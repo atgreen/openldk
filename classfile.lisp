@@ -38,12 +38,84 @@
    (fields)
    (methods)))
 
-(defclass <method> ()
-  ((name :initarg :name)
-   (descriptor :initarg :descriptor)))
+(defmethod print-object ((class <class>) out)
+  (print-unreadable-object (class out :type t)
+    (format out "~A" (slot-value class 'name))))
 
-(defmethod initialize-instance :after ((this <method>) &key)
-  (format t "INITIALIZING METHOD ~A~%" (slot-value this 'name)))
+(defclass <method> ()
+  ((class :initarg :class)
+   (name :initarg :name)
+   (descriptor :initarg :descriptor)
+   (attributes)))
+
+(defmethod print-object ((method <method>) out)
+  (print-unreadable-object (method out :type t)
+    (format out "~A.~A.~A" (slot-value method 'class) (slot-value method 'name) (slot-value method 'descriptor))))
+
+(defclass <code> ()
+  ((max-stack :initarg :max-stack)
+   (max-locals :initarg :max-locals)
+   (code :initarg :code)
+   (exceptions :initarg :exceptions)
+   (attributes :initarg :attributes)))
+
+(defmacro read-u2 ()
+  `(bitio:read-integer bitio :num-bytes 2 :byte-endian :be :unsignedp t))
+
+(defmacro read-u4 ()
+  `(bitio:read-integer bitio :num-bytes 4 :byte-endian :be :unsignedp t))
+
+(defmacro read-buffer (size)
+  `(let ((buf (make-array ,size :element-type '(unsigned-byte 8))))
+     (bitio:read-bytes bitio buf :bit-endian :be :bits-per-byte 8)
+     buf))
+
+(defun read-exceptions (bitio constant-pool class count)
+  (if (> count 0)
+      (let ((exceptions (make-array count)))
+        (dotimes (i count)
+          (read-u2)
+          (read-u2)
+          (read-u2)
+          (read-u2)))
+      nil))
+
+(defun read-attributes (bitio constant-pool class count)
+  "Read COUNT attributes from a classfile for CLASS using the BITIO
+stream."
+  (let ((attributes (make-hash-table)))
+    (dotimes (i count)
+      (let* ((name-index (read-u2))
+             (name (slot-value (aref constant-pool name-index) 'value))
+             (attributes-length (read-u4)))
+        (alexandria:eswitch (name :test 'string=)
+          ("Code"
+           (let* ((max-stack (read-u2))
+                  (max-locals (read-u2))
+                  (code-length (read-u4))
+                  (code (read-buffer code-length))
+                  (exception-table-length (read-u2))
+                  (exceptions (read-exceptions bitio constant-pool class exception-table-length))
+                  (attribute-count (read-u2))
+                  (code-attributes (read-attributes bitio constant-pool class attribute-count)))
+             (setf (gethash "Code" (make-hash-table))
+                   (make-instance '<code>
+                                  :max-stack max-stack
+                                  :max-locals max-locals
+                                  :code code
+                                  :exceptions exceptions
+                                  :attributes code-attributes))))
+          ("Exceptions"
+           (read-buffer attributes-length))
+          ("LineNumberTable"
+           (read-buffer attributes-length))
+          ("StackMapTable"
+           (read-buffer attributes-length))
+          ("SourceFile"
+           (read-buffer attributes-length))
+          ("Signature"
+           (read-buffer attributes-length)))))
+    attributes))
 
 (defun read-classfile (filename)
   (let ((class (make-instance '<class>)))
@@ -51,30 +123,14 @@
       (with-open-file (fin filename :element-type '(unsigned-byte 8))
         (fast-io:with-fast-input (fin-fast nil fin)
            (let ((bitio (bitio:make-bitio fin-fast #'fast-io:fast-read-byte #'wrap-fast-read-sequence)))
-             (flet ((read-buffer (size)
-                      (let ((buf (make-array size :element-type '(unsigned-byte 8))))
-                        (bitio:read-bytes bitio buf :bit-endian :be :bits-per-byte 8)
-                        buf))
-                    (read-u1 () (bitio:read-one-byte bitio))
-                    (read-u2 ()
-                      (bitio:read-integer bitio
-                                          :num-bytes 2
-                                          :byte-endian :be
-                                          :unsignedp t))
-                    (read-u4 ()
-                      (bitio:read-integer bitio
-                                          :num-bytes 4
-                                          :byte-endian :be
-                                          :unsignedp t)))
+             (flet ((read-u1 () (bitio:read-one-byte bitio)))
                (let ((magic (bitio:read-integer bitio :unsignedp nil :byte-endian :be))
                      (minor-version (read-u2))
                      (major-version (read-u2))
                      (constant-pool-count (read-u2)))
-                 (format t "~A~%" constant-pool-count)
                  (let ((constant-pool (make-array (1+ constant-pool-count))))
                    (dotimes (i (1- constant-pool-count))
                      (let ((tag (read-u1)))
-                       (format t "~A: ~A~%" i tag)
                        (setf (aref constant-pool (1+ i))
                              ;; https://en.wikipedia.org/wiki/Java_class_file
                              (ccase tag
@@ -120,51 +176,33 @@
                           (super-class (read-u2))
                           (interface-count (read-u2))
                           (interfaces (make-array interface-count :element-type '(unsigned-byte 16))))
+                     (setf (slot-value class 'name) (slot-value (aref constant-pool (slot-value (aref constant-pool this-class) 'index)) 'value))
                      (if (> super-class 0)
                          (setf super
                                (slot-value (aref constant-pool (slot-value (aref constant-pool super-class) 'index)) 'value)))
 
-                     (format t "Interface count = ~A~%" interface-count)
                      (bitio:read-bytes bitio interfaces :bit-endian :be :bits-per-byte 16)
 
                      (let ((fields-count (read-u2)))
-                       (format t "Field count = ~A~%" fields-count)
                        (dotimes (i fields-count)
-                         (format t "Field #~A~%" i)
                          (let ((access-flags (read-u2))
                                (name-index (read-u2))
                                (descriptor-index (read-u2))
                                (attributes-count (read-u2)))
-                           (dotimes (i attributes-count)
-                             (let* ((attributes-name-index (read-u2))
-                                    (attributes-length (read-u4))
-                                    (info (read-buffer attributes-length)))))))
+                           (read-attributes bitio constant-pool class attributes-count)))
                        (let ((methods-count (read-u2)))
                          (setf methods (make-array methods-count))
                          (dotimes (i methods-count)
-                           (format t "Method #~A~%" i)
                            (let* ((access-flags (read-u2))
                                   (name-index (read-u2))
                                   (descriptor-index (read-u2))
                                   (attributes-count (read-u2))
                                   (method (make-instance '<method>
+                                                         :class class
                                                          :name (slot-value (aref constant-pool name-index) 'value)
                                                          :descriptor (slot-value (aref constant-pool descriptor-index) 'value))))
                              (setf (aref methods i) method)
-                             (format t "name-index ~A: ~A~%" name-index (aref constant-pool name-index))
-                             (format t "AtC ~A~%" attributes-count)
-                             (dotimes (i attributes-count)
-                               (format t "Attribute #~A~%" i)
-                               (let* ((attributes-name-index (read-u2))
-                                      (attributes-length (read-u4))
-                                      (xxx (format t "al ~A~%" attributes-length))
-                                      (info (read-buffer attributes-length)))))))
-                         (let ((attributes-count (read-u2)))
-                           (format t "AtC2 ~A~%" attributes-count)
-                           (dotimes (i attributes-count)
-                             (format t "Attribute2 #~A~%" i)
-                             (let* ((attributes-name-index (read-u2))
-                                    (attributes-length (read-u4))
-                                    (xxx (format t "al ~A~%" attributes-length))
-                                    (info (read-buffer attributes-length)))))))))
+                             (setf (slot-value method 'attributes)
+                                   (read-attributes bitio constant-pool class attributes-count))))
+                         (read-attributes bitio constant-pool class (read-u2)))))
                    class)))))))))

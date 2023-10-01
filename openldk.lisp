@@ -45,6 +45,10 @@
         (uiop:file-exists-p (format nil "~A~A~A.class" dir (uiop:directory-separator-for-host) class))
         nil)))
 
+(defun invoke-method (method)
+  (format t "Invoking method ~A~%" method)
+  )
+
 (defun classload (classname classpath)
   (let ((class (gethash classname *classes*)))
     (unless class
@@ -57,8 +61,10 @@
                                      (lambda (method) (and (string= (slot-value method 'name) "<clinit>")
                                                            (string= (slot-value method 'descriptor) "()V")))
                                      (slot-value class 'methods))))
-              (print <clinit>-method))
+              (when <clinit>-method
+                (invoke-method <clinit>-method)))
             (format t "ERROR: Can't find ~A on classpath ~A~%" classname CLASSPATH))))
+    (setf (gethash classname *classes*) class)
     class))
 
 (defun main ()
