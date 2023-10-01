@@ -45,27 +45,54 @@
         (uiop:file-exists-p (format nil "~A~A~A.class" dir (uiop:directory-separator-for-host) class))
         nil)))
 
-(defun invoke-method (method)
-  (format t "Invoking method ~A~%" method)
-  )
+(defclass <context> ()
+  ((class :initarg :class)
+   (pc :initform 0)
+   (code)))
+
+(defmethod current-class-name ((context <context>))
+  (slot-value (slot-value context 'class) 'name))
+
+(defun :RETURN (context code)
+  (with-slots (pc) context
+    (incf pc)
+    (list 'return)))
+
+(defun :INVOKESTATIC (context code)
+  (with-slots (pc class) context
+    (with-slots (constant-pool) class
+      (let* ((index (+ (* (aref code (incf pc)) 256)
+                       (aref code (incf pc))))
+             (method-reference (aref constant-pool index)))
+        (incf pc)
+        (list (intern (format nil "~A" (emit method-reference constant-pool))))))))
+
+(defun invoke-method (context method)
+  (let* ((code (slot-value (gethash "Code" (slot-value method 'attributes)) 'code))
+         (length (length code)))
+    (with-slots (pc) context
+      (eval (append (list 'block nil)
+                    (loop
+                      while (< pc length)
+                      collect (funcall (aref +opcodes+ (aref code pc)) context code)))))))
 
 (defun classload (classname classpath)
   (let ((class (gethash classname *classes*)))
-    (unless class
-      (let ((fqfn (find-classpath-for-class classname classpath)))
-        (if fqfn
-            (let* ((class (read-classfile fqfn))
-                   (super (let ((super (slot-value class 'super)))
-                            (when super (classload super classpath))))
-                   (<clinit>-method (find-if
-                                     (lambda (method) (and (string= (slot-value method 'name) "<clinit>")
-                                                           (string= (slot-value method 'descriptor) "()V")))
-                                     (slot-value class 'methods))))
-              (when <clinit>-method
-                (invoke-method <clinit>-method)))
-            (format t "ERROR: Can't find ~A on classpath ~A~%" classname CLASSPATH))))
-    (setf (gethash classname *classes*) class)
-    class))
+    (if class
+        class
+        (let ((fqfn (find-classpath-for-class classname classpath)))
+          (if fqfn
+              (let* ((class (read-classfile fqfn))
+                     (super (let ((super (slot-value class 'super)))
+                              (when super (classload super classpath))))
+                     (<clinit>-method (find-if
+                                       (lambda (method) (and (string= (slot-value method 'name) "<clinit>")
+                                                             (string= (slot-value method 'descriptor) "()V")))
+                                       (slot-value class 'methods))))
+                (when <clinit>-method
+                  (invoke-method (make-instance '<context> :class class) <clinit>-method)))
+              (format t "ERROR: Can't find ~A on classpath ~A~%" classname CLASSPATH))
+          (setf (gethash classname *classes*) class)))))
 
 (defun main ()
   (let ((CLASSPATH (uiop:getenv "CLASSPATH")))
@@ -87,5 +114,11 @@
 
       (if (not (eq 1 (length free-args)))
 			    (usage)
-          (progn
-            (classload (car free-args) CLASSPATH))))))
+          (let* ((class (classload (car free-args) CLASSPATH))
+                 (main-method (find-if
+                               (lambda (method) (and (string= (slot-value method 'name) "main")
+                                                     (string= (slot-value method 'descriptor) "([Ljava/lang/String;)V")))
+                               (slot-value class 'methods))))
+            (if main-method
+                (invoke-method (make-instance '<context> :class class) main-method)
+                (format t "ERROR: class ~A has no main method." class)))))))

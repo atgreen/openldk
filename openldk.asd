@@ -23,6 +23,8 @@
   :version "1"
   :serial t
   :components ((:file "package")
+               (:file "opcodes")
+               (:file "native")
                (:file "classfile")
                (:file "openldk"))
   :depends-on (:bitio :fast-io :unix-opts :split-sequence :flexi-streams)

@@ -27,6 +27,25 @@
   ((name-index :initarg :name-index)
    (type-descriptor-index :initarg :type-descriptor-index)))
 
+(defmethod emit ((v constant-string-reference) cp)
+  (format nil "~A" (emit (aref cp (slot-value v 'index)) cp)))
+
+(defmethod emit ((v constant-class-reference) cp)
+  (format nil "~A" (emit (aref cp (slot-value v 'index)) cp)))
+
+(defmethod emit ((v constant-string) cp)
+  (slot-value v 'value))
+
+(defmethod emit ((v constant-name-and-type-descriptor) cp)
+  (format nil "~A.~A"
+          (emit (aref cp (slot-value v 'name-index)) cp)
+          (emit (aref cp (slot-value v 'type-descriptor-index)) cp)))
+
+(defmethod emit ((v constant-method-reference) cp)
+  (format nil "~A.~A"
+          (emit (aref cp (slot-value v 'class-index)) cp)
+          (emit (aref cp (slot-value v 'method-descriptor-index)) cp)))
+
 (defun wrap-fast-read-sequence (vec buf &key (start 0) (end nil))
   "Must wrap this so it has the same signature as clhs' READ-SEQUENCE."
   (fast-io:fast-read-sequence vec buf start end))
@@ -35,6 +54,7 @@
   ((initialized-p :initform nil)
    (name :initarg :name)
    (super :initform nil)
+   (constant-pool)
    (fields)
    (methods)))
 
@@ -98,7 +118,7 @@ stream."
                   (exceptions (read-exceptions bitio constant-pool class exception-table-length))
                   (attribute-count (read-u2))
                   (code-attributes (read-attributes bitio constant-pool class attribute-count)))
-             (setf (gethash "Code" (make-hash-table))
+             (setf (gethash "Code" attributes)
                    (make-instance '<code>
                                   :max-stack max-stack
                                   :max-locals max-locals
@@ -129,6 +149,7 @@ stream."
                      (major-version (read-u2))
                      (constant-pool-count (read-u2)))
                  (let ((constant-pool (make-array (1+ constant-pool-count))))
+                   (setf (slot-value class 'constant-pool) constant-pool)
                    (dotimes (i (1- constant-pool-count))
                      (let ((tag (read-u1)))
                        (setf (aref constant-pool (1+ i))
