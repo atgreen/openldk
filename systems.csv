@@ -1,4 +1,3 @@
-bitio, ghcr.io/ocicl/bitio@sha256:6d1b1af81bf4b6f9f04e3de660d50c5ba3113a159ff0d81a388231d9bffc12bf, bitio-20230818-c295a66/bitio.asd
 fast-io, ghcr.io/ocicl/fast-io@sha256:d5907b55d2d46cfe6a811e560faf487b6cdf150c0074fe3557438a2143744998, fast-io-20230808-a4c5ad6/fast-io.asd
 fast-io-test, ghcr.io/ocicl/fast-io@sha256:d5907b55d2d46cfe6a811e560faf487b6cdf150c0074fe3557438a2143744998, fast-io-20230808-a4c5ad6/fast-io-test.asd
 alexandria, ghcr.io/ocicl/alexandria@sha256:721cedc4d790274a1e8a8e7239aef8e82d0ab5d530aad83ceb0da0d773bf7cb1, alexandria-20230813-db1288f/alexandria.asd
@@ -18,14 +17,15 @@ trivial-features-tests, ghcr.io/ocicl/trivial-features@sha256:9da86d54aeabcaeb43
 babel, ghcr.io/ocicl/babel@sha256:37560213dd2b072e38500b6bae62a67760e6dbf1093afb714a8b830beebada59, babel-20230917-627d6a6/babel.asd
 babel-tests, ghcr.io/ocicl/babel@sha256:37560213dd2b072e38500b6bae62a67760e6dbf1093afb714a8b830beebada59, babel-20230917-627d6a6/babel-tests.asd
 babel-streams, ghcr.io/ocicl/babel@sha256:37560213dd2b072e38500b6bae62a67760e6dbf1093afb714a8b830beebada59, babel-20230917-627d6a6/babel-streams.asd
+bitio, ghcr.io/ocicl/bitio@sha256:6d1b1af81bf4b6f9f04e3de660d50c5ba3113a159ff0d81a388231d9bffc12bf, bitio-20230818-c295a66/bitio.asd
 cl-package-locks, ghcr.io/ocicl/cl-package-locks@sha256:684bfe923ed5f54c70dc30edb74db5c0b1471503e17024482e7566d728ebbf35, cl-package-locks-20230808-96a358e/cl-package-locks.asd
 checkl, ghcr.io/ocicl/checkl@sha256:dfd92024bdc385e105fc0f65d2222cc488db1e0104f2fb5d34441acc9b9f3de3, CheckL-20230818-8032880/checkl.asd
 checkl-test, ghcr.io/ocicl/checkl@sha256:dfd92024bdc385e105fc0f65d2222cc488db1e0104f2fb5d34441acc9b9f3de3, CheckL-20230818-8032880/checkl-test.asd
 checkl-docs, ghcr.io/ocicl/checkl@sha256:dfd92024bdc385e105fc0f65d2222cc488db1e0104f2fb5d34441acc9b9f3de3, CheckL-20230818-8032880/checkl-docs.asd
 marshal, ghcr.io/ocicl/marshal@sha256:0fd1e14368300e41e0891769a67ba476a6cd0fe7ba1f190283b7720fcb9835c0, cl-marshal-20230831-5fe128e/marshal.asd
 marshal-tests, ghcr.io/ocicl/marshal@sha256:0fd1e14368300e41e0891769a67ba476a6cd0fe7ba1f190283b7720fcb9835c0, cl-marshal-20230831-5fe128e/marshal-tests.asd
+flexi-streams, ghcr.io/ocicl/flexi-streams@sha256:2eb7271c30799a51bb3720ca37ee358764522255d66aabcc1a3012becfab1dbc, flexi-streams-20230809-74a1027/flexi-streams.asd
+flexi-streams-test, ghcr.io/ocicl/flexi-streams@sha256:2eb7271c30799a51bb3720ca37ee358764522255d66aabcc1a3012becfab1dbc, flexi-streams-20230809-74a1027/flexi-streams-test.asd
 unix-opts, ghcr.io/ocicl/unix-opts@sha256:21fadcd8f80f1b344dfd90892ae36888ff50f8b778ae37c1b1f0bc4a9f0ea5e2, unix-opts-0.1.7/unix-opts.asd
 unix-opts-tests, ghcr.io/ocicl/unix-opts@sha256:21fadcd8f80f1b344dfd90892ae36888ff50f8b778ae37c1b1f0bc4a9f0ea5e2, unix-opts-0.1.7/unix-opts-tests.asd
 split-sequence, ghcr.io/ocicl/split-sequence@sha256:e3883aa62ed7def931505d24f3cde4ab47d4a715cebf32de90615b8dad292bac, split-sequence-2.0.1/split-sequence.asd
-flexi-streams, ghcr.io/ocicl/flexi-streams@sha256:2eb7271c30799a51bb3720ca37ee358764522255d66aabcc1a3012becfab1dbc, flexi-streams-20230809-74a1027/flexi-streams.asd
-flexi-streams-test, ghcr.io/ocicl/flexi-streams@sha256:2eb7271c30799a51bb3720ca37ee358764522255d66aabcc1a3012becfab1dbc, flexi-streams-20230809-74a1027/flexi-streams-test.asd
