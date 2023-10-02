@@ -39,5 +39,5 @@ OpenLDK was written by [Anthony
 Green](https://github.com/atgreen), and is distributed under the terms
 of the GNU General Public License, Version 2, modified by the
 "CLASSPATH" exception to the GPL.  See
-[LICENSE](https://raw.githubusercontent.com/atgreen/OpenLDK/master/LICENSE)
+[LICENSE](https://github.com/atgreen/OpenLDK/blob/main/LICENSE)
 for details.
