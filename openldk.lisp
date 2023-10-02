@@ -3,6 +3,7 @@
 (defvar *classes* (make-hash-table :test 'equal))
 
 (defvar *debug-codegen* nil)
+(defvar *debug-unmuffle* nil)
 
 (opts:define-opts
   (:name :verbose
@@ -53,6 +54,18 @@
    (stack :initform (cl-containers:make-container 'cl-containers:stack-container))
    (code)))
 
+(defun %eval (code)
+  (when *debug-codegen*
+      (pprint code))
+  (if *debug-unmuffle*
+      (eval code)
+      (handler-bind
+          (#+ansi-cl
+           (style-warning (lambda (c)
+                            (declare (ignore c))
+                            (invoke-restart 'muffle-warning))))
+        (eval code))))
+
 (defmethod current-class-name ((context <context>))
   (slot-value (slot-value context 'class) 'name))
 
@@ -76,6 +89,12 @@
   (with-slots (pc stack) context
     (incf pc)
     (cl-containers:push-item stack 2)
+    nil))
+
+(defun :ICONST_5 (context code)
+  (with-slots (pc stack) context
+    (incf pc)
+    (cl-containers:push-item stack 5)
     nil))
 
 (defun :POP (context code)
@@ -114,6 +133,18 @@
                           (cl-containers:pop-item stack))))
           code)))))
 
+(defun %clinit (class)
+  (labels ((clinit (class)
+             (let ((super-class (gethash (slot-value class 'super) *classes*)))
+               (when super-class (clinit super-class)))
+             (let ((<clinit>-method (find-if
+                                     (lambda (method) (and (string= (slot-value method 'name) "<clinit>")
+                                                           (string= (slot-value method 'descriptor) "()V")))
+                                     (slot-value class 'methods))))
+               (when <clinit>-method
+                 (eval (list (intern "<clinit>()V") (intern (format nil "+static-~A+" (slot-value class 'name)))))))))
+    (clinit class)))
+
 (defun :GETSTATIC (context code)
   (with-slots (pc stack class) context
     (with-slots (constant-pool) class
@@ -123,9 +154,11 @@
             (emit (aref constant-pool index) constant-pool)
           (incf pc)
           (cl-containers:push-item stack
-                                   (list 'slot-value
-                                         (intern (format nil "+static-~A+" (intern classname)))
-                                         (list 'quote (intern fieldname)))))
+                                   (list 'progn
+                                         (list '%clinit (gethash classname *classes*))
+                                         (list 'slot-value
+                                               (intern (format nil "+static-~A+" (intern classname)))
+                                               (list 'quote (intern fieldname))))))
         nil))))
 
 (defun pop-args (num-args stack)
@@ -175,12 +208,9 @@
                             for result = (funcall (aref +opcodes+ (aref code pc)) context code)
                             unless (null result)
                             collect result))))
-        (when *debug-codegen*
-          (print code))
-        (eval code)))))
+        (%eval code)))))
 
 (defun %compile-method (class-name method-index)
-  (format t "compiling ~A~%" class-name)
   (let* ((class (gethash class-name *classes*))
          (method (aref (slot-value class 'methods) (1- method-index))))
     (let* ((code (slot-value (gethash "Code" (slot-value method 'attributes)) 'code))
@@ -199,9 +229,7 @@
                                      for result = (funcall (aref +opcodes+ (aref code pc)) context code)
                                      unless (null result)
                                        collect result))))))
-          (when *debug-codegen*
-            (print code))
-          (eval code))))))
+          (%eval code))))))
 
 (defun emit-<class> (class)
   (let ((defclass-code (with-slots (name super fields) class
@@ -248,18 +276,9 @@
                          (setf (gethash classname *classes*) c)
                          c))
                      (super (let ((super (slot-value class 'super)))
-                              (when super (classload super classpath))))
-                     (<clinit>-method (find-if
-                                       (lambda (method) (and (string= (slot-value method 'name) "<clinit>")
-                                                             (string= (slot-value method 'descriptor) "()V")))
-                                       (slot-value class 'methods))))
+                              (when super (classload super classpath)))))
                 (let ((code (emit-<class> class)))
-                  (when *debug-codegen*
-                    (print code))
-                  (eval code))
-                (when (and <clinit>-method (not (slot-value class 'initialized-p)))
-                  (invoke-method (make-instance '<context> :class class) <clinit>-method)
-                  (setf (slot-value class 'initialized-p) t))
+                  (%eval code))
                 class)
               (format t "ERROR: Can't find ~A on classpath ~A~%" classname CLASSPATH))))))
 
@@ -268,8 +287,11 @@
         (LDK_DEBUG (uiop:getenv "LDK_DEBUG")))
 
     (when LDK_DEBUG
-      (when (find #\c LDK_DEBUG)
-        (setf *debug-codegen* t)))
+      (progn
+        (when (find #\c LDK_DEBUG)
+          (setf *debug-codegen* t))
+        (when (find #\u LDK_DEBUG)
+          (setf *debug-unmuffle* t))))
 
     (multiple-value-bind (options free-args)
         (handler-case
@@ -287,15 +309,7 @@
                    (setf *verbose* t))
 
       (if (not (eq 1 (length free-args)))
-			    (usage)
+          (usage)
           (let* ((class (classload (car free-args) CLASSPATH)))
-            (eval (list (intern "main([Ljava/lang/String;)V") (intern (format nil "+static-~A+" (slot-value class 'name))) #())))))))
-#|
-                 (main-method (find-if
-                               (lambda (method) (and (string= (slot-value method 'name) "main")
-                                                     (string= (slot-value method 'descriptor) "([Ljava/lang/String;)V")))
-                               (slot-value class 'methods))))
-            (if main-method
-                (invoke-method (make-instance '<context> :class class) main-method)
-                (format t "ERROR: class ~A has no main method." class)))))))
-|#
+            (%clinit class)
+            (%eval (list (intern "main([Ljava/lang/String;)V") (intern (format nil "+static-~A+" (slot-value class 'name))) #())))))))
