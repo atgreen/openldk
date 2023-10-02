@@ -23,12 +23,20 @@
   ((class-index :initarg :class-index)
    (method-descriptor-index :initarg :method-descriptor-index)))
 
+(defclass constant-interface-method-reference (constant-method-reference)
+  ())
+
 (defclass constant-name-and-type-descriptor ()
   ((name-index :initarg :name-index)
    (type-descriptor-index :initarg :type-descriptor-index)))
 
 (defmethod emit ((v constant-string-reference) cp)
   (format nil "~A" (emit (aref cp (slot-value v 'index)) cp)))
+
+(defmethod emit ((v constant-field-reference) cp)
+  (let ((classname (emit (aref cp (slot-value v 'class-index)) cp)))
+    (classload classname ".:./jre14")
+    (values (emit-name (aref cp (slot-value v 'type-descriptor-index)) cp) classname)))
 
 (defmethod emit ((v constant-class-reference) cp)
   (format nil "~A" (emit (aref cp (slot-value v 'index)) cp)))
@@ -41,9 +49,17 @@
           (emit (aref cp (slot-value v 'name-index)) cp)
           (emit (aref cp (slot-value v 'type-descriptor-index)) cp)))
 
+(defmethod emit-name ((v constant-name-and-type-descriptor) cp)
+  (format nil "~A" (emit (aref cp (slot-value v 'name-index)) cp)))
+
+#|
 (defmethod emit ((v constant-method-reference) cp)
   (format nil "~A.~A"
           (emit (aref cp (slot-value v 'class-index)) cp)
+          (emit (aref cp (slot-value v 'method-descriptor-index)) cp)))
+|#
+(defmethod emit ((v constant-method-reference) cp)
+  (format nil "~A"
           (emit (aref cp (slot-value v 'method-descriptor-index)) cp)))
 
 (defun wrap-fast-read-sequence (vec buf &key (start 0) (end nil))
@@ -62,11 +78,15 @@
   (print-unreadable-object (class out :type t)
     (format out "~A" (slot-value class 'name))))
 
-(defclass <method> ()
+(defclass <field> ()
   ((class :initarg :class)
    (name :initarg :name)
    (descriptor :initarg :descriptor)
+   (access-flags :initform 0 :initarg :access-flags)
    (attributes)))
+
+(defclass <method> (<field>)
+  ())
 
 (defmethod print-object ((method <method>) out)
   (print-unreadable-object (method out :type t)
@@ -125,9 +145,15 @@ stream."
                                   :code code
                                   :exceptions exceptions
                                   :attributes code-attributes))))
+          ("Deprecated"
+           (read-buffer attributes-length))
           ("Exceptions"
            (read-buffer attributes-length))
+          ("InnerClasses"
+           (read-buffer attributes-length))
           ("LineNumberTable"
+           (read-buffer attributes-length))
+          ("RuntimeVisibleAnnotations"
            (read-buffer attributes-length))
           ("StackMapTable"
            (read-buffer attributes-length))
@@ -184,6 +210,12 @@ stream."
                                   (make-instance 'constant-method-reference
                                                  :class-index class-index
                                                  :method-descriptor-index method-descriptor-index)))
+                               (11
+                                (let ((class-index (read-u2))
+                                      (method-descriptor-index (read-u2)))
+                                  (make-instance 'constant-interface-method-reference
+                                                 :class-index class-index
+                                                 :method-descriptor-index method-descriptor-index)))
                                (12
                                 (let ((name-index (read-u2))
                                       (type-descriptor-index (read-u2)))
@@ -205,12 +237,20 @@ stream."
                      (bitio:read-bytes bitio interfaces :bit-endian :be :bits-per-byte 16)
 
                      (let ((fields-count (read-u2)))
+                       (setf fields (make-array fields-count))
                        (dotimes (i fields-count)
-                         (let ((access-flags (read-u2))
-                               (name-index (read-u2))
-                               (descriptor-index (read-u2))
-                               (attributes-count (read-u2)))
-                           (read-attributes bitio constant-pool class attributes-count)))
+                         (let* ((access-flags (read-u2))
+                                (name-index (read-u2))
+                                (descriptor-index (read-u2))
+                                (attributes-count (read-u2))
+                                (field (make-instance '<field>
+                                                      :class class
+                                                      :name (slot-value (aref constant-pool name-index) 'value)
+                                                      :descriptor (slot-value (aref constant-pool descriptor-index) 'value)
+                                                      :access-flags access-flags)))
+                           (setf (aref fields i) field)
+                           (setf (slot-value field 'attributes)
+                                 (read-attributes bitio constant-pool class attributes-count))))
                        (let ((methods-count (read-u2)))
                          (setf methods (make-array methods-count))
                          (dotimes (i methods-count)
@@ -221,7 +261,8 @@ stream."
                                   (method (make-instance '<method>
                                                          :class class
                                                          :name (slot-value (aref constant-pool name-index) 'value)
-                                                         :descriptor (slot-value (aref constant-pool descriptor-index) 'value))))
+                                                         :descriptor (slot-value (aref constant-pool descriptor-index) 'value)
+                                                         :access-flags access-flags)))
                              (setf (aref methods i) method)
                              (setf (slot-value method 'attributes)
                                    (read-attributes bitio constant-pool class attributes-count))))

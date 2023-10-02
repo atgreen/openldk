@@ -26,8 +26,9 @@
                (:file "opcodes")
                (:file "native")
                (:file "classfile")
+               (:file "descriptors")
                (:file "openldk"))
-  :depends-on (:bitio :fast-io :unix-opts :split-sequence :flexi-streams)
+  :depends-on (:bitio :fast-io :unix-opts :split-sequence :flexi-streams :cl-containers)
   :build-operation "program-op"
   :build-pathname "openldk"
   :entry-point "openldk:main")

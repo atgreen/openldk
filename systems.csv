@@ -29,3 +29,9 @@ flexi-streams-test, ghcr.io/ocicl/flexi-streams@sha256:2eb7271c30799a51bb3720ca3
 unix-opts, ghcr.io/ocicl/unix-opts@sha256:21fadcd8f80f1b344dfd90892ae36888ff50f8b778ae37c1b1f0bc4a9f0ea5e2, unix-opts-0.1.7/unix-opts.asd
 unix-opts-tests, ghcr.io/ocicl/unix-opts@sha256:21fadcd8f80f1b344dfd90892ae36888ff50f8b778ae37c1b1f0bc4a9f0ea5e2, unix-opts-0.1.7/unix-opts-tests.asd
 split-sequence, ghcr.io/ocicl/split-sequence@sha256:e3883aa62ed7def931505d24f3cde4ab47d4a715cebf32de90615b8dad292bac, split-sequence-2.0.1/split-sequence.asd
+cl-containers, ghcr.io/ocicl/cl-containers@sha256:0ecc76f2631131ed54d75b9e167317b6a3d43856d80b6f34a8cd240a76cfbf1e, cl-containers-20230814-dc6e421/cl-containers.asd
+cl-containers-test, ghcr.io/ocicl/cl-containers@sha256:0ecc76f2631131ed54d75b9e167317b6a3d43856d80b6f34a8cd240a76cfbf1e, cl-containers-20230814-dc6e421/cl-containers-test.asd
+cl-containers-documentation, ghcr.io/ocicl/cl-containers@sha256:0ecc76f2631131ed54d75b9e167317b6a3d43856d80b6f34a8cd240a76cfbf1e, cl-containers-20230814-dc6e421/cl-containers-documentation.asd
+asdf-system-connections, ghcr.io/ocicl/asdf-system-connections@sha256:3a5132a99fcb19aec3819851a81c75adbfc2091b4e7c99219dba61810fb1f6c2, asdf-system-connections-20230809-9f08524/asdf-system-connections.asd
+metatilities-base, ghcr.io/ocicl/metatilities-base@sha256:66f431a24659a030faaa40b751085da9f957b335374d6ca3bd9e438062e993db, metatilities-base-20230808-ef04337/metatilities-base.asd
+metatilities-base-test, ghcr.io/ocicl/metatilities-base@sha256:66f431a24659a030faaa40b751085da9f957b335374d6ca3bd9e438062e993db, metatilities-base-20230808-ef04337/metatilities-base-test.asd

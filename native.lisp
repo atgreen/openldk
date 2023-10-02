@@ -1,2 +1,8 @@
-(defun |java/lang/Object.registerNatives.()V| ()
-  (format t "registering natives!~%"))
+(defmethod |java/lang/Object.registerNatives.()V| ()
+  ())
+
+(defmethod |java/lang/System.registerNatives.()V| ()
+  ())
+
+(defmethod |println.(Ljava/lang/String;)V| (stream string)
+  (format t "~A~%" string))
