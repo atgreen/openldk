@@ -15,6 +15,10 @@
 (defclass constant-int ()
   ((value :initarg :value)))
 
+(defclass constant-invoke-dynamic () ())
+
+(defclass constant-method-handle () ())
+
 (defclass constant-field-reference ()
   ((class-index :initarg :class-index)
    (type-descriptor-index :initarg :type-descriptor-index)))
@@ -39,7 +43,9 @@
     (values (emit-name (aref cp (slot-value v 'type-descriptor-index)) cp) classname)))
 
 (defmethod emit ((v constant-class-reference) cp)
-  (format nil "~A" (emit (aref cp (slot-value v 'index)) cp)))
+  (let ((classname (emit (aref cp (slot-value v 'index)) cp)))
+    (classload classname ".:./jre14")
+    classname))
 
 (defmethod emit ((v constant-string) cp)
   (slot-value v 'value))
@@ -129,7 +135,9 @@ stream."
              (name (slot-value (aref constant-pool name-index) 'value))
              (attributes-length (read-u4)))
         (alexandria:eswitch (name :test 'string=)
-          ("Code"
+         ("BootstrapMethods"
+           (read-buffer attributes-length))
+         ("Code"
            (let* ((max-stack (read-u2))
                   (max-locals (read-u2))
                   (code-length (read-u4))
@@ -145,6 +153,8 @@ stream."
                                   :code code
                                   :exceptions exceptions
                                   :attributes code-attributes))))
+          ("ConstantValue"
+           (read-buffer attributes-length))
           ("Deprecated"
            (read-buffer attributes-length))
           ("Exceptions"
@@ -222,6 +232,13 @@ stream."
                                   (make-instance 'constant-name-and-type-descriptor
                                                  :name-index name-index
                                                  :type-descriptor-index type-descriptor-index)))
+                               (15
+                                (let ((type-descriptor (read-u1))
+                                      (index (read-u2)))
+                                  (make-instance 'constant-method-handle)))
+                               (18
+                                (let ((fixme (read-u4)))
+                                  (make-instance 'constant-invoke-dynamic)))
                                ))))
 
                    (let* ((access-flags (read-u2))
