@@ -66,18 +66,125 @@
                             (invoke-restart 'muffle-warning))))
         (eval code))))
 
+(defun ctrace (pc stack)
+  (format t "[~A](~A):~A~%" pc (cl-containers:size stack) (cl-containers:first-element stack)))
+
 (defmethod current-class-name ((context <context>))
   (slot-value (slot-value context 'class) 'name))
 
-(defun :RETURN (context code)
-  (with-slots (pc) context
-    (incf pc)
-    (list 'return)))
+(let ((vreg 10000))
+  (defun next-vreg ()
+    (intern (format nil "vreg~A" (incf vreg)))))
 
 (defun :ACONST_NULL (context code)
   (with-slots (pc stack) context
     (incf pc)
-    (cl-containers:push-item stack nil)))
+    (let ((vreg (next-vreg)))
+      (cl-containers:push-item stack vreg))
+    (list 'setf vreg nil)))
+
+(defun :ALOAD_1 (context code)
+  (with-slots (pc stack) context
+    (incf pc)
+    (cl-containers:push-item stack (intern "local-1")))
+  nil)
+
+(defun :ASTORE (context code)
+  (with-slots (pc stack) context
+    (let ((index (aref code (incf pc))))
+      (incf pc)
+      (list 'setf (intern (format nil "local-~A" index)) (cl-containers:pop-item stack)))))
+
+(defun :ASTORE_1 (context code)
+  (with-slots (pc stack) context
+    (incf pc)
+    (list 'setf (intern "local-1") (cl-containers:pop-item stack))))
+
+(defun :DADD (context code)
+  (with-slots (pc stack) context
+    (incf pc)
+    (cl-containers:push-item
+     stack
+     (list '+ (cl-containers:pop-item stack) (cl-containers:pop-item stack))))
+  nil)
+
+(defun :DCONST_0 (context code)
+  (with-slots (pc stack) context
+    (incf pc)
+    (cl-containers:push-item stack '0.0))
+  nil)
+
+(defun :DDIV (context code)
+  (with-slots (pc stack) context
+    (incf pc)
+    (cl-containers:push-item
+     stack
+     (list '/ (cl-containers:pop-item stack) (cl-containers:pop-item stack))))
+  nil)
+
+(defun :DLOAD (context code)
+  (with-slots (pc stack) context
+    (let ((index (aref code (incf pc))))
+      (incf pc)
+      (cl-containers:push-item stack (intern (format nil "local-~A" index)))))
+  nil)
+
+(defun :DLOAD_2 (context code)
+  (with-slots (pc stack) context
+    (incf pc)
+    (cl-containers:push-item stack (intern "local-2")))
+  nil)
+
+(defun :DMUL (context code)
+  (with-slots (pc stack) context
+    (incf pc)
+    (cl-containers:push-item
+     stack
+     (list '* (cl-containers:pop-item stack) (cl-containers:pop-item stack))))
+  nil)
+
+(defun :DSTORE (context code)
+  (with-slots (pc stack) context
+    (let ((index (aref code (incf pc))))
+      (incf pc)
+      (list 'setf (intern (format nil "local-~A" index)) (cl-containers:pop-item stack)))))
+
+(defun :DSTORE_2 (context code)
+  (with-slots (pc stack) context
+    (incf pc)
+    (list 'setf (intern "local-2") (cl-containers:pop-item stack))))
+
+(defun :DSUB (context code)
+  (with-slots (pc stack) context
+    (incf pc)
+    (cl-containers:push-item
+     stack
+     (list '- (cl-containers:pop-item stack) (cl-containers:pop-item stack))))
+  nil)
+
+(defun :DUP (context code)
+  (with-slots (pc stack) context
+    (ctrace pc stack)
+    (incf pc)
+    (let ((top (cl-containers:pop-item stack))
+          (vreg (next-vreg)))
+      (format t ">>>>>>>>>>>>>>>>>>>>>>... ~A~%" top)
+      (cl-containers:push-item stack top)
+      (cl-containers:push-item stack vreg)
+      (list 'setf vreg top))))
+
+(defun :FCONST_2 (context code)
+  (with-slots (pc stack) context
+    (incf pc)
+    (cl-containers:push-item stack 2.0)
+    nil))
+
+(defun :GOTO (context code)
+  (with-slots (pc stack) context
+    (let* ((offset (+ (* (aref code (incf pc)) 256)
+                      (aref code (incf pc)))))
+      (incf pc)
+      (list 'go (intern (format nil "label-~A" offset))))))
 
 (defun :ICONST_1 (context code)
   (with-slots (pc stack) context
@@ -91,17 +198,52 @@
     (cl-containers:push-item stack 2)
     nil))
 
+(defun :ICONST_4 (context code)
+  (with-slots (pc stack) context
+    (incf pc)
+    (cl-containers:push-item stack 4)
+    nil))
+
 (defun :ICONST_5 (context code)
   (with-slots (pc stack) context
     (incf pc)
     (cl-containers:push-item stack 5)
     nil))
 
-(defun :POP (context code)
+(defun :ICONST_M1 (context code)
   (with-slots (pc stack) context
     (incf pc)
-    (cl-containers:pop-item stack)
+    (cl-containers:push-item stack -1)
+    (format t "WTF~%")
     nil))
+
+(defun :INVOKESPECIAL (context code)
+
+#|
+; I need to use this hack:
+; https://stackoverflow.com/questions/35171694/clos-how-to-call-a-less-specific-method
+(destructuring-bind (method . next)
+    (closer-mop:compute-applicable-methods-using-classes
+     #'fn
+     (list (find-class 'a)))
+  (let ((fn (closer-mop:method-function method)))
+    (defun %fn-as-a (&rest args)
+wi     (funcall fn args next))))
+|#
+
+  (with-slots (pc class stack) context
+    (with-slots (constant-pool) class
+      (let* ((index (+ (* (aref code (incf pc)) 256)
+                       (aref code (incf pc))))
+             (method-reference (aref constant-pool index)))
+        (incf pc)
+        (let* ((descriptor
+                 (slot-value (aref constant-pool
+                                   (slot-value (aref constant-pool (slot-value method-reference 'method-descriptor-index)) 'type-descriptor-index))
+                             'value))
+               (parameter-count (count-parameters descriptor)))
+          (cons (intern (format nil "~A.~A" (intern (slot-value class 'name)) (emit method-reference constant-pool)))
+                (pop-args parameter-count stack)))))))
 
 (defun :LDC (context code)
   (with-slots (pc stack class) context
@@ -114,11 +256,24 @@
 
 (defun :NEW (context code)
   (with-slots (pc stack class) context
+    (ctrace pc stack)
     (with-slots (constant-pool) class
       (let* ((index (+ (* (aref code (incf pc)) 256)
                        (aref code (incf pc))))
-             (classname (emit (aref constant-pool index) constant-pool)))
-        (format t ">> ~A~%" classname)))))
+             (classname (emit (aref constant-pool index) constant-pool))
+             (vreg (next-vreg)))
+        (incf pc)
+        (cl-containers:push-item stack vreg)
+        (format t "VVVVVVVVVV~%")
+        (ctrace pc stack)
+        (format t "^^^^^^^^^^~%")
+        (list 'setf vreg (list 'make-instance (list 'quote (intern classname))))))))
+
+(defun :POP (context code)
+  (with-slots (pc stack) context
+    (incf pc)
+    (cl-containers:pop-item stack)
+    nil))
 
 (defun :PUTSTATIC (context code)
   (with-slots (pc stack class) context
@@ -132,6 +287,11 @@
                                       (list 'quote (intern (emit field-reference constant-pool))))
                           (cl-containers:pop-item stack))))
           code)))))
+
+(defun :RETURN (context code)
+  (with-slots (pc) context
+    (incf pc)
+    (list 'return)))
 
 (defun %clinit (class)
   (labels ((clinit (class)
@@ -167,6 +327,21 @@
         until (null item)
         collect item into items
         finally (return (reverse items))))
+
+(defun :INVOKEDYNAMIC (context code)
+  (with-slots (pc class stack) context
+    (with-slots (constant-pool) class
+      (let* ((index (+ (* (aref code (incf pc)) 256)
+                       (aref code (incf pc))))
+             (method-reference (aref constant-pool index)))
+        (incf pc)
+        (let* ((descriptor
+                 (slot-value (aref constant-pool
+                                   (slot-value (aref constant-pool (slot-value method-reference 'method-descriptor-index)) 'type-descriptor-index))
+                             'value))
+               (parameter-count (count-parameters descriptor)))
+          (cons (intern (format nil "~A.~A" (intern (slot-value class 'name)) (emit method-reference constant-pool)))
+                (pop-args parameter-count stack)))))))
 
 (defun :INVOKESTATIC (context code)
   (with-slots (pc class stack) context
@@ -205,6 +380,7 @@
       (let ((code (append (list 'block nil)
                           (loop
                             while (< pc length)
+                            ;; for result = (progn (format t ">[~A]~%" pc) (funcall (aref +opcodes+ (aref code pc)) context code))
                             for result = (funcall (aref +opcodes+ (aref code pc)) context code)
                             unless (null result)
                             collect result))))
@@ -216,6 +392,9 @@
     (let* ((code (slot-value (gethash "Code" (slot-value method 'attributes)) 'code))
            (length (length code))
            (context (make-instance '<context> :class class)))
+      (when *debug-codegen*
+        (format t "; xcompiling ~A~A~%" (slot-value method 'name) (slot-value method 'descriptor))
+        (force-output))
       (with-slots (pc) context
         (let ((code (append
                      (list 'defmethod
@@ -226,6 +405,7 @@
                            (append (list 'block nil)
                                    (loop
                                      while (< pc length)
+                                     ;; for result = (let ((xxx (format t ">[~A] " pc)) (code (funcall (aref +opcodes+ (aref code pc)) context code))) (format t "~A~%" code))
                                      for result = (funcall (aref +opcodes+ (aref code pc)) context code)
                                      unless (null result)
                                        collect result))))))

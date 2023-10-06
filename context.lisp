@@ -1,0 +1,9 @@
+(in-package :openldk)
+
+(defclass <context> ()
+  ((class :initarg :class)
+   (is-clinit-p :initarg :is-clinit-p)
+   (locals :initform (list))
+   (pc :initform 0)
+   (stack :initform (cl-containers:make-container 'cl-containers:stack-container))
+   (code)))

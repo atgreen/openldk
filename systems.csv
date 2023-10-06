@@ -35,3 +35,4 @@ cl-containers-documentation, ghcr.io/ocicl/cl-containers@sha256:0ecc76f2631131ed
 asdf-system-connections, ghcr.io/ocicl/asdf-system-connections@sha256:3a5132a99fcb19aec3819851a81c75adbfc2091b4e7c99219dba61810fb1f6c2, asdf-system-connections-20230809-9f08524/asdf-system-connections.asd
 metatilities-base, ghcr.io/ocicl/metatilities-base@sha256:66f431a24659a030faaa40b751085da9f957b335374d6ca3bd9e438062e993db, metatilities-base-20230808-ef04337/metatilities-base.asd
 metatilities-base-test, ghcr.io/ocicl/metatilities-base@sha256:66f431a24659a030faaa40b751085da9f957b335374d6ca3bd9e438062e993db, metatilities-base-20230808-ef04337/metatilities-base-test.asd
+closer-mop, ghcr.io/ocicl/closer-mop@sha256:a39bb7ef1aa69dad7650480f852231a9c08150878c9de6a8db8be947f31ec9fc, closer-mop-20231001-f69bd9c/closer-mop.asd
