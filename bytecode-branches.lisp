@@ -2,14 +2,18 @@
 
 (defparameter +bytecode-1-byte+
   '(:ACONST_NULL
+    :ALOAD_0
     :ALOAD_1
+    :ASTORE_1
+    :DADD :DCONST_0 :DDIV :DLOAD_2 :DMUL :DSTORE_2 :DSUB
+    :DUP
     :RETURN))
 
 (defparameter +bytecode-2-byte+
-  '(:LDC))
+  '(:ASTORE :DLOAD :DSTORE :LDC))
 
-(defparameter +bytecode-3-byte+
-  '(:GETSTATIC :GOTO :IF_ICMPLE :INVOKEVIRTUAL :INVOKESTATIC :PUTSTATIC :SIPUSH))
+(defparameter +bytecode-3-byte+ '(:GETSTATIC :GOTO :IF_ICMPLE
+  :INVOKEVIRTUAL :INVOKESPECIAL :INVOKESTATIC :NEW :PUTSTATIC :SIPUSH))
 
 (defparameter +bytecode-short-branch-table+
   (let ((sbtable (make-hash-table)))
@@ -39,15 +43,18 @@ targets."
   (let ((pc 0)
         (length (length code))
         (branch-target-table (make-hash-table)))
+    (format t "A~%")
     (dolist (bt (remove-duplicates
                  (apply #'append (loop
                                    while (< pc length)
                                    for result = (let* ((opcode (aref +opcodes+ (aref code pc)))
                                                        (targets (if (gethash opcode +bytecode-short-branch-table+)
                                                                     (get-short-branch-targets pc code))))
+                                                  (format t "C[~A][~A][~A]~%" pc opcode targets)
                                                   (incf pc (gethash opcode +bytecode-lengths-table+))
                                                   targets)
                                    unless (null result)
                                     collect result))))
       (setf (gethash bt branch-target-table) t))
+    (format t "B~%")
     branch-target-table))

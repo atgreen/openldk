@@ -108,22 +108,24 @@
                (lisp-code (mapcar (lambda (ssa-node)
                                     (codegen ssa-node))
                                   ssa-code))
-               (code (append
-                      (list 'defmethod
-                            (intern (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor)))
-                            (cons (list (intern "this") (intern (slot-value class 'name)))
-                                  (loop for i from 1 upto (count-parameters (slot-value method 'descriptor))
-                                        collect (intern (format nil "arg~A" i))))
-                            (append (list 'block nil)
-                                    (list
-                                     (append (append (list 'let
-                                                           (cons
-                                                            (list 'stack (list 'cl-containers:make-container (list 'quote 'cl-containers:stack-container)))
-                                                            (mapcar
-                                                             (lambda (v)
-                                                               (list v))
-                                                             (slot-value context 'locals))))
-                                                     (list (cons 'tagbody lisp-code))))))))))
+               (code (append (list 'defmethod
+                                   (intern (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor)))
+                                   (cons (list (intern "this") (intern (slot-value class 'name)))
+                                         (loop for i from 1 upto (count-parameters (slot-value method 'descriptor))
+                                               collect (intern (format nil "arg~A" i)))))
+                             (list (list 'let (append (list (list (intern "local-0") (intern "this")))
+                                                      (loop for i from 1 upto (count-parameters (slot-value method 'descriptor))
+                                                            collect (list (intern (format nil "local-~A" i)) (intern (format nil "arg~A" i)))))
+                                         (append (list 'block nil)
+                                                 (list
+                                                  (append (append (list 'let
+                                                                        (cons
+                                                                         (list 'stack (list 'cl-containers:make-container (list 'quote 'cl-containers:stack-container)))
+                                                                         (mapcar
+                                                                          (lambda (v)
+                                                                            (list v))
+                                                                          (slot-value context 'locals))))
+                                                                  (list (cons 'tagbody lisp-code)))))))))))
                (%eval code))))))
 
 (defun emit-<class> (class)

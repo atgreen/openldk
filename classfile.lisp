@@ -47,7 +47,7 @@
     classname))
 
 (defmethod emit ((v constant-name-and-type-descriptor) cp)
-  (format nil "~A.~A"
+  (format nil "~A~A"
           (emit (aref cp (slot-value v 'name-index)) cp)
           (emit (aref cp (slot-value v 'type-descriptor-index)) cp)))
 

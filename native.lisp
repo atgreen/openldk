@@ -1,8 +1,8 @@
-(defmethod |java/lang/Object.registerNatives.()V| ()
+(defmethod |java/lang/Object.registerNatives()V| ()
   ())
 
-(defmethod |java/lang/System.registerNatives.()V| ()
+(defmethod |java/lang/System.registerNatives()V| ()
   ())
 
-(defmethod |println.(Ljava/lang/String;)V| (stream string)
+(defmethod |println(Ljava/lang/String;)V| (stream string)
   (format t "~A~%" string))
