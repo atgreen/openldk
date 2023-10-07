@@ -6,43 +6,27 @@
       (push vreg (slot-value context 'locals))
       (make-instance 'ssa-variable :name vreg))))
 
-(defun pop-args (num-args)
+(defun pop-args (num-args stack)
   (loop repeat num-args
-        collect (make-instance 'ssa-pop)))
+        for item = (cl-containers:pop-item stack)
+        until (null item)
+        collect item into items
+        finally (return (reverse items))))
 
 (defun :ACONST_NULL (context code)
-  (with-slots (pc) context
+  (with-slots (pc stack) context
     (let ((pc-start pc))
       (incf pc)
       (let ((vreg (next-vreg context)))
-        (list (make-instance 'ssa-push
-                             :pc-index pc-start
-                             :value (make-instance 'ssa-null-literal
-                                                   :pc-index pc-start)))))))
-
-(defun :ALOAD_1 (context code)
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ssa-push
-                           :pc-index pc-start
-                           :value (make-instance 'ssa-local-variable
-                                                 :pc-index pc-start
-                                                 :index 1))))))
-
-(defun :DCONST_0 (context code)
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (let ((vreg (next-vreg context)))
-        (list (make-instance 'ssa-push
-                             :pc-index pc-start
-                             :value (make-instance 'ssa-double-literal
-                                                   :pc-index pc-start
-                                                   :value 0.0)))))))
+        (cl-containers:push-item stack vreg)
+        (list (make-instance 'ssa-assign
+                             :index pc-start
+                             :target vreg
+                             :source (make-instance 'ssa-null-literal
+                                                    :index pc-start)))))))
 
 (defun :GETSTATIC (context code)
-  (with-slots (pc class is-clinit-p) context
+  (with-slots (pc class stack is-clinit-p) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
         (let* ((index (+ (* (aref code (incf pc)) 256)
@@ -51,43 +35,23 @@
           (multiple-value-bind (fieldname classname)
               (emit (aref constant-pool index) constant-pool)
             (incf pc)
-            (let ((code (list (make-instance 'ssa-push
-                                             :pc-index pc-start
-                                             :value (make-instance 'ssa-static-member
-                                                                   :pc-index pc-start
-                                                                   :class-name classname
-                                                                   :member-name fieldname)))))
+            (cl-containers:push-item stack vreg)
+            (let ((code (list (make-instance 'ssa-assign
+                                             :index pc-start
+                                             :target vreg
+                                             :source (make-instance 'ssa-static-member
+                                                                    :index pc-start
+                                                                    :class-name classname
+                                                                    :member-name fieldname)))))
               (if is-clinit-p
                   code
                   (cons (make-instance 'ssa-clinit
-                                       :pc-index pc-start
+                                       :index pc-start
                                        :class-name classname)
                         code)))))))))
 
-(defun :GOTO (context code)
-  (with-slots (pc class) context
-    (let ((pc-start pc))
-      (with-slots (constant-pool) class
-        (let* ((offset (+ (* (aref code (incf pc)) 256)
-                          (aref code (incf pc)))))
-          (incf pc)
-          (list (make-instance 'ssa-goto
-                               :pc-index pc-start
-                               :offset (+ pc-start offset))))))))
-
-(defun :IF_ICMPLE (context code)
-  (with-slots (pc class) context
-    (let ((pc-start pc))
-      (with-slots (constant-pool) class
-        (let* ((offset (+ (* (aref code (incf pc)) 256)
-                          (aref code (incf pc)))))
-          (incf pc)
-          (list (make-instance 'ssa-if-icmple
-                               :pc-index pc-start
-                               :offset (+ pc-start offset))))))))
-
 (defun :INVOKEVIRTUAL (context code)
-  (with-slots (pc class) context
+  (with-slots (pc class stack) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
         (let* ((index (+ (* (aref code (incf pc)) 256)
@@ -104,12 +68,12 @@
                               'value))
                  (parameter-count (1+ (count-parameters descriptor))))
             (list (make-instance 'ssa-call-virtual-method
-                                 :pc-index pc-start
+                                 :index pc-start
                                  :method-name (emit method-reference constant-pool)
-                                 :args (pop-args parameter-count)))))))))
+                                 :args (pop-args parameter-count stack)))))))))
 
 (defun :INVOKESTATIC (context code)
-  (with-slots (pc class) context
+  (with-slots (pc class stack) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
         (let* ((index (+ (* (aref code (incf pc)) 256)
@@ -126,23 +90,24 @@
                               'value))
                  (parameter-count (count-parameters descriptor)))
             (list (make-instance 'ssa-call-static-method
-                                 :pc-index pc-start
+                                 :index pc-start
                                  :class-name (slot-value class 'name)
                                  :method-name (emit method-reference constant-pool)
-                                 :args (pop-args parameter-count)))))))))
+                                 :args (pop-args parameter-count stack)))))))))
 
 (defun :LDC (context code)
-  (with-slots (pc class) context
+  (with-slots (pc stack class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
         (let ((index (aref code (incf pc))))
           (incf pc)
-          (list (make-instance 'ssa-push :pc-index pc-start :value (emit (aref constant-pool index) constant-pool))))))))
+          (cl-containers:push-item stack
+                                   (emit (aref constant-pool index) constant-pool))
+          nil)))))
 
 (defun :PUTSTATIC (context code)
-  (with-slots (pc class is-clinit-p) context
+  (with-slots (pc class stack is-clinit-p) context
     (let ((pc-start pc))
-
       (with-slots (constant-pool) class
         (let* ((index (+ (* (aref code (incf pc)) 256)
                          (aref code (incf pc))))
@@ -151,16 +116,16 @@
               (emit (aref constant-pool index) constant-pool)
             (incf pc)
             (let ((code (list (make-instance 'ssa-assign
-                                             :pc-index pc-start
-                                             :source (make-instance 'ssa-pop)
+                                             :index pc-start
+                                             :source (cl-containers:pop-item stack)
                                              :target (make-instance 'ssa-static-member
-                                                                    :pc-index pc-start
+                                                                    :index pc-start
                                                                     :class-name classname
                                                                     :member-name fieldname)))))
               (if is-clinit-p
                   code
                   (cons (make-instance 'ssa-clinit
-                                       :pc-index pc-start
+                                       :index pc-start
                                        :class-name classname)
                         code)))))))))
 
@@ -169,14 +134,4 @@
     (let ((start-pc pc))
       (incf pc)
       (list (make-instance 'ssa-return
-                           :pc-index start-pc)))))
-
-(defun :SIPUSH (context code)
-  (with-slots (pc) context
-    (let ((start-pc pc))
-      (let* ((short (+ (* (aref code (incf pc)) 256)
-                       (* (aref code (incf pc))))))
-        (incf pc)
-        (list (make-instance 'ssa-push
-                             :pc-index start-pc
-                             :value (make-instance 'ssa-int-literal :pc-index start-pc :value short)))))))
+                           :index start-pc)))))

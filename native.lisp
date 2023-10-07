@@ -5,4 +5,4 @@
   ())
 
 (defmethod |println.(Ljava/lang/String;)V| (stream string)
-  (format t "~A~%" (slot-value string 'openldk::value)))
+  (format t "~A~%" string))

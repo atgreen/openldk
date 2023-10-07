@@ -72,6 +72,17 @@
                  (eval (list (intern "<clinit>()V") (intern (format nil "+static-~A+" (slot-value class 'name)))))))))
     (clinit class)))
 
+(defun insert-branch-targets (ssa-code branch-target-table)
+  (let ((btt (make-hash-table)))
+    (loop for insn in ssa-code
+          for pc-index = (slot-value insn 'pc-index)
+          append (if (and (gethash pc-index branch-target-table)
+                          (null (gethash pc-index btt)))
+                     (progn
+                       (setf (gethash pc-index btt) t)
+                       (list (make-instance 'ssa-branch-target :index pc-index)))
+                     (list insn)))))
+
 (defun %compile-method (class-name method-index)
   (let* ((class (gethash class-name *classes*))
          (method (aref (slot-value class 'methods) (1- method-index))))
@@ -85,13 +96,15 @@
         (format t "; compiling ~A~A~%" (slot-value method 'name) (slot-value method 'descriptor))
         (force-output))
       (with-slots (pc) context
-        (let* ((ssa-code
+        (let* ((ssa-code-pre-branch-targets
                 (apply #'append
                        (loop
                         while (< pc length)
                         for result = (funcall (aref +opcodes+ (aref code pc)) context code)
                         unless (null result)
                           collect result)))
+               (ssa-code (insert-branch-targets ssa-code-pre-branch-targets
+                                                (find-branch-targets code)))
                (lisp-code (mapcar (lambda (ssa-node)
                                     (codegen ssa-node))
                                   ssa-code))
@@ -110,7 +123,7 @@
                                                              (lambda (v)
                                                                (list v))
                                                              (slot-value context 'locals))))
-                                                     lisp-code))))))))
+                                                     (list (cons 'tagbody lisp-code))))))))))
                (%eval code))))))
 
 (defun emit-<class> (class)
@@ -123,6 +136,7 @@
                            (map 'list
                                 (lambda (f)
                                   (list (intern (slot-value f 'name))
+                                        :initform nil
                                         :allocation
                                         (if (eq 0 (logand 8 (slot-value f 'access-flags))) :instance :class)))
                                 fields))

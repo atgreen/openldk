@@ -1,7 +1,7 @@
 (in-package :openldk)
 
 (defclass ssa-node ()
-  ((index :initarg :index)))
+  ((pc-index :initarg :pc-index)))
 
 (defclass ssa-literal (ssa-node)
   ((value :initarg :value :initform nil)))
@@ -9,18 +9,36 @@
 (defmethod emit ((v ssa-literal) cp)
   (slot-value v 'value))
 
+(defclass ssa-local-variable (ssa-node)
+  ((index :initarg :index)))
+
 (defclass ssa-null-literal (ssa-literal)
   ())
 
 (defclass ssa-string-literal (ssa-literal)
   ())
 
+(defclass ssa-int-literal (ssa-literal)
+  ())
+
 (defclass ssa-assign (ssa-node)
   ((target :initarg :target)
    (source :initarg :source)))
 
+(defclass ssa-branch (ssa-node)
+  ((offset :initarg :offset)))
+
+(defclass ssa-goto (ssa-branch)
+  ())
+
+(defclass ssa-if-icmple (ssa-branch)
+  ())
+
 (defclass ssa-call (ssa-node)
   ())
+
+(defclass ssa-branch-target (ssa-node)
+  ((index :initarg :index)))
 
 (defclass ssa-call-virtual-method (ssa-call)
   ((method-name :initarg :method-name)

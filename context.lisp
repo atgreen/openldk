@@ -2,7 +2,7 @@
 
 (defclass <context> ()
   ((class :initarg :class)
-   (is-clinit-p :initarg :is-clinit-p)
+   (is-clinit-p :initarg :is-clinit-p :initform nil)
    (locals :initform (list))
    (pc :initform 0)
    (stack :initform (cl-containers:make-container 'cl-containers:stack-container))
