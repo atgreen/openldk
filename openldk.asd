@@ -33,7 +33,7 @@
                (:file "ssa")
                (:file "bytecode-to-ssa")
                (:file "codegen")
-               (:file "openldk-ssa"))
+               (:file "openldk"))
   :depends-on (:bitio :fast-io :unix-opts :split-sequence :flexi-streams :cl-containers :closer-mop)
   :build-operation "program-op"
   :build-pathname "openldk"

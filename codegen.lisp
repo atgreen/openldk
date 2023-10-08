@@ -80,10 +80,16 @@
     (destructuring-bind (method . next)
         (closer-mop:compute-applicable-methods-using-classes
          (eval (list 'function (intern (format nil "~A" method-name) :openldk)))
-         (list (find-class (intern class-name :openldk)) (find-class (intern "java/lang/String" :openldk))))
+         (list (find-class (intern class-name :openldk)) nil))
+      (print "===================================================")
+      (print method)
+      (print (closer-mop:method-function method))
+      (print "===================================================")
+      (print next)
+      (print "===================================================")
       (let ((fn (closer-mop:method-function method)))
         (list 'apply fn
-              (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))))))))
+              (list 'list (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))) (cons 'list next)))))))
 
 (defmethod codegen ((insn ssa-static-member))
   (with-slots (class-name member-name) insn
@@ -94,6 +100,9 @@
 (defmethod codegen ((insn ssa-store))
   (with-slots (target) insn
     (list 'setf (codegen target) (list 'cl-containers:pop-item 'stack))))
+
+(defmethod codegen ((insn ssa-throw))
+  (list 'error "blah"))
 
 (defmethod codegen ((insn ssa-return))
   (list 'return))

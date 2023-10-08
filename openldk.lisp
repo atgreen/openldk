@@ -48,15 +48,10 @@
         (uiop:file-exists-p (format nil "~A~A~A.class" dir (uiop:directory-separator-for-host) class))
         nil)))
 
-(defclass <context> ()
-  ((class :initarg :class)
-   (pc :initform 0)
-   (stack :initform (cl-containers:make-container 'cl-containers:stack-container))
-   (code)))
-
 (defun %eval (code)
   (when *debug-codegen*
-      (pprint code))
+    (pprint code)
+    (format t "~%"))
   (if *debug-unmuffle*
       (eval code)
       (handler-bind
@@ -65,233 +60,6 @@
                             (declare (ignore c))
                             (invoke-restart 'muffle-warning))))
         (eval code))))
-
-(defun ctrace (pc stack)
-  (format t "[~A](~A):~A~%" pc (cl-containers:size stack) (cl-containers:first-element stack)))
-
-(defmethod current-class-name ((context <context>))
-  (slot-value (slot-value context 'class) 'name))
-
-(let ((vreg 10000))
-  (defun next-vreg ()
-    (intern (format nil "vreg~A" (incf vreg)))))
-
-(defun :ACONST_NULL (context code)
-  (with-slots (pc stack) context
-    (incf pc)
-    (let ((vreg (next-vreg)))
-      (cl-containers:push-item stack vreg))
-    (list 'setf vreg nil)))
-
-(defun :ALOAD_1 (context code)
-  (with-slots (pc stack) context
-    (incf pc)
-    (cl-containers:push-item stack (intern "local-1")))
-  nil)
-
-(defun :ASTORE (context code)
-  (with-slots (pc stack) context
-    (let ((index (aref code (incf pc))))
-      (incf pc)
-      (list 'setf (intern (format nil "local-~A" index)) (cl-containers:pop-item stack)))))
-
-(defun :ASTORE_1 (context code)
-  (with-slots (pc stack) context
-    (incf pc)
-    (list 'setf (intern "local-1") (cl-containers:pop-item stack))))
-
-(defun :DADD (context code)
-  (with-slots (pc stack) context
-    (incf pc)
-    (cl-containers:push-item
-     stack
-     (list '+ (cl-containers:pop-item stack) (cl-containers:pop-item stack))))
-  nil)
-
-(defun :DCONST_0 (context code)
-  (with-slots (pc stack) context
-    (incf pc)
-    (cl-containers:push-item stack '0.0))
-  nil)
-
-(defun :DDIV (context code)
-  (with-slots (pc stack) context
-    (incf pc)
-    (cl-containers:push-item
-     stack
-     (list '/ (cl-containers:pop-item stack) (cl-containers:pop-item stack))))
-  nil)
-
-(defun :DLOAD (context code)
-  (with-slots (pc stack) context
-    (let ((index (aref code (incf pc))))
-      (incf pc)
-      (cl-containers:push-item stack (intern (format nil "local-~A" index)))))
-  nil)
-
-(defun :DLOAD_2 (context code)
-  (with-slots (pc stack) context
-    (incf pc)
-    (cl-containers:push-item stack (intern "local-2")))
-  nil)
-
-(defun :DMUL (context code)
-  (with-slots (pc stack) context
-    (incf pc)
-    (cl-containers:push-item
-     stack
-     (list '* (cl-containers:pop-item stack) (cl-containers:pop-item stack))))
-  nil)
-
-(defun :DSTORE (context code)
-  (with-slots (pc stack) context
-    (let ((index (aref code (incf pc))))
-      (incf pc)
-      (list 'setf (intern (format nil "local-~A" index)) (cl-containers:pop-item stack)))))
-
-(defun :DSTORE_2 (context code)
-  (with-slots (pc stack) context
-    (incf pc)
-    (list 'setf (intern "local-2") (cl-containers:pop-item stack))))
-
-(defun :DSUB (context code)
-  (with-slots (pc stack) context
-    (incf pc)
-    (cl-containers:push-item
-     stack
-     (list '- (cl-containers:pop-item stack) (cl-containers:pop-item stack))))
-  nil)
-
-(defun :DUP (context code)
-  (with-slots (pc stack) context
-    (ctrace pc stack)
-    (incf pc)
-    (let ((top (cl-containers:pop-item stack))
-          (vreg (next-vreg)))
-      (format t ">>>>>>>>>>>>>>>>>>>>>>... ~A~%" top)
-      (cl-containers:push-item stack top)
-      (cl-containers:push-item stack vreg)
-      (list 'setf vreg top))))
-
-(defun :FCONST_2 (context code)
-  (with-slots (pc stack) context
-    (incf pc)
-    (cl-containers:push-item stack 2.0)
-    nil))
-
-(defun :GOTO (context code)
-  (with-slots (pc stack) context
-    (let* ((offset (+ (* (aref code (incf pc)) 256)
-                      (aref code (incf pc)))))
-      (incf pc)
-      (list 'go (intern (format nil "label-~A" offset))))))
-
-(defun :ICONST_1 (context code)
-  (with-slots (pc stack) context
-    (incf pc)
-    (cl-containers:push-item stack 1)
-    nil))
-
-(defun :ICONST_2 (context code)
-  (with-slots (pc stack) context
-    (incf pc)
-    (cl-containers:push-item stack 2)
-    nil))
-
-(defun :ICONST_4 (context code)
-  (with-slots (pc stack) context
-    (incf pc)
-    (cl-containers:push-item stack 4)
-    nil))
-
-(defun :ICONST_5 (context code)
-  (with-slots (pc stack) context
-    (incf pc)
-    (cl-containers:push-item stack 5)
-    nil))
-
-(defun :ICONST_M1 (context code)
-  (with-slots (pc stack) context
-    (incf pc)
-    (cl-containers:push-item stack -1)
-    (format t "WTF~%")
-    nil))
-
-(defun :INVOKESPECIAL (context code)
-
-#|
-; I need to use this hack:
-; https://stackoverflow.com/questions/35171694/clos-how-to-call-a-less-specific-method
-(destructuring-bind (method . next)
-    (closer-mop:compute-applicable-methods-using-classes
-     #'fn
-     (list (find-class 'a)))
-  (let ((fn (closer-mop:method-function method)))
-    (defun %fn-as-a (&rest args)
-wi     (funcall fn args next))))
-|#
-
-  (with-slots (pc class stack) context
-    (with-slots (constant-pool) class
-      (let* ((index (+ (* (aref code (incf pc)) 256)
-                       (aref code (incf pc))))
-             (method-reference (aref constant-pool index)))
-        (incf pc)
-        (let* ((descriptor
-                 (slot-value (aref constant-pool
-                                   (slot-value (aref constant-pool (slot-value method-reference 'method-descriptor-index)) 'type-descriptor-index))
-                             'value))
-               (parameter-count (count-parameters descriptor)))
-          (cons (intern (format nil "~A.~A" (intern (slot-value class 'name)) (emit method-reference constant-pool)))
-                (pop-args parameter-count stack)))))))
-
-(defun :LDC (context code)
-  (with-slots (pc stack class) context
-    (with-slots (constant-pool) class
-      (let ((index (aref code (incf pc))))
-        (incf pc)
-        (cl-containers:push-item stack
-                                 (emit (aref constant-pool index) constant-pool))
-        nil))))
-
-(defun :NEW (context code)
-  (with-slots (pc stack class) context
-    (ctrace pc stack)
-    (with-slots (constant-pool) class
-      (let* ((index (+ (* (aref code (incf pc)) 256)
-                       (aref code (incf pc))))
-             (classname (emit (aref constant-pool index) constant-pool))
-             (vreg (next-vreg)))
-        (incf pc)
-        (cl-containers:push-item stack vreg)
-        (format t "VVVVVVVVVV~%")
-        (ctrace pc stack)
-        (format t "^^^^^^^^^^~%")
-        (list 'setf vreg (list 'make-instance (list 'quote (intern classname))))))))
-
-(defun :POP (context code)
-  (with-slots (pc stack) context
-    (incf pc)
-    (cl-containers:pop-item stack)
-    nil))
-
-(defun :PUTSTATIC (context code)
-  (with-slots (pc stack class) context
-    (with-slots (constant-pool) class
-      (let* ((index (+ (* (aref code (incf pc)) 256)
-                       (aref code (incf pc))))
-             (field-reference (aref constant-pool index)))
-        (incf pc)
-        (let ((code (list 'setf (list 'slot-value
-                                      (intern (format nil "+static-~A+" (intern (slot-value class 'name))))
-                                      (list 'quote (intern (emit field-reference constant-pool))))
-                          (cl-containers:pop-item stack))))
-          code)))))
-
-(defun :RETURN (context code)
-  (with-slots (pc) context
-    (incf pc)
-    (list 'return)))
 
 (defun %clinit (class)
   (labels ((clinit (class)
@@ -302,113 +70,64 @@ wi     (funcall fn args next))))
                                                            (string= (slot-value method 'descriptor) "()V")))
                                      (slot-value class 'methods))))
                (when <clinit>-method
-                 (eval (list (intern "<clinit>()V") (intern (format nil "+static-~A+" (slot-value class 'name)))))))))
+                 (%eval (list (intern "<clinit>()V" :openldk) (intern (format nil "+static-~A+" (slot-value class 'name)) :openldk)))))))
     (clinit class)))
 
-(defun :GETSTATIC (context code)
-  (with-slots (pc stack class) context
-    (with-slots (constant-pool) class
-      (let* ((index (+ (* (aref code (incf pc)) 256)
-                       (aref code (incf pc)))))
-        (multiple-value-bind (fieldname classname)
-            (emit (aref constant-pool index) constant-pool)
-          (incf pc)
-          (cl-containers:push-item stack
-                                   (list 'progn
-                                         (list '%clinit (gethash classname *classes*))
-                                         (list 'slot-value
-                                               (intern (format nil "+static-~A+" (intern classname)))
-                                               (list 'quote (intern fieldname))))))
-        nil))))
-
-(defun pop-args (num-args stack)
-  (loop repeat num-args
-        for item = (cl-containers:pop-item stack)
-        until (null item)
-        collect item into items
-        finally (return (reverse items))))
-
-(defun :INVOKEDYNAMIC (context code)
-  (with-slots (pc class stack) context
-    (with-slots (constant-pool) class
-      (let* ((index (+ (* (aref code (incf pc)) 256)
-                       (aref code (incf pc))))
-             (method-reference (aref constant-pool index)))
-        (incf pc)
-        (let* ((descriptor
-                 (slot-value (aref constant-pool
-                                   (slot-value (aref constant-pool (slot-value method-reference 'method-descriptor-index)) 'type-descriptor-index))
-                             'value))
-               (parameter-count (count-parameters descriptor)))
-          (cons (intern (format nil "~A.~A" (intern (slot-value class 'name)) (emit method-reference constant-pool)))
-                (pop-args parameter-count stack)))))))
-
-(defun :INVOKESTATIC (context code)
-  (with-slots (pc class stack) context
-    (with-slots (constant-pool) class
-      (let* ((index (+ (* (aref code (incf pc)) 256)
-                       (aref code (incf pc))))
-             (method-reference (aref constant-pool index)))
-        (incf pc)
-        (let* ((descriptor
-                 (slot-value (aref constant-pool
-                                   (slot-value (aref constant-pool (slot-value method-reference 'method-descriptor-index)) 'type-descriptor-index))
-                             'value))
-               (parameter-count (count-parameters descriptor)))
-          (cons (intern (format nil "~A.~A" (intern (slot-value class 'name)) (emit method-reference constant-pool)))
-                (pop-args parameter-count stack)))))))
-
-(defun :INVOKEVIRTUAL (context code)
-  (with-slots (pc class stack) context
-    (with-slots (constant-pool) class
-      (let* ((index (+ (* (aref code (incf pc)) 256)
-                       (aref code (incf pc))))
-             (method-reference (aref constant-pool index)))
-        (incf pc)
-        (let* ((descriptor
-                 (slot-value (aref constant-pool
-                                   (slot-value (aref constant-pool (slot-value method-reference 'method-descriptor-index)) 'type-descriptor-index))
-                             'value))
-               (parameter-count (1+ (count-parameters descriptor))))
-          (cons (intern (format nil "~A" (emit method-reference constant-pool)))
-                (pop-args parameter-count stack)))))))
-
-(defun invoke-method (context method)
-  (let* ((code (slot-value (gethash "Code" (slot-value method 'attributes)) 'code))
-         (length (length code)))
-    (with-slots (pc) context
-      (let ((code (append (list 'block nil)
-                          (loop
-                            while (< pc length)
-                            ;; for result = (progn (format t ">[~A]~%" pc) (funcall (aref +opcodes+ (aref code pc)) context code))
-                            for result = (funcall (aref +opcodes+ (aref code pc)) context code)
-                            unless (null result)
-                            collect result))))
-        (%eval code)))))
+(defun insert-branch-targets (ssa-code branch-target-table)
+  (let ((btt (make-hash-table)))
+    (loop for insn in ssa-code
+          for pc-index = (slot-value insn 'pc-index)
+          append (if (and (gethash pc-index branch-target-table)
+                          (null (gethash pc-index btt)))
+                     (progn
+                       (setf (gethash pc-index btt) t)
+                       (list (make-instance 'ssa-branch-target :index pc-index)))
+                     (list insn)))))
 
 (defun %compile-method (class-name method-index)
   (let* ((class (gethash class-name *classes*))
          (method (aref (slot-value class 'methods) (1- method-index))))
     (let* ((code (slot-value (gethash "Code" (slot-value method 'attributes)) 'code))
            (length (length code))
-           (context (make-instance '<context> :class class)))
+           (context (make-instance '<context>
+                                   :class class
+                                   :is-clinit-p (string= "<clinit>"
+                                                         (slot-value method 'name)))))
       (when *debug-codegen*
-        (format t "; xcompiling ~A~A~%" (slot-value method 'name) (slot-value method 'descriptor))
+        (format t "; compiling ~A~A~%" (slot-value method 'name) (slot-value method 'descriptor))
         (force-output))
       (with-slots (pc) context
-        (let ((code (append
-                     (list 'defmethod
-                           (intern (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor)))
-                           (cons (list (intern "this") (intern (slot-value class 'name)))
-                                 (loop for i from 1 upto (count-parameters (slot-value method 'descriptor))
-                                       collect (intern (format nil "arg~A" i))))
-                           (append (list 'block nil)
-                                   (loop
-                                     while (< pc length)
-                                     ;; for result = (let ((xxx (format t ">[~A] " pc)) (code (funcall (aref +opcodes+ (aref code pc)) context code))) (format t "~A~%" code))
-                                     for result = (funcall (aref +opcodes+ (aref code pc)) context code)
-                                     unless (null result)
-                                       collect result))))))
+        (let* ((ssa-code-pre-branch-targets
+                 (apply #'append
+                        (loop
+                          while (< pc length)
+                          for result = (funcall (aref +opcodes+ (aref code pc)) context code)
+                          unless (null result)
+                            collect result)))
+               (ssa-code (insert-branch-targets ssa-code-pre-branch-targets
+                                                (find-branch-targets code)))
+               (lisp-code (mapcar (lambda (ssa-node)
+                                    (codegen ssa-node))
+                                  ssa-code))
+               (code (append (list 'defmethod
+                                   (intern (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor)) :openldk)
+                                   (cons (list (intern "this" :openldk) (intern (slot-value class 'name) :openldk))
+                                         (loop for i from 1 upto (count-parameters (slot-value method 'descriptor))
+                                               collect (intern (format nil "arg~A" i) :openldk))))
+                             (list (list 'let (append (remove nil (append (list (intern "local-0" :openldk) (intern "this" :openldk))
+                                                                          (loop for i from 1 upto (count-parameters (slot-value method 'descriptor))
+                                                                                collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" i) :openldk))))))
+                                         (append (list 'block nil)
+                                                 (list
+                                                  (append (append (list 'let
+                                                                        (cons
+                                                                         (list 'stack (list 'cl-containers:make-container (list 'quote 'cl-containers:stack-container)))
+                                                                         (mapcar
+                                                                          (lambda (v)
+                                                                            (list v))
+                                                                          (slot-value context 'locals))))
+                                                                  (list (cons 'tagbody lisp-code)))))))))))
+
           (%eval code))))))
 
 (defun emit-<class> (class)
@@ -416,32 +135,33 @@ wi     (funcall fn args next))))
                          (list
                           'progn
                           (list
-                           'defclass (intern name)
-                           (if super (list (intern super)) (list))
+                           'defclass (intern name :openldk)
+                           (if super (list (intern super :openldk)) (list))
                            (map 'list
                                 (lambda (f)
-                                  (list (intern (slot-value f 'name))
+                                  (list (intern (slot-value f 'name) :openldk)
+                                        :initform nil
                                         :allocation
                                         (if (eq 0 (logand 8 (slot-value f 'access-flags))) :instance :class)))
                                 fields))
                           (list
-                           'defparameter (intern (format nil "+static-~A+" (intern name)))
+                           'defparameter (intern (format nil "+static-~A+" (intern name)) :openldk)
                            (list
-                            'make-instance (list 'quote (intern name)))))))
+                            'make-instance (list 'quote (intern name :openldk)))))))
         (methods-code
           (let ((method-index 0))
             (with-slots (name super methods) class
               (map 'list
                    (lambda (m)
-                     (list 'defmethod (intern (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor)))
-                           (cons (list (intern "this") (intern (slot-value (slot-value m 'class) 'name)))
+                     (list 'defmethod (intern (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor)) :openldk)
+                           (cons (list (intern "this" :openldk) (intern (slot-value (slot-value m 'class) 'name) :openldk))
                                  (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
-                                       collect (intern (format nil "arg~A" i))))
+                                       collect (intern (format nil "arg~A" i) :openldk)))
                            (list '%compile-method (slot-value class 'name) (incf method-index))
-                           (cons (intern (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor)))
-                                 (cons (intern "this")
+                           (cons (intern (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor)) :openldk)
+                                 (cons (intern "this" :openldk)
                                        (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
-                                             collect (intern (format nil "arg~A" i)))))))
+                                             collect (intern (format nil "arg~A" i) :openldk))))))
                    methods)))))
     (append defclass-code methods-code)))
 
@@ -492,4 +212,4 @@ wi     (funcall fn args next))))
           (usage)
           (let* ((class (classload (car free-args) CLASSPATH)))
             (%clinit class)
-            (%eval (list (intern "main([Ljava/lang/String;)V") (intern (format nil "+static-~A+" (slot-value class 'name))) #())))))))
+            (%eval (list (intern "main([Ljava/lang/String;)V" :openldk) (intern (format nil "+static-~A+" (slot-value class 'name)) :openldk) #())))))))

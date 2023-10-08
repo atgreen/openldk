@@ -4,7 +4,7 @@ public class Hello
 
     public static void main(String[] args)
     {
-        System.out.println ("Hello World!");
-        //       throw new java.lang.ArithmeticException("Trying to divide by 0");
+        // System.out.println ("Hello World!");
+        throw new java.lang.ArithmeticException("Trying to divide by 0");
     }
 }
