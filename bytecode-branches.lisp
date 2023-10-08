@@ -44,18 +44,15 @@ targets."
   (let ((pc 0)
         (length (length code))
         (branch-target-table (make-hash-table)))
-    (format t "A~%")
     (dolist (bt (remove-duplicates
                  (apply #'append (loop
                                    while (< pc length)
                                    for result = (let* ((opcode (aref +opcodes+ (aref code pc)))
                                                        (targets (if (gethash opcode +bytecode-short-branch-table+)
                                                                     (get-short-branch-targets pc code))))
-                                                  (format t "C[~A][~A][~A]~%" pc opcode targets)
                                                   (incf pc (gethash opcode +bytecode-lengths-table+))
                                                   targets)
                                    unless (null result)
                                     collect result))))
       (setf (gethash bt branch-target-table) t))
-    (format t "B~%")
     branch-target-table))
