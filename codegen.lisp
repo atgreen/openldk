@@ -69,11 +69,15 @@
   (list 'cl-containers:push-item 'stack (list '- (list 'cl-containers:pop-item 'stack) (list 'cl-containers:pop-item 'stack))))
 
 (defmethod codegen ((insn ssa-call-special-method))
-  (with-slots (method-name args) insn
-    (list 'apply
-          (list 'function (intern (format nil "~A"
-                                          method-name)))
-          (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))))))
+  (classload "java/lang/String" ".:jre8")
+  (with-slots (class-name method-name args) insn
+    (destructuring-bind (method . next)
+        (closer-mop:compute-applicable-methods-using-classes
+         (eval (list 'function (intern (format nil "~A" method-name))))
+         (list (find-class (intern class-name)) (find-class (intern "java/lang/String"))))
+      (let ((fn (closer-mop:method-function method)))
+        (list 'apply fn
+              (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))))))))
 
 (defmethod codegen ((insn ssa-static-member))
   (with-slots (class-name member-name) insn

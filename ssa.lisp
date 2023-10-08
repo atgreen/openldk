@@ -53,7 +53,8 @@
   ((index :initarg :index)))
 
 (defclass ssa-call-special-method (ssa-call)
-  ((method-name :initarg :method-name)
+  ((class-name :initarg :class-name)
+   (method-name :initarg :method-name)
    (args :initarg :args :initform nil)))
 
 (defclass ssa-call-virtual-method (ssa-call)
@@ -94,6 +95,9 @@
   ())
 
 (defclass ssa-sub (ssa-node)
+  ())
+
+(defclass ssa-throw (ssa-branch)
   ())
 
 (defclass ssa-variable (ssa-node)

@@ -4,9 +4,7 @@ public class Hello
 
     public static void main(String[] args)
     {
-        if (x > 556)
-            System.out.println("This is amazing!");
-        else
-            System.out.println("This is bogus!");
+        System.out.println ("Hello World!");
+        //       throw new java.lang.ArithmeticException("Trying to divide by 0");
     }
 }

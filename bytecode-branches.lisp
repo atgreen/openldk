@@ -5,6 +5,7 @@
     :ALOAD_0
     :ALOAD_1
     :ASTORE_1
+    :ATHROW
     :DADD :DCONST_0 :DDIV :DLOAD_2 :DMUL :DSTORE_2 :DSUB
     :DUP
     :RETURN))

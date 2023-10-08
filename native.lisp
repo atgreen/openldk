@@ -1,3 +1,5 @@
+(in-package :openldk)
+
 (defmethod |java/lang/Object.registerNatives()V| ()
   ())
 
@@ -5,4 +7,4 @@
   ())
 
 (defmethod |println(Ljava/lang/String;)V| (stream string)
-  (format t "~A~%" string))
+  (format t "~A~%" (slot-value string '|value|)))

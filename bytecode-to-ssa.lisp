@@ -66,6 +66,13 @@
                                                   :pc-index pc-start
                                                   :index 1))))))
 
+(defun :ATHROW (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-throw :pc-index pc-start)))))
+
 (defun :DADD (context code)
   (declare (ignore code))
   (with-slots (pc) context
@@ -234,7 +241,12 @@
                          (aref code (incf pc))))
                (method-reference (aref constant-pool index)))
           (incf pc)
-          (let* ((descriptor
+          (let* ((classname
+                   (emit (aref constant-pool
+                               (slot-value method-reference
+                                           'class-index))
+                         constant-pool))
+                 (descriptor
                   (slot-value (aref constant-pool
                                     (slot-value
                                      (aref constant-pool
@@ -245,6 +257,7 @@
                  (parameter-count (1+ (count-parameters descriptor))))
             (list (make-instance 'ssa-call-special-method
                                  :pc-index pc-start
+                                 :class-name classname
                                  :method-name (emit method-reference constant-pool)
                                  :args (pop-args parameter-count)))))))))
 

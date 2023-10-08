@@ -24,6 +24,7 @@
   :serial t
   :components ((:file "package")
                (:file "opcodes")
+               (:file "bootstrap")
                (:file "bytecode-branches")
                (:file "native")
                (:file "context")
