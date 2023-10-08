@@ -3,6 +3,11 @@
 (defmethod codegen ((insn ssa-literal))
   (slot-value insn 'value))
 
+(defmethod codegen ((insn ssa-string-literal))
+  (let ((s (make-instance '|java/lang/String|)))
+    (setf (slot-value s '|value|) (slot-value insn 'value))
+    s))
+
 (defmethod codegen ((insn ssa-add))
   (list 'cl-containers:push-item 'stack (list '+ (list 'cl-containers:pop-item 'stack) (list 'cl-containers:pop-item 'stack))))
 
