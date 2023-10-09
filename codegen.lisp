@@ -116,6 +116,7 @@
     (list 'destructuring-bind (cons 'method 'next)
           (list 'closer-mop:compute-applicable-methods-using-classes
                 (list 'function (intern (format nil "~A" method-name) :openldk))
+                ;; This should be based on the args list
                 (list 'list (find-class (intern (slot-value class 'name) :openldk)) nil))
           (list 'let (list (list 'fn (list 'closer-mop:method-function 'method)))
                 (list 'apply 'fn
