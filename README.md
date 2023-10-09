@@ -32,6 +32,12 @@ string of characters that are interpreted as below:
 More specifically, running `LDK_DEBUG=cu openldk Hello` will enable
 all debug output while running `Hello`.
 
+Status
+------
+
+Here's an incomplete list of what's not implemented:
+- `monitorenter`/`monitorexit` for object synchronization
+
 Author and License
 -------------------
 

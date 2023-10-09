@@ -2,23 +2,30 @@
 
 (defparameter +bytecode-1-byte+
   '(:ACONST_NULL
-    :ALOAD_0
-    :ALOAD_1
-    :ASTORE_1
+    :ALOAD_0 :ALOAD_1 :ALOAD_2 :ALOAD_3
+    :ARETURN
+    :ASTORE_0 :ASTORE_1 :ASTORE_2 :ASTORE_3
     :ATHROW
     :DADD :DCONST_0 :DDIV :DLOAD_2 :DMUL :DSTORE_2 :DSUB
     :DUP
+    :ICONST_0 :ICONST_1
+    :ILOAD_0 :ILOAD_1 :ILOAD_2 :ILOAD_3
+    :IRETURN
+    :MONITORENTER :MONITOREXIT
+    :POP
     :RETURN))
 
 (defparameter +bytecode-2-byte+
-  '(:ASTORE :DLOAD :DSTORE :LDC))
+  '(:ASTORE :BIPUSH :DLOAD :DSTORE :LDC))
 
-(defparameter +bytecode-3-byte+ '(:GETSTATIC :GOTO :IF_ICMPLE
-  :INVOKEVIRTUAL :INVOKESPECIAL :INVOKESTATIC :NEW :PUTSTATIC :SIPUSH))
+(defparameter +bytecode-3-byte+
+  '(:GETFIELD :GETSTATIC :GOTO :IF_ICMPLE :IFNE :IFNONNULL :IFNULL
+    :INVOKEVIRTUAL :INVOKESPECIAL :INVOKESTATIC :NEW :ANEWARRAY
+    :PUTFIELD :PUTSTATIC :SIPUSH))
 
 (defparameter +bytecode-short-branch-table+
   (let ((sbtable (make-hash-table)))
-    (dolist (o '(:GOTO :IF_ICMPLE))
+    (dolist (o '(:GOTO :IF_ICMPLE :IFNE :IFNONNULL :IFNULL))
       (setf (gethash o sbtable) t))
     sbtable))
 

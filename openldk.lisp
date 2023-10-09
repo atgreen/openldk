@@ -62,16 +62,25 @@
         (eval code))))
 
 (defun %clinit (class)
-  (labels ((clinit (class)
-             (let ((super-class (gethash (slot-value class 'super) *classes*)))
-               (when super-class (clinit super-class)))
-             (let ((<clinit>-method (find-if
-                                     (lambda (method) (and (string= (slot-value method 'name) "<clinit>")
-                                                           (string= (slot-value method 'descriptor) "()V")))
-                                     (slot-value class 'methods))))
-               (when <clinit>-method
-                 (%eval (list (intern "<clinit>()V" :openldk) (intern (format nil "+static-~A+" (slot-value class 'name)) :openldk)))))))
-    (clinit class)))
+  (format t "8888888888888888888888888888888888888888888888888888~%")
+  (force-output)
+  (format t "~A~%" class)
+  (force-output)
+  (format t "clinit ~A~%" (slot-value class 'name))
+  (force-output)
+  (format t "clinit ~A~%" class)
+  (force-output)
+  (let ((class (gethash (slot-value class 'name) *classes*)))
+    (labels ((clinit (class)
+               (let ((super-class (gethash (slot-value class 'super) *classes*)))
+                 (when super-class (clinit super-class)))
+               (let ((<clinit>-method (find-if
+                                       (lambda (method) (and (string= (slot-value method 'name) "<clinit>")
+                                                             (string= (slot-value method 'descriptor) "()V")))
+                                       (slot-value class 'methods))))
+                 (when <clinit>-method
+                   (%eval (list (intern (format nil "~A.<clinit>()V" (slot-value class 'name)) :openldk)))))))
+      (clinit class))))
 
 (defun insert-branch-targets (ssa-code branch-target-table)
   (let ((btt (make-hash-table)))
@@ -94,7 +103,7 @@
                                    :is-clinit-p (string= "<clinit>"
                                                          (slot-value method 'name)))))
       (when *debug-codegen*
-        (format t "; compiling ~A~A~%" (slot-value method 'name) (slot-value method 'descriptor))
+        (format t "; compiling ~A.~A~A~%" class-name (slot-value method 'name) (slot-value method 'descriptor))
         (force-output))
       (with-slots (pc) context
         (let* ((ssa-code-pre-branch-targets
@@ -109,14 +118,23 @@
                (lisp-code (mapcar (lambda (ssa-node)
                                     (codegen ssa-node))
                                   ssa-code))
-               (code (append (list 'defmethod
+               (code (append (if (static-p method)
+                                 (list 'defun
+                                   (intern (format nil "~A.~A~A" (slot-value class 'name) (slot-value method 'name) (slot-value method 'descriptor)) :openldk)
+                                   (loop for i from 1 upto (count-parameters (slot-value method 'descriptor))
+                                         collect (intern (format nil "arg~A" i) :openldk)))
+                                 (list 'defmethod
                                    (intern (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor)) :openldk)
                                    (cons (list (intern "this" :openldk) (intern (slot-value class 'name) :openldk))
                                          (loop for i from 1 upto (count-parameters (slot-value method 'descriptor))
-                                               collect (intern (format nil "arg~A" i) :openldk))))
-                             (list (list 'let (append (remove nil (append (list (intern "local-0" :openldk) (intern "this" :openldk))
-                                                                          (loop for i from 1 upto (count-parameters (slot-value method 'descriptor))
-                                                                                collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" i) :openldk))))))
+                                               collect (intern (format nil "arg~A" i) :openldk)))))
+                             (list (list 'let (append (remove nil
+                                                              (if (static-p method)
+                                                                  (loop for i from 1 upto (count-parameters (slot-value method 'descriptor))
+                                                                        collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" i) :openldk)))
+                                                                  (cons (list (intern "local-0" :openldk) (intern "this" :openldk))
+                                                                        (loop for i from 1 upto (count-parameters (slot-value method 'descriptor))
+                                                                              collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" i) :openldk)))))))
                                          (append (list 'block nil)
                                                  (list
                                                   (append (append (list 'let
@@ -151,18 +169,31 @@
         (methods-code
           (let ((method-index 0))
             (with-slots (name super methods) class
-              (map 'list
-                   (lambda (m)
-                     (list 'defmethod (intern (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor)) :openldk)
-                           (cons (list (intern "this" :openldk) (intern (slot-value (slot-value m 'class) 'name) :openldk))
-                                 (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
-                                       collect (intern (format nil "arg~A" i) :openldk)))
-                           (list '%compile-method (slot-value class 'name) (incf method-index))
-                           (cons (intern (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor)) :openldk)
-                                 (cons (intern "this" :openldk)
-                                       (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
-                                             collect (intern (format nil "arg~A" i) :openldk))))))
-                   methods)))))
+              (remove nil (map 'list
+                               (lambda (m)
+                                 (if (native-p m)
+                                     (progn
+                                       (format t "NATIVE METHOD: ~A~%" (slot-value m 'name))
+                                       (incf method-index)
+                                       nil)
+                                     (if (static-p m)
+                                         (list 'defun (intern (format nil "~A.~A~A" (slot-value class 'name) (slot-value m 'name) (slot-value m 'descriptor)) :openldk)
+                                               (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
+                                                     collect (intern (format nil "arg~A" i) :openldk))
+                                               (list '%compile-method (slot-value class 'name) (incf method-index))
+                                               (cons (intern (format nil "~A.~A~A" (slot-value class 'name) (slot-value m 'name) (slot-value m 'descriptor)) :openldk)
+                                                     (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
+                                                           collect (intern (format nil "arg~A" i) :openldk))))
+                                         (list 'defmethod (intern (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor)) :openldk)
+                                               (cons (list (intern "this" :openldk) (intern (slot-value (slot-value m 'class) 'name) :openldk))
+                                                     (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
+                                                           collect (intern (format nil "arg~A" i) :openldk)))
+                                               (list '%compile-method (slot-value class 'name) (incf method-index))
+                                               (cons (intern (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor)) :openldk)
+                                                     (cons (intern "this" :openldk)
+                                                           (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
+                                                                 collect (intern (format nil "arg~A" i) :openldk))))))))
+                               methods))))))
     (append defclass-code methods-code)))
 
 (defun classload (classname classpath)
@@ -208,8 +239,13 @@
       (when-option (options :verbose)
                    (setf *verbose* t))
 
+      (%clinit (classload "java/lang/Object" ".:jre8/"))
+      (%clinit (classload "java/lang/ClassLoader" ".:jre8/"))
+      (%clinit (classload "java/lang/String" ".:jre8/"))
+      (%clinit (classload "java/lang/Class" ".:jre8/"))
+
       (if (not (eq 1 (length free-args)))
           (usage)
           (let* ((class (classload (car free-args) CLASSPATH)))
             (%clinit class)
-            (%eval (list (intern "main([Ljava/lang/String;)V" :openldk) (intern (format nil "+static-~A+" (slot-value class 'name)) :openldk) #())))))))
+            (%eval (list (intern (format nil "~A.main([Ljava/lang/String;)V" (slot-value class 'name)) :openldk) #())))))))

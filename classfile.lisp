@@ -37,14 +37,12 @@
                  :value (format nil "~A" (emit (aref cp (slot-value v 'index)) cp))))
 
 (defmethod emit ((v constant-field-reference) cp)
-  (let ((classname (emit (aref cp (slot-value v 'class-index)) cp)))
-    (classload classname ".:./jre8")
-    (values (emit-name (aref cp (slot-value v 'type-descriptor-index)) cp) classname)))
+  (let ((class (emit (aref cp (slot-value v 'class-index)) cp)))
+    (values (emit-name (aref cp (slot-value v 'type-descriptor-index)) cp) class)))
 
 (defmethod emit ((v constant-class-reference) cp)
   (let ((classname (emit (aref cp (slot-value v 'index)) cp)))
-    (classload classname ".:./jre8")
-    classname))
+    (make-instance 'ssa-class :class (classload classname ".:./jre8"))))
 
 (defmethod emit ((v constant-name-and-type-descriptor) cp)
   (format nil "~A~A"
@@ -74,7 +72,8 @@
    (super :initform nil)
    (constant-pool)
    (fields)
-   (methods)))
+   (methods)
+   (java-class)))
 
 (defmethod print-object ((class <class>) out)
   (print-unreadable-object (class out :type t)
@@ -89,6 +88,12 @@
 
 (defclass <method> (<field>)
   ())
+
+(defun native-p (method)
+  (not (eq 0 (logand #x100 (slot-value method 'access-flags)))))
+
+(defun static-p (method)
+  (not (eq 0 (logand #x8 (slot-value method 'access-flags)))))
 
 (defmethod print-object ((method <method>) out)
   (print-unreadable-object (method out :type t)

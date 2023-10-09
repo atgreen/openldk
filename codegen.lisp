@@ -16,13 +16,28 @@
     (list 'setf (codegen target) (codegen source))))
 
 (defmethod codegen ((insn ssa-call-static-method))
-  (with-slots (class-name method-name args) insn
+  (with-slots (class method-name args) insn
     (list 'apply
           (list 'function (intern (format nil "~A.~A"
-                                          class-name
+                                          class
                                           method-name)
                                   :openldk))
           (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))))))
+
+(defvar *java-classes* (make-hash-table :test #'equal))
+(defmethod codegen ((insn ssa-class))
+  (let* ((classname (slot-value (slot-value insn 'class) 'name))
+         (java-class (gethash classname *java-classes*)))
+    (if java-class
+        java-class
+        (let ((java-class (make-instance '|java/lang/Class|)))
+          (setf (slot-value java-class '|name|)
+                  (let ((s (make-instance '|java/lang/String|)))
+                    (setf (slot-value s '|value|) classname)))
+          (setf (slot-value java-class '|classLoader|)
+                (make-instance '|java/lang/ClassLoader|))
+          (setf (gethash classname *java-classes*) java-class)
+          java-class))))
 
 (defmethod codegen ((insn ssa-branch-target))
   (intern (format nil "#:branch-target-~A" (slot-value insn 'index)) :openldk))
@@ -38,6 +53,21 @@
     (list 'if (list '>= (list 'cl-containers:pop-item 'stack) (list 'cl-containers:pop-item 'stack))
           (list 'go (intern (format nil "#:branch-target-~A" offset) :openldk)))))
 
+(defmethod codegen ((insn ssa-ifne))
+  (with-slots (offset) insn
+    (list 'if (list 'not (list 'eq (list 'cl-containers:pop-item 'stack) '0))
+          (list 'go (intern (format nil "#:branch-target-~A" offset) :openldk)))))
+
+(defmethod codegen ((insn ssa-ifnonnull))
+  (with-slots (offset) insn
+    (list 'if (list 'not (list 'null (list 'cl-containers:pop-item 'stack)))
+          (list 'go (intern (format nil "#:branch-target-~A" offset) :openldk)))))
+
+(defmethod codegen ((insn ssa-ifnull))
+  (with-slots (offset) insn
+    (list 'if (list 'null (list 'cl-containers:pop-item 'stack))
+          (list 'go (intern (format nil "#:branch-target-~A" offset) :openldk)))))
+
 (defmethod codegen ((insn ssa-goto))
   (with-slots (offset) insn
     (list 'go (intern (format nil "#:branch-target-~A" offset) :openldk))))
@@ -50,8 +80,8 @@
           (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))))))
 
 (defmethod codegen ((insn ssa-clinit))
-  (with-slots (class-name) insn
-    (list (intern "<clinit>()V" :openldk) (intern (format nil "+static-~A+" class-name) :openldk))))
+  (with-slots (class) insn
+    (list (intern (format nil "~A.<clinit>()V" (slot-value (slot-value class 'class) 'name)) :openldk))))
 
 (defmethod codegen ((insn ssa-local-variable))
   (with-slots (index) insn
@@ -61,8 +91,15 @@
   (list 'cl-containers:push-item 'stack (list '* (list 'cl-containers:pop-item 'stack) (list 'cl-containers:pop-item 'stack))))
 
 (defmethod codegen ((insn ssa-new))
-  (with-slots (class-name) insn
-    (list 'make-instance (list 'quote (intern class-name :openldk)))))
+  (with-slots (class) insn
+    (with-slots (class) class
+      (list 'make-instance (list 'quote (intern (slot-value class 'name) :openldk))))))
+
+(defmethod codegen ((insn ssa-new-array))
+  (list 'make-array (list 'cl-containers:pop-item 'stack)))
+
+(defmethod codegen ((insn ssa-nop))
+  (gensym "NOP-"))
 
 (defmethod codegen ((insn ssa-pop))
   (list 'cl-containers:pop-item 'stack))
@@ -75,7 +112,18 @@
   (list 'cl-containers:push-item 'stack (list '- (list 'cl-containers:pop-item 'stack) (list 'cl-containers:pop-item 'stack))))
 
 (defmethod codegen ((insn ssa-call-special-method))
-  (classload "java/lang/String" ".:jre8")
+  (with-slots (class method-name args) insn
+    (list 'destructuring-bind (cons 'method 'next)
+          (list 'closer-mop:compute-applicable-methods-using-classes
+                (list 'function (intern (format nil "~A" method-name) :openldk))
+                (list 'list (find-class (intern (slot-value class 'name) :openldk)) nil))
+          (list 'let (list (list 'fn (list 'closer-mop:method-function 'method)))
+                (list 'apply 'fn
+                      (list 'list (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))) 'next))))))
+
+#|
+(defmethod codegen ((insn ssa-call-special-method))
+  ; (classload "java/lang/String" ".:jre8")
   (with-slots (class-name method-name args) insn
     (destructuring-bind (method . next)
         (closer-mop:compute-applicable-methods-using-classes
@@ -90,11 +138,18 @@
       (let ((fn (closer-mop:method-function method)))
         (list 'apply fn
               (list 'list (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))) (cons 'list next)))))))
+|#
+
+(defmethod codegen ((insn ssa-member))
+  (with-slots (member-name) insn
+    (list 'slot-value
+          (list 'cl-containers:pop-item 'stack)
+          (list 'quote (intern member-name :openldk)))))
 
 (defmethod codegen ((insn ssa-static-member))
-  (with-slots (class-name member-name) insn
+  (with-slots (class member-name) insn
     (list 'slot-value
-          (intern (format nil "+static-~A+" class-name) :openldk)
+          (intern (format nil "+static-~A+" (slot-value (slot-value class 'class) 'name)) :openldk)
           (list 'quote (intern member-name :openldk)))))
 
 (defmethod codegen ((insn ssa-store))
@@ -106,6 +161,9 @@
 
 (defmethod codegen ((insn ssa-return))
   (list 'return))
+
+(defmethod codegen ((insn ssa-return-value))
+  (list 'cl-containers:pop-item 'stack))
 
 (defmethod codegen ((insn ssa-variable))
   (slot-value insn 'name))

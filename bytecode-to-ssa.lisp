@@ -44,6 +44,28 @@
                                                  :pc-index pc-start
                                                  :index 1))))))
 
+(defun :ALOAD_2 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-push
+                           :pc-index pc-start
+                           :value (make-instance 'ssa-local-variable
+                                                 :pc-index pc-start
+                                                 :index 2))))))
+
+(defun :ALOAD_3 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-push
+                           :pc-index pc-start
+                           :value (make-instance 'ssa-local-variable
+                                                 :pc-index pc-start
+                                                 :index 3))))))
+
 (defun :ASTORE (context code)
   (with-slots (pc) context
     (let ((pc-start pc)
@@ -55,6 +77,17 @@
                                                   :pc-index pc-start
                                                   :index index))))))
 
+(defun :ASTORE_0 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-store
+                           :pc-index pc-start
+                           :target (make-instance 'ssa-local-variable
+                                                  :pc-index pc-start
+                                                  :index 0))))))
+
 (defun :ASTORE_1 (context code)
   (declare (ignore code))
   (with-slots (pc) context
@@ -65,6 +98,28 @@
                            :target (make-instance 'ssa-local-variable
                                                   :pc-index pc-start
                                                   :index 1))))))
+
+(defun :ASTORE_2 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-store
+                           :pc-index pc-start
+                           :target (make-instance 'ssa-local-variable
+                                                  :pc-index pc-start
+                                                  :index 2))))))
+
+(defun :ASTORE_3 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-store
+                           :pc-index pc-start
+                           :target (make-instance 'ssa-local-variable
+                                                  :pc-index pc-start
+                                                  :index 3))))))
 
 (defun :ATHROW (context code)
   (declare (ignore code))
@@ -80,6 +135,15 @@
       (incf pc)
       (list (make-instance 'ssa-add
                            :pc-index pc-start)))))
+
+(defun :BIPUSH (context code)
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (let* ((byte (aref code (incf pc))))
+        (incf pc)
+        (list (make-instance 'ssa-push
+                             :pc-index pc-start
+                             :value (make-instance 'ssa-int-literal :pc-index pc-start :value byte)))))))
 
 (defun :DCONST_0 (context code)
   (declare (ignore code))
@@ -173,20 +237,21 @@
       (with-slots (constant-pool) class
         (let* ((index (+ (* (aref code (incf pc)) 256)
                          (aref code (incf pc)))))
-          (multiple-value-bind (fieldname classname)
+          (multiple-value-bind (fieldname class)
               (emit (aref constant-pool index) constant-pool)
             (incf pc)
+            (format t "AAAAAAAAAAAA ~A~%" class)
             (let ((code (list (make-instance 'ssa-push
                                              :pc-index pc-start
                                              :value (make-instance 'ssa-static-member
                                                                    :pc-index pc-start
-                                                                   :class-name classname
+                                                                   :class class
                                                                    :member-name fieldname)))))
               (if is-clinit-p
                   code
                   (cons (make-instance 'ssa-clinit
                                        :pc-index pc-start
-                                       :class-name classname)
+                                       :class class)
                         code)))))))))
 
 (defun :GOTO (context code)
@@ -200,6 +265,28 @@
                                :pc-index pc-start
                                :offset (+ pc-start offset))))))))
 
+(defun :ICONST_0 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-push
+                           :pc-index pc-start
+                           :value (make-instance 'ssa-int-literal
+                                                 :pc-index pc-start
+                                                 :value 0))))))
+
+(defun :ICONST_1 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-push
+                           :pc-index pc-start
+                           :value (make-instance 'ssa-int-literal
+                                                 :pc-index pc-start
+                                                 :value 1))))))
+
 (defun :IF_ICMPLE (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
@@ -210,6 +297,83 @@
           (list (make-instance 'ssa-if-icmple
                                :pc-index pc-start
                                :offset (+ pc-start offset))))))))
+
+(defun :IFNE (context code)
+  (with-slots (pc class) context
+    (let ((pc-start pc))
+      (with-slots (constant-pool) class
+        (let* ((offset (+ (* (aref code (incf pc)) 256)
+                          (aref code (incf pc)))))
+          (incf pc)
+          (list (make-instance 'ssa-ifne
+                               :pc-index pc-start
+                               :offset (+ pc-start offset))))))))
+
+(defun :IFNONNULL (context code)
+  (with-slots (pc class) context
+    (let ((pc-start pc))
+      (with-slots (constant-pool) class
+        (let* ((offset (+ (* (aref code (incf pc)) 256)
+                          (aref code (incf pc)))))
+          (incf pc)
+          (list (make-instance 'ssa-ifnonnull
+                               :pc-index pc-start
+                               :offset (+ pc-start offset))))))))
+
+(defun :IFNULL (context code)
+  (with-slots (pc class) context
+    (let ((pc-start pc))
+      (with-slots (constant-pool) class
+        (let* ((offset (+ (* (aref code (incf pc)) 256)
+                          (aref code (incf pc)))))
+          (incf pc)
+          (list (make-instance 'ssa-ifnull
+                               :pc-index pc-start
+                               :offset (+ pc-start offset))))))))
+
+(defun :ILOAD_0 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-push
+                           :pc-index pc-start
+                           :value (make-instance 'ssa-local-variable
+                                                 :pc-index pc-start
+                                                 :index 0))))))
+
+(defun :ILOAD_1 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-push
+                           :pc-index pc-start
+                           :value (make-instance 'ssa-local-variable
+                                                 :pc-index pc-start
+                                                 :index 1))))))
+
+(defun :ILOAD_2 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-push
+                           :pc-index pc-start
+                           :value (make-instance 'ssa-local-variable
+                                                 :pc-index pc-start
+                                                 :index 2))))))
+
+(defun :ILOAD_3 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-push
+                           :pc-index pc-start
+                           :value (make-instance 'ssa-local-variable
+                                                 :pc-index pc-start
+                                                 :index 3))))))
 
 (defun :INVOKEVIRTUAL (context code)
   (with-slots (pc class) context
@@ -241,11 +405,12 @@
                          (aref code (incf pc))))
                (method-reference (aref constant-pool index)))
           (incf pc)
-          (let* ((classname
-                   (emit (aref constant-pool
-                               (slot-value method-reference
-                                           'class-index))
-                         constant-pool))
+          (let* ((class
+                   (slot-value (emit (aref constant-pool
+                                           (slot-value method-reference
+                                                       'class-index))
+                                     constant-pool)
+                               'class))
                  (descriptor
                   (slot-value (aref constant-pool
                                     (slot-value
@@ -257,7 +422,7 @@
                  (parameter-count (1+ (count-parameters descriptor))))
             (list (make-instance 'ssa-call-special-method
                                  :pc-index pc-start
-                                 :class-name classname
+                                 :class class
                                  :method-name (emit method-reference constant-pool)
                                  :args (pop-args parameter-count)))))))))
 
@@ -280,9 +445,20 @@
                  (parameter-count (count-parameters descriptor)))
             (list (make-instance 'ssa-call-static-method
                                  :pc-index pc-start
-                                 :class-name (slot-value class 'name)
+                                 :class (slot-value class 'name)
                                  :method-name (emit method-reference constant-pool)
                                  :args (pop-args parameter-count)))))))))
+
+(defun :IRETURN (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-return-value
+                           :pc-index pc-start)))))
+
+(defun :ARETURN (context code)
+  (:IRETURN context code))
 
 (defun :LDC (context code)
   (with-slots (pc class) context
@@ -293,41 +469,100 @@
           (list (make-instance 'ssa-push :pc-index pc-start
                                          :value (emit (aref constant-pool index) constant-pool))))))))
 
+(defun :MONITORENTER (context code)
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-nop :pc-index pc-start)))))
+
+(defun :MONITOREXIT (context code)
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-nop :pc-index pc-start)))))
+
 (defun :NEW (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
       (let* ((index (+ (* (aref code (incf pc)) 256)
                        (aref code (incf pc))))
-             (classname (emit (aref constant-pool index) constant-pool)))
+             (class (emit (aref constant-pool index) constant-pool)))
         (incf pc)
         (list (make-instance 'ssa-push
                              :pc-index pc-start
-                             :value (make-instance 'ssa-new :pc-index pc-start :class-name classname))))))))
+                             :value (make-instance 'ssa-new :pc-index pc-start :class class))))))))
+
+(defun :ANEWARRAY (context code)
+  (with-slots (pc class) context
+    (let ((pc-start pc))
+      (with-slots (constant-pool) class
+      (let* ((index (+ (* (aref code (incf pc)) 256)
+                       (aref code (incf pc))))
+             (class (emit (aref constant-pool index) constant-pool)))
+        (incf pc)
+        (list (make-instance 'ssa-push
+                             :pc-index pc-start
+                             :value (make-instance 'ssa-new-array :pc-index pc-start :class class))))))))
+
+(defun :POP (context code)
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-pop :pc-index pc-start)))))
+
+(defun :GETFIELD (context code)
+  (with-slots (pc class) context
+    (let ((pc-start pc))
+      (with-slots (constant-pool) class
+        (let* ((index (+ (* (aref code (incf pc)) 256)
+                         (aref code (incf pc)))))
+          (multiple-value-bind (fieldname)
+              (emit (aref constant-pool index) constant-pool)
+            (incf pc)
+            (list (make-instance 'ssa-push
+                                 :pc-index pc-start
+                                 :value (make-instance 'ssa-member
+                                                       :pc-index pc-start
+                                                       :member-name fieldname)))))))))
+
+(defun :PUTFIELD (context code)
+  (with-slots (pc class) context
+    (let ((pc-start pc))
+      (with-slots (constant-pool) class
+        (let* ((index (+ (* (aref code (incf pc)) 256)
+                         (aref code (incf pc)))))
+          (multiple-value-bind (fieldname)
+              (emit (aref constant-pool index) constant-pool)
+            (incf pc)
+            (list (make-instance 'ssa-assign
+                                 :pc-index pc-start
+                                 :source (make-instance 'ssa-pop :pc-index pc-start)
+                                 :target (make-instance 'ssa-member
+                                                        :pc-index pc-start
+                                                        :member-name fieldname)))))))))
 
 (defun :PUTSTATIC (context code)
   (with-slots (pc class is-clinit-p) context
     (let ((pc-start pc))
-
       (with-slots (constant-pool) class
         (let* ((index (+ (* (aref code (incf pc)) 256)
-                         (aref code (incf pc))))
-               (field-reference (aref constant-pool index)))
-          (multiple-value-bind (fieldname classname)
+                         (aref code (incf pc)))))
+          (multiple-value-bind (fieldname class)
               (emit (aref constant-pool index) constant-pool)
             (incf pc)
             (let ((code (list (make-instance 'ssa-assign
                                              :pc-index pc-start
-                                             :source (make-instance 'ssa-pop)
+                                             :source (make-instance 'ssa-pop :pc-index pc-start)
                                              :target (make-instance 'ssa-static-member
                                                                     :pc-index pc-start
-                                                                    :class-name classname
+                                                                    :class class
                                                                     :member-name fieldname)))))
               (if is-clinit-p
                   code
                   (cons (make-instance 'ssa-clinit
                                        :pc-index pc-start
-                                       :class-name classname)
+                                       :class class)
                         code)))))))))
 
 (defun :RETURN (context code)

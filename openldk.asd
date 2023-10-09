@@ -24,7 +24,6 @@
   :serial t
   :components ((:file "package")
                (:file "opcodes")
-               (:file "bootstrap")
                (:file "bytecode-branches")
                (:file "native")
                (:file "context")
@@ -33,7 +32,8 @@
                (:file "ssa")
                (:file "bytecode-to-ssa")
                (:file "codegen")
-               (:file "openldk"))
+               (:file "openldk")
+               (:file "bootstrap"))
   :depends-on (:bitio :fast-io :unix-opts :split-sequence :flexi-streams :cl-containers :closer-mop)
   :build-operation "program-op"
   :build-pathname "openldk"

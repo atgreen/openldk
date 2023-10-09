@@ -3,6 +3,9 @@
 (defclass ssa-node ()
   ((pc-index :initarg :pc-index)))
 
+(defclass ssa-nop (ssa-node)
+  ())
+
 (defclass ssa-literal (ssa-node)
   ((value :initarg :value :initform nil)))
 
@@ -23,6 +26,9 @@
 
 (defclass ssa-int-literal (ssa-literal)
   ())
+
+(defclass ssa-class (ssa-node)
+  ((class :initarg :class)))
 
 (defclass ssa-assign (ssa-node)
   ((target :initarg :target)
@@ -46,6 +52,15 @@
 (defclass ssa-if-icmple (ssa-branch)
   ())
 
+(defclass ssa-ifne (ssa-branch)
+  ())
+
+(defclass ssa-ifnonnull (ssa-branch)
+  ())
+
+(defclass ssa-ifnull (ssa-branch)
+  ())
+
 (defclass ssa-call (ssa-node)
   ())
 
@@ -53,7 +68,7 @@
   ((index :initarg :index)))
 
 (defclass ssa-call-special-method (ssa-call)
-  ((class-name :initarg :class-name)
+  ((class :initarg :class)
    (method-name :initarg :method-name)
    (args :initarg :args :initform nil)))
 
@@ -62,13 +77,16 @@
    (args :initarg :args :initform nil)))
 
 (defclass ssa-call-static-method (ssa-call-virtual-method)
-  ((class-name :initarg :class-name)))
+  ((class :initarg :class)))
 
 (defclass ssa-clinit (ssa-call)
-  ((class-name :initarg :class-name)))
+  ((class :initarg :class)))
+
+(defclass ssa-member (ssa-node)
+  ((member-name :initarg :member-name)))
 
 (defclass ssa-static-member (ssa-node)
-  ((class-name :initarg :class-name)
+  ((class :initarg :class)
    (member-name :initarg :member-name)))
 
 (defclass ssa-store (ssa-node)
@@ -80,7 +98,10 @@
    (branch-if-false :initarg :branch-if-false)))
 
 (defclass ssa-new (ssa-node)
-  ((class-name :initarg :class-name)))
+  ((class :initarg :class)))
+
+(defclass ssa-new-array (ssa-new)
+  ())
 
 (defclass ssa-mul (ssa-node)
   ())
@@ -92,6 +113,9 @@
   ((value :initarg :value)))
 
 (defclass ssa-return (ssa-node)
+  ())
+
+(defclass ssa-return-value (ssa-node)
   ())
 
 (defclass ssa-sub (ssa-node)
