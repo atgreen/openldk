@@ -13,7 +13,8 @@
 
 (defmethod codegen ((insn ssa-assign))
   (with-slots (source target) insn
-    (list 'setf (codegen target) (codegen source))))
+    (list 'let (list (list 'value (codegen source)))
+          (list 'setf (codegen target) 'value))))
 
 (defmethod codegen ((insn ssa-call-static-method))
   (with-slots (class method-name args) insn
@@ -53,6 +54,21 @@
     (list 'if (list '>= (list 'cl-containers:pop-item 'stack) (list 'cl-containers:pop-item 'stack))
           (list 'go (intern (format nil "#:branch-target-~A" offset) :openldk)))))
 
+(defmethod codegen ((insn ssa-ifeq))
+  (with-slots (offset) insn
+    (list 'if (list 'eq (list 'cl-containers:pop-item 'stack) 0)
+          (list 'go (intern (format nil "#:branch-target-~A" offset) :openldk)))))
+
+(defmethod codegen ((insn ssa-ifge))
+  (with-slots (offset) insn
+    (list 'if (list '>= (list 'cl-containers:pop-item 'stack) 0)
+          (list 'go (intern (format nil "#:branch-target-~A" offset) :openldk)))))
+
+(defmethod codegen ((insn ssa-ifle))
+  (with-slots (offset) insn
+    (list 'if (list '<= (list 'cl-containers:pop-item 'stack) 0)
+          (list 'go (intern (format nil "#:branch-target-~A" offset) :openldk)))))
+
 (defmethod codegen ((insn ssa-ifne))
   (with-slots (offset) insn
     (list 'if (list 'not (list 'eq (list 'cl-containers:pop-item 'stack) '0))
@@ -67,6 +83,10 @@
   (with-slots (offset) insn
     (list 'if (list 'null (list 'cl-containers:pop-item 'stack))
           (list 'go (intern (format nil "#:branch-target-~A" offset) :openldk)))))
+
+(defmethod codegen ((insn ssa-instanceof))
+  (with-slots (class) insn
+    (format t "MMMMMMMMMMMMMM ~A~%" class)))
 
 (defmethod codegen ((insn ssa-goto))
   (with-slots (offset) insn
@@ -116,8 +136,11 @@
     (list 'destructuring-bind (cons 'method 'next)
           (list 'closer-mop:compute-applicable-methods-using-classes
                 (list 'function (intern (format nil "~A" method-name) :openldk))
-                ;; This should be based on the args list
-                (list 'list (find-class (intern (slot-value class 'name) :openldk)) nil))
+                ;; FIXME: This should be based on the args list
+                (cons 'list
+                      (cons (find-class (intern (slot-value class 'name) :openldk))
+                            (loop for a in args
+                                  collect t))))
           (list 'let (list (list 'fn (list 'closer-mop:method-function 'method)))
                 (list 'apply 'fn
                       (list 'list (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))) 'next))))))
@@ -144,7 +167,10 @@
 (defmethod codegen ((insn ssa-member))
   (with-slots (member-name) insn
     (list 'slot-value
-          (list 'cl-containers:pop-item 'stack)
+          (list 'let (list (list 'objref (list 'cl-containers:pop-item 'stack)))
+                (list 'when (list 'null 'objref) (list 'error
+                                                       (format nil "Null Pointer Exception ~A" (slot-value insn 'pc-index))))
+                'objref)
           (list 'quote (intern member-name :openldk)))))
 
 (defmethod codegen ((insn ssa-static-member))
@@ -164,7 +190,9 @@
   (list 'return))
 
 (defmethod codegen ((insn ssa-return-value))
-  (list 'cl-containers:pop-item 'stack))
+  (list 'return-from
+        (intern (slot-value insn 'fn-name) :openldk)
+        (list 'cl-containers:pop-item 'stack)))
 
 (defmethod codegen ((insn ssa-variable))
   (slot-value insn 'name))

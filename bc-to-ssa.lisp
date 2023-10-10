@@ -298,6 +298,39 @@
                                :pc-index pc-start
                                :offset (+ pc-start offset))))))))
 
+(defun :IFEQ (context code)
+  (with-slots (pc class) context
+    (let ((pc-start pc))
+      (with-slots (constant-pool) class
+        (let* ((offset (+ (* (aref code (incf pc)) 256)
+                          (aref code (incf pc)))))
+          (incf pc)
+          (list (make-instance 'ssa-ifeq
+                               :pc-index pc-start
+                               :offset (+ pc-start offset))))))))
+
+(defun :IFGE (context code)
+  (with-slots (pc class) context
+    (let ((pc-start pc))
+      (with-slots (constant-pool) class
+        (let* ((offset (+ (* (aref code (incf pc)) 256)
+                          (aref code (incf pc)))))
+          (incf pc)
+          (list (make-instance 'ssa-ifge
+                               :pc-index pc-start
+                               :offset (+ pc-start offset))))))))
+
+(defun :IFLE (context code)
+  (with-slots (pc class) context
+    (let ((pc-start pc))
+      (with-slots (constant-pool) class
+        (let* ((offset (+ (* (aref code (incf pc)) 256)
+                          (aref code (incf pc)))))
+          (incf pc)
+          (list (make-instance 'ssa-ifle
+                               :pc-index pc-start
+                               :offset (+ pc-start offset))))))))
+
 (defun :IFNE (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
@@ -375,6 +408,19 @@
                                                  :pc-index pc-start
                                                  :index 3))))))
 
+(defun :INSTANCEOF (context code)
+  (format t ",,,,,,,,,,,,,,,,,,,,,,,,,,, INSTANCEOF~%")
+  (with-slots (pc class) context
+    (let ((pc-start pc))
+      (with-slots (constant-pool) class
+        (let* ((index (+ (* (aref code (incf pc)) 256)
+                         (aref code (incf pc))))
+               (class (aref constant-pool index)))
+          (incf pc)
+          (list (make-instance 'ssa-instanceof
+                               :pc-index pc-start
+                               :class (emit class constant-pool))))))))
+
 (defun :INVOKEVIRTUAL (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
@@ -435,19 +481,29 @@
                (method-reference (aref constant-pool index)))
           (incf pc)
           (let* ((descriptor
-                  (slot-value (aref constant-pool
-                                    (slot-value
-                                     (aref constant-pool
-                                           (slot-value method-reference
-                                                       'method-descriptor-index))
-                                     'type-descriptor-index))
-                              'value))
+                   (slot-value (aref constant-pool
+                                     (slot-value
+                                      (aref constant-pool
+                                            (slot-value method-reference
+                                                        'method-descriptor-index))
+                                      'type-descriptor-index))
+                               'value))
+                 (callee-class
+                   (slot-value (aref constant-pool
+                                     (slot-value
+                                      (aref constant-pool
+                                            (slot-value method-reference
+                                                        'class-index))
+                                      'index))
+                               'value))
                  (parameter-count (count-parameters descriptor)))
+            (classload callee-class ".:jre8/")
             (list (make-instance 'ssa-call-static-method
                                  :pc-index pc-start
-                                 :class (slot-value class 'name)
+                                 :class callee-class
                                  :method-name (emit method-reference constant-pool)
                                  :args (pop-args parameter-count)))))))))
+
 
 (defun :IRETURN (context code)
   (declare (ignore code))
@@ -455,6 +511,7 @@
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ssa-return-value
+                           :fn-name (slot-value context 'fn-name)
                            :pc-index pc-start)))))
 
 (defun :ARETURN (context code)

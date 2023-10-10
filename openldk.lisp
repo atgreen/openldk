@@ -62,14 +62,6 @@
         (eval code))))
 
 (defun %clinit (class)
-  (format t "8888888888888888888888888888888888888888888888888888~%")
-  (force-output)
-  (format t "~A~%" class)
-  (force-output)
-  (format t "clinit ~A~%" (slot-value class 'name))
-  (force-output)
-  (format t "clinit ~A~%" class)
-  (force-output)
   (let ((class (gethash (slot-value class 'name) *classes*)))
     (labels ((clinit (class)
                (let ((super-class (gethash (slot-value class 'super) *classes*)))
@@ -83,14 +75,21 @@
       (clinit class))))
 
 (defun insert-branch-targets (ssa-code branch-target-table)
+  (maphash (lambda (key value)
+             (format t "~A -> ~A~%" key value))
+           branch-target-table)
   (let ((btt (make-hash-table)))
+    (loop for insn in ssa-code
+          for pc-index = (slot-value insn 'pc-index)
+          do (format t "[~A][~A] ~A~%" pc-index (gethash pc-index branch-target-table) insn))
     (loop for insn in ssa-code
           for pc-index = (slot-value insn 'pc-index)
           append (if (and (gethash pc-index branch-target-table)
                           (null (gethash pc-index btt)))
                      (progn
                        (setf (gethash pc-index btt) t)
-                       (list (make-instance 'ssa-branch-target :index pc-index)))
+                       (list (make-instance 'ssa-branch-target :index pc-index)
+                             insn))
                      (list insn)))))
 
 (defun %compile-method (class-name method-index)
@@ -105,7 +104,10 @@
       (when *debug-codegen*
         (format t "; compiling ~A.~A~A~%" class-name (slot-value method 'name) (slot-value method 'descriptor))
         (force-output))
-      (with-slots (pc) context
+      (with-slots (pc fn-name) context
+        (if (static-p method)
+            (setf fn-name (format nil "~A.~A~A" (slot-value class 'name) (slot-value method 'name) (slot-value method 'descriptor)))
+            (setf fn-name (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor))))
         (let* ((ssa-code-pre-branch-targets
                  (apply #'append
                         (loop
@@ -120,18 +122,18 @@
                                   ssa-code))
                (code (append (if (static-p method)
                                  (list 'defun
-                                   (intern (format nil "~A.~A~A" (slot-value class 'name) (slot-value method 'name) (slot-value method 'descriptor)) :openldk)
-                                   (loop for i from 1 upto (count-parameters (slot-value method 'descriptor))
-                                         collect (intern (format nil "arg~A" i) :openldk)))
+                                       (intern fn-name :openldk)
+                                       (loop for i from 1 upto (count-parameters (slot-value method 'descriptor))
+                                             collect (intern (format nil "arg~A" i) :openldk)))
                                  (list 'defmethod
-                                   (intern (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor)) :openldk)
-                                   (cons (list (intern "this" :openldk) (intern (slot-value class 'name) :openldk))
-                                         (loop for i from 1 upto (count-parameters (slot-value method 'descriptor))
-                                               collect (intern (format nil "arg~A" i) :openldk)))))
+                                       (intern fn-name :openldk)
+                                       (cons (list (intern "this" :openldk) (intern (slot-value class 'name) :openldk))
+                                             (loop for i from 1 upto (count-parameters (slot-value method 'descriptor))
+                                                   collect (intern (format nil "arg~A" i) :openldk)))))
                              (list (list 'let (append (remove nil
                                                               (if (static-p method)
                                                                   (loop for i from 1 upto (count-parameters (slot-value method 'descriptor))
-                                                                        collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" i) :openldk)))
+                                                                        collect (list (intern (format nil "local-~A" (1- i)) :openldk) (intern (format nil "arg~A" i) :openldk)))
                                                                   (cons (list (intern "local-0" :openldk) (intern "this" :openldk))
                                                                         (loop for i from 1 upto (count-parameters (slot-value method 'descriptor))
                                                                               collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" i) :openldk)))))))

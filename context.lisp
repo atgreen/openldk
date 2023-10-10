@@ -6,4 +6,5 @@
    (locals :initform (list))
    (pc :initform 0)
    (stack :initform (cl-containers:make-container 'cl-containers:stack-container))
+   (fn-name)
    (code)))

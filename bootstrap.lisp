@@ -14,6 +14,9 @@
   (print-unreadable-object (s out :type t)
     (format out "~S" (slot-value s '|value|))))
 
+(defclass |java/lang/Throwable| (|java/lang/Object|)
+  ())
+
 #|
 (defclass |java/lang/Class| (|java/lang/Object|)
   ((name :initarg :name)

@@ -17,5 +17,14 @@
   (print class)
   nil)
 
+(defun |java/lang/Class.getSecurityManager()Ljava/lang/SecurityManager;| ()
+  (print "java/lang/Class.getSecurityManager()Ljava/lang/SecurityManager;")
+  (let ((c (classload "java/lang/SecurityManager" ".:jre8/")))
+    (eval (list 'make-instance (list 'quote '|java/lang/SecurityManager|)))))
+
 (defmethod |println(Ljava/lang/String;)V| (stream string)
   (format t "~A~%" (slot-value string '|value|)))
+
+(defmethod |fillInStackTrace(I)Ljava/lang/Throwable;| ((|this| |java/lang/Throwable|) dummy)
+  (let ((bt (trivial-backtrace:print-backtrace nil :output nil)))
+    (print bt)))

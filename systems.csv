@@ -36,3 +36,6 @@ asdf-system-connections, ghcr.io/ocicl/asdf-system-connections@sha256:3a5132a99f
 metatilities-base, ghcr.io/ocicl/metatilities-base@sha256:66f431a24659a030faaa40b751085da9f957b335374d6ca3bd9e438062e993db, metatilities-base-20230808-ef04337/metatilities-base.asd
 metatilities-base-test, ghcr.io/ocicl/metatilities-base@sha256:66f431a24659a030faaa40b751085da9f957b335374d6ca3bd9e438062e993db, metatilities-base-20230808-ef04337/metatilities-base-test.asd
 closer-mop, ghcr.io/ocicl/closer-mop@sha256:a39bb7ef1aa69dad7650480f852231a9c08150878c9de6a8db8be947f31ec9fc, closer-mop-20231001-f69bd9c/closer-mop.asd
+dissect, ghcr.io/ocicl/dissect@sha256:c6af70da31e5184f50e80ff1d6e688a3bd90156c243b76112324910aad13cb45, dissect-20230808-b7bf9b9/dissect.asd
+trivial-backtrace, ghcr.io/ocicl/trivial-backtrace@sha256:8189c3a641490b523a67b6711bdf44a2b4b64e2c51604cf991247d9353597d21, trivial-backtrace-20230809-7f90b4a/trivial-backtrace.asd
+trivial-backtrace-test, ghcr.io/ocicl/trivial-backtrace@sha256:8189c3a641490b523a67b6711bdf44a2b4b64e2c51604cf991247d9353597d21, trivial-backtrace-20230809-7f90b4a/trivial-backtrace-test.asd

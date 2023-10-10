@@ -52,6 +52,15 @@
 (defclass ssa-if-icmple (ssa-branch)
   ())
 
+(defclass ssa-ifeq (ssa-branch)
+  ())
+
+(defclass ssa-ifge (ssa-branch)
+  ())
+
+(defclass ssa-ifle (ssa-branch)
+  ())
+
 (defclass ssa-ifne (ssa-branch)
   ())
 
@@ -60,6 +69,9 @@
 
 (defclass ssa-ifnull (ssa-branch)
   ())
+
+(defclass ssa-instanceof (ssa-node)
+  ((class :initarg :class)))
 
 (defclass ssa-call (ssa-node)
   ())
@@ -116,7 +128,7 @@
   ())
 
 (defclass ssa-return-value (ssa-node)
-  ())
+  ((fn-name :initarg :fn-name)))
 
 (defclass ssa-sub (ssa-node)
   ())

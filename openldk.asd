@@ -16,6 +16,8 @@
 ;;; License along with this program.  If not, see
 ;;; <http://www.gnu.org/licenses/>.
 
+(sb-ext:restrict-compiler-policy 'debug 3)
+
 (asdf:defsystem #:openldk
   :description "Java in Common Lisp"
   :author "Anthony Green <green@moxielogic.com>"
@@ -25,16 +27,16 @@
   :components ((:file "package")
                (:file "opcodes")
                (:file "bytecode-branches")
+               (:file "bootstrap")
                (:file "native")
                (:file "context")
                (:file "classfile")
                (:file "descriptors")
                (:file "ssa")
-               (:file "bytecode-to-ssa")
+               (:file "bc-to-ssa")
                (:file "codegen")
-               (:file "openldk")
-               (:file "bootstrap"))
-  :depends-on (:bitio :fast-io :unix-opts :split-sequence :flexi-streams :cl-containers :closer-mop)
+               (:file "openldk"))
+  :depends-on (:bitio :fast-io :unix-opts :split-sequence :flexi-streams :cl-containers :closer-mop :trivial-backtrace)
   :build-operation "program-op"
   :build-pathname "openldk"
   :entry-point "openldk:main")

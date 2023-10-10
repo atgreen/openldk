@@ -19,13 +19,13 @@
   '(:ASTORE :BIPUSH :DLOAD :DSTORE :LDC))
 
 (defparameter +bytecode-3-byte+
-  '(:GETFIELD :GETSTATIC :GOTO :IF_ICMPLE :IFNE :IFNONNULL :IFNULL
-    :INVOKEVIRTUAL :INVOKESPECIAL :INVOKESTATIC :NEW :ANEWARRAY
+  '(:GETFIELD :GETSTATIC :GOTO :IF_ICMPLE :IFEQ :IFGE :IFLE :IFNE :IFNONNULL :IFNULL
+    :INSTANCEOF :INVOKEVIRTUAL :INVOKESPECIAL :INVOKESTATIC :NEW :ANEWARRAY
     :PUTFIELD :PUTSTATIC :SIPUSH))
 
 (defparameter +bytecode-short-branch-table+
   (let ((sbtable (make-hash-table)))
-    (dolist (o '(:GOTO :IF_ICMPLE :IFNE :IFNONNULL :IFNULL))
+    (dolist (o '(:GOTO :IF_ICMPLE :IFGE :IFLE :IFNE :IFNONNULL :IFNULL))
       (setf (gethash o sbtable) t))
     sbtable))
 
@@ -48,6 +48,7 @@
 (defun find-branch-targets (code)
   "Return a HASH-TABLE with all of the offsets in CODE that are branch
 targets."
+  (print "0000000000000000000000000000000000000 FIND-BRANCH-TARGETS")
   (let ((pc 0)
         (length (length code))
         (branch-target-table (make-hash-table)))
@@ -60,6 +61,8 @@ targets."
                                                   (incf pc (gethash opcode +bytecode-lengths-table+))
                                                   targets)
                                    unless (null result)
-                                    collect result))))
+                                     collect result))))
+      (print "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
+      (format t ">>~A<<~%" bt)
       (setf (gethash bt branch-target-table) t))
     branch-target-table))
