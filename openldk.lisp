@@ -198,6 +198,8 @@
                                methods))))))
     (append defclass-code methods-code)))
 
+(defvar *condition-table* (make-hash-table))
+
 (defun classload (classname classpath)
   (let ((class (gethash classname *classes*)))
     (if class
@@ -212,6 +214,13 @@
                               (when super (classload super classpath)))))
                 (let ((code (emit-<class> class)))
                   (%eval code))
+                (when (and (not (string= classname "java/lang/Throwable"))
+                           (subtypep (find-class (intern classname :openldk)) (find-class '|java/lang/Throwable|)))
+                  (let ((condition-symbol (intern (format nil "condition-~A" classname) :openldk)))
+                    (setf (gethash (find-class (intern classname :openldk)) *condition-table*) condition-symbol)
+                    (let ((ccode (list 'define-condition condition-symbol
+                                       (list (intern (format nil "condition-~A" (slot-value super 'name)) :openldk)) (list))))
+                    (%eval ccode))))
                 class)
               (format t "ERROR: Can't find ~A on classpath ~A~%" classname CLASSPATH))))))
 

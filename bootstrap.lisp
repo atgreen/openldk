@@ -17,13 +17,5 @@
 (defclass |java/lang/Throwable| (|java/lang/Object|)
   ())
 
-#|
-(defclass |java/lang/Class| (|java/lang/Object|)
-  ((name :initarg :name)
-   (class)))
-
-(defmethod print-object ((c |java/lang/Class|) out)
-  (print-unreadable-object (c out :type t)
-    (format out "~A" (slot-value c 'name))))
-|#
-;      (%clinit (classload "java/lang/Class" ".:jre8/"))
+(define-condition |condition-java/lang/Throwable| (error)
+  ((objref)))

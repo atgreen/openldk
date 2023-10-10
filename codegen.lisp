@@ -183,8 +183,16 @@
   (with-slots (target) insn
     (list 'setf (codegen target) (list 'cl-containers:pop-item 'stack))))
 
+(define-condition java-lang-throwable (error)
+  ((throwable :initarg :throwable :reader throwable)))
+
+(defun make-java-condition (e)
+  (make-condition (gethash (class-of e) *condition-table*) :objref e))
+
 (defmethod codegen ((insn ssa-throw))
-  (list 'error "blah"))
+  (list 'let* (list (list 'e (list 'cl-containers:pop-item 'stack))
+                    (list 'c (list 'make-java-condition 'e)))
+        (list 'error 'c)))
 
 (defmethod codegen ((insn ssa-return))
   (list 'return))
