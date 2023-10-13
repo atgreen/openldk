@@ -9,9 +9,11 @@
     :DADD :DCONST_0 :DDIV :DLOAD_2 :DMUL :DSTORE_2 :DSUB
     :DUP
     :ICONST_0 :ICONST_1
+    :IDIV
     :ILOAD_0 :ILOAD_1 :ILOAD_2 :ILOAD_3
     :IRETURN
     :MONITORENTER :MONITOREXIT
+    :NOP
     :POP
     :RETURN))
 
@@ -38,31 +40,3 @@
     (dolist (o +bytecode-3-byte+)
       (setf (gethash o bltable) 3))
     bltable))
-
-(defun get-short-branch-targets (pc code)
-  (let ((start_pc pc)
-        (offset (+ (* (aref code (incf pc)) 256)
-                   (aref code (incf pc)))))
-      (list pc (+ start_pc offset))))
-
-(defun find-branch-targets (code)
-  "Return a HASH-TABLE with all of the offsets in CODE that are branch
-targets."
-  (print "0000000000000000000000000000000000000 FIND-BRANCH-TARGETS")
-  (let ((pc 0)
-        (length (length code))
-        (branch-target-table (make-hash-table)))
-    (dolist (bt (remove-duplicates
-                 (apply #'append (loop
-                                   while (< pc length)
-                                   for result = (let* ((opcode (aref +opcodes+ (aref code pc)))
-                                                       (targets (if (gethash opcode +bytecode-short-branch-table+)
-                                                                    (get-short-branch-targets pc code))))
-                                                  (incf pc (gethash opcode +bytecode-lengths-table+))
-                                                  targets)
-                                   unless (null result)
-                                     collect result))))
-      (print "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
-      (format t ">>~A<<~%" bt)
-      (setf (gethash bt branch-target-table) t))
-    branch-target-table))

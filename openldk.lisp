@@ -1,6 +1,10 @@
 (in-package :openldk)
 
 (defvar *classes* (make-hash-table :test 'equal))
+(defvar *cli-classpath* nil)
+(defvar *verbose* nil)
+(defvar *dump-dir* nil)
+(defvar *context* nil)
 
 (defvar *debug-codegen* nil)
 (defvar *debug-unmuffle* nil)
@@ -10,6 +14,13 @@
    :description "produce verbose output"
    :short #\v
    :long "verbose")
+  (:name :dump-dir
+   :description "dump internal compiler debug output into this directory"
+   :short #\d
+   :arg-parser (lambda (arg) (setf *dump-dir* arg))
+   :meta-var "DIRECTORY"
+   :default nil
+   :long "dump-dir")
   (:name :classpath
    :description "override CLASSPATH environment variable"
    :short #\c
@@ -88,67 +99,123 @@
                           (null (gethash pc-index btt)))
                      (progn
                        (setf (gethash pc-index btt) t)
-                       (list (make-instance 'ssa-branch-target :index pc-index)
+                       (list (make-instance 'ssa-branch-target :pc-index pc-index :index pc-index)
                              insn))
                      (list insn)))))
 
+(defun make-ssa-try-catch (ssa-code start-pc end-pc)
+  (let* ((before (remove-if (lambda (ssa-node)
+                              (let ((pc (slot-value ssa-node 'pc-index)))
+                                (>= pc start-pc)))
+                            ssa-code))
+         (after (remove-if (lambda (ssa-node)
+                             (let ((pc (slot-value ssa-node 'pc-index)))
+                               (< pc end-pc)))
+                           ssa-code))
+         (middle (list (remove-if (lambda (ssa-node)
+                                    (let ((pc (slot-value ssa-node 'pc-index)))
+                                      (or (< pc start-pc)
+                                          (>= pc end-pc))))
+                                  ssa-code))))
+    (print "AAAAAAAAAAAAAAAAAAAAAAAA")
+    (print before)
+    (print "BBBBBBBBBBBBBBBBBBBBBBBB")
+    (print middle)
+    (print "CCCCCCCCCCCCCCCCCCCCCCCC")
+    (print after)
+    (let ((aaa (append before middle after)))
+      (format t "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW~%")
+      (print aaa)
+      aaa)))
+
+(defun insert-try-catch (ssa-code exception-table)
+  (when exception-table
+    (loop for i from 0 upto (1- (length exception-table))
+          do (let ((ete (aref exception-table i)))
+               (let ((start-pc (slot-value ete 'start-pc))
+                     (end-pc (slot-value ete 'end-pc)))
+                 (make-ssa-try-catch ssa-code start-pc end-pc)))))
+  ssa-code)
+
+#|
+
+            with-slots (pc-start pc-end) ete
+             (loop for insn in ssa-code
+                   for pc-index = (slot-value insn 'pc-index)
+                   append (if (eq pc-start pc-index)
+                                   (null (gethash pc-index btt)))
+                              (progn
+                                (setf (gethash pc-index btt) t)
+                                (list (make-instance 'ssa-branch-target :index pc-index)
+                                      insn))
+                              (list insn))))))
+|#
 (defun %compile-method (class-name method-index)
   (let* ((class (gethash class-name *classes*))
-         (method (aref (slot-value class 'methods) (1- method-index))))
-    (let* ((code (slot-value (gethash "Code" (slot-value method 'attributes)) 'code))
-           (length (length code))
-           (context (make-instance '<context>
+         (method (aref (slot-value class 'methods) (1- method-index)))
+         (exception-table (slot-value (gethash "Code" (slot-value method 'attributes)) 'exceptions))
+         (code (slot-value (gethash "Code" (slot-value method 'attributes)) 'code))
+         (length (length code))
+         (*context* (make-instance '<context>
                                    :class class
+                                   :classes *classes*
+                                   :exception-table exception-table
+                                   :bytecode code
+                                   :constant-pool
                                    :is-clinit-p (string= "<clinit>"
                                                          (slot-value method 'name)))))
-      (when *debug-codegen*
-        (format t "; compiling ~A.~A~A~%" class-name (slot-value method 'name) (slot-value method 'descriptor))
-        (force-output))
-      (with-slots (pc fn-name) context
-        (if (static-p method)
-            (setf fn-name (format nil "~A.~A~A" (slot-value class 'name) (slot-value method 'name) (slot-value method 'descriptor)))
-            (setf fn-name (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor))))
-        (let* ((ssa-code-pre-branch-targets
-                 (apply #'append
-                        (loop
-                          while (< pc length)
-                          for result = (funcall (aref +opcodes+ (aref code pc)) context code)
-                          unless (null result)
-                            collect result)))
-               (ssa-code (insert-branch-targets ssa-code-pre-branch-targets
-                                                (find-branch-targets code)))
-               (lisp-code (mapcar (lambda (ssa-node)
-                                    (codegen ssa-node))
-                                  ssa-code))
-               (code (append (if (static-p method)
-                                 (list 'defun
-                                       (intern fn-name :openldk)
-                                       (loop for i from 1 upto (count-parameters (slot-value method 'descriptor))
-                                             collect (intern (format nil "arg~A" i) :openldk)))
-                                 (list 'defmethod
-                                       (intern fn-name :openldk)
-                                       (cons (list (intern "this" :openldk) (intern (slot-value class 'name) :openldk))
-                                             (loop for i from 1 upto (count-parameters (slot-value method 'descriptor))
-                                                   collect (intern (format nil "arg~A" i) :openldk)))))
-                             (list (list 'let (append (remove nil
-                                                              (if (static-p method)
-                                                                  (loop for i from 1 upto (count-parameters (slot-value method 'descriptor))
-                                                                        collect (list (intern (format nil "local-~A" (1- i)) :openldk) (intern (format nil "arg~A" i) :openldk)))
-                                                                  (cons (list (intern "local-0" :openldk) (intern "this" :openldk))
-                                                                        (loop for i from 1 upto (count-parameters (slot-value method 'descriptor))
-                                                                              collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" i) :openldk)))))))
-                                         (append (list 'block nil)
-                                                 (list
-                                                  (append (append (list 'let
-                                                                        (cons
-                                                                         (list 'stack (list 'cl-containers:make-container (list 'quote 'cl-containers:stack-container)))
-                                                                         (mapcar
-                                                                          (lambda (v)
-                                                                            (list v))
-                                                                          (slot-value context 'locals))))
-                                                                  (list (cons 'tagbody lisp-code)))))))))))
-
-          (%eval code))))))
+    (when *debug-codegen*
+      (format t "; compiling ~A.~A~A~%" class-name (slot-value method 'name) (slot-value method 'descriptor))
+      (force-output))
+    (with-slots (pc fn-name) *context*
+      (if (static-p method)
+          (setf fn-name (format nil "~A.~A~A" (slot-value class 'name) (slot-value method 'name) (slot-value method 'descriptor)))
+          (setf fn-name (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor))))
+      (let* ((ssa-code-pre-branch-targets
+               (apply #'append
+                      (loop
+                        while (< pc length)
+                        for result = (funcall (aref +opcodes+ (aref code pc)) *context* code)
+                        unless (null result)
+                          collect result)))
+             (delete-me-also (print ssa-code-pre-branch-targets))
+             (delete-me (build-basic-blocks ssa-code-pre-branch-targets))
+             (ssa-code
+               (insert-try-catch
+                (insert-branch-targets ssa-code-pre-branch-targets
+                                       (find-target-instructions))
+                (slot-value (gethash "Code" (slot-value method 'attributes)) 'exceptions)))
+             (lisp-code (mapcar (lambda (ssa-node)
+                                  (codegen ssa-node))
+                                ssa-code))
+             (code (append (if (static-p method)
+                               (list 'defun
+                                     (intern fn-name :openldk)
+                                     (loop for i from 1 upto (count-parameters (slot-value method 'descriptor))
+                                           collect (intern (format nil "arg~A" i) :openldk)))
+                               (list 'defmethod
+                                     (intern fn-name :openldk)
+                                     (cons (list (intern "this" :openldk) (intern (slot-value class 'name) :openldk))
+                                           (loop for i from 1 upto (count-parameters (slot-value method 'descriptor))
+                                                 collect (intern (format nil "arg~A" i) :openldk)))))
+                           (list (list 'let (append (remove nil
+                                                            (if (static-p method)
+                                                                (loop for i from 1 upto (count-parameters (slot-value method 'descriptor))
+                                                                      collect (list (intern (format nil "local-~A" (1- i)) :openldk) (intern (format nil "arg~A" i) :openldk)))
+                                                                (cons (list (intern "local-0" :openldk) (intern "this" :openldk))
+                                                                      (loop for i from 1 upto (count-parameters (slot-value method 'descriptor))
+                                                                            collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" i) :openldk)))))))
+                                       (append (list 'block nil)
+                                               (list
+                                                (append (append (list 'let
+                                                                      (cons
+                                                                       (list 'stack (list 'cl-containers:make-container (list 'quote 'cl-containers:stack-container)))
+                                                                       (mapcar
+                                                                        (lambda (v)
+                                                                          (list v))
+                                                                        (slot-value *context* 'locals))))
+                                                                (list (cons 'tagbody lisp-code)))))))))))
+        (%eval code)))))
 
 (defun emit-<class> (class)
   (let ((defclass-code (with-slots (name super fields) class
@@ -250,13 +317,13 @@
       (when-option (options :verbose)
                    (setf *verbose* t))
 
-      (%clinit (classload "java/lang/Object" ".:jre8/"))
-      (%clinit (classload "java/lang/ClassLoader" ".:jre8/"))
-      (%clinit (classload "java/lang/String" ".:jre8/"))
-      (%clinit (classload "java/lang/Class" ".:jre8/"))
-
       (if (not (eq 1 (length free-args)))
           (usage)
-          (let* ((class (classload (car free-args) CLASSPATH)))
-            (%clinit class)
-            (%eval (list (intern (format nil "~A.main([Ljava/lang/String;)V" (slot-value class 'name)) :openldk) #())))))))
+          (progn
+            (%clinit (classload "java/lang/Object" ".:jre8/"))
+            (%clinit (classload "java/lang/ClassLoader" ".:jre8/"))
+            (%clinit (classload "java/lang/String" ".:jre8/"))
+            (%clinit (classload "java/lang/Class" ".:jre8/"))
+            (let* ((class (classload (car free-args) CLASSPATH)))
+              (%clinit class)
+              (%eval (list (intern (format nil "~A.main([Ljava/lang/String;)V" (slot-value class 'name)) :openldk) #()))))))))

@@ -44,6 +44,9 @@
   (let ((classname (emit (aref cp (slot-value v 'index)) cp)))
     (make-instance 'ssa-class :class (classload classname ".:./jre8"))))
 
+(defmethod emit-name ((v constant-class-reference) cp)
+  (emit (aref cp (slot-value v 'index)) cp))
+
 (defmethod emit ((v constant-name-and-type-descriptor) cp)
   (format nil "~A~A"
           (emit (aref cp (slot-value v 'name-index)) cp)
@@ -71,6 +74,7 @@
    (name :initarg :name)
    (super :initform nil)
    (constant-pool)
+   (access-flags)
    (fields)
    (methods)
    (java-class)))
@@ -120,14 +124,26 @@
      (bitio:read-bytes bitio buf :bit-endian :be :bits-per-byte 8)
      buf))
 
-(defun read-exceptions (bitio constant-pool class count)
+(defclass <exception-table-entry> ()
+  ((start-pc :initarg :start-pc)
+   (end-pc :initarg :end-pc)
+   (handler-pc :initarg :handler-pc)
+   (catch-type :initarg :catch-type)))
+
+(defun read-exceptions (bitio cp count)
   (if (> count 0)
       (let ((exceptions (make-array count)))
         (dotimes (i count)
-          (read-u2)
-          (read-u2)
-          (read-u2)
-          (read-u2)))
+          (setf (aref exceptions i)
+                (make-instance '<exception-table-entry>
+                               :start-pc (read-u2)
+                               :end-pc (read-u2)
+                               :handler-pc (read-u2)
+                               :catch-type (let ((i (read-u2)))
+                                             (if (eq i 0)
+                                                 nil
+                                                 (emit-name (aref cp i) cp))))))
+        exceptions)
       nil))
 
 (defun read-attributes (bitio constant-pool class count)
@@ -147,7 +163,7 @@ stream."
                   (code-length (read-u4))
                   (code (read-buffer code-length))
                   (exception-table-length (read-u2))
-                  (exceptions (read-exceptions bitio constant-pool class exception-table-length))
+                  (exceptions (read-exceptions bitio constant-pool exception-table-length))
                   (attribute-count (read-u2))
                   (code-attributes (read-attributes bitio constant-pool class attribute-count)))
              (setf (gethash "Code" attributes)
@@ -184,10 +200,10 @@ stream."
         (fast-io:with-fast-input (fin-fast nil fin)
            (let ((bitio (bitio:make-bitio fin-fast #'fast-io:fast-read-byte #'wrap-fast-read-sequence)))
              (flet ((read-u1 () (bitio:read-one-byte bitio)))
-               (let ((magic (bitio:read-integer bitio :unsignedp nil :byte-endian :be))
-                     (minor-version (read-u2))
-                     (major-version (read-u2))
-                     (constant-pool-count (read-u2)))
+               (bitio:read-integer bitio :unsignedp nil :byte-endian :be) ;; magic bytes
+               (read-u2) ;; minor-version
+               (read-u2) ;; major version
+               (let ((constant-pool-count (read-u2)))
                  (let ((constant-pool (make-array (1+ constant-pool-count)))
                        (skip nil))
                    (setf (slot-value class 'constant-pool) constant-pool)
@@ -245,8 +261,8 @@ stream."
                                                         :name-index name-index
                                                         :type-descriptor-index type-descriptor-index)))
                                       (15
-                                       (let ((type-descriptor (read-u1))
-                                             (index (read-u2)))
+                                       (let ((fixme2 (read-u1))
+                                             (fixme1 (read-u2)))
                                          (make-instance 'constant-method-handle)))
                                       (18
                                        (let ((fixme (read-u4)))
@@ -259,6 +275,7 @@ stream."
                           (interface-count (read-u2))
                           (interfaces (make-array interface-count :element-type '(unsigned-byte 16))))
                      (setf (slot-value class 'name) (slot-value (aref constant-pool (slot-value (aref constant-pool this-class) 'index)) 'value))
+                     (setf (slot-value class 'access-flags) access-flags)
                      (if (> super-class 0)
                          (setf super
                                (slot-value (aref constant-pool (slot-value (aref constant-pool super-class) 'index)) 'value)))

@@ -206,6 +206,7 @@
                                                   :index index))))))
 
 (defun :DSTORE_2 (context code)
+  (declare (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -297,6 +298,14 @@
           (list (make-instance 'ssa-if-icmple
                                :pc-index pc-start
                                :offset (+ pc-start offset))))))))
+
+(defun :IDIV (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-div
+                           :pc-index pc-start)))))
 
 (defun :IFEQ (context code)
   (with-slots (pc class) context
@@ -527,12 +536,14 @@
                                          :value (emit (aref constant-pool index) constant-pool))))))))
 
 (defun :MONITORENTER (context code)
+  (declare (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ssa-nop :pc-index pc-start)))))
 
 (defun :MONITOREXIT (context code)
+  (declare (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -563,6 +574,7 @@
                              :value (make-instance 'ssa-new-array :pc-index pc-start :class class))))))))
 
 (defun :POP (context code)
+  (declare (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
