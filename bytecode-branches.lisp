@@ -31,6 +31,12 @@
       (setf (gethash o sbtable) t))
     sbtable))
 
+(defparameter +bytecode-conditional-branch-table+
+  (let ((cbtable (make-hash-table)))
+    (dolist (o '(:IF_ICMPLE :IFGE :IFLE :IFNE :IFNONNULL :IFNULL))
+      (setf (gethash o cbtable) t))
+    cbtable))
+
 (defparameter +bytecode-lengths-table+
   (let ((bltable (make-hash-table)))
     (dolist (o +bytecode-1-byte+)

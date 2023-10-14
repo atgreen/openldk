@@ -2,9 +2,7 @@
 
 (defun dump (id obj)
   "Dump OBJ to disk in *DUMP-DIR*/[current-class]/ID, and *CONTEXT* beside it."
-  (print *dump-dir*)
   (when *dump-dir*
-    (print "OKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK!!!!!!!!!!!!!!!!")
     (flet ((directory-from-filename (filename)
              (let ((path (pathname filename)))
                (namestring (make-pathname :host (pathname-host path)
@@ -14,15 +12,17 @@
                                           :type nil
                                           :version nil)))))
 
-      (let* ((path (format nil "~A~A~A.~A" *dump-dir* (uiop:directory-separator-for-host)
-                           (slot-value (slot-value *context* 'class) 'name) id))
+      (let* ((path (format nil "~A~A~A~A.~A" *dump-dir* (uiop:directory-separator-for-host)
+                           (slot-value (slot-value *context* 'class) 'name)
+                           (slot-value *context* 'fn-name) id))
              (context-path (format nil "~A.context" path)))
         (uiop:ensure-all-directories-exist
          (list (directory-from-filename path)))
-        (cl-store:store obj path)
-        (cl-store:store *context* context-path)))))
+        (cl-store:store (list obj *context* *classes*)  path)))))
 
 (defun restore (filename)
   "Restore from the given file, as well as the *CONTEXT* at the time of dump."
-  (setf *context* (cl-store:restore (format nil "~A.context" filename)))
-  (cl-store:restore filename))
+  (let ((v (cl-store:restore filename)))
+    (setf *context* (cadr v))
+    (setf *classes* (caddr v))
+    (car v)))

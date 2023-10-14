@@ -86,13 +86,7 @@
       (clinit class))))
 
 (defun insert-branch-targets (ssa-code branch-target-table)
-  (maphash (lambda (key value)
-             (format t "~A -> ~A~%" key value))
-           branch-target-table)
   (let ((btt (make-hash-table)))
-    (loop for insn in ssa-code
-          for pc-index = (slot-value insn 'pc-index)
-          do (format t "[~A][~A] ~A~%" pc-index (gethash pc-index branch-target-table) insn))
     (loop for insn in ssa-code
           for pc-index = (slot-value insn 'pc-index)
           append (if (and (gethash pc-index branch-target-table)
@@ -117,15 +111,7 @@
                                       (or (< pc start-pc)
                                           (>= pc end-pc))))
                                   ssa-code))))
-    (print "AAAAAAAAAAAAAAAAAAAAAAAA")
-    (print before)
-    (print "BBBBBBBBBBBBBBBBBBBBBBBB")
-    (print middle)
-    (print "CCCCCCCCCCCCCCCCCCCCCCCC")
-    (print after)
     (let ((aaa (append before middle after)))
-      (format t "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW~%")
-      (print aaa)
       aaa)))
 
 (defun insert-try-catch (ssa-code exception-table)
@@ -137,19 +123,8 @@
                  (make-ssa-try-catch ssa-code start-pc end-pc)))))
   ssa-code)
 
-#|
+; (apply #'%compile-method (restore "dumps/java/util/Vector<init>(II)V.compile-method"))
 
-            with-slots (pc-start pc-end) ete
-             (loop for insn in ssa-code
-                   for pc-index = (slot-value insn 'pc-index)
-                   append (if (eq pc-start pc-index)
-                                   (null (gethash pc-index btt)))
-                              (progn
-                                (setf (gethash pc-index btt) t)
-                                (list (make-instance 'ssa-branch-target :index pc-index)
-                                      insn))
-                              (list insn))))))
-|#
 (defun %compile-method (class-name method-index)
   (let* ((class (gethash class-name *classes*))
          (method (aref (slot-value class 'methods) (1- method-index)))
@@ -161,7 +136,6 @@
                                    :classes *classes*
                                    :exception-table exception-table
                                    :bytecode code
-                                   :constant-pool
                                    :is-clinit-p (string= "<clinit>"
                                                          (slot-value method 'name)))))
     (when *debug-codegen*
@@ -171,6 +145,7 @@
       (if (static-p method)
           (setf fn-name (format nil "~A.~A~A" (slot-value class 'name) (slot-value method 'name) (slot-value method 'descriptor)))
           (setf fn-name (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor))))
+      (dump "compile-method" (list class-name method-index))
       (let* ((ssa-code-pre-branch-targets
                (apply #'append
                       (loop
