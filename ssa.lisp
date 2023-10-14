@@ -3,6 +3,9 @@
 (defclass ssa-node ()
   ((pc-index :initarg :pc-index)))
 
+(defmethod set-successors ((node ssa-node) successors)
+  )
+
 (defclass ssa-nop (ssa-node)
   ())
 
@@ -38,7 +41,12 @@
   ())
 
 (defclass ssa-branch (ssa-node)
-  ((offset :initarg :offset)))
+  ((offset :initarg :offset)
+   (successors :initform nil)))
+
+(defmethod set-successors ((node ssa-branch) successors)
+  (format t "SETTING SUCCESSOR: ~A ~A~%" node successors)
+  (setf (slot-value node 'successors) successors))
 
 (defclass ssa-div (ssa-node)
   ())

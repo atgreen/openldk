@@ -2,7 +2,8 @@
 
 (defclass <basic-block> ()
   ((code :initform (list))
-   (successors :initform (list))))
+   (successors :initform (list))
+   (fixed-up-p :initform nil)))
 
 (defun get-short-branch-targets (pc code)
   (let ((start_pc pc)
@@ -39,17 +40,19 @@ exception targets."
     ;; First, let's go through the instructions looking
     ;; for branch targets.
     (dolist (bt (remove-duplicates
-                 (apply #'append (loop
-                                   while (< pc length)
-                                   for result = (let* ((opcode (aref +opcodes+ (aref code pc)))
-                                                       (targets (if (gethash opcode +bytecode-short-branch-table+)
-                                                                    (get-short-branch-targets pc code))))
-                                                  (when targets
-                                                    (setf (gethash pc successor-table) targets))
-                                                  (incf pc (gethash opcode +bytecode-lengths-table+))
-                                                  targets)
-                                   unless (null result)
-                                     collect result))))
+                 (apply
+                  #'append
+                  (loop
+                    while (< pc length)
+                    for result = (let* ((opcode (aref +opcodes+ (aref code pc)))
+                                        (targets (if (gethash opcode +bytecode-short-branch-table+)
+                                                     (get-short-branch-targets pc code))))
+                                   (when targets
+                                     (setf (gethash pc successor-table) targets))
+                                   (incf pc (gethash opcode +bytecode-lengths-table+))
+                                   targets)
+                    unless (null result)
+                      collect result))))
       (setf (gethash bt branch-target-table) t))
 
     ;; Now let's go through the exception table, looking for exception
@@ -75,7 +78,21 @@ exception targets."
 
     (values branch-target-table successor-table)))
 
+(defun fixup-branch-insns (basic-block)
+  "Find all branch instructions within BASIC-BLOCKS and update them
+with target BASIC-BLOCK links."
+  (with-slots (code successors fixed-up-p) basic-block
+    (unless fixed-up-p
+      (when successors
+        (progn
+          (set-successors (car (last code)) successors)
+          (setf fixed-up-p t)
+          (dolist (b successors)
+            (fixup-branch-insns b)))))))
+
 (defun build-basic-blocks (ssa-code)
+  "Build <BASIC-BLOCK> objects from SSA-CODE.  Return the entry
+block."
   (dump "build-basic-blocks" ssa-code)
   (multiple-value-bind (branch-targets successor-table)
       (find-target-instructions)
@@ -124,7 +141,9 @@ exception targets."
               (dolist (pc (slot-value b 'successors))
                 (push (gethash pc block-by-entry-pc) sb))
               (setf (slot-value b 'successors) sb)))
-          blocks)))))
+          ;; Update all of the branch ssa nodes with links to the target blocks.
+          (fixup-branch-insns (car blocks))
+          (car blocks))))))
 
 #|
 

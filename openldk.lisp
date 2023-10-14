@@ -161,8 +161,6 @@
                 (insert-branch-targets ssa-code-pre-branch-targets
                                        (find-target-instructions))
                 (slot-value (gethash "Code" (slot-value method 'attributes)) 'exceptions)))
-             (delete-me-too (progn (print "======================================================")
-                                   (print ssa-code)))
              (lisp-code (mapcar (lambda (ssa-node)
                                   (codegen ssa-node))
                                 ssa-code))
