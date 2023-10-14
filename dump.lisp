@@ -12,8 +12,10 @@
       (cl-store:store (list obj *context* *classes*) pathname))))
 
 (defun restore (filename)
-  "Restore from the given file, as well as the *CONTEXT* at the time of dump."
-  (let ((v (cl-store:restore filename)))
+  "Restore an object from the given file, as well as *CONTEXT* and
+*CLASSES* at the time of dump."
+  (let ((v (cl-store:restore
+            (pathname-utils:parse-native-namestring filename))))
     (setf *context* (cadr v))
     (setf *classes* (caddr v))
     (car v)))
