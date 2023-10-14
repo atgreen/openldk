@@ -38,7 +38,7 @@
                (:file "bc-to-ssa")
                (:file "codegen")
                (:file "openldk"))
-  :depends-on (:bitio :fast-io :unix-opts :split-sequence :flexi-streams :cl-containers :closer-mop :trivial-backtrace :cl-store)
+  :depends-on (:bitio :fast-io :unix-opts :split-sequence :flexi-streams :cl-containers :closer-mop :trivial-backtrace :cl-store :pathname-utils)
   :build-operation "program-op"
   :build-pathname "openldk"
   :entry-point "openldk:main")

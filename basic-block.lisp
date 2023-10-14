@@ -2,13 +2,13 @@
 
 (defclass <basic-block> ()
   ((code :initform (list))
-   (successors)))
+   (successors :initform (list))))
 
 (defun get-short-branch-targets (pc code)
   (let ((start_pc pc)
         (offset (+ (* (aref code (incf pc)) 256)
                    (aref code (incf pc)))))
-    (if (gethash (aref code start_pc) +bytecode-conditional-branch-table+)
+    (if (gethash (aref +opcodes+ (aref code start_pc)) +bytecode-conditional-branch-table+)
         (list (1+ pc) (+ start_pc offset))
         (list (+ start_pc offset)))))
 
@@ -18,7 +18,7 @@
   `(setf (gethash ,opcode *instruction-exceptions*) ,exceptions))
 
 (define-instruction-exceptions :IDIV
- '("java/lang/ArithmeticException" "java/lang/Exception" "java/lang/Throwable"))
+ '("java/lang/ArithmeticException" "java/lang/Exception" "java/lang/Throw able"))
 
 (defun opcode-throws-p (opcode throwable)
   (let ((throwables (gethash opcode *instruction-exceptions*)))
@@ -73,55 +73,66 @@ exception targets."
                               (incf pc insn-length))))
                    (setf (gethash handler-pc branch-target-table) t)))))
 
-    (values successor-table branch-target-table)))
+    (values branch-target-table successor-table)))
 
 (defun build-basic-blocks (ssa-code)
   (dump "build-basic-blocks" ssa-code)
-  (multiple-value-bind (successor-table branch-targets)
+  (multiple-value-bind (branch-targets successor-table)
       (find-target-instructions)
-    (labels ((%add-to-block (basic-block insn)
-               (with-slots (code) basic-block
-                 (push insn code)))
-             (%build-basic-blocks (ssa-code)
-               (let ((basic-bloc (make-instance '<basic-block>))
-                     (entry-insn t))
-                 (multiple-value-prog1
-                     (loop
-                       for insn = (car ssa-code)
-                       while insn
-                       for pc-index = (slot-value insn 'pc-index)
-                       do (if (or entry-insn
-                                  (not (gethash pc-index branch-targets)))
-                              (progn
-                                (%add-to-block basic-bloc insn)
-                                (setf entry-insn nil)
-                                (setf (gethash pc-index branch-targets) nil)
-                                (pop ssa-code))
-                              (progn
-                                ;; This is the end of the basic block
-                                (setf (gethash pc-index branch-targets) nil)
-                                (setf (slot-value basic-bloc 'successors) (gethash pc-index successor-table))
-                                (return (progn
-                                          (with-slots (code) basic-bloc
-                                            (setf code (reverse code)))
-                                          (values basic-bloc ssa-code)))))
-                       finally (with-slots (code) basic-bloc
-                                 (setf code (nreverse code))
-                                 (return (if (slot-value basic-bloc 'code) (values basic-bloc nil) (values nil nil)))))
-                   (values basic-bloc nil)))))
-      (loop
-        with current-ssa = ssa-code
-        for (basic-block rest-ssa) = (multiple-value-list (%build-basic-blocks current-ssa))
-        while basic-block
-        do (setf current-ssa rest-ssa)
-        collect basic-block))))
+    (let ((block-by-entry-pc (make-hash-table)))
+      (labels ((%add-to-block (basic-block insn)
+                 (with-slots (code) basic-block
+                   (push insn code)))
+               (%build-basic-blocks (ssa-code)
+                 (let ((basic-bloc (make-instance '<basic-block>))
+                       (entry-insn t))
+                   ;; Keep track of blocks by their entry pc.
+                   (when (car ssa-code)
+                     (setf (gethash (slot-value (car ssa-code) 'pc-index) block-by-entry-pc) basic-bloc))
+                   (multiple-value-prog1
+                       (loop
+                         for insn = (car ssa-code)
+                         while insn
+                         for pc-index = (slot-value insn 'pc-index)
+                         do (setf (slot-value basic-bloc 'successors) (append (gethash pc-index successor-table) (slot-value basic-bloc 'successors)))
+                         do (if (or entry-insn
+                                    (not (gethash pc-index branch-targets)))
+                                (progn
+                                  (%add-to-block basic-bloc insn)
+                                  (setf entry-insn nil)
+                                  (setf (gethash pc-index branch-targets) nil)
+                                  (pop ssa-code))
+                                (progn
+                                  ;; This is the end of the basic block
+                                  (setf (gethash pc-index branch-targets) nil)
+                                  (return (progn
+                                            (with-slots (code) basic-bloc
+                                              (setf code (reverse code)))
+                                            (values basic-bloc ssa-code)))))
+                         finally (with-slots (code) basic-bloc
+                                   (setf code (nreverse code))
+                                   (return (if (slot-value basic-bloc 'code) (values basic-bloc nil) (values nil nil)))))
+                     (values basic-bloc nil)))))
+        (let ((blocks (loop
+                        with current-ssa = ssa-code
+                        for (basic-block rest-ssa) = (multiple-value-list (%build-basic-blocks current-ssa))
+                        while basic-block
+                        do (setf current-ssa rest-ssa)
+                        collect basic-block)))
+          (dolist (b blocks)
+            (let ((sb (list)))
+              (dolist (pc (slot-value b 'successors))
+                (push (gethash pc block-by-entry-pc) sb))
+              (setf (slot-value b 'successors) sb)))
+          blocks)))))
 
 #|
 
 (setf x (restore "dumps/java/util/Vector<init>(II)V.build-basic-blocks"))
 
 (dolist (bb (build-basic-blocks x))
-  (print (slot-value bb 'code)))
+  (print (slot-value bb 'code))
+  (print (slot-value bb 'successors)))
 
 (maphash (lambda (k v)
            (format t "~A: ~A~%" k v))

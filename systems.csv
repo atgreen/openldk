@@ -40,3 +40,5 @@ dissect, ghcr.io/ocicl/dissect@sha256:c6af70da31e5184f50e80ff1d6e688a3bd90156c24
 trivial-backtrace, ghcr.io/ocicl/trivial-backtrace@sha256:8189c3a641490b523a67b6711bdf44a2b4b64e2c51604cf991247d9353597d21, trivial-backtrace-20230809-7f90b4a/trivial-backtrace.asd
 trivial-backtrace-test, ghcr.io/ocicl/trivial-backtrace@sha256:8189c3a641490b523a67b6711bdf44a2b4b64e2c51604cf991247d9353597d21, trivial-backtrace-20230809-7f90b4a/trivial-backtrace-test.asd
 cl-store, ghcr.io/ocicl/cl-store@sha256:2972a9169575148927af8362cfffdf97fb52064e097a85fc75d7e89c90ea9b48, cl-store-20230808-adb52a1/cl-store.asd
+pathname-utils, ghcr.io/ocicl/pathname-utils@sha256:5b204d930cf3f8f7d109775d78e85d5a5dcbb1154f3591ef7f25c8ae69331467, pathname-utils-20230808-c89fd69/pathname-utils.asd
+pathname-utils-test, ghcr.io/ocicl/pathname-utils@sha256:5b204d930cf3f8f7d109775d78e85d5a5dcbb1154f3591ef7f25c8ae69331467, pathname-utils-20230808-c89fd69/pathname-utils-test.asd

@@ -154,12 +154,15 @@
                         unless (null result)
                           collect result)))
              (delete-me-also (print ssa-code-pre-branch-targets))
-             (delete-me (build-basic-blocks ssa-code-pre-branch-targets))
+             (delete-me (dolist (b (build-basic-blocks ssa-code-pre-branch-targets))
+                          (print b)))
              (ssa-code
                (insert-try-catch
                 (insert-branch-targets ssa-code-pre-branch-targets
                                        (find-target-instructions))
                 (slot-value (gethash "Code" (slot-value method 'attributes)) 'exceptions)))
+             (delete-me-too (progn (print "======================================================")
+                                   (print ssa-code)))
              (lisp-code (mapcar (lambda (ssa-node)
                                   (codegen ssa-node))
                                 ssa-code))
