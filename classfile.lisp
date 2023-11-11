@@ -17,6 +17,8 @@
 
 (defclass constant-method-handle () ())
 
+(defclass constant-method-type () ())
+
 (defclass constant-field-reference ()
   ((class-index :initarg :class-index)
    (type-descriptor-index :initarg :type-descriptor-index)))
@@ -35,6 +37,9 @@
 (defmethod emit ((v constant-string-reference) cp)
   (make-instance 'ssa-string-literal
                  :value (format nil "~A" (emit (aref cp (slot-value v 'index)) cp))))
+
+(defmethod emit ((v constant-int) cp)
+  (make-instance 'ssa-int-literal :value (slot-value v 'value)))
 
 (defmethod emit ((v constant-field-reference) cp)
   (let ((class (emit (aref cp (slot-value v 'class-index)) cp)))
@@ -129,6 +134,11 @@
    (end-pc :initarg :end-pc)
    (handler-pc :initarg :handler-pc)
    (catch-type :initarg :catch-type)))
+
+(defmethod print-object ((ete <exception-table-entry>) out)
+  (print-unreadable-object (ete out :type t)
+    (with-slots (start-pc end-pc handler-pc) ete
+      (format out "(~A:~A]->~A" start-pc end-pc handler-pc))))
 
 (defun read-exceptions (bitio cp count)
   (if (> count 0)
@@ -264,6 +274,9 @@ stream."
                                        (let ((fixme2 (read-u1))
                                              (fixme1 (read-u2)))
                                          (make-instance 'constant-method-handle)))
+				      (16
+				       (let ((fixme1 (read-u2)))
+					 (make-instance 'constant-method-type)))
                                       (18
                                        (let ((fixme (read-u4)))
                                          (make-instance 'constant-invoke-dynamic)))

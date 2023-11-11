@@ -17,6 +17,12 @@
                (t nil)))
     count))
 
+(defun void-return-p (name)
+  (let ((len (length name)))
+    (and (not (zerop len))
+	 (char= (char name (1- len))
+		#\V))))
+
 (defun parse-parameter-types (descriptor)
   "Parse the Java method descriptor and return a list of parameter types as strings."
   (let ((param-list nil)

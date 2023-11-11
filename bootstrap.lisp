@@ -19,3 +19,11 @@
 
 (define-condition |condition-java/lang/Throwable| (error)
   ((objref)))
+
+(define-condition |condition-java/lang/Exception|
+    (|condition-java/lang/Throwable|)
+  ((objref)))
+
+(define-condition |condition-java/lang/ArithmeticException|
+    (|condition-java/lang/Exception|)
+  ((objref)))

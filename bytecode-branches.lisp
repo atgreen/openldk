@@ -3,22 +3,27 @@
 (defparameter +bytecode-1-byte+
   '(:ACONST_NULL
     :ALOAD_0 :ALOAD_1 :ALOAD_2 :ALOAD_3
+    :ARRAYLENGTH
     :ARETURN
     :ASTORE_0 :ASTORE_1 :ASTORE_2 :ASTORE_3
     :ATHROW
     :DADD :DCONST_0 :DDIV :DLOAD_2 :DMUL :DSTORE_2 :DSUB
     :DUP
-    :ICONST_0 :ICONST_1
+    :IADD
+    :ICONST_0 :ICONST_1 :ICONST_2
     :IDIV
     :ILOAD_0 :ILOAD_1 :ILOAD_2 :ILOAD_3
+    :ISTORE_2
     :IRETURN
+    :ISHL
+    :ISUB
     :MONITORENTER :MONITOREXIT
     :NOP
     :POP
     :RETURN))
 
 (defparameter +bytecode-2-byte+
-  '(:ASTORE :BIPUSH :DLOAD :DSTORE :LDC))
+  '(:ASTORE :BIPUSH :DLOAD :DSTORE :ILOAD :LDC :NEWARRAY))
 
 (defparameter +bytecode-3-byte+
   '(:GETFIELD :GETSTATIC :GOTO :IF_ICMPLE :IFEQ :IFGE :IFLE :IFNE :IFNONNULL :IFNULL

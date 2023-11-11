@@ -1,10 +1,13 @@
 (in-package :openldk)
 
 (defclass ssa-node ()
-  ((pc-index :initarg :pc-index)))
+  ((address :initarg :address :accessor address)))
 
 (defmethod set-successors ((node ssa-node) successors)
   )
+
+(defmethod uses-stack-p ((node ssa-node))
+  nil)
 
 (defclass ssa-nop (ssa-node)
   ())
@@ -33,12 +36,18 @@
 (defclass ssa-class (ssa-node)
   ((class :initarg :class)))
 
+(defclass ssa-array-length (ssa-node)
+  ())
+
 (defclass ssa-assign (ssa-node)
   ((target :initarg :target)
    (source :initarg :source)))
 
 (defclass ssa-add (ssa-node)
   ())
+
+(defmethod uses-stack-p (ssa-add)
+  t)
 
 (defclass ssa-branch (ssa-node)
   ((offset :initarg :offset)
@@ -80,6 +89,9 @@
 
 (defclass ssa-instanceof (ssa-node)
   ((class :initarg :class)))
+
+(defclass ssa-ishl (ssa-node)
+  ())
 
 (defclass ssa-call (ssa-node)
   ())
@@ -131,6 +143,9 @@
 
 (defclass ssa-push (ssa-node)
   ((value :initarg :value)))
+
+(defmethod uses-stack-p ((node ssa-node))
+  t)
 
 (defclass ssa-return (ssa-node)
   ())
