@@ -63,7 +63,7 @@
 	(list 'let (list (list 'op2 (list 'pop-item 'stack))
 			 (list 'op1 (list 'pop-item 'stack)))
 	      (list 'push-item 'stack (list '/ 'op1 'op2)))
-        (list 'division-by-zero (list 'e) (list 'error (list 'make-condition (list 'quote '|condition-java.lang.ArithmeticException|))))))
+        (list 'division-by-zero (list 'e) (list 'error (list 'make-condition (list 'quote '|condition-java/lang/ArithmeticException|))))))
 
 (defmethod codegen ((insn ssa-dup))
   (flag-stack-usage *context*)
