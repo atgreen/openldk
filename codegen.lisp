@@ -85,7 +85,6 @@
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'progn
-	  (list 'format 't "IFGE ~A~%" (list 'car 'stack))
 	  (list 'if (list '>= (list 'pop-item 'stack) 0)
 		(list 'go (intern (format nil "#:branch-target-~A" offset) :openldk))))))
 
@@ -93,7 +92,6 @@
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'progn
-	  (list 'format 't "IFLE ~A~%" (list 'car 'stack))
 	  (list 'if (list '<= (list 'pop-item 'stack) 0)
 		(list 'go (intern (format nil "#:branch-target-~A" offset) :openldk))))))
 
@@ -269,23 +267,21 @@
   (slot-value insn 'name))
 
 (defmethod codegen ((basic-block <basic-block>))
-  (format t "cg:bb ~A~%" basic-block)
   (push basic-block (slot-value *context* 'blocks))
   (let ((lisp-code (loop for insn in (slot-value basic-block 'code)
                                       collect (codegen insn))))
     (pop (slot-value *context* 'blocks))
-    (format t "BB: ~A~%" lisp-code)
     lisp-code))
 
 (defmethod codegen ((try-block <try-block>))
-  (format t "cg:tb ~A ~A ~A ~A~%" try-block (slot-value try-block 'try-body) (slot-value try-block 'catch-blocks) (slot-value try-block 'successors))
   (push try-block (slot-value *context* 'blocks))
   (let ((lisp-code (loop for bloc in (slot-value try-block 'try-body)
-                         collect (cons 'progn (codegen bloc)))))
+                         append (codegen bloc))))
     (pop (slot-value *context* 'blocks))
     (list (list 'handler-case
-		(cons 'progn
-		      lisp-code)))))
-
-
-		  
+		(cons 'tagbody
+		      lisp-code)
+		(append (list
+			 (intern (format nil "condition-~A" (car (car (slot-value try-block 'catch-blocks)))) :openldk)
+				 (list (intern "condition" :openldk)))
+			(codegen (cdr (car (slot-value try-block 'catch-blocks)))))))))

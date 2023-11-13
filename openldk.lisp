@@ -7,6 +7,8 @@
 (defvar *context* nil)
 
 (defvar *debug-codegen* nil)
+(defvar *debug-trace* nil)
+(defvar *debug-stack* nil)
 (defvar *debug-unmuffle* nil)
 
 (opts:define-opts
@@ -97,32 +99,6 @@
                              insn))
                      (list insn)))))
 
-(defun make-ssa-try-catch (ssa-code start-pc end-pc)
-  (let* ((before (remove-if (lambda (ssa-node)
-                              (let ((pc (slot-value ssa-node 'pc-index)))
-                                (>= pc start-pc)))
-                            ssa-code))
-         (after (remove-if (lambda (ssa-node)
-                             (let ((pc (slot-value ssa-node 'pc-index)))
-                               (< pc end-pc)))
-                           ssa-code))
-         (middle (list (remove-if (lambda (ssa-node)
-                                    (let ((pc (slot-value ssa-node 'pc-index)))
-                                      (or (< pc start-pc)
-                                          (>= pc end-pc))))
-                                  ssa-code))))
-    (let ((aaa (append before middle after)))
-      aaa)))
-
-(defun insert-try-catch (ssa-code exception-table)
-  (when exception-table
-    (loop for i from 0 upto (1- (length exception-table))
-          do (let ((ete (aref exception-table i)))
-               (let ((start-pc (slot-value ete 'start-pc))
-                     (end-pc (slot-value ete 'end-pc)))
-                 (make-ssa-try-catch ssa-code start-pc end-pc)))))
-  ssa-code)
-
 ; (apply #'%compile-method (restore "dumps/java/util/Vector<init>(II)V.compile-method"))
 
 (defun %compile-method (class-name method-index)
@@ -173,25 +149,26 @@
                                  (cons (list (intern "this" :openldk) (intern (slot-value class 'name) :openldk))
                                        (loop for i from 1 upto parameter-count
                                              collect (intern (format nil "arg~A" i) :openldk)))))
-		       (list (list 'format 't "tracing: ~A.~A~%" class-name fn-name))
+                       (when *debug-trace*
+                         (list (list 'format 't "tracing: ~A.~A~%" class-name fn-name)))
                        (if (slot-value *context* 'uses-stack-p)
                            (list (append (list 'let (append (list (list 'stack (list 'list)))
                                                             (if (static-p method)
                                                                 (append (loop for i from 1 upto parameter-count
-									      collect (list (intern (format nil "local-~A" (1- i)) :openldk) (intern (format nil "arg~A" (1- i)) :openldk)))
-									(loop for i from (1+ parameter-count) upto max-locals
-									      collect (list (intern (format nil "local-~A" (1- i)) :openldk))))
+                                                                              collect (list (intern (format nil "local-~A" (1- i)) :openldk) (intern (format nil "arg~A" (1- i)) :openldk)))
+                                                                        (loop for i from (1+ parameter-count) upto max-locals
+                                                                              collect (list (intern (format nil "local-~A" (1- i)) :openldk))))
                                                                 (append (cons (list (intern "local-0" :openldk) (intern "this" :openldk))
-									      (loop for i from 1 upto parameter-count
-										    collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" i) :openldk))))
-									(loop for i from (+ 2 parameter-count) upto max-locals
-									      collect (list (intern (format nil "local-~A" (1- i)) :openldk)))))))
+                                                                              (loop for i from 1 upto parameter-count
+                                                                                    collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" i) :openldk))))
+                                                                        (loop for i from (+ 2 parameter-count) upto max-locals
+                                                                              collect (list (intern (format nil "local-~A" (1- i)) :openldk)))))))
                                          lisp-code))
                            lisp-code)))))
         (%eval definition-code)))))
 
 (defun initform-from-descriptor (descriptor)
-  (cond 
+  (cond
     ((string= descriptor "I")
      0)
     ((string= descriptor "J")
@@ -217,7 +194,6 @@
                            (if super (list (intern super :openldk)) (list))
                            (map 'list
                                 (lambda (f)
-				  (format t "FIELD ~A: ~A~%" (slot-value f 'name) (slot-value f 'descriptor))
                                   (list (intern (slot-value f 'name) :openldk)
                                         :initform (initform-from-descriptor (slot-value f 'descriptor))
                                         :allocation
@@ -234,7 +210,6 @@
                                (lambda (m)
                                  (if (native-p m)
                                      (progn
-                                       (format t "NATIVE METHOD: ~A~%" (slot-value m 'name))
                                        (incf method-index)
                                        nil)
                                      (if (static-p m)
@@ -291,6 +266,10 @@
       (progn
         (when (find #\c LDK_DEBUG)
           (setf *debug-codegen* t))
+        (when (find #\s LDK_DEBUG)
+          (setf *debug-stack* t))
+        (when (find #\t LDK_DEBUG)
+          (setf *debug-trace* t))
         (when (find #\u LDK_DEBUG)
           (setf *debug-unmuffle* t))))
 

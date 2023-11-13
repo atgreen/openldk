@@ -72,7 +72,7 @@
       (incf pc)
       (list (make-instance 'ssa-array-length
 			   :address pc-start)))))
-	  
+
 
 (defun :ASTORE (context code)
   (with-slots (pc) context
@@ -276,7 +276,6 @@
           (multiple-value-bind (fieldname class)
               (emit (aref constant-pool index) constant-pool)
             (incf pc)
-            (format t "AAAAAAAAAAAA ~A~%" class)
             (let ((code (list (make-instance 'ssa-push
                                              :address pc-start
                                              :value (make-instance 'ssa-static-member
