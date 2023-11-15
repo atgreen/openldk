@@ -12,6 +12,22 @@
   (loop repeat num-args
         collect (make-instance 'ssa-pop)))
 
+(defun :AALOAD (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-aaload
+                           :address pc-start)))))
+
+(defun :AASTORE (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-aastore
+                           :address pc-start)))))
+
 (defun :ACONST_NULL (context code)
   (declare (ignore code))
   (with-slots (pc) context
@@ -21,6 +37,18 @@
                            :address pc-start
                            :value (make-instance 'ssa-null-literal
                                                  :address pc-start))))))
+
+(defun :ALOAD (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc)
+          (index (aref code (incf pc))))
+      (incf pc)
+      (list (make-instance 'ssa-push
+                           :address pc-start
+                           :value (make-instance 'ssa-local-variable
+                                                 :address pc-start
+                                                 :index index))))))
 
 (defun :ALOAD_0 (context code)
   (declare (ignore code))
@@ -118,6 +146,40 @@
                                                   :address pc-start
                                                   :index 2))))))
 
+(defun :IINC (context code)
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (with-slots (constant-pool) class
+        (let* ((index (aref code (incf pc)))
+               (const (aref code (incf pc))))
+          (incf pc)
+          (list (make-instance 'ssa-iinc
+                               :address pc-start
+                               :index index
+                               :const const)))))))
+
+(defun :ISTORE (context code)
+  (with-slots (pc) context
+    (let ((pc-start pc)
+          (index (aref code (incf pc))))
+      (incf pc)
+      (list (make-instance 'ssa-store
+                           :address pc-start
+                           :target (make-instance 'ssa-local-variable
+                                                  :address pc-start
+                                                  :index index))))))
+
+(defun :ISTORE_1 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-store
+                           :address pc-start
+                           :target (make-instance 'ssa-local-variable
+                                                  :address pc-start
+                                                  :index 1))))))
+
 (defun :ISTORE_2 (context code)
   (declare (ignore code))
   (with-slots (pc) context
@@ -128,6 +190,17 @@
                            :target (make-instance 'ssa-local-variable
                                                   :address pc-start
                                                   :index 2))))))
+
+(defun :ISTORE_3 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-store
+                           :address pc-start
+                           :target (make-instance 'ssa-local-variable
+                                                  :address pc-start
+                                                  :index 3))))))
 
 (defun :ASTORE_3 (context code)
   (declare (ignore code))
@@ -146,6 +219,17 @@
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ssa-throw :address pc-start)))))
+
+(defun :CHECKCAST (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc)
+          (index (+ (* (aref code (incf pc)) 256)
+                    (aref code (incf pc)))))
+      (incf pc)
+      (list (make-instance 'ssa-checkcast
+                           :address pc-start
+                           :index index)))))
 
 (defun :DADD (context code)
   (declare (ignore code))
@@ -289,12 +373,17 @@
                                        :class class)
                         code)))))))))
 
+(defun unsigned-to-signed (unsigned-value)
+  (if (>= unsigned-value 32768)
+      (- unsigned-value 65536)
+      unsigned-value))
+
 (defun :GOTO (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
-        (let* ((offset (+ (* (aref code (incf pc)) 256)
-                          (aref code (incf pc)))))
+        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
+                                              (aref code (incf pc))))))
           (incf pc)
           (list (make-instance 'ssa-goto
                                :address pc-start
@@ -333,14 +422,36 @@
                                                  :address pc-start
                                                  :value 2))))))
 
+(defun :IF_ICMPGE (context code)
+  (with-slots (pc class) context
+    (let ((pc-start pc))
+      (with-slots (constant-pool) class
+        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
+                                              (aref code (incf pc))))))
+          (incf pc)
+          (list (make-instance 'ssa-if-icmpge
+                               :address pc-start
+                               :offset (+ pc-start offset))))))))
+
 (defun :IF_ICMPLE (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
-        (let* ((offset (+ (* (aref code (incf pc)) 256)
-                          (aref code (incf pc)))))
+        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
+                                              (aref code (incf pc))))))
           (incf pc)
           (list (make-instance 'ssa-if-icmple
+                               :address pc-start
+                               :offset (+ pc-start offset))))))))
+
+(defun :IF_ICMPNE (context code)
+  (with-slots (pc class) context
+    (let ((pc-start pc))
+      (with-slots (constant-pool) class
+        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
+                                              (aref code (incf pc))))))
+          (incf pc)
+          (list (make-instance 'ssa-if-icmpne
                                :address pc-start
                                :offset (+ pc-start offset))))))))
 
@@ -356,8 +467,8 @@
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
-        (let* ((offset (+ (* (aref code (incf pc)) 256)
-                          (aref code (incf pc)))))
+        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
+                                              (aref code (incf pc))))))
           (incf pc)
           (list (make-instance 'ssa-ifeq
                                :address pc-start
@@ -367,8 +478,8 @@
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
-        (let* ((offset (+ (* (aref code (incf pc)) 256)
-                          (aref code (incf pc)))))
+        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
+                                              (aref code (incf pc))))))
           (incf pc)
           (list (make-instance 'ssa-ifge
                                :address pc-start
@@ -378,8 +489,8 @@
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
-        (let* ((offset (+ (* (aref code (incf pc)) 256)
-                          (aref code (incf pc)))))
+        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
+                                              (aref code (incf pc))))))
           (incf pc)
           (list (make-instance 'ssa-ifle
                                :address pc-start
@@ -389,8 +500,8 @@
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
-        (let* ((offset (+ (* (aref code (incf pc)) 256)
-                          (aref code (incf pc)))))
+        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
+                                              (aref code (incf pc))))))
           (incf pc)
           (list (make-instance 'ssa-ifne
                                :address pc-start
@@ -400,8 +511,8 @@
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
-        (let* ((offset (+ (* (aref code (incf pc)) 256)
-                          (aref code (incf pc)))))
+        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
+                                              (aref code (incf pc))))))
           (incf pc)
           (list (make-instance 'ssa-ifnonnull
                                :address pc-start
@@ -411,8 +522,8 @@
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
-        (let* ((offset (+ (* (aref code (incf pc)) 256)
-                          (aref code (incf pc)))))
+        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
+                                              (aref code (incf pc))))))
           (incf pc)
           (list (make-instance 'ssa-ifnull
                                :address pc-start
@@ -474,7 +585,6 @@
                                                  :index 3))))))
 
 (defun :INSTANCEOF (context code)
-  (format t ",,,,,,,,,,,,,,,,,,,,,,,,,,, INSTANCEOF~%")
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
@@ -599,6 +709,14 @@
           (list (make-instance 'ssa-push :address pc-start
                                          :value (emit (aref constant-pool index) constant-pool))))))))
 
+(defun :LUSHR (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-lushr
+                           :address pc-start)))))
+
 (defun :MONITORENTER (context code)
   (declare (ignore code))
   (with-slots (pc) context
@@ -624,6 +742,12 @@
         (list (make-instance 'ssa-push
                              :address pc-start
                              :value (make-instance 'ssa-new :address pc-start :class class))))))))
+
+(defun :NOP (context code)
+  (with-slots (pc class) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-nop :address pc-start)))))
 
 (defun :ANEWARRAY (context code)
   (with-slots (pc class) context
@@ -719,8 +843,8 @@
 (defun :SIPUSH (context code)
   (with-slots (pc) context
     (let ((pc-start pc))
-      (let* ((short (+ (* (aref code (incf pc)) 256)
-                       (* (aref code (incf pc))))))
+      (let* ((short (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
+                                           (* (aref code (incf pc)))))))
         (incf pc)
         (list (make-instance 'ssa-push
                              :address pc-start

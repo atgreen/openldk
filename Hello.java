@@ -1,6 +1,6 @@
 public class Hello
 {
-    public static int x = 555;
+    public static int x = 1;
 
     public static void test() throws java.lang.ArithmeticException
     {

@@ -1,13 +1,26 @@
 (in-package :openldk)
 
 (defclass ssa-node ()
-  ((address :initarg :address :accessor address)))
+  ((address :reader .address :initarg :address :accessor address :initform -1)))
 
-(defmethod set-successors ((node ssa-node) successors)
-  )
+(defmethod print-object ((node ssa-node) out)
+  (print-unreadable-object (node out :type t)
+    (format out "~A" (slot-value node 'address))))
+
+(defmethod dot-dump-string ((node ssa-node))
+  (format nil "~3A: ~A" (.address node) (class-name (class-of node))))
 
 (defmethod uses-stack-p ((node ssa-node))
   nil)
+
+(defclass ssa-aaload (ssa-node)
+  ())
+
+(defclass ssa-aastore (ssa-node)
+  ())
+
+(defclass ssa-aload (ssa-node)
+  ((index :initarg :index)))
 
 (defclass ssa-nop (ssa-node)
   ())
@@ -53,10 +66,6 @@
   ((offset :initarg :offset)
    (successors :initform nil)))
 
-(defmethod set-successors ((node ssa-branch) successors)
-  (format t "SETTING SUCCESSOR: ~A ~A~%" node successors)
-  (setf (slot-value node 'successors) successors))
-
 (defclass ssa-div (ssa-node)
   ())
 
@@ -66,7 +75,17 @@
 (defclass ssa-goto (ssa-branch)
   ())
 
+(defclass ssa-iinc (ssa-node)
+  ((index :initarg :index)
+   (const :initarg :const)))
+
+(defclass ssa-if-icmpge (ssa-branch)
+  ())
+
 (defclass ssa-if-icmple (ssa-branch)
+  ())
+
+(defclass ssa-if-icmpne (ssa-branch)
   ())
 
 (defclass ssa-ifeq (ssa-branch)
@@ -111,6 +130,9 @@
 (defclass ssa-call-static-method (ssa-call-virtual-method)
   ((class :initarg :class)))
 
+(defclass ssa-checkcast (ssa-node)
+  ((index :initarg :index)))
+
 (defclass ssa-clinit (ssa-call)
   ((class :initarg :class)))
 
@@ -135,6 +157,9 @@
 (defclass ssa-new-array (ssa-new)
   ())
 
+(defclass ssa-lushr (ssa-node)
+  ())
+
 (defclass ssa-mul (ssa-node)
   ())
 
@@ -150,7 +175,7 @@
 (defclass ssa-return (ssa-node)
   ())
 
-(defclass ssa-return-value (ssa-node)
+(defclass ssa-return-value (ssa-return)
   ((fn-name :initarg :fn-name)))
 
 (defclass ssa-sub (ssa-node)

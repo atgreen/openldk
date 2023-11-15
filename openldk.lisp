@@ -76,6 +76,8 @@
 
 (defun %clinit (class)
   (let ((class (gethash (slot-value class 'name) *classes*)))
+    (assert
+     (or class (error "Can't find ~A" class)))
     (labels ((clinit (class)
                (let ((super-class (gethash (slot-value class 'super) *classes*)))
                  (when super-class (clinit super-class)))
@@ -136,35 +138,35 @@
              (blocks (build-basic-blocks ssa-code-0))
 	     (lisp-code
 	      (list (list 'block nil
-			  (cons 'tagbody (loop for bloc in blocks append (codegen bloc))))))
+                    (cons 'tagbody (loop for bloc in blocks append (codegen bloc))))))
              (definition-code
-	      (let ((parameter-count (count-parameters (slot-value method 'descriptor))))
-               (append (if (static-p method)
-                           (list 'defun
-                                 (intern fn-name :openldk)
-                                 (loop for i from 1 upto parameter-count
-                                       collect (intern (format nil "arg~A" (1- i)) :openldk)))
-                           (list 'defmethod
-                                 (intern fn-name :openldk)
-                                 (cons (list (intern "this" :openldk) (intern (slot-value class 'name) :openldk))
-                                       (loop for i from 1 upto parameter-count
-                                             collect (intern (format nil "arg~A" i) :openldk)))))
-                       (when *debug-trace*
-                         (list (list 'format 't "tracing: ~A.~A~%" class-name fn-name)))
-                       (if (slot-value *context* 'uses-stack-p)
-                           (list (append (list 'let (append (list (list 'stack (list 'list)))
-                                                            (if (static-p method)
-                                                                (append (loop for i from 1 upto parameter-count
-                                                                              collect (list (intern (format nil "local-~A" (1- i)) :openldk) (intern (format nil "arg~A" (1- i)) :openldk)))
-                                                                        (loop for i from (1+ parameter-count) upto max-locals
-                                                                              collect (list (intern (format nil "local-~A" (1- i)) :openldk))))
-                                                                (append (cons (list (intern "local-0" :openldk) (intern "this" :openldk))
-                                                                              (loop for i from 1 upto parameter-count
-                                                                                    collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" i) :openldk))))
-                                                                        (loop for i from (+ 2 parameter-count) upto max-locals
-                                                                              collect (list (intern (format nil "local-~A" (1- i)) :openldk)))))))
-                                         lisp-code))
-                           lisp-code)))))
+               (let ((parameter-count (count-parameters (slot-value method 'descriptor))))
+                 (append (if (static-p method)
+                             (list 'defun
+                                   (intern fn-name :openldk)
+                                   (loop for i from 1 upto parameter-count
+                                         collect (intern (format nil "arg~A" (1- i)) :openldk)))
+                             (list 'defmethod
+                                   (intern fn-name :openldk)
+                                   (cons (list (intern "this" :openldk) (intern (slot-value class 'name) :openldk))
+                                         (loop for i from 1 upto parameter-count
+                                               collect (intern (format nil "arg~A" i) :openldk)))))
+                         (when *debug-trace*
+                           (list (list 'format 't "tracing: ~A.~A~%" class-name fn-name)))
+                         (if (slot-value *context* 'uses-stack-p)
+                             (list (append (list 'let (append (list (list 'stack (list 'list)))
+                                                              (if (static-p method)
+                                                                  (append (loop for i from 1 upto parameter-count
+                                                                                collect (list (intern (format nil "local-~A" (1- i)) :openldk) (intern (format nil "arg~A" (1- i)) :openldk)))
+                                                                          (loop for i from (1+ parameter-count) upto max-locals
+                                                                                collect (list (intern (format nil "local-~A" (1- i)) :openldk))))
+                                                                  (append (cons (list (intern "local-0" :openldk) (intern "this" :openldk))
+                                                                                (loop for i from 1 upto parameter-count
+                                                                                      collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" i) :openldk))))
+                                                                          (loop for i from (+ 2 parameter-count) upto max-locals
+                                                                                collect (list (intern (format nil "local-~A" (1- i)) :openldk)))))))
+                                           lisp-code))
+                             lisp-code)))))
         (%eval definition-code)))))
 
 (defun initform-from-descriptor (descriptor)
@@ -211,6 +213,7 @@
                                  (if (native-p m)
                                      (progn
                                        (incf method-index)
+                                       (format t "NATIVE METHOD: ~A~%" (slot-value m 'name))
                                        nil)
                                      (if (static-p m)
                                          (list 'defun (intern (format nil "~A.~A~A" (slot-value class 'name) (slot-value m 'name) (slot-value m 'descriptor)) :openldk)
@@ -235,21 +238,22 @@
 (defvar *condition-table* (make-hash-table))
 
 (defun classload (classname classpath)
-  (let ((class (gethash classname *classes*)))
+  (let ((class (gethash classname *classes*))
+        (internal-classname (intern (substitute #\/ #\. classname) :openldk)))
     (if class
         class
         (let ((fqfn (find-classpath-for-class classname classpath)))
           (if fqfn
               (let* ((class
                        (let ((c (read-classfile fqfn)))
-                         (setf (gethash classname *classes*) c)
+                         (setf (gethash (substitute #\/ #\. classname) *classes*) c)
                          c))
                      (super (let ((super (slot-value class 'super)))
                               (when super (classload super classpath)))))
                 (let ((code (emit-<class> class)))
                   (%eval code))
                 (when (and (not (string= classname "java/lang/Throwable"))
-                           (subtypep (find-class (intern classname :openldk)) (find-class '|java/lang/Throwable|)))
+                           (subtypep (find-class internal-classname) (find-class '|java/lang/Throwable|)))
                   (let ((condition-symbol (intern (format nil "condition-~A" classname) :openldk)))
                     (setf (gethash (find-class (intern classname :openldk)) *condition-table*) condition-symbol)
                     (let ((ccode (list 'define-condition condition-symbol
@@ -296,5 +300,6 @@
             (%clinit (classload "java/lang/ClassLoader" ".:jre8/"))
             (%clinit (classload "java/lang/Class" ".:jre8/"))
             (let* ((class (classload (car free-args) CLASSPATH)))
+              (assert (or class (error "Can't load ~A" (car free-args))))
               (%clinit class)
               (%eval (list (intern (format nil "~A.main([Ljava/lang/String;)V" (slot-value class 'name)) :openldk) #()))))))))

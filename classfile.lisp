@@ -118,6 +118,9 @@
 (defmacro read-u2 ()
   `(bitio:read-integer bitio :num-bytes 2 :byte-endian :be :unsignedp t))
 
+(defmacro read-u2 ()
+  `(bitio:read-integer bitio :num-bytes 2 :byte-endian :be :unsignedp t))
+
 (defmacro read-u4 ()
   `(bitio:read-integer bitio :num-bytes 4 :byte-endian :be :unsignedp t))
 
@@ -190,6 +193,10 @@ stream."
           ("Exceptions"
            (read-buffer attributes-length))
           ("InnerClasses"
+           (read-buffer attributes-length))
+          ("LocalVariableTable"
+           (read-buffer attributes-length))
+          ("LocalVariableTypeTable"
            (read-buffer attributes-length))
           ("LineNumberTable"
            (read-buffer attributes-length))
