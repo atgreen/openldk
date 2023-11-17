@@ -22,8 +22,8 @@ cl-package-locks, ghcr.io/ocicl/cl-package-locks@sha256:684bfe923ed5f54c70dc30ed
 checkl, ghcr.io/ocicl/checkl@sha256:dfd92024bdc385e105fc0f65d2222cc488db1e0104f2fb5d34441acc9b9f3de3, CheckL-20230818-8032880/checkl.asd
 checkl-test, ghcr.io/ocicl/checkl@sha256:dfd92024bdc385e105fc0f65d2222cc488db1e0104f2fb5d34441acc9b9f3de3, CheckL-20230818-8032880/checkl-test.asd
 checkl-docs, ghcr.io/ocicl/checkl@sha256:dfd92024bdc385e105fc0f65d2222cc488db1e0104f2fb5d34441acc9b9f3de3, CheckL-20230818-8032880/checkl-docs.asd
-marshal, ghcr.io/ocicl/marshal@sha256:0fd1e14368300e41e0891769a67ba476a6cd0fe7ba1f190283b7720fcb9835c0, cl-marshal-20230831-5fe128e/marshal.asd
-marshal-tests, ghcr.io/ocicl/marshal@sha256:0fd1e14368300e41e0891769a67ba476a6cd0fe7ba1f190283b7720fcb9835c0, cl-marshal-20230831-5fe128e/marshal-tests.asd
+marshal, ghcr.io/ocicl/marshal@sha256:a030659d1b47d8418a2bc2c32b1cb9a4ecf061b0d2107e14af6636860bdf82eb, cl-marshal-20231027-f7d9a22/marshal.asd
+marshal-tests, ghcr.io/ocicl/marshal@sha256:a030659d1b47d8418a2bc2c32b1cb9a4ecf061b0d2107e14af6636860bdf82eb, cl-marshal-20231027-f7d9a22/marshal-tests.asd
 flexi-streams, ghcr.io/ocicl/flexi-streams@sha256:2eb7271c30799a51bb3720ca37ee358764522255d66aabcc1a3012becfab1dbc, flexi-streams-20230809-74a1027/flexi-streams.asd
 flexi-streams-test, ghcr.io/ocicl/flexi-streams@sha256:2eb7271c30799a51bb3720ca37ee358764522255d66aabcc1a3012becfab1dbc, flexi-streams-20230809-74a1027/flexi-streams-test.asd
 unix-opts, ghcr.io/ocicl/unix-opts@sha256:21fadcd8f80f1b344dfd90892ae36888ff50f8b778ae37c1b1f0bc4a9f0ea5e2, unix-opts-0.1.7/unix-opts.asd
@@ -35,7 +35,7 @@ cl-containers-documentation, ghcr.io/ocicl/cl-containers@sha256:951ecb9d773ce11f
 asdf-system-connections, ghcr.io/ocicl/asdf-system-connections@sha256:3a5132a99fcb19aec3819851a81c75adbfc2091b4e7c99219dba61810fb1f6c2, asdf-system-connections-20230809-9f08524/asdf-system-connections.asd
 metatilities-base, ghcr.io/ocicl/metatilities-base@sha256:66f431a24659a030faaa40b751085da9f957b335374d6ca3bd9e438062e993db, metatilities-base-20230808-ef04337/metatilities-base.asd
 metatilities-base-test, ghcr.io/ocicl/metatilities-base@sha256:66f431a24659a030faaa40b751085da9f957b335374d6ca3bd9e438062e993db, metatilities-base-20230808-ef04337/metatilities-base-test.asd
-closer-mop, ghcr.io/ocicl/closer-mop@sha256:a39bb7ef1aa69dad7650480f852231a9c08150878c9de6a8db8be947f31ec9fc, closer-mop-20231001-f69bd9c/closer-mop.asd
+closer-mop, ghcr.io/ocicl/closer-mop@sha256:7baa9ed42246afa8d5956954fa5a0d2942ede273d241a03e4206a1e0a842cca3, closer-mop-20231031-5fc40bd/closer-mop.asd
 dissect, ghcr.io/ocicl/dissect@sha256:c6af70da31e5184f50e80ff1d6e688a3bd90156c243b76112324910aad13cb45, dissect-20230808-b7bf9b9/dissect.asd
 trivial-backtrace, ghcr.io/ocicl/trivial-backtrace@sha256:8189c3a641490b523a67b6711bdf44a2b4b64e2c51604cf991247d9353597d21, trivial-backtrace-20230809-7f90b4a/trivial-backtrace.asd
 trivial-backtrace-test, ghcr.io/ocicl/trivial-backtrace@sha256:8189c3a641490b523a67b6711bdf44a2b4b64e2c51604cf991247d9353597d21, trivial-backtrace-20230809-7f90b4a/trivial-backtrace-test.asd
