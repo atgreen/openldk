@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?> 
+
+<!--
+    test data for integerTest
+-->
+<java>
+	<short>16000</short>
+	
+	<short>-16000</short>
+	
+	<!-- Short.MIN_VALUE -->
+	<short>-32768</short>
+	
+	<!-- Short.MAX_VALUE -->
+	<short>32767</short>
+</java>

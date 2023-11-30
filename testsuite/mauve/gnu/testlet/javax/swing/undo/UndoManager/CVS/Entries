@@ -1,0 +1,20 @@
+/TestUndoManager.java/1.2/Mon Jan 17 21:40:07 2005//
+/addEdit.java/1.1/Wed Feb 11 12:15:32 2004//
+/canRedo.java/1.1/Wed Feb 11 12:15:32 2004//
+/canUndo.java/1.1/Wed Feb 11 12:15:32 2004//
+/canUndoOrRedo.java/1.1/Wed Feb 11 12:15:32 2004//
+/discardAllEdits.java/1.1/Wed Feb 11 12:15:32 2004//
+/editToBeRedone.java/1.2/Thu Jun  3 14:31:19 2004//
+/editToBeUndone.java/1.2/Thu Jun  3 14:31:19 2004//
+/end.java/1.1/Wed Feb 11 12:15:32 2004//
+/getLimit.java/1.1/Wed Feb 11 12:15:32 2004//
+/getRedoPresentationName.java/1.1/Wed Feb 11 12:15:32 2004//
+/getUndoOrRedoPresentationName.java/1.1/Wed Feb 11 12:15:32 2004//
+/getUndoPresentationName.java/1.1/Wed Feb 11 12:15:32 2004//
+/redoTo.java/1.1/Wed Feb 11 12:15:32 2004//
+/setLimit.java/1.1/Wed Feb 11 12:15:32 2004//
+/toString.java/1.1/Wed Feb 11 12:15:32 2004//
+/trimEdits.java/1.2/Thu Jun  3 14:31:19 2004//
+/undoTo.java/1.1/Wed Feb 11 12:15:32 2004//
+/undoableEditHappened.java/1.1/Wed Feb 11 12:15:32 2004//
+D

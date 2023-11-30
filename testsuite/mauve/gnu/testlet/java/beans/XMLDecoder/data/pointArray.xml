@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!--
+    test data for pointArrayTest
+-->
+
+<java version="1.4.0" class="java.beans.XMLDecoder">
+	<array class="java.awt.Point" length="3">
+		<void index="0">
+			<object class="java.awt.Point">
+				<int>0</int>
+				<int>0</int>
+			</object>
+		</void>
+
+		<void index="1">
+			<object class="java.awt.Point">
+				<int>1</int>
+				<int>1</int>
+			</object>
+		</void>
+
+		<void index="2">
+			<object class="java.awt.Point">
+				<int>2</int>
+				<int>2</int>
+			</object>
+		</void>
+	</array>
+</java>

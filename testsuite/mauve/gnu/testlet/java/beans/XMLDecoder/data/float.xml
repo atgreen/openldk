@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?> 
+
+<!--
+    test data for floatTest
+-->
+
+<java>
+	<!-- (float) Math.PI -->
+	<float>3.1415927</float>
+	
+	<!-- (float) Math.E -->
+	<float>2.7182817</float>
+	
+	<!-- (float) 2^-16 -->
+	<float>1.5258789E-5</float>
+	
+	<float>0</float>
+
+	<!-- Float.NaN -->
+	<float>NaN</float>
+	
+	<!-- Float.POSITIVE_INFINITY -->
+	<float>Infinity</float>
+	
+	<!-- Float.NEGATIVE_INFINITY -->
+	<float>-Infinity</float>
+	
+</java>

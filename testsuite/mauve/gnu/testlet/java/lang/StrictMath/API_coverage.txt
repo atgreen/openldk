@@ -1,0 +1,47 @@
+#   Return type     Method name and arguments            Since   Test name   Test name (with strictfp modifier)
+
+01  static double   abs(double a)                         1.3  
+02  static float    abs(float a)                          1.3  
+03  static int      abs(int a)                            1.3  
+04  static long     abs(long a)                           1.3  
+05  static double   acos(double a)                        1.3    acos.java   acos_strictfp.java
+06  static double   asin(double a)                        1.3    asin.java   asin_strictfp.java
+07  static double   atan(double a)                        1.3    atan.java   atan_strictfp.java
+08  static double   atan2(double y, double x)             1.3  
+09  static double   cbrt(double a)                        1.5    cbrt.java   cbrt_strictfp.java
+10  static double   ceil(double a)                        1.3  
+11  static double   cos(double a)                         1.3    cos.java    cos_strictfp.java
+12  static double   cosh(double x)                        1.5    cosh.java
+13  static double   exp(double a)                         1.3  
+14  static double   expm1(double x)                       1.3    exmp1.java  exmp1_strictfp.java
+15  static double   floor(double a)                       1.3  
+16  static double   hypot(double x, double y)             1.5  
+17  static double   IEEEremainder(double f1, double f2)   1.3  
+18  static double   log(double a)                         1.3  
+19  static double   log10(double a)                       1.5  
+20  static double   log1p(double x)                       1.3  
+21  static double   max(double a, double b)               1.3  
+22  static float    max(float a, float b)                 1.3  
+23  static int      max(int a, int b)                     1.3  
+24  static long     max(long a, long b)                   1.3  
+25  static double   min(double a, double b)               1.3  
+26  static float    min(float a, float b)                 1.3  
+27  static int      min(int a, int b)                     1.3  
+28  static long     min(long a, long b)                   1.3  
+29  static double   pow(double a, double b)               1.3  
+30  static double   random()                              1.3  
+31  static double   rint(double a)                        1.3  
+32  static long     round(double a)                       1.3  
+33  static int      round(float a)                        1.3  
+34  static double   signum(double d)                      1.5  
+35  static float    signum(float f)                       1.5  
+36  static double   sin(double a)                         1.3    sin.java    sin_strictfp.java
+37  static double   sinh(double x)                        1.5    sinh.java
+38  static double   sqrt(double a)                        1.3  
+39  static double   tan(double a)                         1.3    tan.java    tan_strictfp.java
+40  static double   tanh(double x)                        1.5    tanh.java
+41  static double   toDegrees(double angrad)              1.3  
+42  static double   toRadians(double angdeg)              1.3  
+43  static double   ulp(double d)                         1.5  
+44  static float    ulp(float f)                          1.5  
+

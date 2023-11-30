@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!--
+    test data for growablePointArrayTest
+-->
+
+<java version="1.4.0" class="java.beans.XMLDecoder">
+
+	<array class="java.awt.Point">
+
+		<object class="java.awt.Point">
+			<int>0</int>
+			<int>0</int>
+		</object>
+
+		<object class="java.awt.Point">
+			<int>1</int>
+			<int>1</int>
+		</object>
+
+		<object class="java.awt.Point">
+			<int>2</int>
+			<int>2</int>
+		</object>
+
+		<object class="java.awt.Point">
+			<int>3</int>
+			<int>3</int>
+		</object>
+
+		<object class="java.awt.Point">
+			<int>4</int>
+			<int>4</int>
+		</object>
+
+		<object class="java.awt.Point">
+			<int>5</int>
+			<int>5</int>
+		</object>
+
+	</array>
+</java>

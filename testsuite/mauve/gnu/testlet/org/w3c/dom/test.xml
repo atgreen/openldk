@@ -1,0 +1,12 @@
+<?xml version="1.0" standalone="yes"?>
+<!DOCTYPE a [
+<!ELEMENT a (b, kedit)>
+<!ELEMENT b (#PCDATA)>
+<!NOTATION kedit SYSTEM "kedit">
+]>
+<a>
+	<!--This is a Comment.-->
+	<b>This is a Text Node.</b>
+	<?kedit This is a Processing Instruction. ?>
+	<![CDATA[This is a CDATA section.]]>
+</a>

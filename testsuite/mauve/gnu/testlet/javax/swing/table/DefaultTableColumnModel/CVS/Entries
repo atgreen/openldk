@@ -1,0 +1,23 @@
+/MyDefaultTableColumnModel.java/1.1/Wed Jun 28 10:06:19 2006//
+/MyListener.java/1.1/Sun Apr 24 21:14:08 2005//
+/addColumn.java/1.3/Wed Jun 28 10:06:19 2006//
+/addColumnModelListener.java/1.2/Thu Apr 28 07:37:35 2005//
+/constructor.java/1.3/Wed May 21 13:30:50 2008//
+/getColumn.java/1.2/Wed Jun 28 10:06:19 2006//
+/getColumnCount.java/1.1/Sun Apr 24 21:14:08 2005//
+/getColumnIndex.java/1.1/Sun Apr 24 21:14:08 2005//
+/getColumnIndexAtX.java/1.1/Sun Apr 24 21:14:08 2005//
+/getColumnMargin.java/1.2/Mon Jul 25 09:01:06 2005//
+/getColumnModelListeners.java/1.2/Thu Apr 28 07:37:36 2005//
+/getColumnSelectionAllowed.java/1.2/Wed Jun 28 10:06:19 2006//
+/getColumns.java/1.1/Sun Apr 24 21:14:08 2005//
+/getListeners.java/1.3/Wed Dec 27 15:48:18 2006//
+/getSelectedColumnCount.java/1.1/Sun Apr 24 21:14:08 2005//
+/getSelectionModel.java/1.1/Sun Apr 24 21:14:08 2005//
+/getTotalColumnWidth.java/1.1/Wed Jun 28 10:06:19 2006//
+/moveColumn.java/1.3/Fri Jul  1 16:49:33 2005//
+/removeColumn.java/1.2/Wed Jun 28 10:06:19 2006//
+/setColumnMargin.java/1.2/Thu Apr 28 07:37:36 2005//
+/setColumnSelectionAllowed.java/1.1/Sun Apr 24 21:14:08 2005//
+/setSelectionModel.java/1.2/Wed Jun 28 10:06:19 2006//
+D

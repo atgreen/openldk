@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?> 
+
+<!-- 
+	test data for listTest
+-->
+
+<java> 
+
+ <!-- ArrayList -->
+ <object id="arrayList" class="java.util.ArrayList">
+    <void method="add">
+	<int>100</int>
+    </void>
+    
+    <void method="add">
+	<string>Hello World</string>
+    </void>
+    
+    <void method="add">
+	<class>java.lang.ref.WeakReference</class>
+    </void>
+ </object>
+
+ <!-- LinkedList with same content -->
+ <object id="linkedList" class="java.util.LinkedList">
+    <void method="add">
+	<int>100</int>
+    </void>
+    
+    <void method="add">
+	<string>Hello World</string>
+    </void>
+    
+    <void method="add">
+	<class>java.lang.ref.WeakReference</class>
+    </void>
+    
+	<!-- compares both lists and stores result in 'comparison' -->
+    <void id="comparison" method="equals">
+	<object idref="arrayList"/>
+    </void>
+ </object>
+
+ <!-- returns comparison result which should be 'true' --> 
+ <object idref="comparison"/>
+ 
+</java> 

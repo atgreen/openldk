@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?> 
+
+<!--
+    test data for integerTest
+-->
+
+<java>
+	<long>5432154321</long>
+
+	<long>-5432154321</long>
+
+	<!-- Long.MIN_VALUE -->
+	<long>-9223372036854775808</long>
+	
+	<!-- Long.MAX_VALUE -->
+	<long>9223372036854775807</long>
+</java>
