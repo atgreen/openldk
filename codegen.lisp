@@ -71,7 +71,7 @@
           java-class))))
 
 (defmethod codegen ((insn ssa-branch-target))
-  (intern (format nil "#:branch-target-~A" (slot-value insn 'index)) :openldk))
+  (intern (format nil "branch-target-~A" (slot-value insn 'index))))
 
 (defmethod codegen ((insn ssa-div))
   (flag-stack-usage *context*)
@@ -93,57 +93,57 @@
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'if (list '>= (list 'pop-item 'stack) (list 'pop-item 'stack))
-          (list 'go (intern (format nil "#:branch-target-~A" offset) :openldk)))))
+          (list 'go (intern (format nil "branch-target-~A" offset))))))
 
 (defmethod codegen ((insn ssa-if-icmpge))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'if (list '<= (list 'pop-item 'stack) (list 'pop-item 'stack))
-          (list 'go (intern (format nil "#:branch-target-~A" offset) :openldk)))))
+          (list 'go (intern (format nil "branch-target-~A" offset))))))
 
 (defmethod codegen ((insn ssa-if-icmpne))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'if (list 'not (list 'eq (list 'pop-item 'stack) (list 'pop-item 'stack)))
-          (list 'go (intern (format nil "#:branch-target-~A" offset) :openldk)))))
+          (list 'go (intern (format nil "branch-target-~A" offset))))))
 
 (defmethod codegen ((insn ssa-ifeq))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'if (list 'eq (list 'pop-item 'stack) 0)
-          (list 'go (intern (format nil "#:branch-target-~A" offset) :openldk)))))
+          (list 'go (intern (format nil "branch-target-~A" offset))))))
 
 (defmethod codegen ((insn ssa-ifge))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'progn
 	  (list 'if (list '>= (list 'pop-item 'stack) 0)
-		(list 'go (intern (format nil "#:branch-target-~A" offset) :openldk))))))
+          (list 'go (intern (format nil "branch-target-~A" offset)))))))
 
 (defmethod codegen ((insn ssa-ifle))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'progn
 	  (list 'if (list '<= (list 'pop-item 'stack) 0)
-		(list 'go (intern (format nil "#:branch-target-~A" offset) :openldk))))))
+          (list 'go (intern (format nil "branch-target-~A" offset)))))))
 
 (defmethod codegen ((insn ssa-ifne))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'if (list 'not (list 'eq (list 'pop-item 'stack) '0))
-          (list 'go (intern (format nil "#:branch-target-~A" offset) :openldk)))))
+          (list 'go (intern (format nil "branch-target-~A" offset))))))
 
 (defmethod codegen ((insn ssa-ifnonnull))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'if (list 'not (list 'null (list 'pop-item 'stack)))
-          (list 'go (intern (format nil "#:branch-target-~A" offset) :openldk)))))
+          (list 'go (intern (format nil "branch-target-~A" offset))))))
 
 (defmethod codegen ((insn ssa-ifnull))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'if (list 'null (list 'pop-item 'stack))
-          (list 'go (intern (format nil "#:branch-target-~A" offset) :openldk)))))
+          (list 'go (intern (format nil "branch-target-~A" offset))))))
 
 (defmethod codegen ((insn ssa-instanceof))
   (with-slots (class) insn
@@ -167,7 +167,7 @@
 
 (defmethod codegen ((insn ssa-goto))
   (with-slots (offset) insn
-    (list 'go (intern (format nil "#:branch-target-~A" offset) :openldk))))
+    (list 'go (intern (format nil "branch-target-~A" offset)))))
 
 (defmethod codegen ((insn ssa-call-virtual-method))
   (with-slots (method-name args) insn
@@ -292,10 +292,10 @@
       (progn
         (push basic-block (slot-value *context* 'blocks))
         (let ((lisp-code
-                (cons
-                 (intern (format nil "#:branch-target-~A" (.address (car (slot-value basic-block 'code)))) :openldk)
-                 (loop for insn in (slot-value basic-block 'code)
-                       collect (codegen insn)))))
+                (cons (intern (format nil "branch-target-~A" (.address (car (slot-value basic-block 'code)))()))
+                      ;; (intern (format nil ":branch-target-~A" (.address (car (slot-value basic-block 'code)))) :openldk)
+                      (loop for insn in (slot-value basic-block 'code)
+                            collect (codegen insn)))))
           (setf (slot-value basic-block 'code-emitted-p) t)
           (pop (slot-value *context* 'blocks))
           (dolist (successor (.successor-blocks basic-block))
@@ -314,4 +314,5 @@
                 (append (list
                          (intern (format nil "condition-~A" (car (car (slot-value try-block 'catch-blocks)))) :openldk)
                          (list (intern "condition" :openldk)))
-                        (codegen (cdr (car (slot-value try-block 'catch-blocks)))))))))
+                        (list (cons 'tagbody
+                                    (codegen (cdr (car (slot-value try-block 'catch-blocks)))))))))))

@@ -93,7 +93,6 @@ exception targets."
                                         (targets (if (gethash opcode +bytecode-short-branch-table+)
                                                      (get-short-branch-targets pc code))))
                                    (when targets
-                                     (format t "FIXME-SAT: ~A ~A~%" pc targets)
                                      (setf (gethash pc successor-address-table) targets))
                                    (incf pc (gethash opcode +bytecode-lengths-table+))
                                    targets)
@@ -167,7 +166,6 @@ non-null.  Return the entry block."
 
                ;; Create a block, starting with SSA-CODE.
                (%build-basic-block (ssa-code &optional (end-address nil))
-                 (format t "FIXME3 ========================================================~%")
                  (when ssa-code
                    (with-accessors ((ssa-code-address address)) (car ssa-code)
                      (let* ((block-ete-list (gethash ssa-code-address try-block-table)))
@@ -210,12 +208,9 @@ non-null.  Return the entry block."
                                      until (and end-address (>= address end-address))
                                      until (and (not entry-insn) (gethash address branch-targets))
 
-                                     do (format t "FIXME2: ~A: ~A ~A ~A~%" address entry-insn (gethash address branch-targets) insn)
-
                                      ;; If this instruction has successors,
                                      ;; add them to the block.
                                      do (progn
-                                          (format t "FIXME4: ~A~%" (gethash address successor-address-table))
                                           (setf (slot-value bloc 'successor-addresses)
                                                 (append (gethash address successor-address-table) (slot-value bloc 'successor-addresses))))
 
@@ -229,7 +224,6 @@ non-null.  Return the entry block."
                                           (if (or entry-insn
                                                   (not (gethash address branch-targets)))
                                               (progn
-                                                (format t "FIXME1: ~A ~A ~A ~A~%" address entry-insn (gethash address branch-targets) insn)
                                                 (%add-to-block bloc insn)
                                                 (setf entry-insn nil)
                                                 ;; FIXME - this is causing duplicate code gen in Hello
@@ -242,11 +236,9 @@ non-null.  Return the entry block."
                                                       (return-from %build-basic-block (values bloc nil))))
 
                                                 (let ((successors (gethash address successor-address-table)))
-                                                  (format t "FIXME888: ~A ~A~%" address successors)
                                                   (dolist (successor successors)
                                                     (let ((successor-block (or (gethash successor block-by-entry-address)
                                                                                (%build-basic-block (find-ssa-node successor)))))
-                                                      (format t "    SB: ~A~%" successor-block)
                                                       (push successor-block (slot-value bloc 'successor-blocks))))
                                                   (if successors
                                                       (with-slots (code) bloc

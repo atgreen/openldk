@@ -213,7 +213,6 @@
                                  (if (native-p m)
                                      (progn
                                        (incf method-index)
-                                       (format t "NATIVE METHOD: ~A~%" (slot-value m 'name))
                                        nil)
                                      (if (static-p m)
                                          (list 'defun (intern (format nil "~A.~A~A" (slot-value class 'name) (slot-value m 'name) (slot-value m 'descriptor)) :openldk)
