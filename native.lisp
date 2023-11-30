@@ -25,6 +25,9 @@
 (defmethod |println(Ljava/lang/String;)V| (stream string)
   (format t "~A~%" (slot-value string '|value|)))
 
+(defmethod |println(I)V| (stream number)
+  (format t "~A~%" number))
+
 (defmethod |fillInStackTrace(I)Ljava/lang/Throwable;| ((|this| |java/lang/Throwable|) dummy)
   (let ((bt (trivial-backtrace:print-backtrace nil :output nil)))
     (print bt)))
