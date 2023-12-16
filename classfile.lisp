@@ -190,6 +190,8 @@ stream."
            (read-buffer attributes-length))
           ("Deprecated"
            (read-buffer attributes-length))
+          ("EnclosingMethod"
+           (read-buffer attributes-length))
           ("Exceptions"
            (read-buffer attributes-length))
           ("InnerClasses"

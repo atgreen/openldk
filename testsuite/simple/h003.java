@@ -1,5 +1,7 @@
 /* { dg-output "^OK!\r\nDone" } */
 
+package simple;
+
 public class h003
 {
     public static int x = 0;

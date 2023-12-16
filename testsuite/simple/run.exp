@@ -4,12 +4,16 @@ dg-init
 
 set dg-do-what-default run
 
+set testargs ""
+
 proc openldk_load { classfile } {
+
+    global testargs
     set timeout 5
     verbose "load $classfile"
-    setenv "CLASSPATH" "./jre8:."
+    setenv "CLASSPATH" "./jre8:.:./simple"
     set classname [string map {".class" ""} $classfile]
-    set result [local_exec "../openldk $classname" "" "" $timeout]
+    set result [local_exec "../openldk $classname $testargs" "" "" $timeout]
     verbose "result = $result"
     set status [lindex $result 0]
     set output [lindex $result 1]
@@ -25,6 +29,7 @@ proc openldk_load { classfile } {
 
 proc openldk-dg-test { prog do_what extra_tool_flags } {
 
+    global testargs
     set timeout 5
 
     verbose "prog $prog" 2
@@ -34,11 +39,13 @@ proc openldk-dg-test { prog do_what extra_tool_flags } {
     set status [local_exec "javac $prog" "" "" $timeout]
     set classname [string map {".java" ""} $prog]
 
+    set testargs "1 2 3 4 5"
+
     return [list [lindex $status 1] "$classname.class"]
 }
 
 
-set tlist [lsort [glob -nocomplain -- *.java]]
+set tlist [lsort [glob -nocomplain -- simple/*.java]]
 
 foreach test $tlist {
 

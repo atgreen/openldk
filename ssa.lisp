@@ -79,6 +79,12 @@
   ((index :initarg :index)
    (const :initarg :const)))
 
+(defclass ssa-if-acmpeq (ssa-branch)
+  ())
+
+(defclass ssa-if-acmpne (ssa-branch)
+  ())
+
 (defclass ssa-if-icmpge (ssa-branch)
   ())
 

@@ -1,5 +1,7 @@
 /* { dg-output "" } */
 
+package simple;
+
 public class icmpeq
 {
     static int compare (int a, int b)

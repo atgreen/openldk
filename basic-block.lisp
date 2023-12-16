@@ -221,6 +221,9 @@ non-null.  Return the entry block."
                                           ;; could be try on entry to a
                                           ;; block, or we have reached
                                           ;; the end of block.
+                                          #|
+                                          (when entry-insn
+                                            (%add-to-block bloc (make-instance 'ssa-branch-target :index (slot-value insn 'address)))) |#
                                           (if (or entry-insn
                                                   (not (gethash address branch-targets)))
                                               (progn

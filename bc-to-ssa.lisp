@@ -422,6 +422,28 @@
                                                  :address pc-start
                                                  :value 2))))))
 
+(defun :IF_ACMPEQ (context code)
+  (with-slots (pc class) context
+    (let ((pc-start pc))
+      (with-slots (constant-pool) class
+        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
+                                              (aref code (incf pc))))))
+          (incf pc)
+          (list (make-instance 'ssa-if-acmpeq
+                               :address pc-start
+                               :offset (+ pc-start offset))))))))
+
+(defun :IF_ACMPNE (context code)
+  (with-slots (pc class) context
+    (let ((pc-start pc))
+      (with-slots (constant-pool) class
+        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
+                                              (aref code (incf pc))))))
+          (incf pc)
+          (list (make-instance 'ssa-if-acmpne
+                               :address pc-start
+                               :offset (+ pc-start offset))))))))
+
 (defun :IF_ICMPGE (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
@@ -595,6 +617,30 @@
           (list (make-instance 'ssa-instanceof
                                :address pc-start
                                :class (emit class constant-pool))))))))
+
+(defun :INVOKEINTERFACE (context code)
+  (with-slots (pc class) context
+    (let ((pc-start pc))
+      (with-slots (constant-pool) class
+        (let* ((index (+ (* (aref code (incf pc)) 256)
+                         (aref code (incf pc))))
+               (method-reference (aref constant-pool index)))
+          (incf pc)
+          (incf pc)
+          (incf pc)
+          (let* ((descriptor
+                  (slot-value (aref constant-pool
+                                    (slot-value
+                                     (aref constant-pool
+                                           (slot-value method-reference
+                                                       'method-descriptor-index))
+                                     'type-descriptor-index))
+                              'value))
+                 (parameter-count (1+ (count-parameters descriptor))))
+            (list (make-instance 'ssa-call-virtual-method
+                                 :address pc-start
+                                 :method-name (emit method-reference constant-pool)
+                                 :args (pop-args parameter-count)))))))))
 
 (defun :INVOKEVIRTUAL (context code)
   (with-slots (pc class) context

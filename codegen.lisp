@@ -10,8 +10,8 @@
 
 (defmethod codegen ((insn ssa-aaload))
   (flag-stack-usage *context*)
-  (list 'let (list (list 'arrayref (list 'pop-item 'stack))
-                   (list 'index (list 'pop-item 'stack)))
+  (list 'let (list (list 'index (list 'pop-item 'stack))
+                   (list 'arrayref (list 'pop-item 'stack)))
         (list 'push-item 'stack (list 'aref 'arrayref 'index))))
 
 (defmethod codegen ((insn ssa-aastore))
@@ -55,7 +55,6 @@
 (defmethod codegen ((insn ssa-checkcast))
   (intern (format nil "#:checkcast-FIXME-~A" (slot-value insn 'index)) :openldk))
 
-(defvar *java-classes* (make-hash-table :test #'equal))
 (defmethod codegen ((insn ssa-class))
   (let* ((classname (slot-value (slot-value insn 'class) 'name))
          (java-class (gethash classname *java-classes*)))
@@ -88,6 +87,18 @@
 (defmethod codegen ((insn ssa-iinc))
   (with-slots (index const) insn
     (list 'incf (intern (format nil "local-~A" index) :openldk) const)))
+
+(defmethod codegen ((insn ssa-if-acmpeq))
+  (flag-stack-usage *context*)
+  (with-slots (offset) insn
+    (list 'if (list 'eq (list 'pop-item 'stack) (list 'pop-item 'stack))
+          (list 'go (intern (format nil "branch-target-~A" offset))))))
+
+(defmethod codegen ((insn ssa-if-acmpne))
+  (flag-stack-usage *context*)
+  (with-slots (offset) insn
+    (list 'if (list 'not (list 'eq (list 'pop-item 'stack) (list 'pop-item 'stack)))
+          (list 'go (intern (format nil "branch-target-~A" offset))))))
 
 (defmethod codegen ((insn ssa-if-icmple))
   (flag-stack-usage *context*)

@@ -25,7 +25,7 @@
   :version "1"
   :serial t
   :components ((:file "package")
-	       (:file "stack")
+               (:file "stack")
                (:file "opcodes")
                (:file "dump")
                (:file "basic-block")

@@ -30,10 +30,13 @@
 (defparameter +bytecode-3-byte+
   '(:CHECKCAST
     :GETFIELD :GETSTATIC :GOTO :IINC
-    :IF_ICMPGE :IF_ICMPLE :IF_ICMPNE :IFEQ :IFGE :IFLE
+    :IF_ACMPEQ :IF_ACMPNE :IF_ICMPGE :IF_ICMPLE :IF_ICMPNE :IFEQ :IFGE :IFLE
     :IFNE :IFNONNULL :IFNULL
     :INSTANCEOF :INVOKEVIRTUAL :INVOKESPECIAL :INVOKESTATIC :NEW :ANEWARRAY
     :PUTFIELD :PUTSTATIC :SIPUSH))
+
+(defparameter +bytecode-5-byte+
+  '(:INVOKEINTERFACE))
 
 (defparameter +bytecode-short-branch-table+
   (let ((sbtable (make-hash-table)))
@@ -55,4 +58,6 @@
       (setf (gethash o bltable) 2))
     (dolist (o +bytecode-3-byte+)
       (setf (gethash o bltable) 3))
+    (dolist (o +bytecode-5-byte+)
+      (setf (gethash o bltable) 5))
     bltable))

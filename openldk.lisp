@@ -1,6 +1,7 @@
 (in-package :openldk)
 
 (defvar *classes* (make-hash-table :test 'equal))
+(defvar *java-classes* (make-hash-table :test #'equal))
 (defvar *cli-classpath* nil)
 (defvar *verbose* nil)
 (defvar *dump-dir* nil)
@@ -291,14 +292,32 @@
       (when-option (options :verbose)
                    (setf *verbose* t))
 
-      (if (not (eq 1 (length free-args)))
+      (if (eq 0 (length free-args))
           (usage)
           (progn
             (%clinit (classload "java/lang/Object" ".:jre8/"))
             (%clinit (classload "java/lang/String" ".:jre8/"))
             (%clinit (classload "java/lang/ClassLoader" ".:jre8/"))
             (%clinit (classload "java/lang/Class" ".:jre8/"))
-            (let* ((class (classload (car free-args) CLASSPATH)))
+
+            ;; Create a java/lang/Class for every class we've see so far.
+            (maphash (lambda (k v)
+                       (let ((klass (make-instance '|java/lang/Class|))
+                             (cname (make-instance '|java/lang/String|))
+                             (cloader (make-instance '|java/lang/ClassLoader|)))
+                         (with-slots (|name| |classLoader|) klass
+                           (setf (slot-value cname '|value|) k)
+                           (setf |name| cname)
+                           (setf |classLoader| cloader))
+                         (setf (gethash k *java-classes*) klass)))
+                     *classes*)
+
+            (let* ((class (classload (car free-args) CLASSPATH))
+                   (args (make-array (1- (length free-args)))))
               (assert (or class (error "Can't load ~A" (car free-args))))
+              (dotimes (i (1- (length free-args)))
+                (let ((arg (make-instance '|java/lang/String|)))
+                  (setf (slot-value arg '|value|) (nth (1+ i) free-args))
+                  (setf (aref args i) arg)))
               (%clinit class)
-              (%eval (list (intern (format nil "~A.main([Ljava/lang/String;)V" (slot-value class 'name)) :openldk) #()))))))))
+              (%eval (list (intern (format nil "~A.main([Ljava/lang/String;)V" (slot-value class 'name)) :openldk) args))))))))
