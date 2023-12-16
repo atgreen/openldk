@@ -48,6 +48,8 @@ Here's an incomplete list of what's not implemented:
 - support for class files beyond Java 8
 - bytecode verification
 - `monitorenter`/`monitorexit` for object synchronization
+- SSA and SSA-based optimizations is aspirational. The compiler currently generates code for a
+  naive stack machine.
 
 Author and License
 -------------------
