@@ -10,8 +10,7 @@ OpenLDK makes use of OpenJDK's core runtime libraries.  This is made
 possible by the GNU Classpath Exception to the GPL, under which
 OpenJDK code is distributed.
 
-Requirements
-------------
+## Requirements
 
 `openldk` has only been tested with sbcl.  It's possible that other
 Common Lisp implementations could be made to work with it, but I am
@@ -26,8 +25,13 @@ my Fedora Linux system that looks like:
 $ export LDK_CLASSPATH=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.392.b08-4.fc39.x86_64/jre/lib/rt.jar
 ```
 
-Debugging
----------
+## Hacking
+
+### Testing
+
+Run `make check` to run through the dejagnu-based testsuite.
+
+### Debugging
 
 The `openldk` runtime will generate useful debug info if you set your
 `LDK_DEBUG` environment variable.  `LDK_DEBUG` should be set to a
@@ -41,8 +45,7 @@ string of characters that are interpreted as below:
 More specifically, running `LDK_DEBUG=cstu openldk Hello` will enable
 all debug output while running `Hello`.
 
-Status
-------
+## Status
 
 It still doesn't work.  You are looking at a work in progress that may
 never be completed.  I don't want to see this on hackernews or reddit
