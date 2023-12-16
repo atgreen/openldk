@@ -34,9 +34,11 @@ The `openldk` runtime will generate useful debug info if you set your
 string of characters that are interpreted as below:
 
 - `c` - dump all Lisp code prior to evalation
+- `s` - show stack push/pop events
+- `t` - trace method entries
 - `u` - unmuffle the Lisp compiler
 
-More specifically, running `LDK_DEBUG=cu openldk Hello` will enable
+More specifically, running `LDK_DEBUG=cstu openldk Hello` will enable
 all debug output while running `Hello`.
 
 Status
