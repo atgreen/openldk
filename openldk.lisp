@@ -240,22 +240,24 @@
         class
         (let ((classfile-stream (open-java-classfile-on-classpath classname)))
           (if classfile-stream
-              (let* ((class
-                       (let ((c (read-classfile classfile-stream)))
-                         (setf (gethash (substitute #\/ #\. classname) *classes*) c)
-                         c))
-                     (super (let ((super (slot-value class 'super)))
-                              (when super (classload super)))))
-                (let ((code (emit-<class> class)))
-                  (%eval code))
-                (when (and (not (string= classname "java/lang/Throwable"))
-                           (subtypep (find-class internal-classname) (find-class '|java/lang/Throwable|)))
-                  (let ((condition-symbol (intern (format nil "condition-~A" classname) :openldk)))
-                    (setf (gethash (find-class (intern classname :openldk)) *condition-table*) condition-symbol)
-                    (let ((ccode (list 'define-condition condition-symbol
-                                       (list (intern (format nil "condition-~A" (slot-value super 'name)) :openldk)) (list))))
-                    (%eval ccode))))
-                class)
+              (unwind-protect
+                   (let* ((class
+                            (let ((c (read-classfile classfile-stream)))
+                              (setf (gethash (substitute #\/ #\. classname) *classes*) c)
+                              c))
+                          (super (let ((super (slot-value class 'super)))
+                                   (when super (classload super)))))
+                     (let ((code (emit-<class> class)))
+                       (%eval code))
+                     (when (and (not (string= classname "java/lang/Throwable"))
+                                (subtypep (find-class internal-classname) (find-class '|java/lang/Throwable|)))
+                       (let ((condition-symbol (intern (format nil "condition-~A" classname) :openldk)))
+                         (setf (gethash (find-class (intern classname :openldk)) *condition-table*) condition-symbol)
+                         (let ((ccode (list 'define-condition condition-symbol
+                                            (list (intern (format nil "condition-~A" (slot-value super 'name)) :openldk)) (list))))
+                           (%eval ccode))))
+                     class)
+                (close classfile-stream))
               (format t "ERROR: Can't find ~A on classpath~%" classname))))))
 
 (defun main ()
