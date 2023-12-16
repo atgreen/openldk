@@ -44,12 +44,15 @@ all debug output while running `Hello`.
 Status
 ------
 
+It still doesn't work.  You are looking at a work in progress that may
+never be completed.  I don't want to see this on hackernews or reddit
+prematurely.
+
 Here's an incomplete list of what's not implemented:
 - support for class files beyond Java 8
 - bytecode verification
 - `monitorenter`/`monitorexit` for object synchronization
-- SSA and SSA-based optimizations is aspirational. The compiler currently generates code for a
-  naive stack machine.
+- SSA and SSA-based optimizations are aspirational. The compiler currently generates code for a naive stack machine.
 
 Author and License
 -------------------
