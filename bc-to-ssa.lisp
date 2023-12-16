@@ -718,7 +718,7 @@
                                       'index))
                                'value))
                  (parameter-count (count-parameters descriptor)))
-            (classload callee-class ".:jre8/")
+            (classload callee-class)
             (list (make-instance 'ssa-call-static-method
                                  :address pc-start
                                  :class callee-class

@@ -51,16 +51,12 @@
 (defun split-classpath (classpath)
   (split-sequence:split-sequence (uiop:inter-directory-separator) classpath))
 
-(defun find-classpath-for-class (class classpath)
-  (let* ((class (substitute (uiop:directory-separator-for-host) #\. class))
-         (dir (find-if
-               (lambda (path)
-                 (let ((fqn (format nil "~A~A~A.class" path (uiop:directory-separator-for-host) class)))
-                   (uiop:file-exists-p fqn)))
-               (split-classpath classpath))))
-    (if dir
-        (uiop:file-exists-p (format nil "~A~A~A.class" dir (uiop:directory-separator-for-host) class))
-        nil)))
+(defun open-java-classfile-on-classpath (class)
+  (let* ((class (substitute (uiop:directory-separator-for-host) #\. class)))
+    (loop for cpe in *classpath*
+          for classfile-stream = (open-java-classfile cpe class)
+          when classfile-stream
+            return classfile-stream)))
 
 (defun %eval (code)
   (when *debug-codegen*
@@ -237,19 +233,19 @@
 
 (defvar *condition-table* (make-hash-table))
 
-(defun classload (classname classpath)
+(defun classload (classname)
   (let ((class (gethash classname *classes*))
         (internal-classname (intern (substitute #\/ #\. classname) :openldk)))
     (if class
         class
-        (let ((fqfn (find-classpath-for-class classname classpath)))
-          (if fqfn
+        (let ((classfile-stream (open-java-classfile-on-classpath classname)))
+          (if classfile-stream
               (let* ((class
-                       (let ((c (read-classfile fqfn)))
+                       (let ((c (read-classfile classfile-stream)))
                          (setf (gethash (substitute #\/ #\. classname) *classes*) c)
                          c))
                      (super (let ((super (slot-value class 'super)))
-                              (when super (classload super classpath)))))
+                              (when super (classload super)))))
                 (let ((code (emit-<class> class)))
                   (%eval code))
                 (when (and (not (string= classname "java/lang/Throwable"))
@@ -260,11 +256,17 @@
                                        (list (intern (format nil "condition-~A" (slot-value super 'name)) :openldk)) (list))))
                     (%eval ccode))))
                 class)
-              (format t "ERROR: Can't find ~A on classpath ~A~%" classname CLASSPATH))))))
+              (format t "ERROR: Can't find ~A on classpath~%" classname))))))
 
 (defun main ()
-  (let ((CLASSPATH (uiop:getenv "CLASSPATH"))
+  (let ((CLASSPATH (uiop:getenv "LDK_CLASSPATH"))
         (LDK_DEBUG (uiop:getenv "LDK_DEBUG")))
+
+    (setf *classpath*
+          (loop for cpe in (split-classpath CLASSPATH)
+                collect (if (str:ends-with? ".jar" cpe)
+                            (make-instance 'jar-classpath-entry :jarfile cpe)
+                            (make-instance 'dir-classpath-entry :dir cpe))))
 
     (when LDK_DEBUG
       (progn
@@ -295,10 +297,10 @@
       (if (eq 0 (length free-args))
           (usage)
           (progn
-            (%clinit (classload "java/lang/Object" ".:jre8/"))
-            (%clinit (classload "java/lang/String" ".:jre8/"))
-            (%clinit (classload "java/lang/ClassLoader" ".:jre8/"))
-            (%clinit (classload "java/lang/Class" ".:jre8/"))
+            (%clinit (classload "java/lang/Object"))
+            (%clinit (classload "java/lang/String"))
+            (%clinit (classload "java/lang/ClassLoader"))
+            (%clinit (classload "java/lang/Class"))
 
             ;; Create a java/lang/Class for every class we've see so far.
             (maphash (lambda (k v)
@@ -312,7 +314,7 @@
                          (setf (gethash k *java-classes*) klass)))
                      *classes*)
 
-            (let* ((class (classload (car free-args) CLASSPATH))
+            (let* ((class (classload (car free-args)))
                    (args (make-array (1- (length free-args)))))
               (assert (or class (error "Can't load ~A" (car free-args))))
               (dotimes (i (1- (length free-args)))

@@ -42,3 +42,16 @@ trivial-backtrace-test, ghcr.io/ocicl/trivial-backtrace@sha256:8189c3a641490b523
 cl-store, ghcr.io/ocicl/cl-store@sha256:2972a9169575148927af8362cfffdf97fb52064e097a85fc75d7e89c90ea9b48, cl-store-20230808-adb52a1/cl-store.asd
 pathname-utils, ghcr.io/ocicl/pathname-utils@sha256:5b204d930cf3f8f7d109775d78e85d5a5dcbb1154f3591ef7f25c8ae69331467, pathname-utils-20230808-c89fd69/pathname-utils.asd
 pathname-utils-test, ghcr.io/ocicl/pathname-utils@sha256:5b204d930cf3f8f7d109775d78e85d5a5dcbb1154f3591ef7f25c8ae69331467, pathname-utils-20230808-c89fd69/pathname-utils-test.asd
+zip, ghcr.io/ocicl/zip@sha256:456faccc24e80777f553a012e0af32955015062cc68ab5aa668c3609a580027e, zip-20230808-688b154/zip.asd
+salza2, ghcr.io/ocicl/salza2@sha256:ee78e58f212f78dca72ef3d56c647a78ff8174fd92db129bc9773597e6b8eafb, salza2-2.1/salza2.asd
+cl-fad, ghcr.io/ocicl/cl-fad@sha256:4abd6537a2e7115b20dbe46c7e6656923f42686d78820d42ed54d6833b6410fc, cl-fad-0.7.6/cl-fad.asd
+bordeaux-threads, ghcr.io/ocicl/bordeaux-threads@sha256:9df017ccbb783949cdaea6c7849d678105e041b784d0fc738220873739c3bfe5, bordeaux-threads-0.9.1/bordeaux-threads.asd
+global-vars, ghcr.io/ocicl/global-vars@sha256:22937c8bd0f635855c2c044b0ae0ab3b438ba5e858192dae462807148547d99a, global-vars-20230809-c749f32/global-vars.asd
+global-vars-test, ghcr.io/ocicl/global-vars@sha256:22937c8bd0f635855c2c044b0ae0ab3b438ba5e858192dae462807148547d99a, global-vars-20230809-c749f32/global-vars-test.asd
+trivial-garbage, ghcr.io/ocicl/trivial-garbage@sha256:fdcc5b6acd3eacb1e9ee305685b72ea270435cf363ea7a9cb1cc3d86a3534ed7, trivial-garbage-20231020-3474f64/trivial-garbage.asd
+str.test, ghcr.io/ocicl/str@sha256:3ef34d84ea40856d8423899d185987c2db8129ef99b74cdb4c07e7fe50446ede, cl-str-20231207-c988818/str.test.asd
+str, ghcr.io/ocicl/str@sha256:3ef34d84ea40856d8423899d185987c2db8129ef99b74cdb4c07e7fe50446ede, cl-str-20231207-c988818/str.asd
+cl-ppcre, ghcr.io/ocicl/cl-ppcre@sha256:8042e7730ed475808e237fcfe34d8e2a5f9f192555922cb819f08969e9ab76c2, cl-ppcre-20230813-93bd7cf/cl-ppcre.asd
+cl-ppcre-unicode, ghcr.io/ocicl/cl-ppcre@sha256:8042e7730ed475808e237fcfe34d8e2a5f9f192555922cb819f08969e9ab76c2, cl-ppcre-20230813-93bd7cf/cl-ppcre-unicode.asd
+cl-unicode, ghcr.io/ocicl/cl-unicode@sha256:719754d063cb0e3c8ec2119713bfca0aa1d359e82eefaebd5d2c7ae48904e0e5, cl-unicode-20231118-07e7ff5/cl-unicode.asd
+cl-change-case, ghcr.io/ocicl/cl-change-case@sha256:67069ab13c96a36125bca952e62a27f5aba36cf8cc696d7ae71e715643b23b9f, cl-change-case-0.2.1/cl-change-case.asd

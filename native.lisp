@@ -19,7 +19,7 @@
 
 (defun |java/lang/Class.getSecurityManager()Ljava/lang/SecurityManager;| ()
   (print "java/lang/Class.getSecurityManager()Ljava/lang/SecurityManager;")
-  (classload "java/lang/SecurityManager" ".:jre8/")
+  (classload "java/lang/SecurityManager")
   (eval (list 'make-instance (list 'quote '|java/lang/SecurityManager|))))
 
 (defmethod |println(Ljava/lang/String;)V| (stream string)
@@ -46,7 +46,7 @@
     (print lname)
     (maphash (lambda (k v) (print k)) *java-classes*)
     (or (gethash lname *java-classes*)
-        (progn (%clinit (classload lname ".:jre8/:mauve/"))
+        (progn (%clinit (classload lname))
                (let ((java-class (make-instance '|java/lang/Class|)))
                  (setf (slot-value java-class '|name|)
                        (let ((s (make-instance '|java/lang/String|)))

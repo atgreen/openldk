@@ -47,7 +47,7 @@
 
 (defmethod emit ((v constant-class-reference) cp)
   (let ((classname (emit (aref cp (slot-value v 'index)) cp)))
-    (make-instance 'ssa-class :class (classload classname ".:./jre8"))))
+    (make-instance 'ssa-class :class (classload classname))))
 
 (defmethod emit-name ((v constant-class-reference) cp)
   (emit (aref cp (slot-value v 'index)) cp))
@@ -212,127 +212,126 @@ stream."
            (read-buffer attributes-length)))))
     attributes))
 
-(defun read-classfile (filename)
+(defun read-classfile (fin)
   (let ((class (make-instance '<class>)))
     (with-slots (methods fields super) class
-      (with-open-file (fin filename :element-type '(unsigned-byte 8))
-        (fast-io:with-fast-input (fin-fast nil fin)
-           (let ((bitio (bitio:make-bitio fin-fast #'fast-io:fast-read-byte #'wrap-fast-read-sequence)))
-             (flet ((read-u1 () (bitio:read-one-byte bitio)))
-               (bitio:read-integer bitio :unsignedp nil :byte-endian :be) ;; magic bytes
-               (read-u2) ;; minor-version
-               (read-u2) ;; major version
-               (let ((constant-pool-count (read-u2)))
-                 (let ((constant-pool (make-array (1+ constant-pool-count)))
-                       (skip nil))
-                   (setf (slot-value class 'constant-pool) constant-pool)
-                   (dotimes (i (1- constant-pool-count))
-                     (if skip
-                         (setf skip nil)
-                       (let ((tag (read-u1)))
-                         (setf (aref constant-pool (1+ i))
-                               ;; https://en.wikipedia.org/wiki/Java_class_file
-                               (ccase tag
-                                      (1
-                                       (let* ((size (read-u2))
-                                              (string
-                                               (flexi-streams:octets-to-string (read-buffer size)
-                                                                               :external-format :utf-8)))
-                                         (make-instance 'ssa-string-literal
-                                                        :value string)))
-                                      (3
-                                       (make-instance 'constant-int
-                                                      :value (read-u4)))
-                                      (4
-                                       (make-instance 'constant-float
-                                                      :value (read-u4)))
-                                      (5
-                                       (progn
-                                         (setf skip t)
-                                         (make-instance 'constant-long
-                                                        :value (read-u8))))
-                                      (7
-                                       (make-instance 'constant-class-reference
-                                                      :index (read-u2)))
-                                      (8
-                                       (make-instance 'constant-string-reference
-                                                      :index (read-u2)))
-                                      (9
-                                       (make-instance 'constant-field-reference
-                                                      :class-index (read-u2)
-                                                      :type-descriptor-index (read-u2)))
-                                      (10
-                                       (let ((class-index (read-u2))
-                                             (method-descriptor-index (read-u2)))
-                                         (make-instance 'constant-method-reference
-                                                        :class-index class-index
-                                                        :method-descriptor-index method-descriptor-index)))
-                                      (11
-                                       (let ((class-index (read-u2))
-                                             (method-descriptor-index (read-u2)))
-                                         (make-instance 'constant-interface-method-reference
-                                                        :class-index class-index
-                                                        :method-descriptor-index method-descriptor-index)))
-                                      (12
-                                       (let ((name-index (read-u2))
-                                             (type-descriptor-index (read-u2)))
-                                         (make-instance 'constant-name-and-type-descriptor
-                                                        :name-index name-index
-                                                        :type-descriptor-index type-descriptor-index)))
-                                      (15
-                                       (let ((fixme2 (read-u1))
-                                             (fixme1 (read-u2)))
-                                         (make-instance 'constant-method-handle)))
-				      (16
-				       (let ((fixme1 (read-u2)))
-					 (make-instance 'constant-method-type)))
-                                      (18
-                                       (let ((fixme (read-u4)))
-                                         (make-instance 'constant-invoke-dynamic)))
-                                      )))))
+      (fast-io:with-fast-input (fin-fast nil fin)
+        (let ((bitio (bitio:make-bitio fin-fast #'fast-io:fast-read-byte #'wrap-fast-read-sequence)))
+          (flet ((read-u1 () (bitio:read-one-byte bitio)))
+            (bitio:read-integer bitio :unsignedp nil :byte-endian :be) ;; magic bytes
+            (read-u2) ;; minor-version
+            (read-u2) ;; major version
+            (let ((constant-pool-count (read-u2)))
+              (let ((constant-pool (make-array (1+ constant-pool-count)))
+                    (skip nil))
+                (setf (slot-value class 'constant-pool) constant-pool)
+                (dotimes (i (1- constant-pool-count))
+                  (if skip
+                      (setf skip nil)
+                      (let ((tag (read-u1)))
+                        (setf (aref constant-pool (1+ i))
+                              ;; https://en.wikipedia.org/wiki/Java_class_file
+                              (ccase tag
+                                (1
+                                 (let* ((size (read-u2))
+                                        (string
+                                          (flexi-streams:octets-to-string (read-buffer size)
+                                                                          :external-format :utf-8)))
+                                   (make-instance 'ssa-string-literal
+                                                  :value string)))
+                                (3
+                                 (make-instance 'constant-int
+                                                :value (read-u4)))
+                                (4
+                                 (make-instance 'constant-float
+                                                :value (read-u4)))
+                                (5
+                                 (progn
+                                   (setf skip t)
+                                   (make-instance 'constant-long
+                                                  :value (read-u8))))
+                                (7
+                                 (make-instance 'constant-class-reference
+                                                :index (read-u2)))
+                                (8
+                                 (make-instance 'constant-string-reference
+                                                :index (read-u2)))
+                                (9
+                                 (make-instance 'constant-field-reference
+                                                :class-index (read-u2)
+                                                :type-descriptor-index (read-u2)))
+                                (10
+                                 (let ((class-index (read-u2))
+                                       (method-descriptor-index (read-u2)))
+                                   (make-instance 'constant-method-reference
+                                                  :class-index class-index
+                                                  :method-descriptor-index method-descriptor-index)))
+                                (11
+                                 (let ((class-index (read-u2))
+                                       (method-descriptor-index (read-u2)))
+                                   (make-instance 'constant-interface-method-reference
+                                                  :class-index class-index
+                                                  :method-descriptor-index method-descriptor-index)))
+                                (12
+                                 (let ((name-index (read-u2))
+                                       (type-descriptor-index (read-u2)))
+                                   (make-instance 'constant-name-and-type-descriptor
+                                                  :name-index name-index
+                                                  :type-descriptor-index type-descriptor-index)))
+                                (15
+                                 (let ((fixme2 (read-u1))
+                                       (fixme1 (read-u2)))
+                                   (make-instance 'constant-method-handle)))
+                                (16
+                                 (let ((fixme1 (read-u2)))
+                                   (make-instance 'constant-method-type)))
+                                (18
+                                 (let ((fixme (read-u4)))
+                                   (make-instance 'constant-invoke-dynamic)))
+                                )))))
 
-                   (let* ((access-flags (read-u2))
-                          (this-class (read-u2))
-                          (super-class (read-u2))
-                          (interface-count (read-u2))
-                          (interfaces (make-array interface-count :element-type '(unsigned-byte 16))))
-                     (setf (slot-value class 'name) (slot-value (aref constant-pool (slot-value (aref constant-pool this-class) 'index)) 'value))
-                     (setf (slot-value class 'access-flags) access-flags)
-                     (if (> super-class 0)
-                         (setf super
-                               (slot-value (aref constant-pool (slot-value (aref constant-pool super-class) 'index)) 'value)))
+                (let* ((access-flags (read-u2))
+                       (this-class (read-u2))
+                       (super-class (read-u2))
+                       (interface-count (read-u2))
+                       (interfaces (make-array interface-count :element-type '(unsigned-byte 16))))
+                  (setf (slot-value class 'name) (slot-value (aref constant-pool (slot-value (aref constant-pool this-class) 'index)) 'value))
+                  (setf (slot-value class 'access-flags) access-flags)
+                  (if (> super-class 0)
+                      (setf super
+                            (slot-value (aref constant-pool (slot-value (aref constant-pool super-class) 'index)) 'value)))
 
-                     (bitio:read-bytes bitio interfaces :bit-endian :be :bits-per-byte 16)
+                  (bitio:read-bytes bitio interfaces :bit-endian :be :bits-per-byte 16)
 
-                     (let ((fields-count (read-u2)))
-                       (setf fields (make-array fields-count))
-                       (dotimes (i fields-count)
-                         (let* ((access-flags (read-u2))
-                                (name-index (read-u2))
-                                (descriptor-index (read-u2))
-                                (attributes-count (read-u2))
-                                (field (make-instance '<field>
+                  (let ((fields-count (read-u2)))
+                    (setf fields (make-array fields-count))
+                    (dotimes (i fields-count)
+                      (let* ((access-flags (read-u2))
+                             (name-index (read-u2))
+                             (descriptor-index (read-u2))
+                             (attributes-count (read-u2))
+                             (field (make-instance '<field>
+                                                   :class class
+                                                   :name (slot-value (aref constant-pool name-index) 'value)
+                                                   :descriptor (slot-value (aref constant-pool descriptor-index) 'value)
+                                                   :access-flags access-flags)))
+                        (setf (aref fields i) field)
+                        (setf (slot-value field 'attributes)
+                              (read-attributes bitio constant-pool class attributes-count))))
+                    (let ((methods-count (read-u2)))
+                      (setf methods (make-array methods-count))
+                      (dotimes (i methods-count)
+                        (let* ((access-flags (read-u2))
+                               (name-index (read-u2))
+                               (descriptor-index (read-u2))
+                               (attributes-count (read-u2))
+                               (method (make-instance '<method>
                                                       :class class
                                                       :name (slot-value (aref constant-pool name-index) 'value)
                                                       :descriptor (slot-value (aref constant-pool descriptor-index) 'value)
                                                       :access-flags access-flags)))
-                           (setf (aref fields i) field)
-                           (setf (slot-value field 'attributes)
-                                 (read-attributes bitio constant-pool class attributes-count))))
-                       (let ((methods-count (read-u2)))
-                         (setf methods (make-array methods-count))
-                         (dotimes (i methods-count)
-                           (let* ((access-flags (read-u2))
-                                  (name-index (read-u2))
-                                  (descriptor-index (read-u2))
-                                  (attributes-count (read-u2))
-                                  (method (make-instance '<method>
-                                                         :class class
-                                                         :name (slot-value (aref constant-pool name-index) 'value)
-                                                         :descriptor (slot-value (aref constant-pool descriptor-index) 'value)
-                                                         :access-flags access-flags)))
-                             (setf (aref methods i) method)
-                             (setf (slot-value method 'attributes)
-                                   (read-attributes bitio constant-pool class attributes-count))))
-                         (read-attributes bitio constant-pool class (read-u2)))))
-                   class)))))))))
+                          (setf (aref methods i) method)
+                          (setf (slot-value method 'attributes)
+                                (read-attributes bitio constant-pool class attributes-count))))
+                      (read-attributes bitio constant-pool class (read-u2)))))
+                class))))))))

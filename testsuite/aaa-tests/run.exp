@@ -11,7 +11,8 @@ proc openldk_load { classfile } {
     global testargs
     set timeout 5
     verbose "load $classfile"
-    setenv "CLASSPATH" "./jre8:.:./simple"
+    set ldkcp [getenv "LDK_CLASSPATH"]
+    setenv "LDK_CLASSPATH" "$ldkcp:.:./aaa-tests"
     set classname [string map {".class" ""} $classfile]
     set result [local_exec "../openldk $classname $testargs" "" "" $timeout]
     verbose "result = $result"
@@ -45,7 +46,7 @@ proc openldk-dg-test { prog do_what extra_tool_flags } {
 }
 
 
-set tlist [lsort [glob -nocomplain -- simple/*.java]]
+set tlist [lsort [glob -nocomplain -- aaa-tests/*.java]]
 
 foreach test $tlist {
 
