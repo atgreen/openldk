@@ -1,6 +1,6 @@
 /* { dg-output "^OK!\r\nDone" } */
 
-package simple;
+package aaa;
 
 public class h003
 {
