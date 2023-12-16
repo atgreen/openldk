@@ -13,9 +13,9 @@ OpenJDK code is distributed.
 Requirements
 ------------
 
-`openldk` has only been tested with `sbcl`.  It's possible that other
-Common Lisp implementation could be made to work with it, but I am
-only developing with `sbcl` for now.
+`openldk` has only been tested with sbcl.  It's possible that other
+Common Lisp implementations could be made to work with it, but I am
+only developing with sbcl for now.
 
 `openldk` has only been tested in Linux.
 
