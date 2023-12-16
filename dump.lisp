@@ -44,5 +44,3 @@
     (setf *context* (cadr v))
     (setf *classes* (caddr v))
     (car v)))
-
-(alexandria:starts-with-subseq "sae" "sadfdb")
