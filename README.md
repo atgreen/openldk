@@ -19,6 +19,13 @@ only developing with `sbcl` for now.
 
 `openldk` has only been tested in Linux.
 
+`openldk` uses the `LDK_CLASSPATH` environment variable rather than
+`CLASSPATH`.  Be sure to point it at your Java 8 runtime jar file.  On
+my Fedora Linux system that looks like:
+```
+$ export LDK_CLASSPATH=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.392.b08-4.fc39.x86_64/jre/lib/rt.jar
+```
+
 Debugging
 ---------
 
