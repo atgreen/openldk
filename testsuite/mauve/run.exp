@@ -49,6 +49,7 @@ set tlist [lsort [glob -nocomplain -- mauve/gnu/testlet/java/lang/*/*.java]]
 
 set ldkcp [getenv "LDK_CLASSPATH"]
 setenv "LDK_CLASSPATH" "$ldkcp:.:./mauve"
+setenv "CLASSPATH" "$ldkcp:.:./mauve"
 local_exec "javac mauve/openldkHarness.java" "" "" "10"
 
 foreach test $tlist {
