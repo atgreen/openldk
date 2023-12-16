@@ -33,7 +33,7 @@ The `openldk` runtime will generate useful debug info if you set your
 `LDK_DEBUG` environment variable.  `LDK_DEBUG` should be set to a
 string of characters that are interpreted as below:
 
-- `c` - dump all Lisp code prior to evalation
+- `c` - dump all Lisp code prior to evaluation
 - `s` - show stack push/pop events
 - `t` - trace method entries
 - `u` - unmuffle the Lisp compiler
