@@ -30,6 +30,11 @@ jobs:
           cd ..
           rm -rf ocicl-1.0.19
         shell: bash
+      - name: Install rlgl
+        run: |
+	        wget -qO - https://rl.gl/cli/rlgl-linux-amd64.tgz
+          tar --strip-components=2 -xvzf - ./rlgl/rlgl;
+        shell: bash
       - name: Install dejagnu and java
         run: |
           sudo apt-get update
@@ -40,4 +45,7 @@ jobs:
           ocicl install
           make
           LDK_CLASSPATH=/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/rt.jar make check RUNTESTFLAGS=aaa/run.exp
+          RLGL_KEY=0LIBFFI-0LIBFFI-0LIBFFI-0LIBFFI
+          ./rlgl l --key=${RLGL_KEY} https://rl.gl
+          ./rlgl e -l project=openldk -l sha=${GITHUB_SHA:0:7} --policy=https://github.com/libffi/rlgl-policy.git */testsuite/openldk.log
         shell: bash
