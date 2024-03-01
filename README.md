@@ -1,5 +1,9 @@
 # OpenLDK
 
+> [!WARNING]
+> This does not work and may never work.  Please don't tell anyone
+> about this.  I just prefer to tinker in public.
+
 OpenLDK is a JIT compiler and runtime for Java written in Common Lisp.
 It works by incrementally translating Java bytecode into Lisp, and
 then compiling that into native machine code for execution.  Java
