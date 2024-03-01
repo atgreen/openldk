@@ -32,8 +32,7 @@ jobs:
         shell: bash
       - name: Install rlgl
         run: |
-          wget -qO - https://rl.gl/cli/rlgl-linux-amd64.tgz
-          tar --strip-components=2 -xvzf - ./rlgl/rlgl;
+          wget -qO - https://rl.gl/cli/rlgl-linux-amd64.tgz | tar --strip-components=2 -xvzf - ./rlgl/rlgl;
         shell: bash
       - name: Install dejagnu and java
         run: |
