@@ -44,6 +44,7 @@ jobs:
           ocicl install
           make
           LDK_CLASSPATH=/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/rt.jar make check RUNTESTFLAGS=aaa/run.exp || true
+          echo $?
           RLGL_KEY=OPENLDK-OPENLDK-OPENLDK-OPENLDK
           ./rlgl l --key=${RLGL_KEY} https://rl.gl
           ./rlgl e -l project=openldk -l sha=${GITHUB_SHA:0:7} --policy=https://github.com/openldk-rlgl-policy.git testsuite/openldk.log
