@@ -1,0 +1,38 @@
+on:
+  # Triggers the workflow on push or pull request events but only for the main branch
+  push:
+    branches: [ main, windows ]
+  pull_request:
+    branches: [ main, windows ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install SBCL
+        run: |
+          curl -L -O "https://downloads.sourceforge.net/project/sbcl/sbcl/2.4.2/sbcl-2.4.2-x86-64-linux-binary.tar.bz2"
+          tar -xf sbcl-2.4.2-x86-64-linux-binary.tar.bz2
+          cd sbcl-2.4.2-x86-64-linux
+          ./install.sh --prefix=$HOME/.local
+          cd ..
+          rm -rf sbcl-2.4.2-x86-64-linux-binary.tar.bz2 sbcl-2.4.2-x86-64-linux
+        shell: bash
+      - name: Install ocicl
+        run: |
+          curl -L https://github.com/ocicl/ocicl/archive/refs/tags/v1.0.19.tar.gz | tar xvfz -
+          cd ocicl-1.0.19
+          make && make install
+          ~/.local/bin/ocicl setup > ~/.sbclrc
+          echo "(pushnew (uiop:getcwd) asdf:*central-registry*)" >> ~/.sbclrc
+          cd ..
+          rm -rf ocicl-1.0.19
+        shell: bash
+      - name: Build and Test
+        run: |
+          ocicl install
+          make
+          make check RUNTESTFLAGS=aaa/run.exp
+        shell: bash
