@@ -30,6 +30,11 @@ jobs:
           cd ..
           rm -rf ocicl-1.0.19
         shell: bash
+      - name: Install dejagnu
+        run: |
+          sudo apt-get update
+          sudo apt-get install dejagnu
+        shell: bash
       - name: Build and Test
         run: |
           ocicl install
