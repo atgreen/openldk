@@ -30,14 +30,14 @@ jobs:
           cd ..
           rm -rf ocicl-1.0.19
         shell: bash
-      - name: Install dejagnu
+      - name: Install dejagnu and java
         run: |
           sudo apt-get update
-          sudo apt-get install dejagnu
+          sudo apt-get install dejagnu openjdk-8-jre
         shell: bash
       - name: Build and Test
         run: |
           ocicl install
           make
-          make check RUNTESTFLAGS=aaa/run.exp
+          LDK_CLASSPATH=/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/rt.jar make check RUNTESTFLAGS=aaa/run.exp
         shell: bash
