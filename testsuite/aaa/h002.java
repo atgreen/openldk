@@ -1,6 +1,6 @@
 /* { dg-output "^30" } */
 
-package simple;
+package aaa;
 
 public class h002
 {

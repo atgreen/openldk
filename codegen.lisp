@@ -100,6 +100,12 @@
     (list 'if (list 'not (list 'eq (list 'pop-item 'stack) (list 'pop-item 'stack)))
           (list 'go (intern (format nil "branch-target-~A" offset))))))
 
+(defmethod codegen ((insn ssa-if-icmpeq))
+  (flag-stack-usage *context*)
+  (with-slots (offset) insn
+    (list 'if (list 'equal (list 'pop-item 'stack) (list 'pop-item 'stack))
+          (list 'go (intern (format nil "branch-target-~A" offset))))))
+
 (defmethod codegen ((insn ssa-if-icmple))
   (flag-stack-usage *context*)
   (with-slots (offset) insn

@@ -1,6 +1,6 @@
 /* { dg-output "^Hello!" } */
 
-package simple;
+package aaa;
 
 public class h001
 {

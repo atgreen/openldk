@@ -33,13 +33,14 @@
                (:file "bootstrap")
                (:file "native")
                (:file "context")
+               (:file "classpath")
                (:file "classfile")
                (:file "descriptors")
                (:file "ssa")
                (:file "bc-to-ssa")
                (:file "codegen")
                (:file "openldk"))
-  :depends-on (:bitio :fast-io :unix-opts :split-sequence :flexi-streams :cl-containers :closer-mop :trivial-backtrace :cl-store :pathname-utils)
+  :depends-on (:bitio :fast-io :unix-opts :split-sequence :flexi-streams :cl-containers :closer-mop :trivial-backtrace :cl-store :pathname-utils :str :zip)
   :build-operation "program-op"
   :build-pathname "openldk"
   :entry-point "openldk:main")

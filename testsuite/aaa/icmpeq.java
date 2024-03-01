@@ -1,6 +1,6 @@
 /* { dg-output "" } */
 
-package simple;
+package aaa;
 
 public class icmpeq
 {

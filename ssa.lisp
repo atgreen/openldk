@@ -88,6 +88,9 @@
 (defclass ssa-if-icmpge (ssa-branch)
   ())
 
+(defclass ssa-if-icmpeq (ssa-branch)
+  ())
+
 (defclass ssa-if-icmple (ssa-branch)
   ())
 

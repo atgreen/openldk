@@ -444,6 +444,17 @@
                                :address pc-start
                                :offset (+ pc-start offset))))))))
 
+(defun :IF_ICMPEQ (context code)
+  (with-slots (pc class) context
+    (let ((pc-start pc))
+      (with-slots (constant-pool) class
+        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
+                                              (aref code (incf pc))))))
+          (incf pc)
+          (list (make-instance 'ssa-if-icmpeq
+                               :address pc-start
+                               :offset (+ pc-start offset))))))))
+
 (defun :IF_ICMPGE (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
@@ -718,7 +729,7 @@
                                       'index))
                                'value))
                  (parameter-count (count-parameters descriptor)))
-            (classload callee-class ".:jre8/")
+            (classload callee-class)
             (list (make-instance 'ssa-call-static-method
                                  :address pc-start
                                  :class callee-class
