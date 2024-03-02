@@ -13,7 +13,9 @@
 (defclass constant-int (constant-value) ())
 (defclass constant-long (constant-value) ())
 
-(defclass constant-invoke-dynamic () ())
+(defclass constant-invoke-dynamic ()
+  ((bootstrap-method-attr-index :initarg :bootstrap-method-attr-index)
+   (name-and-type-index :initarg :name-and-type-index)))
 
 (defclass constant-method-handle () ())
 
@@ -286,8 +288,11 @@ stream."
                                  (let ((fixme1 (read-u2)))
                                    (make-instance 'constant-method-type)))
                                 (18
-                                 (let ((fixme (read-u4)))
-                                   (make-instance 'constant-invoke-dynamic)))
+                                 (let ((bootstrap-method-attr-index (read-u2))
+                                       (name-and-type-index (read-u2)))
+                                   (make-instance 'constant-invoke-dynamic
+                                                  :bootstrap-method-attr-index bootstrap-method-attr-index
+                                                  :name-and-type-index name-and-type-index)))
                                 )))))
 
                 (let* ((access-flags (read-u2))
