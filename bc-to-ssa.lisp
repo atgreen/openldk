@@ -862,6 +862,14 @@
       (list (make-instance 'ssa-ishl
                            :address pc-start)))))
 
+(defun :ISHR (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-ishr
+                           :address pc-start)))))
+
 (defun :ARETURN (context code)
   (:IRETURN context code))
 

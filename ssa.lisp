@@ -139,6 +139,9 @@
 (defclass ssa-ishl (ssa-node)
   ())
 
+(defclass ssa-ishr (ssa-node)
+  ())
+
 (defclass ssa-call (ssa-node)
   ())
 

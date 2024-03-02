@@ -210,6 +210,12 @@
                    (list 'op1 (list 'pop-item 'stack)))
 	      (list 'push-item 'stack (list 'ash 'op1 'op2))))
 
+(defmethod codegen ((insn ssa-ishr))
+  (flag-stack-usage *context*)
+  (list 'let (list (list 'op2 (list 'pop-item 'stack))
+                   (list 'op1 (list 'pop-item 'stack)))
+	      (list 'push-item 'stack (list 'ash 'op1 (list '- 'op2)))))
+
 (defmethod codegen ((insn ssa-lushr))
   (flag-stack-usage *context*)
   (list 'let (list (list 'op2 (list 'pop-item 'stack))
