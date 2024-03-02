@@ -9,6 +9,13 @@
 (defun |java/lang/System.registerNatives()V| ()
   ())
 
+(defun |java/lang/System.arraycopy(Ljava/lang/Object;ILjava/lang/Object;II)V|
+    (source-array source-position dest-array dest-position length)
+  (replace dest-array source-array
+           :start1 dest-position
+           :start2 source-position
+           :end2 (+ source-position length)))
+
 (defun |java/lang/Class.registerNatives()V| ()
   ())
 
