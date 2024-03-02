@@ -16,6 +16,11 @@ OpenJDK code is distributed.
 
 ## Requirements
 
+System dependencies are managed with
+[`ocicl`](https://github.com/ocicl/ocicl).  Just run `ocicl install`
+in the top level source directory to download and install of the
+`openldk`'s dependencies.
+
 `openldk` has only been tested with sbcl.  It's possible that other
 Common Lisp implementations could be made to work with it, but I am
 only developing with sbcl for now.
