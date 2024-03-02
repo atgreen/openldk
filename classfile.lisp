@@ -1,5 +1,10 @@
 (in-package :openldk)
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  #+sbcl (sb-int:set-floating-point-modes :traps nil)
+  #+cmucl (ext:set-floating-point-modes :traps nil)
+  #+linux (cffi:foreign-funcall "fedisableexcept" :int -1))
+
 (defclass constant-class-reference ()
   ((index :initarg :index)))
 
@@ -12,6 +17,7 @@
 (defclass constant-float (constant-value) ())
 (defclass constant-int (constant-value) ())
 (defclass constant-long (constant-value) ())
+(defclass constant-double (constant-value) ())
 
 (defclass constant-invoke-dynamic ()
   ((bootstrap-method-attr-index :initarg :bootstrap-method-attr-index)
@@ -245,13 +251,19 @@ stream."
                                  (make-instance 'constant-int
                                                 :value (read-u4)))
                                 (4
-                                 (make-instance 'constant-float
-                                                :value (read-u4)))
+                                 (let ((f (ieee-floats:decode-float32 (read-u4))))
+                                   (make-instance 'constant-float
+                                                  :value f)))
                                 (5
                                  (progn
                                    (setf skip t)
                                    (make-instance 'constant-long
                                                   :value (read-u8))))
+                                (6
+                                 (progn
+                                   (setf skip t)
+                                   (make-instance 'constant-double
+                                                  :value (ieee-floats:decode-float64 (read-u8)))))
                                 (7
                                  (make-instance 'constant-class-reference
                                                 :index (read-u2)))

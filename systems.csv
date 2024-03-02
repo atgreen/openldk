@@ -55,3 +55,4 @@ cl-ppcre, ghcr.io/ocicl/cl-ppcre@sha256:8042e7730ed475808e237fcfe34d8e2a5f9f1925
 cl-ppcre-unicode, ghcr.io/ocicl/cl-ppcre@sha256:8042e7730ed475808e237fcfe34d8e2a5f9f192555922cb819f08969e9ab76c2, cl-ppcre-20230813-93bd7cf/cl-ppcre-unicode.asd
 cl-unicode, ghcr.io/ocicl/cl-unicode@sha256:719754d063cb0e3c8ec2119713bfca0aa1d359e82eefaebd5d2c7ae48904e0e5, cl-unicode-20231118-07e7ff5/cl-unicode.asd
 cl-change-case, ghcr.io/ocicl/cl-change-case@sha256:67069ab13c96a36125bca952e62a27f5aba36cf8cc696d7ae71e715643b23b9f, cl-change-case-0.2.1/cl-change-case.asd
+ieee-floats, ghcr.io/ocicl/ieee-floats@sha256:841f2a324bff7bccf622f9e16684ea58eb8566ed8ac63df42ad1b9738aca6972, ieee-floats-20230808-9566ce8/ieee-floats.asd

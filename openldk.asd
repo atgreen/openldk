@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: JICL; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2023  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2023, 2024  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; This program is free software: you can redistribute it and/or
 ;;; modify it under the terms of the GNU Affero General Public License
@@ -40,7 +40,7 @@
                (:file "bc-to-ssa")
                (:file "codegen")
                (:file "openldk"))
-  :depends-on (:bitio :fast-io :unix-opts :split-sequence :flexi-streams :cl-containers :closer-mop :trivial-backtrace :cl-store :pathname-utils :str :zip)
+  :depends-on (:bitio :fast-io :unix-opts :split-sequence :flexi-streams :cl-containers :closer-mop :trivial-backtrace :cl-store :pathname-utils :str :zip :ieee-floats)
   :build-operation "program-op"
   :build-pathname "openldk"
   :entry-point "openldk:main")
