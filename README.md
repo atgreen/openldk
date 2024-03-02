@@ -18,7 +18,7 @@ OpenJDK code is distributed.
 
 System dependencies are managed with
 [`ocicl`](https://github.com/ocicl/ocicl).  Just run `ocicl install`
-in the top level source directory to download and install of the
+in the top level source directory to download and install
 `openldk`'s dependencies.
 
 `openldk` has only been tested with sbcl.  It's possible that other
