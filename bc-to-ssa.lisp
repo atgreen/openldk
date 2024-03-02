@@ -711,22 +711,22 @@
       (with-slots (constant-pool) class
         (let* ((index (+ (* (aref code (incf pc)) 256)
                          (aref code (incf pc))))
-               (method-reference (aref constant-pool index)))
+               (invoke-dynamic-info (aref constant-pool index)))
           (incf pc)
           (incf pc)
           (incf pc)
-          (let* ((descriptor
+          (let* ((name-and-type (aref constant-pool
+                                      (slot-value invoke-dynamic-info
+                                                  'name-and-type-index)))
+                 (descriptor
                   (slot-value (aref constant-pool
-                                    (slot-value
-                                     (aref constant-pool
-                                           (slot-value method-reference
-                                                       'method-descriptor-index))
-                                     'type-descriptor-index))
+                                    (slot-value name-and-type 'type-descriptor-index))
                               'value))
                  (parameter-count (1+ (count-parameters descriptor))))
+            (format t "==== ~A ====~%" (emit name-and-type constant-pool))
             (list (make-instance 'ssa-call-virtual-method
                                  :address pc-start
-                                 :method-name (emit method-reference constant-pool)
+                                 :method-name (emit name-and-type constant-pool)
                                  :args (pop-args parameter-count)))))))))
 
 (defun :INVOKEINTERFACE (context code)
