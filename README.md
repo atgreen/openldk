@@ -38,7 +38,10 @@ $ export LDK_CLASSPATH=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.392.b08-4.fc39.x86_
 
 ### Testing
 
-Run `make check` to run through the dejagnu-based testsuite.
+Run `make check` to run through the dejagnu-based testsuite.  This
+project makes use of github actions, in which we use [red light green
+light](https://rl.gl) to evaluate test results.  The rlgl policy for openldk is found at
+https://github.com/atgreen/openldk-rlgl-policy.
 
 ### Debugging
 
