@@ -52,6 +52,20 @@
           call
           (list 'push-item 'stack call)))))
 
+(defmethod codegen ((insn ssa-castore))
+  (flag-stack-usage *context*)
+  (list 'let (list (list 'arrayref (list 'pop-item 'stack))
+                   (list 'index (list 'pop-item 'stack))
+                   (list 'value (list 'pop-item 'stack)))
+        (list 'setf (list 'aref 'arrayref 'index) 'value)))
+
+(defmethod codegen ((insn ssa-iastore))
+  (flag-stack-usage *context*)
+  (list 'let (list (list 'arrayref (list 'pop-item 'stack))
+                   (list 'index (list 'pop-item 'stack))
+                   (list 'value (list 'pop-item 'stack)))
+        (list 'setf (list 'aref 'arrayref 'index) 'value)))
+
 (defmethod codegen ((insn ssa-checkcast))
   (intern (format nil "#:checkcast-FIXME-~A" (slot-value insn 'index)) :openldk))
 
@@ -83,6 +97,12 @@
 (defmethod codegen ((insn ssa-dup))
   (flag-stack-usage *context*)
   (list 'push-item 'stack (list 'car 'stack)))
+
+(defmethod codegen ((insn ssa-iaload))
+  (flag-stack-usage *context*)
+  (list 'let (list (list 'index (list 'pop-item 'stack))
+                   (list 'arrayref (list 'pop-item 'stack)))
+        (list 'push-item 'stack (list 'aref 'arrayref 'index))))
 
 (defmethod codegen ((insn ssa-ineg))
   (flag-stack-usage *context*)
@@ -120,6 +140,12 @@
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'if (list '<= (list 'pop-item 'stack) (list 'pop-item 'stack))
+          (list 'go (intern (format nil "branch-target-~A" offset))))))
+
+(defmethod codegen ((insn ssa-if-icmpgt))
+  (flag-stack-usage *context*)
+  (with-slots (offset) insn
+    (list 'if (list '< (list 'pop-item 'stack) (list 'pop-item 'stack))
           (list 'go (intern (format nil "branch-target-~A" offset))))))
 
 (defmethod codegen ((insn ssa-if-icmpne))

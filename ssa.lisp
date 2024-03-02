@@ -19,6 +19,12 @@
 (defclass ssa-aastore (ssa-node)
   ())
 
+(defclass ssa-castore (ssa-node)
+  ())
+
+(defclass ssa-iastore (ssa-node)
+  ())
+
 (defclass ssa-aload (ssa-node)
   ((index :initarg :index)))
 
@@ -75,6 +81,9 @@
 (defclass ssa-goto (ssa-branch)
   ())
 
+(defclass ssa-iaload (ssa-node)
+  ())
+
 (defclass ssa-iinc (ssa-node)
   ((index :initarg :index)
    (const :initarg :const)))
@@ -86,6 +95,9 @@
   ())
 
 (defclass ssa-if-icmpge (ssa-branch)
+  ())
+
+(defclass ssa-if-icmpgt (ssa-branch)
   ())
 
 (defclass ssa-if-icmpeq (ssa-branch)

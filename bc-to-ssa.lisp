@@ -146,6 +146,22 @@
                                                   :address pc-start
                                                   :index 2))))))
 
+(defun :CASTORE (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-castore
+                           :address pc-start)))))
+
+(defun :IASTORE (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-iastore
+                           :address pc-start)))))
+
 (defun :IINC (context code)
   (with-slots (pc) context
     (let ((pc-start pc))
@@ -389,6 +405,14 @@
                                :address pc-start
                                :offset (+ pc-start offset))))))))
 
+(defun :IALOAD (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-iaload
+                           :address pc-start)))))
+
 (defun :ICONST_0 (context code)
   (declare (ignore code))
   (with-slots (pc) context
@@ -496,6 +520,17 @@
                                               (aref code (incf pc))))))
           (incf pc)
           (list (make-instance 'ssa-if-icmpge
+                               :address pc-start
+                               :offset (+ pc-start offset))))))))
+
+(defun :IF_ICMPGT (context code)
+  (with-slots (pc class) context
+    (let ((pc-start pc))
+      (with-slots (constant-pool) class
+        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
+                                              (aref code (incf pc))))))
+          (incf pc)
+          (list (make-instance 'ssa-if-icmpgt
                                :address pc-start
                                :offset (+ pc-start offset))))))))
 
