@@ -78,6 +78,9 @@
 (defclass ssa-dup (ssa-node)
   ())
 
+(defclass ssa-dup-x1 (ssa-node)
+  ())
+
 (defclass ssa-goto (ssa-branch)
   ())
 

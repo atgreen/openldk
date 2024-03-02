@@ -98,6 +98,14 @@
   (flag-stack-usage *context*)
   (list 'push-item 'stack (list 'car 'stack)))
 
+(defmethod codegen ((insn ssa-dup-x1))
+  (flag-stack-usage *context*)
+	(list 'let (list (list 'p1 (list 'pop-item 'stack))
+                   (list 'p2 (list 'pop-item 'stack)))
+        (list 'push-item 'stack 'p1)
+        (list 'push-item 'stack 'p2)
+        (list 'push-item 'stack 'p1)))
+
 (defmethod codegen ((insn ssa-iaload))
   (flag-stack-usage *context*)
   (list 'let (list (list 'index (list 'pop-item 'stack))
@@ -200,9 +208,7 @@
   (flag-stack-usage *context*)
   (list 'let (list (list 'op2 (list 'pop-item 'stack))
                    (list 'op1 (list 'pop-item 'stack)))
-	(list 'progn
-	      (list 'format 't "ISHL ~A ~A~%" 'op1 'op2)
-	      (list 'push-item 'stack (list 'ash 'op1 'op2)))))
+	      (list 'push-item 'stack (list 'ash 'op1 'op2))))
 
 (defmethod codegen ((insn ssa-lushr))
   (flag-stack-usage *context*)

@@ -367,6 +367,14 @@
       (list (make-instance 'ssa-dup
                            :address pc-start)))))
 
+(defun :DUP_X1 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-dup-x1
+                           :address pc-start)))))
+
 (defun :GETSTATIC (context code)
   (with-slots (pc class is-clinit-p) context
     (let ((pc-start pc))
