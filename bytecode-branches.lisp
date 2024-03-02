@@ -39,7 +39,7 @@
     :PUTFIELD :PUTSTATIC :SIPUSH))
 
 (defparameter +bytecode-5-byte+
-  '(:INVOKEINTERFACE))
+  '(:INVOKEDYNAMIC :INVOKEINTERFACE))
 
 (defparameter +bytecode-short-branch-table+
   (let ((sbtable (make-hash-table)))
