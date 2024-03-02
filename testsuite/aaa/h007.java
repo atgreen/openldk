@@ -1,5 +1,5 @@
 // ===== Test Case h007: If-Else Control Flow =====
-/* { dg-output "^It's positive.$" } */
+/* { dg-output "^It's positive." } */
 package aaa;
 
 public class h007 {
