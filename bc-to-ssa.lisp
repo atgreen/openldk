@@ -650,6 +650,14 @@
                                                  :address pc-start
                                                  :index 3))))))
 
+(defun :INEG (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-ineg
+                           :address pc-start)))))
+
 (defun :INSTANCEOF (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))

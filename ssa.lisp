@@ -115,6 +115,9 @@
 (defclass ssa-ifnull (ssa-branch)
   ())
 
+(defclass ssa-ineg (ssa-node)
+  ())
+
 (defclass ssa-instanceof (ssa-node)
   ((class :initarg :class)))
 

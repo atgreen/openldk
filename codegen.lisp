@@ -84,6 +84,10 @@
   (flag-stack-usage *context*)
   (list 'push-item 'stack (list 'car 'stack)))
 
+(defmethod codegen ((insn ssa-ineg))
+  (flag-stack-usage *context*)
+  (list 'push-item 'stack (list '- (list 'car 'stack))))
+
 (defmethod codegen ((insn ssa-iinc))
   (with-slots (index const) insn
     (list 'incf (intern (format nil "local-~A" index) :openldk) const)))
