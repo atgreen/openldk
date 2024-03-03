@@ -132,14 +132,14 @@
       (let ((bloc nil))
         (dolist (insn ssa-code)
           (when (or (null bloc) (gethash (.address insn) branch-targets))
-            (format t "new @ ~A~%" (.address insn))
+;;;            (format t "new @ ~A~%" (.address insn))
             ;; We are starting a new block
             (when bloc
               ;; Instructions were pushed in reverse order, so let's fix that.
               (setf (slot-value bloc 'code) (reverse (slot-value bloc 'code)))
               ;; Stash the block in block-by-entry-address.
-              (format t "stashing block @ ~A~%" (.address insn))
-              (setf (gethash (.address insn) block-by-entry-address) bloc))
+;;;              (format t "stashing block @ ~A~%" (.address (car (.code bloc))))
+              (setf (gethash (.address (car (.code bloc))) block-by-entry-address) bloc))
             ;; Create a new block
             (setf bloc (make-instance '<block>)))
           (with-slots (code) bloc
@@ -147,7 +147,7 @@
         (when bloc
           ;; Instructions were pushed in reverse order, so let's fix that.
           (setf (slot-value bloc 'code) (reverse (slot-value bloc 'code)))
-          (format t "stashing last block @ ~A~%" (.address (car (.code bloc))))
+;;;          (format t "stashing last block @ ~A~%" (.address (car (.code bloc))))
           (setf (gethash (.address (car (.code bloc))) block-by-entry-address) bloc))
 
         ;; Now that we've created all of the blocks, let's set
@@ -158,9 +158,10 @@
                                collect (gethash s block-by-entry-address))))
                  block-by-entry-address)
 
+#|
         (dump-dot (gethash 0 block-by-entry-address) (make-hash-table) t)
 
         (maphash (lambda (k v) (format t "B: ~A~%" k))
                  block-by-entry-address)
-
+|#
         (gethash 0 block-by-entry-address)))))

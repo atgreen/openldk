@@ -32,6 +32,9 @@
 (defmethod |println(Ljava/lang/String;)V| (stream string)
   (format t "~A~%" (slot-value string '|value|)))
 
+(defmethod |print(Ljava/lang/String;)V| (stream string)
+  (format t "~A" (slot-value string '|value|)))
+
 (defmethod |println(I)V| (stream number)
   (format t "~A~%" number))
 
