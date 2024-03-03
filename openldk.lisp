@@ -34,7 +34,7 @@
 
 (defun usage ()
   (opts:describe
-   :prefix "openldk - copyright (C) 2023 Anthony Green <green@moxielogic.com>"
+   :prefix "openldk - copyright (C) 2023, 2024 Anthony Green <green@moxielogic.com>"
    :suffix "Distributed under the terms of MIT License"
    :usage-of "openldk"
    :args "classname"))
@@ -105,7 +105,7 @@
          (method (aref (slot-value class 'methods) (1- method-index)))
          (exception-table (slot-value (gethash "Code" (slot-value method 'attributes)) 'exceptions))
          (code (slot-value (gethash "Code" (slot-value method 'attributes)) 'code))
-	 (max-locals (slot-value (gethash "Code" (slot-value method 'attributes)) 'max-locals))
+         (max-locals (slot-value (gethash "Code" (slot-value method 'attributes)) 'max-locals))
          (length (length code))
          (*context* (make-instance '<context>
                                    :class class
@@ -132,10 +132,10 @@
                                             *context* code)
                               unless (null result)
                                 collect result))))
-             (blocks (build-basic-blocks ssa-code-0))
-	     (lisp-code
-	      (list (list 'block nil
-                    (cons 'tagbody (loop for bloc in blocks append (codegen bloc))))))
+             (entry-block (build-blocks ssa-code-0))
+             (lisp-code
+               (list (list 'block nil
+                           (cons 'tagbody (codegen entry-block)))))
              (definition-code
                (let ((parameter-count (count-parameters (slot-value method 'descriptor))))
                  (append (if (static-p method)

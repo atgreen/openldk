@@ -10,14 +10,9 @@
    (code-emitted-p :initform nil)
    (successor-addresses :reader .successor-addresses :initform (list))
    (successor-blocks :reader .successor-blocks :initform (list))
-   (fixed-up-p :initform nil)))
-
-(defclass <basic-block> (<block>)
-  ((code :reader .code :initform (list))))
-
-(defclass <try-block> (<block>)
-  ((try-body :reader .try-body :initform nil)
-   (catch-blocks :reader .catch-blocks :initform (list))))
+   (catch-blocks :reader .catch-blocks :initform (list))
+   (fixed-up-p :initform nil)
+   (code :reader .code :initform (list))))
 
 (defmethod .id (x) 0)
 
@@ -35,16 +30,10 @@
     (dolist (successor (.successor-blocks bloc))
       (when successor
         (dump-dot successor done-table stream)
-        (format stream "~A -> ~A~%" (.id bloc) (.id successor))))))
-
-(defmethod dump-dot ((bloc <try-block>) done-table stream)
-  (dump-dot (.try-body bloc) done-table stream)
-  (dolist (catch-block (.catch-blocks bloc))
-    (dump-dot (cdr catch-block) done-table stream)
-    (format stream "~A -> ~A [label=\"catch\"];~%" (.id bloc) (.id (cdr catch-block))))
-  (dolist (successor (.successor-blocks bloc))
-    (dump-dot successor done-table stream)
-    (format stream "~A -> ~A;~%" (.id bloc) (.id successor))))
+        (format stream "~A -> ~A~%" (.id bloc) (.id successor))))
+    (dolist (catch-block (.catch-blocks bloc))
+      (dump-dot (cdr catch-block) done-table stream)
+      (format stream "~A -> ~A [label=\"catch\"];~%" (.id bloc) (.id (cdr catch-block))))))
 
 (defun get-short-branch-targets (pc code)
   (let ((start_pc pc)
@@ -66,11 +55,11 @@
   (let ((throwables (gethash opcode *instruction-exceptions*)))
     (find throwable throwables :test #'string=)))
 
-(defun find-target-instructions ()
-  "Return two HASH-TABLE objects.  The first maps a bytecode index key
-with lists of successor bytecode indices. The second includes entries
-for all of the program indices in the current code that are branch or
-exception targets."
+(defun find-leader-instructions ()
+  "Returns three HASH-TABLE objects.
+1. Key: address, Value: t if this is a leader instruction.
+2. Key: address, Value: an exception table entry if this is the start of a range.
+3. Key: address, Value: a list of possible next PCs (successors)."
   (let* ((code (slot-value *context* 'bytecode))
          (exception-table (slot-value *context* 'exception-table))
          (pc 0)
@@ -126,174 +115,52 @@ exception targets."
 
     (values branch-target-table try-block-table successor-address-table)))
 
-(defun find-ssa-node (address)
-  (let ((ssa-code (slot-value *context* 'ssa-code)))
-    (loop
-      do (if (eq address (slot-value (car ssa-code) 'address))
-             (progn
-               (return ssa-code))
-             (setf ssa-code (cdr ssa-code))))))
+(defun build-blocks (ssa-code)
+  "Build <BLOCK> objects from SSA-CODE. Return the entry block."
+  (dump "build-blocks" ssa-code)
+  (assert (eq 0 (.address (car ssa-code))))
 
-(defun extract-outer-ete (ete-list)
-  (let* ((largest-address (loop for ete in ete-list
-                                maximize (slot-value ete 'end-pc)))
-         (outer-ete-list (loop for ete in ete-list
-                               when (eq (slot-value ete 'end-pc) largest-address)
-                                 collect ete))
-         (remaining-ete-list (loop for ete in ete-list
-                                   when (not (eq (slot-value ete 'end-pc) largest-address))
-                                     collect ete)))
-    (values outer-ete-list remaining-ete-list)))
-
-(defun build-basic-blocks (ssa-code)
-  "Build <BASIC-BLOCK> objects from SSA-CODE, but stop at END-ADDRESS if
-non-null.  Return the entry block."
-  (dump "build-basic-blocks" ssa-code)
   (multiple-value-bind (branch-targets try-block-table successor-address-table)
-      (find-target-instructions)
-    ;; (setf ssa-code (insert-branch-targets ssa-code branch-targets))
-    ;;
+      (find-leader-instructions)
     ;; We now have three hashtables, keyed on instruction address.
     ;; These identify branch targets, the start of try blocks, and
     ;; successor addresses in case of branches, gotos, etc.
     ;;
     (let ((block-by-entry-address (make-hash-table)))
-      (labels (;; Add instructions to a block.  They are in reverse
-               ;; order and will need to be resorted once we are done.
-               (%add-to-block (basic-block insn)
-                 (with-slots (code) basic-block
-                   (push insn code)))
 
-               ;; Create a block, starting with SSA-CODE.
-               (%build-basic-block (ssa-code &optional (end-address nil))
-                 (when ssa-code
-                   (with-accessors ((ssa-code-address address)) (car ssa-code)
-                     (let* ((block-ete-list (gethash ssa-code-address try-block-table)))
-                       (multiple-value-bind (outer-ete-list remaining-ete-list)
-                           (extract-outer-ete block-ete-list)
-                         ;; Remove the outer ETE list from TRY-BLOCK-TABLE
-                         (setf (gethash ssa-code-address try-block-table) remaining-ete-list)
+      ;; Create all of the basic blocks by running through the code.
+      (let ((bloc nil))
+        (dolist (insn ssa-code)
+          (when (or (null bloc) (gethash (.address insn) branch-targets))
+            (format t "new @ ~A~%" (.address insn))
+            ;; We are starting a new block
+            (when bloc
+              ;; Instructions were pushed in reverse order, so let's fix that.
+              (setf (slot-value bloc 'code) (reverse (slot-value bloc 'code)))
+              ;; Stash the block in block-by-entry-address.
+              (format t "stashing block @ ~A~%" (.address insn))
+              (setf (gethash (.address insn) block-by-entry-address) bloc))
+            ;; Create a new block
+            (setf bloc (make-instance '<block>)))
+          (with-slots (code) bloc
+            (push insn code)))
+        (when bloc
+          ;; Instructions were pushed in reverse order, so let's fix that.
+          (setf (slot-value bloc 'code) (reverse (slot-value bloc 'code)))
+          (format t "stashing last block @ ~A~%" (.address (car (.code bloc))))
+          (setf (gethash (.address (car (.code bloc))) block-by-entry-address) bloc))
 
-                         (if (or (null end-address) (< ssa-code-address end-address))
+        ;; Now that we've created all of the blocks, let's set
+        ;; up the successors.
+        (maphash (lambda (address bloc)
+                   (setf (slot-value bloc 'successor-blocks)
+                         (loop for s in (gethash (.address (car (last (.code bloc)))) successor-address-table)
+                               collect (gethash s block-by-entry-address))))
+                 block-by-entry-address)
 
-                             (if outer-ete-list
+        (dump-dot (gethash 0 block-by-entry-address) (make-hash-table) t)
 
-                                 ;; We are in a TRY block
-                                 (let ((bloc (make-instance '<try-block>)))
-                                   (setf (slot-value bloc 'try-body)
-                                         (%build-basic-block ssa-code
-                                                             (loop for ete in outer-ete-list maximize (slot-value ete 'end-pc))))
-                                   (setf (slot-value bloc 'catch-blocks)
-                                         (loop for ete in outer-ete-list
-                                               collect (cons
-                                                        (slot-value ete 'catch-type)
-                                                        (%build-basic-block
-                                                         (find-ssa-node (slot-value ete 'handler-pc))))))
-                                   (return-from %build-basic-block (values bloc nil)))
+        (maphash (lambda (k v) (format t "B: ~A~%" k))
+                 block-by-entry-address)
 
-                                 ;; We are in a BASIC block
-                                 (let ((bloc (make-instance '<basic-block>))
-                                       (entry-insn t))
-
-                                   ;; Keep track of blocks by their entry pc.
-                                   (setf (gethash ssa-code-address block-by-entry-address) bloc)
-
-                                   ;; Loop through all of the instructions,
-                                   ;; adding them to the current block, until we reach the
-                                   ;; start of a new block or END-ADDRESS.
-                                   (loop
-                                     for insn = (car ssa-code)
-                                     for address = (and insn (.address insn))
-                                     while insn
-                                     until (and end-address (>= address end-address))
-                                     until (and (not entry-insn) (gethash address branch-targets))
-
-                                     ;; If this instruction has successors,
-                                     ;; add them to the block.
-                                     do (progn
-                                          (setf (slot-value bloc 'successor-addresses)
-                                                (append (gethash address successor-address-table) (slot-value bloc 'successor-addresses))))
-
-                                     do (progn
-                                          ;; ETE will be non-null if we
-                                          ;; are at the start of an
-                                          ;; exception range.  This
-                                          ;; could be try on entry to a
-                                          ;; block, or we have reached
-                                          ;; the end of block.
-                                          #|
-                                          (when entry-insn
-                                            (%add-to-block bloc (make-instance 'ssa-branch-target :index (slot-value insn 'address)))) |#
-                                          (if (or entry-insn
-                                                  (not (gethash address branch-targets)))
-                                              (progn
-                                                (%add-to-block bloc insn)
-                                                (setf entry-insn nil)
-                                                ;; FIXME - this is causing duplicate code gen in Hello
-                                                (setf (gethash address branch-targets) nil)
-                                                (pop ssa-code)
-
-                                                (if (typep insn (find-class 'ssa-return))
-                                                    (with-slots (code) bloc
-                                                      (setf code (reverse code))
-                                                      (return-from %build-basic-block (values bloc nil))))
-
-                                                (let ((successors (gethash address successor-address-table)))
-                                                  (dolist (successor successors)
-                                                    (let ((successor-block (or (gethash successor block-by-entry-address)
-                                                                               (%build-basic-block (find-ssa-node successor)))))
-                                                      (push successor-block (slot-value bloc 'successor-blocks))))
-                                                  (if successors
-                                                      (with-slots (code) bloc
-                                                        (setf code (reverse code))
-                                                        (return-from %build-basic-block (values bloc nil))))))
-
-                                              ;; Generate catch handler blocks, if necessary
-
-                                              #|
-                                              (format t "ete-list length = ~A~%" (length ete-list))
-                                          (dolist (ete ete-list)
-                                          (format t "E: ~A~%" ete)
-                                          (push (%build-basic-block (find-ssa-node (slot-value ete 'handler-pc)))
-                                          (slot-value basic-bloc 'catch-blocks)))
-                                              |#
-                                              (with-slots (code) bloc
-                                                (setf code (reverse code))
-                                                (return-from %build-basic-block (values bloc ssa-code)))))
-
-                                     finally (with-slots (code) bloc
-                                               (setf code (nreverse code))
-                                               (when address
-                                                 (let ((successor-block (%build-basic-block ssa-code)))
-                                                   (push successor-block (slot-value bloc 'successor-blocks))))
-
-                                             ;; Generate catch handler blocks, if necessary
-                                             #|
-                                               (dolist (ete ete-list)
-                                               (format t "C: ~A~%" ete))
-                                               |#
-
-                                               (return-from %build-basic-block (values bloc nil))))
-                                   (return-from %build-basic-block (values bloc nil))
-                                   ))))))))
-
-               (%build-basic-block-list (ssa-code &optional (end-address 9999999))
-                 (loop with current-ssa = ssa-code
-                       while (and current-ssa (< (slot-value (car current-ssa) 'address) end-address))
-                       for (bloc rest-ssa) = (multiple-value-list (%build-basic-block current-ssa))
-                       collect bloc into results
-                       do (setf current-ssa rest-ssa)
-                       finally (return results))))
-
-        (let ((blocks (%build-basic-block-list ssa-code)))
-#|
-          (dolist (b blocks)
-            ;; (print (slot-value b 'code))
-            (let ((sb (list)))
-              (dolist (pc (.successor-addresses b))
-                (push (gethash pc block-by-entry-address) sb))
-          (setf (slot-value b 'successor-addresses) sb)))
-          |#
-          ;; Update all of the branch ssa nodes with links to the target blocks.
-          (dump-method-dot blocks)
-          blocks)))))
+        (gethash 0 block-by-entry-address)))))

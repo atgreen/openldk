@@ -346,23 +346,23 @@
 (defmethod codegen ((insn ssa-variable))
   (slot-value insn 'name))
 
-(defmethod codegen ((basic-block <basic-block>))
-  (if (not (slot-value basic-block 'code-emitted-p))
+(defmethod codegen ((bloc <block>))
+  (if (not (slot-value bloc 'code-emitted-p))
       (progn
-        (push basic-block (slot-value *context* 'blocks))
+        (push bloc (slot-value *context* 'blocks))
         (let ((lisp-code
-                (cons (intern (format nil "branch-target-~A" (.address (car (slot-value basic-block 'code)))()))
-                      ;; (intern (format nil ":branch-target-~A" (.address (car (slot-value basic-block 'code)))) :openldk)
-                      (loop for insn in (slot-value basic-block 'code)
+                (cons (intern (format nil "branch-target-~A" (.address (car (slot-value bloc 'code)))()))
+                      ;; (intern (format nil ":branch-target-~A" (.address (car (slot-value bloc 'code)))) :openldk)
+                      (loop for insn in (slot-value bloc 'code)
                             collect (codegen insn)))))
-          (setf (slot-value basic-block 'code-emitted-p) t)
+          (setf (slot-value bloc 'code-emitted-p) t)
           (pop (slot-value *context* 'blocks))
-          (dolist (successor (.successor-blocks basic-block))
+          (dolist (successor (.successor-blocks bloc))
             (when successor
               (setf lisp-code (append lisp-code (codegen successor)))))
           lisp-code))
       nil))
-
+#|
 (defmethod codegen ((try-block <try-block>))
   (push try-block (slot-value *context* 'blocks))
   (let ((lisp-code (codegen (.try-body try-block))))
@@ -375,3 +375,4 @@
                          (list (intern "condition" :openldk)))
                         (list (cons 'tagbody
                                     (codegen (cdr (car (slot-value try-block 'catch-blocks)))))))))))
+|#

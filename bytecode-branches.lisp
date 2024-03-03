@@ -53,6 +53,12 @@
       (setf (gethash o cbtable) t))
     cbtable))
 
+(defparameter +bytecode-unconditional-jump+
+  (let ((ujtable (make-hash-table)))
+    (dolist (o '(:GOTO :IRETURN :LRETURN :FRETURN :DRETURN :ARETURN :RETURN :RET))
+      (setf (gethash o ujtable) t))
+    ujtable))
+
 (defparameter +bytecode-lengths-table+
   (let ((bltable (make-hash-table)))
     (dolist (o +bytecode-1-byte+)
