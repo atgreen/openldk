@@ -55,6 +55,41 @@
   (let ((throwables (gethash opcode *instruction-exceptions*)))
     (find throwable throwables :test #'string=)))
 
+(defclass exception-tree-node ()
+  ((entry :initarg :entry :accessor entry)
+   (children :initarg :children :accessor children :initform nil)))
+
+(defmethod print-object ((etn exception-tree-node) out)
+  (print-unreadable-object (etn out :type t)
+    (with-slots (start-pc end-pc handler-pc) ete
+      (format out "~A [~%" (slot-value etn 'entry))
+      (print (slot-value etn 'children))
+      (format out "]~%"))))
+
+(defun sort-exceptions-array (exceptions-array)
+  (sort exceptions-array #'< :key #'start-pc))
+
+(defun nest-exceptions (sorted-exceptions)
+  (let ((root (make-instance 'exception-tree-node :entry nil))) ; Dummy root node
+    (labels ((nest (node exceptions)
+               (when (not (endp exceptions))
+                 (let ((current (first exceptions))
+                       (rest (rest exceptions)))
+                   (if (or (null (entry node)) ; Root node or nesting check
+                           (and (<= (start-pc (entry node)) (start-pc current))
+                                (>= (end-pc (entry node)) (end-pc current))))
+                       (let ((new-node (make-instance 'exception-tree-node :entry current)))
+                         (push new-node (children node))
+                         (nest new-node rest))
+                       (return-from nest (cons current rest)))))))
+      (nest root sorted-exceptions))
+    (children root)))
+
+(defun build-exception-trees-from-array (exceptions-array)
+  (print exceptions-array)
+  (let ((sorted-exceptions (sort-exceptions-array exceptions-array)))
+    (nest-exceptions (coerce sorted-exceptions 'list))))
+
 (defun find-leader-instructions ()
   "Returns three HASH-TABLE objects.
 1. Key: address, Value: t if this is a leader instruction.
@@ -70,6 +105,9 @@
          ;; value: a list of successor addresses, the first of which
          ;;        is the "fall-through" case, should one exist.
          (successor-address-table (make-hash-table)))
+
+    (print "===========================================")
+    (print (build-exception-trees-from-array exception-table))
 
     ;; First, let's go through the instructions looking
     ;; for branch targets.
@@ -115,10 +153,10 @@
 
     (values branch-target-table try-block-table successor-address-table)))
 
-(defun build-blocks (ssa-code)
-  "Build <BLOCK> objects from SSA-CODE. Return the entry block."
-  (dump "build-blocks" ssa-code)
-  (assert (eq 0 (.address (car ssa-code))))
+(defun build-blocks (ir-code)
+  "Build <BLOCK> objects from IR-CODE. Return the entry block."
+  (dump "build-blocks" ir-code)
+  (assert (eq 0 (.address (car ir-code))))
 
   (multiple-value-bind (branch-targets try-block-table successor-address-table)
       (find-leader-instructions)
@@ -130,8 +168,8 @@
 
       ;; Create all of the basic blocks by running through the code.
       (let ((bloc nil))
-        (dolist (insn ssa-code)
-          (when (or (null bloc) (gethash (.address insn) branch-targets))
+        (dolist (insn ir-code)
+          (when (or (null bloc) (gethash (.address insn) branch-targets) (gethash (.address insn) try-block-table))
 ;;;            (format t "new @ ~A~%" (.address insn))
             ;; We are starting a new block
             (when bloc
@@ -153,14 +191,18 @@
         ;; Now that we've created all of the blocks, let's set
         ;; up the successors.
         (maphash (lambda (address bloc)
+                   ;; First we need to connect all of the regular successor blocks
                    (setf (slot-value bloc 'successor-blocks)
-                         (loop for s in (gethash (.address (car (last (.code bloc)))) successor-address-table)
-                               collect (gethash s block-by-entry-address))))
+                         (reverse
+                          (loop for s in (gethash (.address (car (last (.code bloc)))) successor-address-table)
+                                collect (gethash s block-by-entry-address))))
+                   ;; Now we need to connect all of the catch regions
+
+                   )
                  block-by-entry-address)
 
+        (dump-method-dot (gethash 0 block-by-entry-address))
 #|
-        (dump-dot (gethash 0 block-by-entry-address) (make-hash-table) t)
-
         (maphash (lambda (k v) (format t "B: ~A~%" k))
                  block-by-entry-address)
 |#

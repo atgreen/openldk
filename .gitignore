@@ -7,3 +7,4 @@ jre14
 \#*
 *.log
 *.sum
+/dump/

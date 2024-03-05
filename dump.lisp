@@ -1,6 +1,6 @@
 (in-package :openldk)
 
-(defun dump-method-dot (blocks)
+(defun dump-method-dot (bloc)
   (when *dump-dir*
     (let ((class-name (slot-value (slot-value *context* 'class) 'name))
           (fn-name (slot-value *context* 'fn-name))
@@ -16,8 +16,7 @@
            (list (pathname-utils:parent pathname)))
           (with-open-file (stream pathname :direction :output :if-does-not-exist :create :if-exists :supersede)
             (format stream "digraph code {~%graph [rankdir=TB];~%node [shape=box];~%")
-            (dolist (b blocks)
-              (dump-dot b dt stream))
+            (dump-dot bloc dt stream)
             (format stream "}~%")))))))
 
 (defun dump (id obj)

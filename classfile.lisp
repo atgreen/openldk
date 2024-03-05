@@ -43,11 +43,11 @@
    (type-descriptor-index :initarg :type-descriptor-index)))
 
 (defmethod emit ((v constant-string-reference) cp)
-  (make-instance 'ssa-string-literal
+  (make-instance 'ir-string-literal
                  :value (format nil "~A" (emit (aref cp (slot-value v 'index)) cp))))
 
 (defmethod emit ((v constant-int) cp)
-  (make-instance 'ssa-int-literal :value (slot-value v 'value)))
+  (make-instance 'ir-int-literal :value (slot-value v 'value)))
 
 (defmethod emit ((v constant-field-reference) cp)
   (let ((class (emit (aref cp (slot-value v 'class-index)) cp)))
@@ -55,7 +55,7 @@
 
 (defmethod emit ((v constant-class-reference) cp)
   (let ((classname (emit (aref cp (slot-value v 'index)) cp)))
-    (make-instance 'ssa-class :class (classload classname))))
+    (make-instance 'ir-class :class (classload classname))))
 
 (defmethod emit-name ((v constant-class-reference) cp)
   (emit (aref cp (slot-value v 'index)) cp))
@@ -141,8 +141,8 @@
      buf))
 
 (defclass <exception-table-entry> ()
-  ((start-pc :initarg :start-pc)
-   (end-pc :initarg :end-pc)
+  ((start-pc :initarg :start-pc :accessor start-pc)
+   (end-pc :initarg :end-pc :accessor end-pc)
    (handler-pc :initarg :handler-pc)
    (catch-type :initarg :catch-type)))
 
@@ -245,7 +245,7 @@ stream."
                                         (string
                                           (flexi-streams:octets-to-string (read-buffer size)
                                                                           :external-format :utf-8)))
-                                   (make-instance 'ssa-string-literal
+                                   (make-instance 'ir-string-literal
                                                   :value string)))
                                 (3
                                  (make-instance 'constant-int

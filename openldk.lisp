@@ -86,15 +86,15 @@
                    (%eval (list (intern (format nil "~A.<clinit>()V" (slot-value class 'name)) :openldk)))))))
       (clinit class))))
 
-(defun insert-branch-targets (ssa-code branch-target-table)
+(defun insert-branch-targets (ir-code branch-target-table)
   (let ((btt (make-hash-table)))
-    (loop for insn in ssa-code
+    (loop for insn in ir-code
           for pc-index = (slot-value insn 'address)
           append (if (and (gethash pc-index branch-target-table)
                           (null (gethash pc-index btt)))
                      (progn
                        (setf (gethash pc-index btt) t)
-                       (list (make-instance 'ssa-branch-target :address pc-index :index pc-index)
+                       (list (make-instance 'ir-branch-target :address pc-index :index pc-index)
                              insn))
                      (list insn)))))
 
@@ -122,8 +122,8 @@
           (setf fn-name (format nil "~A.~A~A" (slot-value class 'name) (slot-value method 'name) (slot-value method 'descriptor)))
           (setf fn-name (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor))))
       (dump "compile-method" (list class-name method-index))
-      (let* ((ssa-code-0
-               (setf (slot-value *context* 'ssa-code)
+      (let* ((ir-code-0
+               (setf (slot-value *context* 'ir-code)
                      (apply #'append
                             (loop
                               while (< pc length)
@@ -132,7 +132,7 @@
                                             *context* code)
                               unless (null result)
                                 collect result))))
-             (entry-block (build-blocks ssa-code-0))
+             (entry-block (build-blocks ir-code-0))
              (lisp-code
                (list (list 'block nil
                            (cons 'tagbody (codegen entry-block)))))
