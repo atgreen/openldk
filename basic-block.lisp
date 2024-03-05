@@ -199,7 +199,9 @@
                    ;; Now we need to connect all of the catch regions
                    (setf (slot-value bloc 'catch-blocks)
                          (loop for s in (gethash (.address (car (.code bloc))) try-block-table)
-                               collect (gethash s block-by-entry-address))))
+                               collect (gethash (slot-value s 'handler-pc) block-by-entry-address)))
+                   (format t ">> CATCH BLOCKS: ~A~%" (slot-value bloc 'catch-blocks)))
+
                  block-by-entry-address)
 
         (dump-method-dot (gethash 0 block-by-entry-address))
