@@ -197,8 +197,9 @@
                           (loop for s in (gethash (.address (car (last (.code bloc)))) successor-address-table)
                                 collect (gethash s block-by-entry-address))))
                    ;; Now we need to connect all of the catch regions
-
-                   )
+                   (setf (slot-value bloc 'catch-blocks)
+                         (loop for s in (gethash (.address (car (.code bloc))) try-block-table)
+                               collect (gethash s block-by-entry-address))))
                  block-by-entry-address)
 
         (dump-method-dot (gethash 0 block-by-entry-address))

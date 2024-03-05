@@ -12,7 +12,7 @@
    (stack :initform (cl-containers:make-container 'cl-containers:stack-container))
    (fn-name)
    (bytecode :initarg :bytecode)
-   (ssa-code :initform nil)
+   (ir-code :initform nil)
    (exception-table :initarg :exception-table :initform nil)))
 
 (defmethod flag-stack-usage ((context <context>))

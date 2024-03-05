@@ -8,3 +8,5 @@ jre14
 *.log
 *.sum
 /dump/
+*.svg
+/testsuite/dump/
