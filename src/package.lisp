@@ -39,4 +39,4 @@
   (:use #:cl #:defclass-std)
   (:local-nicknames
 	 (#:cli #:whereiseveryone.command-line-args))
-  (:export :main-command))
+  (:export :main-wrapper))

@@ -267,3 +267,9 @@
 													(make-instance 'dir-classpath-entry :dir cpe))))
 
 	(%clinit (classload "java/lang/Object")))
+
+(defun main-wrapper ()
+	(handler-case
+			(main-command)
+		(cli:wrong-number-of-args (e)
+			(format t "~A~%" e))))

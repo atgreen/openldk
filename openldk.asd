@@ -65,7 +65,7 @@
   :depends-on (:cl-annot :whereiseveryone.command-line-args :flexi-streams :zip :str :defclass-std :fast-io :bitio :pathname-utils :cl-store :trivial-backtrace)
   :build-operation "program-op"
   :build-pathname "openldk"
-  :entry-point "openldk:main-command")
+  :entry-point "openldk:main-wrapper")
 
 #+sb-core-compression
 (defmethod asdf:perform ((o asdf:image-op) (c asdf:system))
