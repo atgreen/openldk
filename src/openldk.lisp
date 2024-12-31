@@ -249,13 +249,15 @@
 @cli:command
 (defun main (mainclass &optional (args (list)) &key dump-dir classpath)
 	(declare
-	 (cli:parser ppcre:parse-string args)
+	 (cli:parser (list ppcre:parse-string) args)
    (cli:parser ppcre:parse-string classpath)
 	 (cli:parser ppcre:parse-string dump-dir))
 	"openldk - copyright (C) 2023-2024 Anthony Green <green@moxielogic.com>
    Distributed under the terms of the GPLv3 + Classpath Exception
 
    MAINCLASS: The class with the static main method to execute.
+
+   ARGS: Java program command line arguments
 
    CLASSPATH: The classpath from which classes are loaded.
 
@@ -312,7 +314,6 @@
 				(setf (aref argv i) arg)))
 		(%clinit class)
 		(%eval (list (intern (format nil "~A.main([Ljava/lang/String;)V" (slot-value class 'name)) :openldk) args))))
-
 
 (defun main-wrapper ()
 	"Main entry point into OpenLDK.  Process command line errors here."
