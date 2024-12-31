@@ -42,6 +42,7 @@
 (defvar *classpath* nil)
 (defvar *classes* (make-hash-table :test #'equal))
 (defvar *context* nil)
+(defvar *condition-table* (make-hash-table))
 
 (defvar *dump-dir* nil)
 (defvar *debug-codegen* nil)
@@ -80,7 +81,6 @@
     (when *debug-codegen*
       (format t "; compiling ~A.~A~A~%" class-name (name method) (descriptor method))
       (force-output))
-		(print (pc *context*))
 		(if (static-p method)
 				(setf (fn-name *context*) (format nil "~A.~A~A" (slot-value class 'name) (slot-value method 'name) (slot-value method 'descriptor)))
 				(setf (fn-name *context*) (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor))))
@@ -130,8 +130,8 @@
 			(%eval definition-code))))
 
 (defun %clinit (class)
-	(format t "%clinit ~A~%" class)
-	(dump-classes)
+	;; (format t "%clinit ~A~%" class)
+	;; (dump-classes)
   (let ((class (gethash (name class) *classes*)))
     (assert
      (or class (error "Can't find ~A" class)))
@@ -152,6 +152,24 @@
           for classfile-stream = (open-java-classfile cpe class)
           when classfile-stream
             return classfile-stream)))
+
+(defun initform-from-descriptor (descriptor)
+  (cond
+    ((string= descriptor "I")
+     0)
+    ((string= descriptor "J")
+     0)
+    ((string= descriptor "F")
+     0.0)
+    ((string= descriptor "D")
+     0.0d0)
+    ((string= descriptor "S")
+     0)
+    ((string= descriptor "B")
+     0)
+    ((string= descriptor "C")
+     #\0)
+    (t nil)))
 
 (defun emit-<class> (class)
   (let ((defclass-code (with-slots (name super fields) class
@@ -266,9 +284,13 @@
 													(make-instance 'jar-classpath-entry :jarfile cpe)
 													(make-instance 'dir-classpath-entry :dir cpe))))
 
-	(%clinit (classload "java/lang/Object")))
+	(%clinit (classload "java/lang/Object"))
+	(%clinit (classload "java/lang/String"))
+	(%clinit (classload "java/lang/ClassLoader"))
+	(%clinit (classload "java/lang/Class")))
 
 (defun main-wrapper ()
+	"Main entry point into OpenLDK.  Process command line errors here."
 	(handler-case
 			(main-command)
 		(cli:wrong-number-of-args (e)

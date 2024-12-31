@@ -35,39 +35,16 @@
 ;;; library, but you are not obligated to do so.  If you do not wish
 ;;; to do so, delete this exception statement from your version.
 
-(sb-ext:restrict-compiler-policy 'debug 3)
+(in-package :openldk)
 
-(asdf:defsystem #:openldk
-  :description "Java in Common Lisp"
-  :author "Anthony Green <green@moxielogic.com>"
-  :license "GPL3+Classpath Exception"
-  :version "1"
-  :serial t
-  :components ((:file "src/package")
-							 (:file "src/debug")
-							 (:file "src/context")
-							 (:file "src/bootstrap")
-							 (:file "src/opcodes")
-							 (:file "src/bc-to-ssa")
-							 (:file "src/bytecode-branches")
-							 (:file "src/classpath")
-							 (:file "src/basic-block")
-							 (:file "src/ssa")
-							 (:file "src/codegen")
-							 (:file "src/descriptors")
-							 (:file "src/classfile")
-							 (:file "src/native")
-							 (:file "src/stack")
-							 (:file "src/openldk"))
-  :around-compile
-  "(lambda (thunk)
-     (cl-annot:enable-annot-syntax)
-     (funcall thunk))"
-  :depends-on (:cl-annot :whereiseveryone.command-line-args :flexi-streams :zip :str :defclass-std :fast-io :bitio :pathname-utils :cl-store :trivial-backtrace)
-  :build-operation "program-op"
-  :build-pathname "openldk"
-  :entry-point "openldk:main-wrapper")
+(defmacro push-item (stack item)
+  (if *debug-stack*
+      `(progn (push ,item ,stack)
+              (format t "--- push ~A~%" ,stack))
+      `(push ,item ,stack)))
 
-#+sb-core-compression
-(defmethod asdf:perform ((o asdf:image-op) (c asdf:system))
-  (uiop:dump-image (asdf:output-file o c) :executable t :compression t))
+(defmacro pop-item (stack)
+  (if *debug-stack*
+      `(progn (format t "-- pop ~A~%" ,stack)
+              (pop ,stack))
+      `(pop ,stack)))
