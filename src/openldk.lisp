@@ -41,6 +41,7 @@
 
 (defvar *classpath* nil)
 (defvar *classes* (make-hash-table :test #'equal))
+(defvar *java-classes* (make-hash-table :test #'equal))
 (defvar *context* nil)
 (defvar *condition-table* (make-hash-table))
 
@@ -246,8 +247,9 @@
               (format t "ERROR: Can't find ~A on classpath~%" classname))))))
 
 @cli:command
-(defun main (mainclass &key dump-dir classpath)
+(defun main (mainclass &optional (args (list)) &key dump-dir classpath)
 	(declare
+	 (cli:parser ppcre:parse-string args)
    (cli:parser ppcre:parse-string classpath)
 	 (cli:parser ppcre:parse-string dump-dir))
 	"openldk - copyright (C) 2023-2024 Anthony Green <green@moxielogic.com>
@@ -287,7 +289,30 @@
 	(%clinit (classload "java/lang/Object"))
 	(%clinit (classload "java/lang/String"))
 	(%clinit (classload "java/lang/ClassLoader"))
-	(%clinit (classload "java/lang/Class")))
+	(%clinit (classload "java/lang/Class"))
+
+	;; Create a java/lang/Class for every class we've see so far.
+	(maphash (lambda (k v)
+						 (let ((klass (make-instance '|java/lang/Class|))
+									 (cname (make-instance '|java/lang/String|))
+									 (cloader (make-instance '|java/lang/ClassLoader|)))
+							 (with-slots (|name| |classLoader|) klass
+								 (setf (slot-value cname '|value|) k)
+								 (setf |name| cname)
+								 (setf |classLoader| cloader))
+							 (setf (gethash k *java-classes*) klass)))
+					 *classes*)
+
+	(let* ((class (classload mainclass))
+				 (argv (make-array (length args))))
+		(assert (or class (error "Can't load ~A" mainclass)))
+		(dotimes (i (length args))
+			(let ((arg (make-instance '|java/lang/String|)))
+				(setf (slot-value argv '|value|) (nth i args))
+				(setf (aref argv i) arg)))
+		(%clinit class)
+		(%eval (list (intern (format nil "~A.main([Ljava/lang/String;)V" (slot-value class 'name)) :openldk) args))))
+
 
 (defun main-wrapper ()
 	"Main entry point into OpenLDK.  Process command line errors here."
