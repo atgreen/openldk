@@ -160,10 +160,11 @@ address."
 																				 do (push insn (code block))
 																				 do (setf ssa-code (cdr ssa-code)))
 																	 block))))
-			;; Reverse all of the code back into normal order
 			(dolist (block blocks)
+				;; Make connections between basic blocks.
 				(dolist (target (gethash (address (car (code block))) successor-address-table))
 					(push (gethash target block-by-address) (exits block)))
+				;; Reverse all of the code back into normal order.
 				(setf (code block) (nreverse (code block))))
 			(dump-method-dot blocks)
 			blocks)))
