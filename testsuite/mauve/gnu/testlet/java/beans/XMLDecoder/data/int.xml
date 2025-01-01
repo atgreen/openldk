@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?> 
+
+<!--
+    test data for intTest
+-->
+
+<java>
+	<int>54321</int>
+	
+	<int>-54321</int>
+	
+	<!-- Integer.MIN_VALUE -->
+	<int>-2147483648</int>
+	
+	<!-- Integer.MAX_VALUE -->
+	<int>2147483647</int>
+</java>

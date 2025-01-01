@@ -1,0 +1,144 @@
+#
+# Quoting constructs (PR libgcj/20504)
+#
+
+/abc\Qabc\Eabc/
+    abcabcabc
+ 0: abcabcabc
+
+/abc\Q(*+|\Eabc/
+    abc(*+|abc
+ 0: abc(*+|abc
+
+/\Qa.b+c*\E/
+    a.b+c*
+ 0: a.b+c*
+    aabbcc
+No match
+
+/\Q(a)\E/
+    (a)
+ 0: (a)
+    a
+No match
+
+/a+\Qb+\Ea+/
+    aaab+a
+ 0: aaab+a
+    aaabbbaaa
+No match
+
+/\Q\a\b\n\r\E/
+    \a\b\n\r
+ 0: \a\b\n\r
+
+#
+# Possessive quantifiers (PR libgcj/20435)
+#
+
+/a?+/
+    a
+ 0: a
+    aa
+ 0: a
+
+/a*+/
+    a
+ 0: a
+    aa
+ 0: aa
+
+/a++/
+    a
+ 0: a
+    aa
+ 0: aa
+
+/.*+b/
+    a
+No match
+    ab
+No match
+    aab
+No match
+
+/a{1,3}+/
+    a
+ 0: a
+    aa
+ 0: aa
+    aaa
+ 0: aaa
+
+/a*+abc?+xyz++pqr{3}+ab{2,}+xy{4,5}+pq{0,6}+AB{0,}+zz/
+    abxyzpqrrrabbxyyyypqAzz
+No match
+
+/(\d\d\d\d)/(\d{1,2}+)/(\d{1,2}+)/(.+)/
+    /2005/05/01/url
+ 0: 2005/05/01/url
+ 1: 2005
+ 2: 05
+ 3: 01
+ 4: url
+    /2005/5/1/url
+ 0: 2005/5/1/url
+ 1: 2005
+ 2: 5
+ 3: 1
+ 4: url
+    /2005/05/01/
+No match
+    /2005/100/100/url
+No match
+
+#
+# Union and intersection of character classes
+#
+
+/[\p{L}[\p{Mn}[\p{Pc}[\p{Nd}[\p{Nl}[\p{Sc}]]]]]]+/
+    $a1_
+ 0: $a1_
+
+/[a-c&&[b-e]&&[\w]]X/
+    bX
+ 0: bX
+
+/[a-c&&b-e&&\p{Lower}]X/
+    cX
+ 0: cX
+
+/[a-e[h-k][m-p]&&[^bjn]]+/
+    ckp
+ 0: ckp
+    dhn
+ 0: dh
+    nhd
+ 0: hd
+    nx
+No match
+
+#
+# Unicode-aware case folding
+#
+
+/(?u:\uff21)/i
+    \uff41
+ 0: \uff41
+
+/(?:\uff21)/i
+    \uff41
+No match
+
+/(?ui:[\uff21-\uff23]+)/
+    \uff41\uff42\uff43
+ 0: \uff41\uff42\uff43
+    \uff21\uff42\uff23
+ 0: \uff21\uff42\uff23
+
+/(?i:[\uff21-\uff23]+)/
+    \uff41\uff42\uff43
+No match
+    \uff21\uff42\uff23
+ 0: \uff21
+

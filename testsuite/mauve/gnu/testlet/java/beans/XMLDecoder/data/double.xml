@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?> 
+
+<!--
+    test data for doubleTest
+-->
+
+<java>
+	<!-- Math.PI -->
+	<double>3.141592653589793</double>
+	
+	<!-- Math.E -->
+	<double>2.718281828459045</double>
+	
+	<!-- 2^-16 -->
+	<double>1.52587890625E-5</double>
+	
+	<!-- Double.MIN_VALUE -->
+	<double>4.9E-324</double>
+	
+	<!-- Double.MAX_VALUE -->
+	<double>1.7976931348623157E308</double>
+	
+	<!-- Double.NaN -->
+	<double>NaN</double>
+	
+	<!-- Double.POSITIVE_INFINITY -->
+	<double>Infinity</double>
+
+	<!-- Double.NEGATIVE_INFINITY -->
+	<double>-Infinity</double>
+	
+</java>

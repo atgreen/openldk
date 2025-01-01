@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?> 
+
+<!--
+    test data for byteTest
+-->
+
+<java>
+	<byte>-120</byte>
+	<byte>0</byte>
+	
+	<!-- Byte.MIN_VALUE -->
+	<byte>-128</byte>
+
+	<!-- Byte.MAX_VALUE -->
+	<byte>127</byte>
+	
+</java>

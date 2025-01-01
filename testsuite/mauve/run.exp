@@ -1,0 +1,62 @@
+load_lib dg.exp
+
+dg-init
+
+set dg-do-what-default run
+
+set testargs ""
+
+proc openldk_load { classfile } {
+
+    global testargs
+    set timeout 5
+    verbose "load $classfile"
+    set classname [string map {".class" ""} $classfile]
+    set result [local_exec "../openldk mauve.openldkHarness $testargs" "" "" $timeout]
+    verbose "result = $result"
+    set status [lindex $result 0]
+    set output [lindex $result 1]
+    verbose "STATUS = $status"
+    if { $status == 0 } {
+        return [list "pass" $output]
+    } else {
+        return [list "fail" $output]
+    }
+}
+
+proc openldk-dg-test { prog do_what extra_tool_flags } {
+
+    global testargs
+    set timeout 5
+
+    verbose "prog $prog" 2
+    verbose "do_what $do_what" 2
+    verbose "extra_tool_flags $extra_tool_flags" 2
+
+    set status [local_exec "javac $prog" "" "" $timeout]
+
+    verbose "STATUSS = $status"
+
+    set classname [string map {".java" ""} $prog]
+
+    set testargs [string map {"/" "."} [string map {"mauve/" ""} $classname]]
+
+    return [list [lindex $status 1] "$classname.class"]
+}
+
+
+set tlist [lsort [glob -nocomplain -- mauve/gnu/testlet/java/lang/*/*.java]]
+
+set ldkcp [getenv "LDK_CLASSPATH"]
+setenv "LDK_CLASSPATH" "$ldkcp:.:./mauve"
+setenv "CLASSPATH" "$ldkcp:.:./mauve"
+local_exec "javac mauve/openldkHarness.java" "" "" "10"
+
+foreach test $tlist {
+
+ 		verbose "Testing $test"
+		dg-test $test "" ""
+
+}
+
+dg-finish

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!--
+    test data for growableIntArrayTest2
+-->
+
+<java version="1.4.0" class="java.beans.XMLDecoder">
+	<array class="int">
+
+			<byte>0</byte>
+
+			<short>1</short>
+
+			<int>2</int>
+
+	</array>
+</java>

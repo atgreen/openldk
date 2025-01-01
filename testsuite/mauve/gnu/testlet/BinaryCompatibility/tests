@@ -1,0 +1,18 @@
+sh ./foo bin_01
+sh ./foo bin_02
+sh ./foo bin_03
+sh ./foo bin_04
+sh ./foo bin_05
+sh ./foo bin_06
+sh ./foo bin_07
+sh ./foo bin_08
+sh ./foo bin_09
+sh ./foo bin_10
+sh ./foo bin_11
+sh ./foo bin_12
+sh ./foo bin_13
+sh ./foo bin_14
+sh ./foo bin_15
+sh ./foo bin_16 bin_16_sub1.o
+sh ./foo bin_17 bin_17_interface.o
+sh ./foo bin_18

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!--
+    test data for growableIntArrayTest
+-->
+
+<java version="1.4.0" class="java.beans.XMLDecoder">
+	<array class="int">
+
+			<int>0</int>
+
+			<int>1</int>
+
+			<int>2</int>
+
+			<int>3</int>
+
+			<int>4</int>
+
+			<int>5</int>
+
+	</array>
+</java>

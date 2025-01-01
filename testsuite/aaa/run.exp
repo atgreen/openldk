@@ -1,0 +1,58 @@
+load_lib dg.exp
+
+dg-init
+
+set dg-do-what-default run
+
+set testargs ""
+
+proc openldk_load { classfile } {
+
+    global testargs
+    set timeout 5
+    verbose "load $classfile"
+    set ldkcp [getenv "LDK_CLASSPATH"]
+    setenv "LDK_CLASSPATH" "$ldkcp:.:./aaa"
+    set classname [string map {".class" ""} $classfile]
+    set result [local_exec "../openldk $classname $testargs" "" "" $timeout]
+    verbose "result = $result"
+    set status [lindex $result 0]
+    set output [lindex $result 1]
+    verbose "STATUS = $status"
+    if { $status == 0 } {
+        verbose "PASSSSSSSSSSSSSS"
+        return [list "pass" $output]
+    } else {
+        verbose "FAILLLLLLLLLLLLLL"
+        return [list "fail" $output]
+    }
+}
+
+proc openldk-dg-test { prog do_what extra_tool_flags } {
+
+    global testargs
+    set timeout 5
+
+    verbose "prog $prog" 2
+    verbose "do_what $do_what" 2
+    verbose "extra_tool_flags $extra_tool_flags" 2
+
+    set status [local_exec "javac $prog" "" "" $timeout]
+    set classname [string map {".java" ""} $prog]
+
+    set testargs "1 2 3 4 5"
+
+    return [list [lindex $status 1] "$classname.class"]
+}
+
+
+set tlist [lsort [glob -nocomplain -- aaa/*.java]]
+
+foreach test $tlist {
+
+ 		verbose "Testing $test"
+		dg-test $test "" ""
+
+}
+
+dg-finish

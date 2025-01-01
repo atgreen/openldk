@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?> 
+
+<!--
+    test data for simpleElementsTest
+    
+    Simple elements: primitives or elements that cannot contain child elements
+    
+    Note: all values are chosen arbitrarily and do not present anything useful
+-->
+
+<java version="1.4.1" class="java.beans.XMLDecoder"> 
+
+ <boolean>true</boolean> 
+ <boolean>false</boolean> 
+
+ <char>j</char> 
+ <char>a</char> 
+ <char>v</char> 
+ <char>a</char> 
+
+ <byte>8</byte> 
+ 
+ <short>16</short> 
+ 
+ <int>32</int> 
+
+ <long>64</long> 
+
+ <float>32.0</float> 
+ 
+ <double>64.0</double> 
+ 
+ <string>Hello World</string> 
+ 
+ <class>java.lang.Object</class>
+ 
+ <null/>
+
+</java> 
