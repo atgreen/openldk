@@ -37,10 +37,13 @@
 
 (in-package :openldk)
 
-(defun dump-classes ()
+(defun dump-hashtable (ht)
 	(maphash (lambda (k v)
-							 (format t "~A: ~A~%" k v))
-					 *classes*))
+						 (format t "~A: ~A~%" k v))
+					 ht))
+
+(defun dump-classes ()
+	(dump-hashtable *classes*))
 
 (defun dump-method-dot (blocks)
   (when *dump-dir*
