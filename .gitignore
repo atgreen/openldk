@@ -3,3 +3,6 @@ dumps
 openldk
 systems
 .cvsignore
+/*.class
+/*.java
+/*.png
