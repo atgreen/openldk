@@ -352,12 +352,12 @@
                             collect (codegen insn)))))
           (setf (slot-value basic-block 'code-emitted-p) t)
           (pop (slot-value *context* 'blocks))
-          (dolist (successor (.successor-blocks basic-block))
+          (dolist (successor (exits basic-block))
             (when successor
               (setf lisp-code (append lisp-code (codegen successor)))))
           lisp-code))
       nil))
-
+#|
 (defmethod codegen ((try-block <try-block>))
   (push try-block (slot-value *context* 'blocks))
   (let ((lisp-code (codegen (.try-body try-block))))
@@ -370,3 +370,4 @@
                          (list (intern "condition" :openldk)))
                         (list (cons 'tagbody
                                     (codegen (cdr (car (slot-value try-block 'catch-blocks)))))))))))
+|#
