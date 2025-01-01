@@ -350,9 +350,14 @@
                       ;; (intern (format nil ":branch-target-~A" (address (car (slot-value basic-block 'code)))) :openldk)
                       (loop for insn in (slot-value basic-block 'code)
                             collect (codegen insn)))))
+					(if (exception-table-entries basic-block)
+							(setf lisp-code (list (list 'handler-case
+																					(cons 'tagbody
+																								lisp-code)
+																					(append (list (exception-table-entries basic-block)))))))
           (setf (slot-value basic-block 'code-emitted-p) t)
           (pop (slot-value *context* 'blocks))
-          (dolist (successor (exits basic-block))
+          (dolist (successor (successors basic-block))
             (when successor
               (setf lisp-code (append lisp-code (codegen successor)))))
           lisp-code))
