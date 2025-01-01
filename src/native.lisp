@@ -79,9 +79,6 @@
 
 (defmethod |java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;| (name initialize loader caller)
   (let ((lname (substitute #\/ #\. (slot-value name '|value|))))
-    (print "==============================================================")
-    (print lname)
-    (maphash (lambda (k v) (print k)) *java-classes*)
     (or (gethash lname *java-classes*)
         (progn (%clinit (classload lname))
                (let ((java-class (make-instance '|java/lang/Class|)))
