@@ -249,9 +249,9 @@
 @cli:command
 (defun main (mainclass &optional (args (list)) &key dump-dir classpath)
 	(declare
-	 (cli:parser (list ppcre:parse-string) args)
-   (cli:parser ppcre:parse-string classpath)
-	 (cli:parser ppcre:parse-string dump-dir))
+	 (cli:parser (list identity) args)
+   (cli:parser identity classpath)
+	 (cli:parser identity dump-dir))
 	"openldk - copyright (C) 2023-2024 Anthony Green <green@moxielogic.com>
    Distributed under the terms of the GPLv3 + Classpath Exception
 
