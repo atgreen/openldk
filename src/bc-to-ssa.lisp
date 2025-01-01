@@ -398,7 +398,7 @@
               (emit (aref constant-pool index) constant-pool)
             (incf pc)
             (let ((code (list (make-instance 'ssa-push
-                                             :address pc-start
+                                             :address (if is-clinit-p pc-start (+ pc-start 0.1))
                                              :value (make-instance 'ssa-static-member
                                                                    :address pc-start
                                                                    :class class
@@ -913,7 +913,7 @@
               (emit (aref constant-pool index) constant-pool)
             (incf pc)
             (let ((code (list (make-instance 'ssa-assign
-                                             :address pc-start
+                                             :address (if is-clinit-p pc-start (+ pc-start 0.1))
                                              :source (make-instance 'ssa-pop :address pc-start)
                                              :target (make-instance 'ssa-static-member
                                                                     :address pc-start

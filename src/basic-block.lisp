@@ -68,6 +68,18 @@
         (dump-dot successor done-table stream)
         (format stream "~A -> ~A~%" (id bloc) (id successor))))))
 
+(defvar *instruction-exceptions* (make-hash-table))
+
+(defmacro define-instruction-exceptions (opcode exceptions)
+  `(setf (gethash ,opcode *instruction-exceptions*) ,exceptions))
+
+(define-instruction-exceptions :IDIV
+    '("java/lang/ArithmeticException" "java/lang/Exception" "java/lang/Throwable"))
+
+(defun opcode-throws-p (opcode throwable)
+  (let ((throwables (gethash opcode *instruction-exceptions*)))
+    (find throwable throwables :test #'string=)))
+
 (defun get-short-branch-targets (pc code)
 	"The opcode at PC in CODE is a branch instruction.  Return a list of
 addresses for possible next instructions.  The length of the list will
