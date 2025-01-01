@@ -310,10 +310,10 @@
 		(assert (or class (error "Can't load ~A" mainclass)))
 		(dotimes (i (length args))
 			(let ((arg (make-instance '|java/lang/String|)))
-				(setf (slot-value argv '|value|) (nth i args))
+				(setf (slot-value arg '|value|) (nth i args))
 				(setf (aref argv i) arg)))
 		(%clinit class)
-		(%eval (list (intern (format nil "~A.main([Ljava/lang/String;)V" (slot-value class 'name)) :openldk) args))))
+		(%eval (list (intern (format nil "~A.main([Ljava/lang/String;)V" (slot-value class 'name)) :openldk) argv))))
 
 (defun main-wrapper ()
 	"Main entry point into OpenLDK.  Process command line errors here."
