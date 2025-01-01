@@ -50,6 +50,7 @@
 	 (successors)
 	 (stop)
 	 (code-emitted-p)
+	 (try-catch)
 	 (exception-table-entries)
 	 (catch-handlers)))
 
@@ -158,5 +159,16 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
 
 				;; Reverse all of the code back into normal order.
 				(setf (code block) (nreverse (code block))))
+
+			;; Let's create try blocks
+			(let ((exception-table (exception-table *context*)))
+				(when exception-table
+					(loop for i from 0 below (length exception-table)
+								for ete = (aref exception-table i)
+								for start-block = (gethash (start-pc ete) block-by-address)
+								for end-block = (gethash (end-pc ete) block-by-address)
+								for handler = (gethash (handler-pc ete) block-by-address)
+								do (push (cons (catch-type ete) handler) (try-catch start-block)))))
+
 			(dump-method-dot blocks)
 			blocks)))

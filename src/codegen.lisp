@@ -347,32 +347,20 @@
         (push basic-block (slot-value *context* 'blocks))
         (let ((lisp-code
                 (cons (intern (format nil "branch-target-~A" (address (car (slot-value basic-block 'code)))()))
-                      ;; (intern (format nil ":branch-target-~A" (address (car (slot-value basic-block 'code)))) :openldk)
                       (loop for insn in (slot-value basic-block 'code)
                             collect (codegen insn)))))
-					(if (exception-table-entries basic-block)
-							(setf lisp-code (list (list 'handler-case
-																					(cons 'tagbody
-																								lisp-code)
-																					(append (list (exception-table-entries basic-block)))))))
           (setf (slot-value basic-block 'code-emitted-p) t)
           (pop (slot-value *context* 'blocks))
           (dolist (successor (successors basic-block))
             (when successor
               (setf lisp-code (append lisp-code (codegen successor)))))
+					(if (try-catch basic-block)
+							(setf lisp-code (list (append (list 'handler-case)
+																						(list (append (list 'tagbody) lisp-code))
+																						(loop for tc in (try-catch basic-block)
+																									collect (append (list (intern (format nil "condition-~A" (car tc)) :openldk)
+																																				(list (intern "condition" :openldk)))
+																																	(list (cons 'tagbody
+																																							(codegen (cdr tc))))))))))
           lisp-code))
       nil))
-#|
-(defmethod codegen ((try-block <try-block>))
-  (push try-block (slot-value *context* 'blocks))
-  (let ((lisp-code (codegen (.try-body try-block))))
-    (pop (slot-value *context* 'blocks))
-    (list (list 'handler-case
-                (cons 'tagbody
-                      lisp-code)
-                (append (list
-                         (intern (format nil "condition-~A" (car (car (slot-value try-block 'catch-blocks)))) :openldk)
-                         (list (intern "condition" :openldk)))
-                        (list (cons 'tagbody
-                                    (codegen (cdr (car (slot-value try-block 'catch-blocks)))))))))))
-|#
