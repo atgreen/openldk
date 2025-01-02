@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2023, 2024  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; This file is part of OpenLDK.
 
@@ -46,11 +46,14 @@
   ((id :std (generate-id))
 	 (code)
 	 (address)
-	 (incoming)
-	 (successors)
+	 (predecessors
+		:doc "List of incoming blocks")
+	 (successors
+		:doc "List of outgoing blocks")
 	 (stop)
 	 (code-emitted-p)
 	 (try-catch)
+	 (exception-end-blocks)
 	 (exception-table-entries)
 	 (catch-handlers)))
 
@@ -68,7 +71,9 @@
     (dolist (successor (successors bloc))
       (when successor
         (dump-dot successor done-table stream)
-        (format stream "~A -> ~A~%" (id bloc) (id successor))))))
+        (format stream "~A -> ~A~%" (id bloc) (id successor))))
+		(loop for tc in (try-catch bloc)
+					do (format stream "~A -> ~A [label=~S]~%" (id bloc) (id (cdr tc)) (format nil "~A" (car tc))))))
 
 (defvar *instruction-exceptions* (make-hash-table))
 
@@ -100,7 +105,6 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
     - the start of a method
     - the start of an exception range
     - the start of an exception handler
-    - the first statement after an exception range
     - a jump or branch target"
 	(let ((block-starts (make-hash-table)))
 
@@ -113,7 +117,6 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
 				(loop for i from 0 below (length exception-table)
 							for ete = (aref exception-table i)
 							do (setf (gethash (start-pc ete) block-starts) t)
-							do (setf (gethash (end-pc ete) block-starts) t)
 							do (setf (gethash (handler-pc ete) block-starts) t))))
 
 		;; Handle all jump and branch targets
@@ -153,9 +156,13 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
 				;; Make connections between basic blocks.
 				(let* ((opcode (aref +opcodes+ (aref (bytecode *context*) (floor (address (car (code block)))))))
 							 (targets (if (gethash opcode +bytecode-short-branch-table+)
-														(get-short-branch-targets (address (car (code block))) (bytecode *context*)))))
+														(get-short-branch-targets (address (car (code block))) (bytecode *context*))
+														(list (+ (address (car (code block))) (gethash opcode +bytecode-lengths-table+))))))
 					(dolist (target targets)
-						(push (gethash target block-by-address) (successors block))))
+						(let ((target-block (gethash target block-by-address)))
+							(when target-block
+								(push target-block (successors block))
+								(push block (predecessors target-block))))))
 
 				;; Reverse all of the code back into normal order.
 				(setf (code block) (nreverse (code block))))
@@ -168,6 +175,7 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
 								for start-block = (gethash (start-pc ete) block-by-address)
 								for end-block = (gethash (end-pc ete) block-by-address)
 								for handler = (gethash (handler-pc ete) block-by-address)
+								do (push end-block (exception-end-blocks start-block))
 								do (push (cons (catch-type ete) handler) (try-catch start-block)))))
 
 			(dump-method-dot blocks)
