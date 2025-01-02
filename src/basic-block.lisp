@@ -52,6 +52,9 @@
 	 (successors
 		:std (fset:empty-set)
 		:doc "Set of outgoing blocks")
+	 (dominates
+	  :std (fset:empty-set)
+		:doc "Set of blocks that this block dominates in CFG")
 	 (stop)
 	 (code-emitted-p)
 	 (try-catch)
@@ -179,6 +182,9 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
 								for handler = (gethash (handler-pc ete) block-by-address)
 								do (push end-block (exception-end-blocks start-block))
 								do (push (cons (catch-type ete) handler) (try-catch start-block)))))
+
+			;; Let's compute dominator sets for each block
+			;; TODO
 
 			(dump-method-dot blocks)
 			blocks)))
