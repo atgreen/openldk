@@ -33,9 +33,9 @@ jobs:
           distribution: 'temurin'
           java-version: '8'
 
-		  - name: Find rt.jar
-			  run: |
-				  find / -name rt.jar
+      - name: Find rt.jar
+        run: |
+          find / -name rt.jar
 
       - name: Setup SBCL and ocicl
         run: |
