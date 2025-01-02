@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText:  Copyright 2025 Anthony Green
+# SPDX-License-Identifier: MIT
+#
+# Project:  openldk
+# File:     test.yml
+# Date:     2025-01-02
+#
+# ==============================================================================
+
+name: Test
+
+on:
+  push:
+    branches: ["master"]
+  pull_request:
+    branches: ["master"]
+
+jobs:
+  tests:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SBCL and ocicl
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          brew install sbcl ocicl
+          ocicl setup >> ~/.sbclrc
+
+      - name: Install dependencies
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          ocicl install
+
+      - name: Build
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          make
+
+      - name: Test
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          make check
