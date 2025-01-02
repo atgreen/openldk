@@ -6,13 +6,23 @@ import java.util.Date;
 
 public class ni {
 
-   public static void main(String[] args) {
+    public static int x = 0;
+
+		public static void main(String[] args) {
 
       try {
          // date object
          Date d = new Date();
          Class cls = d.getClass();
          System.out.println("Time = " + d.toString());
+
+        try {
+            x = 10 / x ;
+        } catch (Exception e) {
+            System.out.println ("OK!");
+        }
+        System.out.println ("Done.");
+
 
          /* creates a new instance of the class represented by this
             Class object cls */
