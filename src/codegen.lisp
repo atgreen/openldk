@@ -112,9 +112,9 @@
 (defmethod codegen ((insn ssa-div))
   (flag-stack-usage *context*)
   (list 'handler-case
-	(list 'let (list (list 'op2 (list 'pop-item 'stack))
-			 (list 'op1 (list 'pop-item 'stack)))
-	      (list 'push-item 'stack (list '/ 'op1 'op2)))
+  (list 'let (list (list 'op2 (list 'pop-item 'stack))
+       (list 'op1 (list 'pop-item 'stack)))
+        (list 'push-item 'stack (list '/ 'op1 'op2)))
         (list 'division-by-zero (list 'e) (list 'error (list 'make-condition (list 'quote '|condition-java/lang/ArithmeticException|))))))
 
 (defmethod codegen ((insn ssa-dup))
@@ -171,14 +171,14 @@
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'progn
-	  (list 'if (list '>= (list 'pop-item 'stack) 0)
+    (list 'if (list '>= (list 'pop-item 'stack) 0)
           (list 'go (intern (format nil "branch-target-~A" offset)))))))
 
 (defmethod codegen ((insn ssa-ifle))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'progn
-	  (list 'if (list '<= (list 'pop-item 'stack) 0)
+    (list 'if (list '<= (list 'pop-item 'stack) 0)
           (list 'go (intern (format nil "branch-target-~A" offset)))))))
 
 (defmethod codegen ((insn ssa-ifne))
@@ -207,9 +207,9 @@
   (flag-stack-usage *context*)
   (list 'let (list (list 'op2 (list 'pop-item 'stack))
                    (list 'op1 (list 'pop-item 'stack)))
-	(list 'progn
-	      (list 'format 't "ISHL ~A ~A~%" 'op1 'op2)
-	      (list 'push-item 'stack (list 'ash 'op1 'op2)))))
+  (list 'progn
+        (list 'format 't "ISHL ~A ~A~%" 'op1 'op2)
+        (list 'push-item 'stack (list 'ash 'op1 'op2)))))
 
 (defmethod codegen ((insn ssa-lushr))
   (flag-stack-usage *context*)
@@ -226,19 +226,19 @@
 (defmethod codegen ((insn ssa-call-virtual-method))
   (with-slots (method-name args) insn
     (let* ((nargs (length args))
-	   (call (cond
-		   ((eq nargs 0)
-		    (error "internal error"))
-		   ((eq nargs 1)
-		    (list (intern (format nil "~A" method-name) :openldk) (codegen (car args))))
-		   (t
-		    (list 'apply
-			  (list 'function (intern (format nil "~A"
-							  method-name) :openldk))
-			  (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))))))))
+     (call (cond
+       ((eq nargs 0)
+        (error "internal error"))
+       ((eq nargs 1)
+        (list (intern (format nil "~A" method-name) :openldk) (codegen (car args))))
+       (t
+        (list 'apply
+        (list 'function (intern (format nil "~A"
+                method-name) :openldk))
+        (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))))))))
       (if (void-return-p method-name)
-	  call
-	  (list 'push-item 'stack call)))))
+    call
+    (list 'push-item 'stack call)))))
 
 (defmethod codegen ((insn ssa-clinit))
   (with-slots (class) insn
@@ -276,25 +276,25 @@
 (defmethod codegen ((insn ssa-sub))
   (flag-stack-usage *context*)
   (list 'let (list (list 'op2 (list 'pop-item 'stack))
-		   (list 'op1 (list 'pop-item 'stack)))
-	(list 'push-item 'stack (list '- 'op1 'op2))))
+       (list 'op1 (list 'pop-item 'stack)))
+  (list 'push-item 'stack (list '- 'op1 'op2))))
 
 (defmethod codegen ((insn ssa-call-special-method))
   (with-slots (class method-name args) insn
     (let ((call (list 'destructuring-bind (cons 'method 'next)
-		      (list 'closer-mop:compute-applicable-methods-using-classes
-			    (list 'function (intern (format nil "~A" method-name) :openldk))
-			    ;; FIXME: This should be based on the args list
-			    (cons 'list
-				  (cons (find-class (intern (slot-value class 'name) :openldk))
-					(loop for a in args
-					      collect t))))
-		      (list 'let (list (list 'fn (list 'closer-mop:method-function 'method)))
-			    (list 'apply 'fn
-				  (list 'list (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))) 'next))))))
+          (list 'closer-mop:compute-applicable-methods-using-classes
+          (list 'function (intern (format nil "~A" method-name) :openldk))
+          ;; FIXME: This should be based on the args list
+          (cons 'list
+          (cons (find-class (intern (slot-value class 'name) :openldk))
+          (loop for a in args
+                collect t))))
+          (list 'let (list (list 'fn (list 'closer-mop:method-function 'method)))
+          (list 'apply 'fn
+          (list 'list (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))) 'next))))))
       (if (void-return-p method-name)
-	  call
-	  (list 'push-item 'stack call)))))
+    call
+    (list 'push-item 'stack call)))))
 
 (defmethod codegen ((insn ssa-member))
   (flag-stack-usage *context*)
@@ -354,13 +354,13 @@
           (fset:do-set (successor (successors basic-block))
             (when successor
               (setf lisp-code (append lisp-code (codegen successor)))))
-					(if (try-catch basic-block)
-							(setf lisp-code (list (append (list 'handler-case)
-																						(list (append (list 'tagbody) lisp-code))
-																						(loop for tc in (try-catch basic-block)
-																									collect (append (list (intern (format nil "condition-~A" (car tc)) :openldk)
-																																				(list (intern "condition" :openldk)))
-																																	(list (cons 'tagbody
-																																							(codegen (cdr tc))))))))))
+          (if (try-catch basic-block)
+              (setf lisp-code (list (append (list 'handler-case)
+                                            (list (append (list 'tagbody) lisp-code))
+                                            (loop for tc in (try-catch basic-block)
+                                                  collect (append (list (intern (format nil "condition-~A" (car tc)) :openldk)
+                                                                        (list (intern "condition" :openldk)))
+                                                                  (list (cons 'tagbody
+                                                                              (codegen (cdr tc))))))))))
           lisp-code))
       nil))
