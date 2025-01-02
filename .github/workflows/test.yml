@@ -30,7 +30,7 @@ jobs:
       - name: Setup SBCL and ocicl
         run: |
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-          brew install sbcl ocicl
+          brew install sbcl ocicl dejagnu
           ocicl setup >> ~/.sbclrc
 
       - name: Install dependencies
