@@ -7,3 +7,5 @@ systems
 /*.java
 /*.png
 *.class
+/testsuite/openldk.log
+/testsuite/openldk.sum
