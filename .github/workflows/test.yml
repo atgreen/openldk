@@ -27,11 +27,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-		  - name: Install Java 8
-			  uses: actions/setup-java@v4
-				with:
-				  distribution: 'temurin'
-					java-version: '8'
+      - name: Install Java 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '8'
 
 		  - name: Find rt.jar
 			  run: |
