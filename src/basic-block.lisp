@@ -44,23 +44,23 @@
 
 (defclass/std <basic-block> ()
   ((id :std (generate-id))
-	 (code)
-	 (address)
-	 (predecessors
-		:std (fset:empty-set)
-		:doc "Set of incoming blocks")
-	 (successors
-		:std (fset:empty-set)
-		:doc "Set of outgoing blocks")
-	 (dominates
-	  :std (fset:empty-set)
-		:doc "Set of blocks that this block dominates in CFG")
-	 (stop)
-	 (code-emitted-p)
-	 (try-catch)
-	 (exception-end-blocks)
-	 (exception-table-entries)
-	 (catch-handlers)))
+   (code)
+   (address)
+   (predecessors
+    :std (fset:empty-set)
+    :doc "Set of incoming blocks")
+   (successors
+    :std (fset:empty-set)
+    :doc "Set of outgoing blocks")
+   (dominates
+    :std (fset:empty-set)
+    :doc "Set of blocks that this block dominates in CFG")
+   (stop)
+   (code-emitted-p)
+   (try-catch)
+   (exception-end-blocks)
+   (exception-table-entries)
+   (catch-handlers)))
 
 (defmethod dump-dot (b done-table stream)
   (format stream "~A [label=\"wth? ~A\"];~%" b b))
@@ -77,8 +77,8 @@
       (when successor
         (dump-dot successor done-table stream)
         (format stream "~A -> ~A~%" (id bloc) (id successor))))
-		(loop for tc in (try-catch bloc)
-					do (format stream "~A -> ~A [label=~S]~%" (id bloc) (id (cdr tc)) (format nil "~A" (car tc))))))
+    (loop for tc in (try-catch bloc)
+          do (format stream "~A -> ~A [label=~S]~%" (id bloc) (id (cdr tc)) (format nil "~A" (car tc))))))
 
 (defvar *instruction-exceptions* (make-hash-table))
 
@@ -93,7 +93,7 @@
     (find throwable throwables :test #'string=)))
 
 (defun get-short-branch-targets (pc code)
-	"The opcode at PC in CODE is a branch instruction.  Return a list of
+  "The opcode at PC in CODE is a branch instruction.  Return a list of
 addresses for possible next instructions.  The length of the list will
 be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
   (let ((start_pc pc)
@@ -104,87 +104,87 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
         (list (+ start_pc offset)))))
 
 (defun find-block-starts ()
-	"Return a hashtable keyed on instruction address where the value is
+  "Return a hashtable keyed on instruction address where the value is
  T if the instruction at the address is the start of a block.  It is
  the start of a block if it is:
     - the start of a method
     - the start of an exception range
     - the start of an exception handler
     - a jump or branch target"
-	(let ((block-starts (make-hash-table)))
+  (let ((block-starts (make-hash-table)))
 
-		;; The start of the method...
-		(setf (gethash 0 block-starts) t)
+    ;; The start of the method...
+    (setf (gethash 0 block-starts) t)
 
-		;; Handle all of the exception table entries
-		(let ((exception-table (exception-table *context*)))
-			(when exception-table
-				(loop for i from 0 below (length exception-table)
-							for ete = (aref exception-table i)
-							do (setf (gethash (start-pc ete) block-starts) t)
-							do (setf (gethash (handler-pc ete) block-starts) t))))
+    ;; Handle all of the exception table entries
+    (let ((exception-table (exception-table *context*)))
+      (when exception-table
+        (loop for i from 0 below (length exception-table)
+              for ete = (aref exception-table i)
+              do (setf (gethash (start-pc ete) block-starts) t)
+              do (setf (gethash (handler-pc ete) block-starts) t))))
 
-		;; Handle all jump and branch targets
-		(let ((code (bytecode *context*))
-					(pc 0))
-			(loop
-				while (< pc (length code))
-				do (let* ((opcode (aref +opcodes+ (aref code pc)))
-									(targets (if (gethash opcode +bytecode-short-branch-table+)
-															 (get-short-branch-targets pc code))))
-						 (incf pc (gethash opcode +bytecode-lengths-table+))
-						 (dolist (target targets)
-							 (setf (gethash target block-starts) t)))))
+    ;; Handle all jump and branch targets
+    (let ((code (bytecode *context*))
+          (pc 0))
+      (loop
+        while (< pc (length code))
+        do (let* ((opcode (aref +opcodes+ (aref code pc)))
+                  (targets (if (gethash opcode +bytecode-short-branch-table+)
+                               (get-short-branch-targets pc code))))
+             (incf pc (gethash opcode +bytecode-lengths-table+))
+             (dolist (target targets)
+               (setf (gethash target block-starts) t)))))
 
-		block-starts))
+    block-starts))
 
 (defun build-basic-blocks (ssa-code)
   "Build <BASIC-BLOCK> objects from SSA-CODE. Return the entry block."
   (dump "build-basic-blocks" ssa-code)
-	(let ((block-starts (find-block-starts)))
-		(let* ((block-by-address (make-hash-table))
-					 (blocks (loop while ssa-code
-												 for insn = (car ssa-code)
-												 unless (gethash (address insn) block-starts)
-													 do (setf ssa-code (cdr ssa-code))
-												 when (gethash (address insn) block-starts)
-													 collect (let ((block (make-instance '<basic-block>)))
-																		 (loop while ssa-code
-																					 for insn = (car ssa-code)
-																					 for address = (address insn)
-																					 do (push insn (code block))
-																					 do (setf (gethash address block-by-address) block)
-																					 do (setf ssa-code (cdr ssa-code))
-																					 until (and (car ssa-code) (gethash (address (car ssa-code)) block-starts)))
-																		 block))))
-			(dolist (block blocks)
-				;; Make connections between basic blocks.
-				(let* ((opcode (aref +opcodes+ (aref (bytecode *context*) (floor (address (car (code block)))))))
-							 (targets (if (gethash opcode +bytecode-short-branch-table+)
-														(get-short-branch-targets (address (car (code block))) (bytecode *context*))
-														(list (+ (address (car (code block))) (gethash opcode +bytecode-lengths-table+))))))
-					(dolist (target targets)
-						(let ((target-block (gethash target block-by-address)))
-							(when target-block
-								(fset:adjoinf (successors block) target-block)
-								(fset:adjoinf (predecessors target-block) block)))))
+  (let ((block-starts (find-block-starts)))
+    (let* ((block-by-address (make-hash-table))
+           (blocks (loop while ssa-code
+                         for insn = (car ssa-code)
+                         unless (gethash (address insn) block-starts)
+                           do (setf ssa-code (cdr ssa-code))
+                         when (gethash (address insn) block-starts)
+                           collect (let ((block (make-instance '<basic-block>)))
+                                     (loop while ssa-code
+                                           for insn = (car ssa-code)
+                                           for address = (address insn)
+                                           do (push insn (code block))
+                                           do (setf (gethash address block-by-address) block)
+                                           do (setf ssa-code (cdr ssa-code))
+                                           until (and (car ssa-code) (gethash (address (car ssa-code)) block-starts)))
+                                     block))))
+      (dolist (block blocks)
+        ;; Make connections between basic blocks.
+        (let* ((opcode (aref +opcodes+ (aref (bytecode *context*) (floor (address (car (code block)))))))
+               (targets (if (gethash opcode +bytecode-short-branch-table+)
+                            (get-short-branch-targets (address (car (code block))) (bytecode *context*))
+                            (list (+ (address (car (code block))) (gethash opcode +bytecode-lengths-table+))))))
+          (dolist (target targets)
+            (let ((target-block (gethash target block-by-address)))
+              (when target-block
+                (fset:adjoinf (successors block) target-block)
+                (fset:adjoinf (predecessors target-block) block)))))
 
-				;; Reverse all of the code back into normal order.
-				(setf (code block) (nreverse (code block))))
+        ;; Reverse all of the code back into normal order.
+        (setf (code block) (nreverse (code block))))
 
-			;; Let's create try blocks
-			(let ((exception-table (exception-table *context*)))
-				(when exception-table
-					(loop for i from 0 below (length exception-table)
-								for ete = (aref exception-table i)
-								for start-block = (gethash (start-pc ete) block-by-address)
-								for end-block = (gethash (end-pc ete) block-by-address)
-								for handler = (gethash (handler-pc ete) block-by-address)
-								do (push end-block (exception-end-blocks start-block))
-								do (push (cons (catch-type ete) handler) (try-catch start-block)))))
+      ;; Let's create try blocks
+      (let ((exception-table (exception-table *context*)))
+        (when exception-table
+          (loop for i from 0 below (length exception-table)
+                for ete = (aref exception-table i)
+                for start-block = (gethash (start-pc ete) block-by-address)
+                for end-block = (gethash (end-pc ete) block-by-address)
+                for handler = (gethash (handler-pc ete) block-by-address)
+                do (push end-block (exception-end-blocks start-block))
+                do (push (cons (catch-type ete) handler) (try-catch start-block)))))
 
-			;; Let's compute dominator sets for each block
-			;; TODO
+      ;; Let's compute dominator sets for each block
+      ;; TODO
 
-			(dump-method-dot blocks)
-			blocks)))
+      (dump-method-dot blocks)
+      blocks)))
