@@ -84,3 +84,13 @@ marshal-tests, ghcr.io/ocicl/marshal@sha256:a1e4be46c96220d69e43a1cdedd2d4cefe2a
 pathname-utils, ghcr.io/ocicl/pathname-utils@sha256:76da8e0828d9d0b484c17ad4f51113e5f605485accee835ec21a5b9abab06cf5, pathname-utils-20241204-9907593/pathname-utils.asd
 pathname-utils-test, ghcr.io/ocicl/pathname-utils@sha256:76da8e0828d9d0b484c17ad4f51113e5f605485accee835ec21a5b9abab06cf5, pathname-utils-20241204-9907593/pathname-utils-test.asd
 cl-store, ghcr.io/ocicl/cl-store@sha256:9c58bb54e0b871e06b47e049314f890a7e0cf8133aa47cdd7fc06590d564681b, cl-store-20240503-adb52a1/cl-store.asd
+asdf-package-system, ghcr.io/ocicl/asdf-package-system@sha256:dfacc260786f4e9e2aa13a797a7b326b58e08ea5db778421a9985b9c67362df1, asdf-package-system-20240503-61776f2/asdf-package-system.asd
+fset, ghcr.io/ocicl/fset@sha256:ba601482ef476c03f7590751ab29f275294eaf274c9df5152a06995722b4a10b, fset-20241220-7da76db/fset.asd
+misc-extensions, ghcr.io/ocicl/misc-extensions@sha256:9e6224b0933d66b4bc3008540b3d17bdb66d016380b6502bae3d42e3165e58c8, misc-extensions-20241231-79d6090/misc-extensions.asd
+random-state, ghcr.io/ocicl/random-state@sha256:85cf1a0b71baf0b180ea89446a94d8bcd6093bb5a12695ae2c45ed92e2e3869f, random-state-20241217-2116c90/random-state.asd
+random-state-viewer, ghcr.io/ocicl/random-state@sha256:85cf1a0b71baf0b180ea89446a94d8bcd6093bb5a12695ae2c45ed92e2e3869f, random-state-20241217-2116c90/random-state-viewer.asd
+random-state-test, ghcr.io/ocicl/random-state@sha256:85cf1a0b71baf0b180ea89446a94d8bcd6093bb5a12695ae2c45ed92e2e3869f, random-state-20241217-2116c90/random-state-test.asd
+multilang-documentation-utils, ghcr.io/ocicl/documentation-utils@sha256:b2a1b3f3bcd1a738af85ae2b0168d408c177661eab6d6bbebb254e394d983f54, documentation-utils-20230511-98630dd/multilang-documentation-utils.asd
+documentation-utils, ghcr.io/ocicl/documentation-utils@sha256:b2a1b3f3bcd1a738af85ae2b0168d408c177661eab6d6bbebb254e394d983f54, documentation-utils-20230511-98630dd/documentation-utils.asd
+trivial-indent, ghcr.io/ocicl/trivial-indent@sha256:f1ae624eb2ca37133912e9920587488ea6e2f1d6419ba4a1776e63c2bdff0fd9, trivial-indent-20240503-b5d490f/trivial-indent.asd
+named-readtables, ghcr.io/ocicl/named-readtables@sha256:c13ae35d957cf55f8c877762a24537daee5e8322d9968b14f8c86e8cfc1b2df3, named-readtables-20230809-2c05652/named-readtables.asd

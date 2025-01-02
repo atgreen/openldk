@@ -351,7 +351,7 @@
                             collect (codegen insn)))))
           (setf (slot-value basic-block 'code-emitted-p) t)
           (pop (slot-value *context* 'blocks))
-          (dolist (successor (successors basic-block))
+          (fset:do-set (successor (successors basic-block))
             (when successor
               (setf lisp-code (append lisp-code (codegen successor)))))
 					(if (try-catch basic-block)

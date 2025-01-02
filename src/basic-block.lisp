@@ -47,9 +47,11 @@
 	 (code)
 	 (address)
 	 (predecessors
-		:doc "List of incoming blocks")
+		:std (fset:empty-set)
+		:doc "Set of incoming blocks")
 	 (successors
-		:doc "List of outgoing blocks")
+		:std (fset:empty-set)
+		:doc "Set of outgoing blocks")
 	 (stop)
 	 (code-emitted-p)
 	 (try-catch)
@@ -68,7 +70,7 @@
     (dolist (i (code bloc))
       (format stream "<TR><TD ALIGN=\"LEFT\">\"~A\"</TD></TR>~%" (dot-dump-string i)))
     (format stream "</TABLE>>];~%")
-    (dolist (successor (successors bloc))
+    (fset:do-set (successor (successors bloc))
       (when successor
         (dump-dot successor done-table stream)
         (format stream "~A -> ~A~%" (id bloc) (id successor))))
@@ -161,8 +163,8 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
 					(dolist (target targets)
 						(let ((target-block (gethash target block-by-address)))
 							(when target-block
-								(push target-block (successors block))
-								(push block (predecessors target-block))))))
+								(fset:adjoinf (successors block) target-block)
+								(fset:adjoinf (predecessors target-block) block)))))
 
 				;; Reverse all of the code back into normal order.
 				(setf (code block) (nreverse (code block))))
