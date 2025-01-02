@@ -33,10 +33,6 @@ jobs:
           distribution: 'temurin'
           java-version: '8'
 
-      - name: Find rt.jar
-        run: |
-          find / -name rt.jar
-
       - name: Setup SBCL and ocicl
         run: |
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
@@ -56,4 +52,5 @@ jobs:
       - name: Test
         run: |
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+					export LDK_CLASSPATH=/usr/lib/jvm/temurin-8-jdk-amd64/jre/lib/rt.jar
           make check
