@@ -222,8 +222,6 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
 														(loop for child-block in (fset:convert 'list successors)
 																	for merge-address = (depth-first-mark child-block child-block successors)
 																	when merge-address
-																		do (progn
-																				 (format t "MERGING at ~A~%" merge-address)
-																				 (remove-goto block merge-address)))))))
+																		do (remove-goto block merge-address))))))
       (dump-method-dot blocks)
       blocks)))
