@@ -88,3 +88,8 @@
                  (setf (slot-value java-class '|classLoader|) loader)
                  (setf (gethash lname *java-classes*) java-class)
                  java-class)))))
+
+(defmethod |java/lang/System.currentTimeMillis()J| ()
+	;;; FIXME: this probably isn't right.
+  (floor (* (get-internal-real-time) 1000)
+				 internal-time-units-per-second))

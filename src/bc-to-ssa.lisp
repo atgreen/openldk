@@ -803,6 +803,17 @@
           (list (make-instance 'ssa-push :address pc-start
                                          :value (emit (aref constant-pool index) constant-pool))))))))
 
+(defun :LLOAD_1 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-push
+                           :address pc-start
+                           :value (make-instance 'ssa-local-variable
+                                                 :address pc-start
+                                                 :index 1))))))
+
 (defun :LUSHR (context code)
   (declare (ignore code))
   (with-slots (pc) context
