@@ -468,6 +468,39 @@
                                                  :address pc-start
                                                  :value 2))))))
 
+(defun :ICONST_3 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-push
+                           :address pc-start
+                           :value (make-instance 'ssa-int-literal
+                                                 :address pc-start
+                                                 :value 3))))))
+
+(defun :ICONST_4 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-push
+                           :address pc-start
+                           :value (make-instance 'ssa-int-literal
+                                                 :address pc-start
+                                                 :value 4))))))
+
+(defun :ICONST_5 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-push
+                           :address pc-start
+                           :value (make-instance 'ssa-int-literal
+                                                 :address pc-start
+                                                 :value 5))))))
+
 (defun :IF_ACMPEQ (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
