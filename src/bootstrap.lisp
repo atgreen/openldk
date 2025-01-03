@@ -64,3 +64,15 @@
 (define-condition |condition-java/lang/ArithmeticException|
     (|condition-java/lang/Exception|)
   ((objref)))
+
+(define-condition |condition-java/lang/ReflectiveOperationException|
+		(|condition-java/lang/Exception|)
+	((objref)))
+
+(define-condition |condition-java/lang/IllegalAccessException|
+		(|condition-java/lang/ReflectiveOperationException|)
+	((objref)))
+
+(define-condition |condition-java/lang/InstantiationException|
+		(|condition-java/lang/ReflectiveOperationException|)
+	((objref)))

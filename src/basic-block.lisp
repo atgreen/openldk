@@ -58,6 +58,8 @@
    (code-emitted-p)
    (try-catch)
 	 (marks)
+	 (try-exit-block
+		:doc "The block at which try/catch handlers exit if this is a try block")
    (exception-end-blocks)
    (exception-table-entries)
    (catch-handlers)))
@@ -222,6 +224,8 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
 														(loop for child-block in (fset:convert 'list successors)
 																	for merge-address = (depth-first-mark child-block child-block successors)
 																	when merge-address
-																		do (remove-goto block merge-address))))))
+																		do (progn
+																				 (setf (try-exit-block block) (gethash merge-address block-by-address))
+																				 (remove-goto block merge-address)))))))
       (dump-method-dot blocks)
       blocks)))

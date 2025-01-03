@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2023, 2024  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; This file is part of OpenLDK.
 
@@ -55,6 +55,7 @@
     :IRETURN
     :ISHL
     :ISUB
+    :LLOAD_0 :LLOAD_1 :LLOAD_2 :LLOAD_3
     :LUSHR
     :MONITORENTER :MONITOREXIT
     :NOP

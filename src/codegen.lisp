@@ -37,40 +37,40 @@
 
 (in-package :openldk)
 
-(defmethod codegen ((insn ssa-literal))
+(defmethod codegen ((insn ssa-literal) &optional (stop-block nil))
   (slot-value insn 'value))
 
-(defmethod codegen ((insn ssa-string-literal))
+(defmethod codegen ((insn ssa-string-literal) &optional (stop-block nil))
   (let ((s (make-instance '|java/lang/String|)))
     (setf (slot-value s '|value|) (slot-value insn 'value))
     s))
 
-(defmethod codegen ((insn ssa-aaload))
+(defmethod codegen ((insn ssa-aaload) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (list 'let (list (list 'index (list 'pop-item 'stack))
                    (list 'arrayref (list 'pop-item 'stack)))
         (list 'push-item 'stack (list 'aref 'arrayref 'index))))
 
-(defmethod codegen ((insn ssa-aastore))
+(defmethod codegen ((insn ssa-aastore) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (list 'let (list (list 'arrayref (list 'pop-item 'stack))
                    (list 'index (list 'pop-item 'stack))
                    (list 'value (list 'pop-item 'stack)))
         (list 'setf (list 'aref 'arrayref 'index) 'value)))
 
-(defmethod codegen ((insn ssa-add))
+(defmethod codegen ((insn ssa-add) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (list 'push-item 'stack (list '+ (list 'pop-item 'stack) (list 'pop-item 'stack))))
 
-(defmethod codegen ((insn ssa-array-length))
+(defmethod codegen ((insn ssa-array-length) &optional (stop-block nil))
   (list 'push-item 'stack (list 'length (list 'pop-item 'stack))))
 
-(defmethod codegen ((insn ssa-assign))
+(defmethod codegen ((insn ssa-assign) &optional (stop-block nil))
   (with-slots (source target) insn
     (list 'let (list (list 'value (codegen source)))
           (list 'setf (codegen target) 'value))))
 
-(defmethod codegen ((insn ssa-call-static-method))
+(defmethod codegen ((insn ssa-call-static-method) &optional (stop-block nil))
   (with-slots (class method-name args) insn
     (let* ((nargs (length args))
            (call (cond
@@ -89,10 +89,10 @@
           call
           (list 'push-item 'stack call)))))
 
-(defmethod codegen ((insn ssa-checkcast))
+(defmethod codegen ((insn ssa-checkcast) &optional (stop-block nil))
   (intern (format nil "#:checkcast-FIXME-~A" (slot-value insn 'index)) :openldk))
 
-(defmethod codegen ((insn ssa-class))
+(defmethod codegen ((insn ssa-class) &optional (stop-block nil))
   (let* ((classname (slot-value (slot-value insn 'class) 'name))
          (java-class (gethash classname *java-classes*)))
     (if java-class
@@ -106,10 +106,10 @@
           (setf (gethash classname *java-classes*) java-class)
           java-class))))
 
-(defmethod codegen ((insn ssa-branch-target))
+(defmethod codegen ((insn ssa-branch-target) &optional (stop-block nil))
   (intern (format nil "branch-target-~A" (slot-value insn 'index))))
 
-(defmethod codegen ((insn ssa-div))
+(defmethod codegen ((insn ssa-div) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (list 'handler-case
   (list 'let (list (list 'op2 (list 'pop-item 'stack))
@@ -117,93 +117,93 @@
         (list 'push-item 'stack (list '/ 'op1 'op2)))
         (list 'division-by-zero (list 'e) (list 'error (list 'make-condition (list 'quote '|condition-java/lang/ArithmeticException|))))))
 
-(defmethod codegen ((insn ssa-dup))
+(defmethod codegen ((insn ssa-dup) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (list 'push-item 'stack (list 'car 'stack)))
 
-(defmethod codegen ((insn ssa-iinc))
+(defmethod codegen ((insn ssa-iinc) &optional (stop-block nil))
   (with-slots (index const) insn
     (list 'incf (intern (format nil "local-~A" index) :openldk) const)))
 
-(defmethod codegen ((insn ssa-if-acmpeq))
+(defmethod codegen ((insn ssa-if-acmpeq) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'if (list 'eq (list 'pop-item 'stack) (list 'pop-item 'stack))
           (list 'go (intern (format nil "branch-target-~A" offset))))))
 
-(defmethod codegen ((insn ssa-if-acmpne))
+(defmethod codegen ((insn ssa-if-acmpne) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'if (list 'not (list 'eq (list 'pop-item 'stack) (list 'pop-item 'stack)))
           (list 'go (intern (format nil "branch-target-~A" offset))))))
 
-(defmethod codegen ((insn ssa-if-icmpeq))
+(defmethod codegen ((insn ssa-if-icmpeq) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'if (list 'equal (list 'pop-item 'stack) (list 'pop-item 'stack))
           (list 'go (intern (format nil "branch-target-~A" offset))))))
 
-(defmethod codegen ((insn ssa-if-icmple))
+(defmethod codegen ((insn ssa-if-icmple) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'if (list '>= (list 'pop-item 'stack) (list 'pop-item 'stack))
           (list 'go (intern (format nil "branch-target-~A" offset))))))
 
-(defmethod codegen ((insn ssa-if-icmpge))
+(defmethod codegen ((insn ssa-if-icmpge) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'if (list '<= (list 'pop-item 'stack) (list 'pop-item 'stack))
           (list 'go (intern (format nil "branch-target-~A" offset))))))
 
-(defmethod codegen ((insn ssa-if-icmpne))
+(defmethod codegen ((insn ssa-if-icmpne) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'if (list 'not (list 'eq (list 'pop-item 'stack) (list 'pop-item 'stack)))
           (list 'go (intern (format nil "branch-target-~A" offset))))))
 
-(defmethod codegen ((insn ssa-ifeq))
+(defmethod codegen ((insn ssa-ifeq) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'if (list 'eq (list 'pop-item 'stack) 0)
           (list 'go (intern (format nil "branch-target-~A" offset))))))
 
-(defmethod codegen ((insn ssa-ifge))
+(defmethod codegen ((insn ssa-ifge) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'progn
     (list 'if (list '>= (list 'pop-item 'stack) 0)
           (list 'go (intern (format nil "branch-target-~A" offset)))))))
 
-(defmethod codegen ((insn ssa-ifle))
+(defmethod codegen ((insn ssa-ifle) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'progn
     (list 'if (list '<= (list 'pop-item 'stack) 0)
           (list 'go (intern (format nil "branch-target-~A" offset)))))))
 
-(defmethod codegen ((insn ssa-ifne))
+(defmethod codegen ((insn ssa-ifne) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'if (list 'not (list 'eq (list 'pop-item 'stack) '0))
           (list 'go (intern (format nil "branch-target-~A" offset))))))
 
-(defmethod codegen ((insn ssa-ifnonnull))
+(defmethod codegen ((insn ssa-ifnonnull) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'if (list 'not (list 'null (list 'pop-item 'stack)))
           (list 'go (intern (format nil "branch-target-~A" offset))))))
 
-(defmethod codegen ((insn ssa-ifnull))
+(defmethod codegen ((insn ssa-ifnull) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'if (list 'null (list 'pop-item 'stack))
           (list 'go (intern (format nil "branch-target-~A" offset))))))
 
-(defmethod codegen ((insn ssa-instanceof))
+(defmethod codegen ((insn ssa-instanceof) &optional (stop-block nil))
   (with-slots (class) insn
     (list 'push-item 'stack (list 'typep (list 'pop-item 'stack) class))))
 
-(defmethod codegen ((insn ssa-ishl))
+(defmethod codegen ((insn ssa-ishl) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (list 'let (list (list 'op2 (list 'pop-item 'stack))
                    (list 'op1 (list 'pop-item 'stack)))
@@ -211,7 +211,7 @@
         (list 'format 't "ISHL ~A ~A~%" 'op1 'op2)
         (list 'push-item 'stack (list 'ash 'op1 'op2)))))
 
-(defmethod codegen ((insn ssa-lushr))
+(defmethod codegen ((insn ssa-lushr) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (list 'let (list (list 'op2 (list 'pop-item 'stack))
                    (list 'op1 (list 'pop-item 'stack)))
@@ -219,11 +219,11 @@
               (list 'format 't "LUSHR ~A ~A~%" 'op1 'op2)
               (list 'push-item 'stack (list 'ash 'op1 (list \- 'op2))))))
 
-(defmethod codegen ((insn ssa-goto))
+(defmethod codegen ((insn ssa-goto) &optional (stop-block nil))
   (with-slots (offset) insn
     (list 'go (intern (format nil "branch-target-~A" offset)))))
 
-(defmethod codegen ((insn ssa-call-virtual-method))
+(defmethod codegen ((insn ssa-call-virtual-method) &optional (stop-block nil))
   (with-slots (method-name args) insn
     (let* ((nargs (length args))
      (call (cond
@@ -240,46 +240,46 @@
     call
     (list 'push-item 'stack call)))))
 
-(defmethod codegen ((insn ssa-clinit))
+(defmethod codegen ((insn ssa-clinit) &optional (stop-block nil))
   (with-slots (class) insn
     (list (intern (format nil "~A.<clinit>()V" (slot-value (slot-value class 'class) 'name)) :openldk))))
 
-(defmethod codegen ((insn ssa-local-variable))
+(defmethod codegen ((insn ssa-local-variable) &optional (stop-block nil))
   (with-slots (index) insn
     (intern (format nil "local-~A" index) :openldk)))
 
-(defmethod codegen ((insn ssa-mul))
+(defmethod codegen ((insn ssa-mul) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (list 'push-item 'stack (list '* (list 'pop-item 'stack) (list 'pop-item 'stack))))
 
-(defmethod codegen ((insn ssa-new))
+(defmethod codegen ((insn ssa-new) &optional (stop-block nil))
   (with-slots (class) insn
     (with-slots (class) class
       (list 'make-instance (list 'quote (intern (slot-value class 'name) :openldk))))))
 
-(defmethod codegen ((insn ssa-new-array))
+(defmethod codegen ((insn ssa-new-array) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (list 'make-array (list 'pop-item 'stack)))
 
-(defmethod codegen ((insn ssa-nop))
+(defmethod codegen ((insn ssa-nop) &optional (stop-block nil))
   (gensym "NOP-"))
 
-(defmethod codegen ((insn ssa-pop))
+(defmethod codegen ((insn ssa-pop) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (list 'pop-item 'stack))
 
-(defmethod codegen ((insn ssa-push))
+(defmethod codegen ((insn ssa-push) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (with-slots (value) insn
     (list 'push-item 'stack (codegen value))))
 
-(defmethod codegen ((insn ssa-sub))
+(defmethod codegen ((insn ssa-sub) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (list 'let (list (list 'op2 (list 'pop-item 'stack))
        (list 'op1 (list 'pop-item 'stack)))
   (list 'push-item 'stack (list '- 'op1 'op2))))
 
-(defmethod codegen ((insn ssa-call-special-method))
+(defmethod codegen ((insn ssa-call-special-method) &optional (stop-block nil))
   (with-slots (class method-name args) insn
     (let ((call (list 'destructuring-bind (cons 'method 'next)
           (list 'closer-mop:compute-applicable-methods-using-classes
@@ -296,7 +296,7 @@
     call
     (list 'push-item 'stack call)))))
 
-(defmethod codegen ((insn ssa-member))
+(defmethod codegen ((insn ssa-member) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (with-slots (member-name) insn
     (list 'slot-value
@@ -306,13 +306,13 @@
                 'objref)
           (list 'quote (intern member-name :openldk)))))
 
-(defmethod codegen ((insn ssa-static-member))
+(defmethod codegen ((insn ssa-static-member) &optional (stop-block nil))
   (with-slots (class member-name) insn
     (list 'slot-value
           (intern (format nil "+static-~A+" (slot-value (slot-value class 'class) 'name)) :openldk)
           (list 'quote (intern member-name :openldk)))))
 
-(defmethod codegen ((insn ssa-store))
+(defmethod codegen ((insn ssa-store) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (with-slots (target) insn
     (list 'setf (codegen target) (list 'pop-item 'stack))))
@@ -323,44 +323,47 @@
 (defun make-java-condition (e)
   (make-condition (gethash (class-of e) *condition-table*) :objref e))
 
-(defmethod codegen ((insn ssa-throw))
+(defmethod codegen ((insn ssa-throw) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (list 'let* (list (list 'e (list 'pop-item 'stack))
                     (list 'c (list 'make-java-condition 'e)))
         (list 'error 'c)))
 
-(defmethod codegen ((insn ssa-return))
+(defmethod codegen ((insn ssa-return) &optional (stop-block nil))
   (list 'return))
 
-(defmethod codegen ((insn ssa-return-value))
+(defmethod codegen ((insn ssa-return-value) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (list 'return-from
         (intern (slot-value insn 'fn-name) :openldk)
         (list 'pop-item 'stack)))
 
-(defmethod codegen ((insn ssa-variable))
+(defmethod codegen ((insn ssa-variable) &optional (stop-block nil))
   (slot-value insn 'name))
 
-(defmethod codegen ((basic-block <basic-block>))
-  (if (not (slot-value basic-block 'code-emitted-p))
-      (progn
-        (push basic-block (slot-value *context* 'blocks))
-        (let ((lisp-code
-                (cons (intern (format nil "branch-target-~A" (address (car (slot-value basic-block 'code)))()))
-                      (loop for insn in (slot-value basic-block 'code)
-                            collect (codegen insn)))))
-          (setf (slot-value basic-block 'code-emitted-p) t)
-          (pop (slot-value *context* 'blocks))
-          (fset:do-set (successor (successors basic-block))
-            (when successor
-              (setf lisp-code (append lisp-code (codegen successor)))))
-          (if (try-catch basic-block)
-              (setf lisp-code (list (append (list 'handler-case)
-                                            (list (append (list 'tagbody) lisp-code))
-                                            (loop for tc in (try-catch basic-block)
-                                                  collect (append (list (intern (format nil "condition-~A" (car tc)) :openldk)
-                                                                        (list (intern "condition" :openldk)))
-                                                                  (list (cons 'tagbody
-                                                                              (codegen (cdr tc))))))))))
-          lisp-code))
-      nil))
+(defmethod codegen ((basic-block <basic-block>) &optional (stop-block nil))
+	(unless (equal basic-block stop-block)
+		(if (not (slot-value basic-block 'code-emitted-p))
+				(progn
+					(push basic-block (slot-value *context* 'blocks))
+					(let ((lisp-code
+									(cons (intern (format nil "branch-target-~A" (address (car (slot-value basic-block 'code)))()))
+												(loop for insn in (slot-value basic-block 'code)
+															collect (codegen insn)))))
+						(setf (slot-value basic-block 'code-emitted-p) t)
+						(pop (slot-value *context* 'blocks))
+						(fset:do-set (successor (successors basic-block))
+							(when successor
+								(setf lisp-code (append lisp-code (codegen successor (or stop-block (try-exit-block basic-block)))))))
+						(if (try-catch basic-block)
+								(progn
+									(setf lisp-code (append (list (append (list 'handler-case)
+																												(list (append (list 'tagbody) lisp-code))
+																												(loop for tc in (try-catch basic-block)
+																															collect (append (list (intern (format nil "condition-~A" (car tc)) :openldk)
+																																										(list (intern "condition" :openldk)))
+																																							(list (cons 'tagbody
+																																													(codegen (cdr tc) (try-exit-block basic-block))))))))
+																					(codegen (try-exit-block basic-block))))))
+						lisp-code))
+				nil)))
