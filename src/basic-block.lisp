@@ -53,11 +53,11 @@
     :std (fset:empty-set)
     :doc "Set of outgoing blocks")
    (dominates
-    :std (fset:empty-set)
     :doc "Set of blocks that this block dominates in CFG")
    (stop)
    (code-emitted-p)
    (try-catch)
+	 (marks)
    (exception-end-blocks)
    (exception-table-entries)
    (catch-handlers)))
@@ -148,7 +148,7 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
                          unless (gethash (address insn) block-starts)
                            do (setf ssa-code (cdr ssa-code))
                          when (gethash (address insn) block-starts)
-                           collect (let ((block (make-instance '<basic-block>)))
+                           collect (let ((block (make-instance '<basic-block> :address (address insn))))
                                      (loop while ssa-code
                                            for insn = (car ssa-code)
                                            for address = (address insn)
@@ -175,6 +175,7 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
       ;; Let's create try blocks
       (let ((exception-table (exception-table *context*)))
         (when exception-table
+
           (loop for i from 0 below (length exception-table)
                 for ete = (aref exception-table i)
                 for start-block = (gethash (start-pc ete) block-by-address)
@@ -183,8 +184,46 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
                 do (push end-block (exception-end-blocks start-block))
                 do (push (cons (catch-type ete) handler) (try-catch start-block)))))
 
-      ;; Let's compute dominator sets for each block
-      ;; TODO
-
+			;; Let's eliminate the exit goto for try and handler blocks
+			(labels ((depth-first-mark (mark-block child-block matching-set)
+								 "Return the address of the block that is where all successor blocks merge."
+								 (unless (fset:contains? (marks child-block) mark-block)
+									 (setf (marks child-block) (fset:with (marks child-block) mark-block))
+									 (if (fset:equal? (marks child-block) matching-set)
+											 ;; At this point CHILD-BLOCK is the block where the try-block and the
+											 ;; handlers all merge.  Return the address of that block.
+											 (address child-block)
+											 (progn
+												 (fset:do-set (b (successors child-block))
+													 (let ((address (depth-first-mark mark-block b matching-set)))
+														 (if address (return-from depth-first-mark address))))
+												 (dolist (b (mapcar (lambda (tc) (cdr tc))
+																						(try-catch child-block)))
+													 (let ((address (depth-first-mark mark-block b matching-set)))
+														 (if address (return-from depth-first-mark address))))))))
+							 (remove-goto (block target-address)
+								 "Remove a trailing GOTO to TARGET-ADDRESS at the end of BLOCK and successors until we reach TARGET-ADDRESS."
+								 (let ((last-insn (car (last (code block)))))
+									 (when (and (eq (type-of last-insn) 'ssa-goto)
+															(eq target-address (slot-value last-insn 'offset)))
+										 ;; Remove the goto at the end of this block.
+										 (setf (code block) (butlast (code block)))))
+								 (fset:do-set (b (successors block))
+									 (remove-goto b target-address))
+								 (dolist (b (mapcar (lambda (tc) (cdr tc)) (try-catch block)))
+									 (remove-goto b target-address))))
+				(loop for block in blocks
+							when (try-catch block)
+								;; Colour every successor
+								do (progn (loop for block in blocks
+																do (setf (marks block) (fset:empty-set)))
+													(let ((successors (fset:union (successors block)
+																												(fset:convert 'fset:set (mapcar (lambda (tc) (cdr tc)) (try-catch block))))))
+														(loop for child-block in (fset:convert 'list successors)
+																	for merge-address = (depth-first-mark child-block child-block successors)
+																	when merge-address
+																		do (progn
+																				 (format t "MERGING at ~A~%" merge-address)
+																				 (remove-goto block merge-address)))))))
       (dump-method-dot blocks)
       blocks)))
