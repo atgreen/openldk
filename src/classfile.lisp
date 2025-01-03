@@ -79,6 +79,9 @@
 (defmethod emit ((v constant-int) cp)
   (make-instance 'ssa-int-literal :value (slot-value v 'value)))
 
+(defmethod emit ((v constant-long) cp)
+  (make-instance 'ssa-int-literal :value (slot-value v 'value)))
+
 (defmethod emit ((v constant-field-reference) cp)
   (let ((class (emit (aref cp (slot-value v 'class-index)) cp)))
     (values (emit-name (aref cp (slot-value v 'type-descriptor-index)) cp) class)))

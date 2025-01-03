@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2023, 2024  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; This file is part of OpenLDK.
 
@@ -44,6 +44,8 @@
    (classes)
    (bytecode)
    (exception-table)
+	 (block-address-table
+		:doc "A hashtable mapping addresses to blocks")
    (fn-name)
    (blocks)
    (ssa-code)

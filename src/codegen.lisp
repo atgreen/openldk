@@ -181,6 +181,13 @@
     (list 'if (list '<= (list 'pop-item 'stack) 0)
           (list 'go (intern (format nil "branch-target-~A" offset)))))))
 
+(defmethod codegen ((insn ssa-iflt) &optional (stop-block nil))
+  (flag-stack-usage *context*)
+  (with-slots (offset) insn
+    (list 'progn
+    (list 'if (list '< (list 'pop-item 'stack) 0)
+          (list 'go (intern (format nil "branch-target-~A" offset)))))))
+
 (defmethod codegen ((insn ssa-ifne) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
@@ -210,6 +217,18 @@
   (list 'progn
         (list 'format 't "ISHL ~A ~A~%" 'op1 'op2)
         (list 'push-item 'stack (list 'ash 'op1 'op2)))))
+
+(defmethod codegen ((insn ssa-lcmp) &optional (stop-block nil))
+  (flag-stack-usage *context*)
+  (list 'let (list (list 'op2 (list 'pop-item 'stack))
+									 (list 'op1 (list 'pop-item 'stack)))
+				(list 'cond
+							(list (list 'eq 'op1 'op2)
+										(list 'push-item 'stack 0))
+							(list (list '> 'op1 'op2)
+										(list 'push-item 'stack 1))
+							(list 't
+										(list 'push-item 'stack -1)))))
 
 (defmethod codegen ((insn ssa-lushr) &optional (stop-block nil))
   (flag-stack-usage *context*)
@@ -352,9 +371,11 @@
 															collect (codegen insn)))))
 						(setf (slot-value basic-block 'code-emitted-p) t)
 						(pop (slot-value *context* 'blocks))
-						(fset:do-set (successor (successors basic-block))
-							(when successor
-								(setf lisp-code (append lisp-code (codegen successor (or stop-block (try-exit-block basic-block)))))))
+						;; sort by address
+						(let ((successor-list (sort (fset:convert 'list (successors basic-block)) (lambda (a b) (< (address a) (address b))))))
+							(dolist (successor successor-list)
+								(when successor
+									(setf lisp-code (append lisp-code (codegen successor (or stop-block (try-exit-block basic-block))))))))
 						(if (try-catch basic-block)
 								(progn
 									(setf lisp-code (append (list (append (list 'handler-case)

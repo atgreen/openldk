@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2023, 2024  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; This file is part of OpenLDK.
 
@@ -83,6 +83,9 @@
 (defclass/std ssa-int-literal (ssa-literal)
   ())
 
+(defclass/std ssa-long-literal (ssa-literal)
+  ())
+
 (defclass/std ssa-class (ssa-node)
   ((class :with)))
 
@@ -138,6 +141,9 @@
   ())
 
 (defclass/std ssa-ifle (ssa-branch)
+  ())
+
+(defclass/std ssa-iflt (ssa-branch)
   ())
 
 (defclass/std ssa-ifne (ssa-branch)
@@ -199,6 +205,12 @@
   ((class :with)))
 
 (defclass/std ssa-new-array (ssa-new)
+  ())
+
+(defclass/std ssa-lcmp (ssa-node)
+  ())
+
+(defclass/std ssa-ldc2_w (ssa-node)
   ())
 
 (defclass/std ssa-lushr (ssa-node)

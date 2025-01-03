@@ -78,7 +78,7 @@
 
 (defparameter +bytecode-short-branch-table+
   (let ((sbtable (make-hash-table)))
-    (dolist (o '(:GOTO :IF_ICMPLE :IF_ICMPEQ :IF_ICMPGE :IF_ICMPNE :IFEQ :IFGE :IFLE :IFNE :IFNONNULL :IFNULL))
+    (dolist (o '(:GOTO :IF_ACMPEQ :IF_ACMPNE :IF_ICMPLE :IF_ICMPEQ :IF_ICMPGE :IF_ICMPNE :IFEQ :IFGE :IFLE :IFNE :IFNONNULL :IFNULL))
       (setf (gethash o sbtable) t))
     sbtable))
 

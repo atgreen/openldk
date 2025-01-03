@@ -208,8 +208,8 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
 								 (let ((last-insn (car (last (code block)))))
 									 (when (and (eq (type-of last-insn) 'ssa-goto)
 															(eq target-address (slot-value last-insn 'offset)))
-										 ;; Remove the goto at the end of this block.
-										 (setf (code block) (butlast (code block)))))
+										 ;; Replace the goto with a nop
+										 (setf (code block) (append (butlast (code block)) (list (make-instance 'ssa-nop :address target-address))))))
 								 (fset:do-set (b (successors block))
 									 (remove-goto b target-address))
 								 (dolist (b (mapcar (lambda (tc) (cdr tc)) (try-catch block)))
@@ -227,5 +227,6 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
 																		do (progn
 																				 (setf (try-exit-block block) (gethash merge-address block-by-address))
 																				 (remove-goto block merge-address)))))))
+			(setf (block-address-table *context*) block-by-address)
       (dump-method-dot blocks)
       blocks)))
