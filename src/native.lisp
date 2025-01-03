@@ -77,7 +77,14 @@
          (cstring (subseq caller-string 1 (position #\. caller-string))))
     (gethash cstring *java-classes*)))
 
+(defmethod |getClass()Ljava/lang/Class;| (object)
+	(when *debug-trace*
+		(format t "tracing: java/lang/Object.getClass()Ljava/lang/Class~%"))
+	(gethash (format nil "~A" (type-of object)) *java-classes*))
+
 (defmethod |java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;| (name initialize loader caller)
+	(when *debug-trace*
+		(format t "tracing: java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;~%"))
   (let ((lname (substitute #\/ #\. (slot-value name '|value|))))
     (or (gethash lname *java-classes*)
         (progn (%clinit (classload lname))
@@ -93,3 +100,9 @@
 	;;; FIXME: this probably isn't right.
   (floor (* (get-internal-real-time) 1000)
 				 internal-time-units-per-second))
+
+(defmethod |java/lang/System.arraycopy(Ljava/lang/Object;ILjava/lang/Object;II)V| (source_arr sourcePos dest_arr destPos len)
+	(print "======================================================================")
+	(format t "sourcePos = ~A~%" sourcePos)
+	(format t "~A ~A ~A ~A ~A" source_arr sourcePos dest_arr destPos len)
+	(print "======================================================================"))

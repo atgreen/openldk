@@ -44,6 +44,7 @@
 (defvar *java-classes* (make-hash-table :test #'equal))
 (defvar *context* nil)
 (defvar *condition-table* (make-hash-table))
+(defvar *bootstrapped* nil)
 
 (defvar *dump-dir* nil)
 (defvar *debug-codegen* nil)
@@ -242,6 +243,15 @@
                          (let ((ccode (list 'define-condition condition-symbol
                                             (list (intern (format nil "condition-~A" (slot-value super 'name)) :openldk)) (list))))
                            (%eval ccode))))
+										 (when *bootstrapped*
+											 (let ((klass (make-instance '|java/lang/Class|))
+														 (cname (make-instance '|java/lang/String|))
+														 (cloader (make-instance '|java/lang/ClassLoader|)))
+												 (with-slots (|name| |classLoader|) klass
+													 (setf (slot-value cname '|value|) (substitute #\/ #\. classname))
+													 (setf |name| cname)
+													 (setf |classLoader| cloader))
+												 (setf (gethash (substitute #\/ #\. classname) *java-classes*) klass)))
                      class)
                 (close classfile-stream))
               (format t "ERROR: Can't find ~A on classpath~%" classname))))))
@@ -292,6 +302,8 @@
 	(%clinit (classload "java/lang/String"))
 	(%clinit (classload "java/lang/ClassLoader"))
 	(%clinit (classload "java/lang/Class"))
+
+	(setf *bootstrapped* t)
 
 	;; Create a java/lang/Class for every class we've see so far.
 	(maphash (lambda (k v)
