@@ -102,7 +102,5 @@
 				 internal-time-units-per-second))
 
 (defmethod |java/lang/System.arraycopy(Ljava/lang/Object;ILjava/lang/Object;II)V| (source_arr sourcePos dest_arr destPos len)
-	(print "======================================================================")
-	(format t "sourcePos = ~A~%" sourcePos)
-	(format t "~A ~A ~A ~A ~A" source_arr sourcePos dest_arr destPos len)
-	(print "======================================================================"))
+	(dotimes (i len)
+		(setf (aref dest_arr (+ destPos i)) (aref source_arr (+ sourcePos i)))))
