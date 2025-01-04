@@ -53,9 +53,9 @@
 
 (defmethod codegen ((insn ssa-aastore) &optional (stop-block nil))
   (flag-stack-usage *context*)
-  (list 'let (list (list 'arrayref (list 'pop-item 'stack))
+  (list 'let (list (list 'value (list 'pop-item 'stack))
                    (list 'index (list 'pop-item 'stack))
-                   (list 'value (list 'pop-item 'stack)))
+                   (list 'arrayref (list 'pop-item 'stack)))
         (list 'setf (list 'aref 'arrayref 'index) 'value)))
 
 (defmethod codegen ((insn ssa-add) &optional (stop-block nil))
@@ -120,6 +120,13 @@
 (defmethod codegen ((insn ssa-dup) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (list 'push-item 'stack (list 'car 'stack)))
+
+(defmethod codegen ((insn ssa-iastore) &optional (stop-block nil))
+  (flag-stack-usage *context*)
+  (list 'let (list (list 'value (list 'pop-item 'stack))
+                   (list 'index (list 'pop-item 'stack))
+                   (list 'arrayref (list 'pop-item 'stack)))
+        (list 'setf (list 'aref 'arrayref 'index) 'value)))
 
 (defmethod codegen ((insn ssa-iinc) &optional (stop-block nil))
   (with-slots (index const) insn

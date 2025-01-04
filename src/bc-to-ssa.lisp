@@ -183,6 +183,14 @@
                                                   :address pc-start
                                                   :index 2))))))
 
+(defun :IASTORE (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-iastore
+                           :address pc-start)))))
+
 (defun :IINC (context code)
   (with-slots (pc) context
     (let ((pc-start pc))

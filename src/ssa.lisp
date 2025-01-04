@@ -80,6 +80,9 @@
 (defclass/std ssa-double-literal (ssa-literal)
   ())
 
+(defclass/std ssa-iastore (ssa-node)
+  ())
+
 (defclass/std ssa-int-literal (ssa-literal)
   ())
 
