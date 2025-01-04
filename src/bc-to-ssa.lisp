@@ -947,14 +947,14 @@
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
-      (list (make-instance 'ssa-nop :address pc-start)))))
+      (list (make-instance 'ssa-monitorenter :address pc-start)))))
 
 (defun :MONITOREXIT (context code)
   (declare (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
-      (list (make-instance 'ssa-nop :address pc-start)))))
+      (list (make-instance 'ssa-monitorexit :address pc-start)))))
 
 (defun :NEW (context code)
   (with-slots (pc class) context

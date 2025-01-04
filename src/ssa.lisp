@@ -192,6 +192,12 @@
 (defclass/std ssa-member (ssa-node)
   ((member-name)))
 
+(defclass/std ssa-monitorenter (ssa-node)
+  (()))
+
+(defclass/std ssa-monitorexit (ssa-node)
+  (()))
+
 (defclass/std ssa-static-member (ssa-node)
   ((class :with)
    (member-name)))

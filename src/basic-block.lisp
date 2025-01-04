@@ -57,6 +57,8 @@
    (stop)
    (code-emitted-p)
    (try-catch)
+	 (finally
+	  :doc "A list of finally blocks for each try-finally starting here.")
 	 (marks)
 	 (try-exit-block
 		:doc "The block at which try/catch handlers exit if this is a try block")

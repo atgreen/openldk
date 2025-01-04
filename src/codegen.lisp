@@ -274,6 +274,14 @@
   (with-slots (index) insn
     (intern (format nil "local-~A" index) :openldk)))
 
+(defmethod codegen ((insn ssa-monitorenter) &optional (stop-block nil))
+	(flag-stack-usage *context*)
+	(list 'monitor-enter (list 'pop-item 'stack)))
+
+(defmethod codegen ((insn ssa-monitorexit) &optional (stop-block nil))
+	(flag-stack-usage *context*)
+	(list 'monitor-exit (list 'pop-item 'stack)))
+
 (defmethod codegen ((insn ssa-mul) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (list 'push-item 'stack (list '* (list 'pop-item 'stack) (list 'pop-item 'stack))))
@@ -383,15 +391,29 @@
 							(dolist (successor successor-list)
 								(when successor
 									(setf lisp-code (append lisp-code (codegen successor (or stop-block (try-exit-block basic-block))))))))
-						(if (try-catch basic-block)
-								(progn
-									(setf lisp-code (append (list (append (list 'handler-case)
-																												(list (append (list 'tagbody) lisp-code))
-																												(loop for tc in (try-catch basic-block)
-																															collect (append (list (intern (format nil "condition-~A" (car tc)) :openldk)
-																																										(list (intern "condition" :openldk)))
-																																							(list (cons 'tagbody
-																																													(codegen (cdr tc) (try-exit-block basic-block))))))))
-																					(codegen (try-exit-block basic-block))))))
+						;; FIXME: need to clean up / remove handlers for certain FINALLY situations.
+						;; Do this is BUILD-BASIC-BLOCKS.
+						(loop for tc in (try-catch basic-block)
+									unless (car tc)
+										do (progn
+												 ;; This is a FINALLY block.  Wrap this in UNWIND-PROTECT.
+												 (setf lisp-code (append (list (append (list 'unwind-protect)
+																															 (list (append (list 'tagbody) lisp-code))
+																															 (list (cons 'tagbody
+																																					 (codegen (cdr tc) (try-exit-block basic-block))))))
+																								 (codegen (try-exit-block basic-block))))))
+						(loop for tc in (try-catch basic-block)
+									when (car tc)
+										do (progn
+												 ;; This is a TRY-CATCH block.  Wrap this in HANDLER-CASE.
+												 (setf lisp-code (append (list (append (list 'handler-case)
+																															 (list (append (list 'tagbody) lisp-code))
+																															 (loop for tc in (try-catch basic-block)
+																																		 when (car tc)
+																																			 collect (append (list (intern (format nil "condition-~A" (car tc)) :openldk)
+																																														 (list (intern "condition" :openldk)))
+																																											 (list (cons 'tagbody
+																																																	 (codegen (cdr tc) (try-exit-block basic-block))))))))
+																								 (codegen (try-exit-block basic-block))))))
 						lisp-code))
 				nil)))
