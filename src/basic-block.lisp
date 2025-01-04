@@ -204,17 +204,19 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
 																						(try-catch child-block)))
 													 (let ((address (depth-first-mark mark-block b matching-set)))
 														 (if address (return-from depth-first-mark address))))))))
-							 (remove-goto (block target-address)
+							 (remove-goto (block target-address seen-table)
 								 "Remove a trailing GOTO to TARGET-ADDRESS at the end of BLOCK and successors until we reach TARGET-ADDRESS."
-								 (let ((last-insn (car (last (code block)))))
-									 (when (and (eq (type-of last-insn) 'ssa-goto)
-															(eq target-address (slot-value last-insn 'offset)))
-										 ;; Replace the goto with a nop
-										 (setf (code block) (append (butlast (code block)) (list (make-instance 'ssa-nop :address target-address))))))
-								 (fset:do-set (b (successors block))
-									 (remove-goto b target-address))
-								 (dolist (b (mapcar (lambda (tc) (cdr tc)) (try-catch block)))
-									 (remove-goto b target-address))))
+								 (unless (gethash block seen-table)
+									 (setf (gethash block seen-table) t)
+									 (let ((last-insn (car (last (code block)))))
+										 (when (and (eq (type-of last-insn) 'ssa-goto)
+																(eq target-address (slot-value last-insn 'offset)))
+											 ;; Replace the goto with a nop
+											 (setf (code block) (append (butlast (code block)) (list (make-instance 'ssa-nop :address target-address))))))
+									 (fset:do-set (b (successors block))
+										 (remove-goto b target-address seen-table))
+									 (dolist (b (mapcar (lambda (tc) (cdr tc)) (try-catch block)))
+										 (remove-goto b target-address seen-table)))))
 				(loop for block in blocks
 							when (try-catch block)
 								;; Colour every successor
@@ -227,7 +229,7 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
 																	when merge-address
 																		do (progn
 																				 (setf (try-exit-block block) (gethash merge-address block-by-address))
-																				 (remove-goto block merge-address)))))))
+																				 (remove-goto block merge-address (make-hash-table))))))))
 			(setf (block-address-table *context*) block-by-address)
       (dump-method-dot blocks)
       blocks)))
