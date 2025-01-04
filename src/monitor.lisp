@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2023, 2024  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; This file is part of OpenLDK.
 
@@ -37,42 +37,33 @@
 
 (in-package :openldk)
 
-(defclass/std |java/lang/Object| ()
-  ((monitor :std (make-instance '<java-monitor>))))
+(defclass/std <java-monitor> ()
+  ((mutex :std (bordeaux-threads:make-lock))
+   (condition-variable :std (bordeaux-threads:make-condition-variable))
+   (owner)
+   (recursion-count :std 0)))
 
-(defclass |java/lang/String| (|java/lang/Object|)
-  ((|value| :initform NIL :allocation :instance)
-   (|hash| :initform NIL :allocation :instance)
-   (|serialVersionUID| :initform NIL :allocation :class)
-   (|serialPersistentFields| :initform NIL :allocation :class)
-   (CASE_INSENSITIVE_ORDER :initform NIL :allocation :class)))
+(defun monitor-enter (object)
+  (let* ((monitor (monitor object))
+         (mutex (mutex monitor))
+         (current-thread (bordeaux-threads:current-thread)))
+    (bordeaux-threads:with-lock-held (mutex)
+      (if (eq (owner monitor) current-thread)
+          (incf (recursion-count monitor))
+          (progn
+            (loop while (owner monitor)
+                  do (bordeaux-threads:condition-wait (condition-variable monitor) mutex))
+            (setf (owner monitor) current-thread
+                  (recursion-count monitor) 1))))))
 
-(defmethod print-object ((s |java/lang/String|) out)
-  (print-unreadable-object (s out :type t)
-    (format out "~S" (slot-value s '|value|))))
-
-(defclass |java/lang/Throwable| (|java/lang/Object|)
-  ())
-
-(define-condition |condition-java/lang/Throwable| (error)
-  ((objref)))
-
-(define-condition |condition-java/lang/Exception|
-    (|condition-java/lang/Throwable|)
-  ((objref)))
-
-(define-condition |condition-java/lang/ArithmeticException|
-    (|condition-java/lang/Exception|)
-  ((objref)))
-
-(define-condition |condition-java/lang/ReflectiveOperationException|
-		(|condition-java/lang/Exception|)
-	((objref)))
-
-(define-condition |condition-java/lang/IllegalAccessException|
-		(|condition-java/lang/ReflectiveOperationException|)
-	((objref)))
-
-(define-condition |condition-java/lang/InstantiationException|
-		(|condition-java/lang/ReflectiveOperationException|)
-	((objref)))
+(defun monitor-exit (object)
+  (let* ((monitor (monitor object))
+         (mutex (mutex monitor))
+         (current-thread (bordeaux-threads:current-thread)))
+    (bordeaux-threads:with-lock-held (mutex)
+      (unless (eq (owner monitor) current-thread)
+        (error "Current thread does not own the monitor"))
+      (decf (recursion-count monitor))
+      (when (zerop (recursion-count monitor))
+        (setf (owner monitor) nil)
+        (bordeaux-threads:condition-notify (condition-variable monitor))))))

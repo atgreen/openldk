@@ -45,6 +45,7 @@
   :serial t
   :components ((:file "src/package")
 							 (:file "src/debug")
+							 (:file "src/monitor")
 							 (:file "src/context")
 							 (:file "src/bootstrap")
 							 (:file "src/opcodes")
@@ -63,7 +64,7 @@
   "(lambda (thunk)
      (cl-annot:enable-annot-syntax)
      (funcall thunk))"
-  :depends-on (:cl-annot :whereiseveryone.command-line-args :flexi-streams :zip :str :defclass-std :fast-io :bitio :pathname-utils :cl-store :trivial-backtrace :fset)
+  :depends-on (:cl-annot :whereiseveryone.command-line-args :flexi-streams :zip :str :defclass-std :fast-io :bitio :pathname-utils :cl-store :trivial-backtrace :fset :bordeaux-threads)
   :build-operation "program-op"
   :build-pathname "openldk"
   :entry-point "openldk:main-wrapper")
