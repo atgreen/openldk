@@ -116,8 +116,8 @@
                          (list 'op1 (list 'pop-item 'stack)))
               (list 'push-item 'stack (list '/ 'op1 'op2)))
         (list 'division-by-zero (list 'e)
-              (list 'push-item 'stack (list 'make-condition (list 'quote '|condition-java/lang/ArithmeticException|)))
-              (list 'error (list 'peek-item 'stack)))))
+              (list 'push-item 'stack (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
+              (list 'error (list 'lisp-condition (list 'peek-item 'stack))))))
 
 (defmethod codegen ((insn ssa-dup) &optional (stop-block nil))
   (flag-stack-usage *context*)
@@ -361,8 +361,7 @@
 
 (defmethod codegen ((insn ssa-throw) &optional (stop-block nil))
   (flag-stack-usage *context*)
-  (list 'let* (list (list 'e (list 'peek-item 'stack))
-                    (list 'c (list 'make-java-condition 'e)))
+  (list 'let (list (list 'c (list 'lisp-condition (list 'peek-item 'stack))))
         (list 'error 'c)))
 
 (defmethod codegen ((insn ssa-return) &optional (stop-block nil))

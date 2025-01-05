@@ -54,6 +54,9 @@
 (defclass |java/lang/Throwable| (|java/lang/Object|)
   ())
 
+(defmethod lisp-condition ((throwable |java/lang/Throwable|))
+  (error (format nil "Missing lisp-condition implementation for ~A." throwable)))
+
 (define-condition |condition-java/lang/Throwable| (error)
   ((objref)))
 
@@ -61,9 +64,15 @@
     (|condition-java/lang/Throwable|)
   ((objref)))
 
+(defclass |java/lang/ArithmeticException| (|java/lang/Exception|)
+  ())
+
 (define-condition |condition-java/lang/ArithmeticException|
     (|condition-java/lang/Exception|)
   ((objref)))
+
+(defmethod lisp-condition ((throwable |java/lang/ArithmeticException|))
+  (make-condition '|condition-java/lang/ArithmeticException|))
 
 (define-condition |condition-java/lang/ReflectiveOperationException|
 		(|condition-java/lang/Exception|)

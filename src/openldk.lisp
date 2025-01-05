@@ -242,6 +242,9 @@
                          (setf (gethash (find-class (intern classname :openldk)) *condition-table*) condition-symbol)
                          (let ((ccode (list 'define-condition condition-symbol
                                             (list (intern (format nil "condition-~A" (slot-value super 'name)) :openldk)) (list))))
+                           (%eval ccode))
+                         (let ((ccode (list 'defmethod 'lisp-condition (list (list 'throwable (intern (format nil "~A" classname) :openldk)))
+                                            (list 'make-condition (list 'quote (intern (format nil "condition-~A" classname) :openldk))))))
                            (%eval ccode))))
                      (when *bootstrapped*
                        (let ((klass (make-instance '|java/lang/Class|))
