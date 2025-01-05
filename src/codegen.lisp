@@ -421,6 +421,7 @@
                                                                                              (list (intern "condition" :openldk)))
                                                                                        (list (cons 'tagbody
                                                                                                    (codegen (cdr tc) (try-exit-block basic-block))))))))
-                                                 (codegen (try-exit-block basic-block))))))
+                                                 (when (try-exit-block basic-block)
+                                                   (codegen (try-exit-block basic-block)))))))
             lisp-code))
         nil)))

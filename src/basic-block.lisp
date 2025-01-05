@@ -113,6 +113,7 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
  the start of a block if it is:
     - the start of a method
     - the start of an exception range
+    - the instruction following an exception range
     - the start of an exception handler
     - a jump or branch target"
   (let ((block-starts (make-hash-table)))
@@ -126,6 +127,7 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
         (loop for i from 0 below (length exception-table)
               for ete = (aref exception-table i)
               do (setf (gethash (start-pc ete) block-starts) t)
+              do (setf (gethash (end-pc ete) block-starts) t)
               do (setf (gethash (handler-pc ete) block-starts) t))))
 
     ;; Handle all jump and branch targets
@@ -136,7 +138,6 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
         do (let* ((opcode (aref +opcodes+ (aref code pc)))
                   (targets (if (gethash opcode +bytecode-short-branch-table+)
                                (get-short-branch-targets pc code))))
-;						 (format t "opcode: ~A~%" opcode)
              (incf pc (gethash opcode +bytecode-lengths-table+))
              (dolist (target targets)
                (setf (gethash target block-starts) t)))))
@@ -167,7 +168,8 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
         (let* ((opcode (aref +opcodes+ (aref (bytecode *context*) (floor (address (car (code block)))))))
                (targets (if (gethash opcode +bytecode-short-branch-table+)
                             (get-short-branch-targets (address (car (code block))) (bytecode *context*))
-                            (list (+ (address (car (code block))) (gethash opcode +bytecode-lengths-table+))))))
+                            (unless (eq :ATHROW opcode)
+                              (list (+ (address (car (code block))) (gethash opcode +bytecode-lengths-table+)))))))
           (dolist (target targets)
             (let ((target-block (gethash target block-by-address)))
               (when target-block
