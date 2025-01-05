@@ -214,7 +214,7 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
 										 (when (and (eq (type-of last-insn) 'ssa-goto)
 																(eq target-address (slot-value last-insn 'offset)))
 											 ;; Replace the goto with a nop
-											 (setf (code block) (append (butlast (code block)) (list (make-instance 'ssa-nop :address target-address))))))
+											 (setf (code block) (append (butlast (code block)) (list (make-instance 'ssa-nop :address (address last-insn)))))))
 									 (fset:do-set (b (successors block))
 										 (remove-goto b target-address seen-table))
 									 (dolist (b (mapcar (lambda (tc) (cdr tc)) (try-catch block)))
