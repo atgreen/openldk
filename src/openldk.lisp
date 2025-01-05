@@ -116,17 +116,16 @@
                        (when *debug-trace*
                          (list (list 'format 't "tracing: ~A.~A~%" class-name (fn-name *context*))))
                        (if (slot-value *context* 'uses-stack-p)
-                           (list (append (list 'let (append ; (list (list 'stack (list 'list)))
-                                                            (if (static-p method)
-                                                                (append (loop for i from 1 upto parameter-count
-                                                                              collect (list (intern (format nil "local-~A" (1- i)) :openldk) (intern (format nil "arg~A" (1- i)) :openldk)))
-                                                                        (loop for i from (1+ parameter-count) upto max-locals
-                                                                              collect (list (intern (format nil "local-~A" (1- i)) :openldk))))
-                                                                (append (cons (list (intern "local-0" :openldk) (intern "this" :openldk))
-                                                                              (loop for i from 1 upto parameter-count
-                                                                                    collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" i) :openldk))))
-                                                                        (loop for i from (+ 2 parameter-count) upto max-locals
-                                                                              collect (list (intern (format nil "local-~A" (1- i)) :openldk)))))))
+                           (list (append (list 'let (if (static-p method)
+                                                        (append (loop for i from 1 upto parameter-count
+                                                                      collect (list (intern (format nil "local-~A" (1- i)) :openldk) (intern (format nil "arg~A" (1- i)) :openldk)))
+                                                                (loop for i from (1+ parameter-count) upto max-locals
+                                                                      collect (list (intern (format nil "local-~A" (1- i)) :openldk))))
+                                                        (append (cons (list (intern "local-0" :openldk) (intern "this" :openldk))
+                                                                      (loop for i from 1 upto parameter-count
+                                                                            collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" i) :openldk))))
+                                                                (loop for i from (+ 2 parameter-count) upto max-locals
+                                                                      collect (list (intern (format nil "local-~A" (1- i)) :openldk))))))
                                          lisp-code))
                            lisp-code)))))
       (%eval definition-code))))
