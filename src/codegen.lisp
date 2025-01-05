@@ -383,7 +383,7 @@
         (progn
           (push basic-block (slot-value *context* 'blocks))
           (let ((lisp-code
-                  (cons (intern (format nil "branch-target-~A" (address (car (slot-value basic-block 'code)))()))
+                  (cons (intern (format nil "branch-target-~A" (address (car (slot-value basic-block 'code)))))
                         (loop for insn in (slot-value basic-block 'code)
                               collect (codegen insn)))))
             (setf (slot-value basic-block 'code-emitted-p) t)
@@ -395,6 +395,7 @@
                   (setf lisp-code (append lisp-code (codegen successor (or stop-block (try-exit-block basic-block))))))))
             ;; FIXME: need to clean up / remove handlers for certain FINALLY situations.
             ;; Do this is BUILD-BASIC-BLOCKS.
+            #|
             (loop for tc in (try-catch basic-block)
                   unless (car tc)
                     do (progn
@@ -403,16 +404,21 @@
                                                                (list (append (list 'tagbody) lisp-code))
                                                                (list (cons 'tagbody
                                                                            (codegen (cdr tc) (try-exit-block basic-block))))))
-                                                 (codegen (try-exit-block basic-block))))))
+            (codegen (try-exit-block basic-block))))))
+            |#
             (loop for tc in (try-catch basic-block)
-                  when (car tc)
+                  ;; when (car tc)
                     do (progn
                          ;; This is a TRY-CATCH block.  Wrap this in HANDLER-CASE.
                          (setf lisp-code (append (list (append (list 'handler-case)
                                                                (list (append (list 'tagbody) lisp-code))
                                                                (loop for tc in (try-catch basic-block)
-                                                                     when (car tc)
-                                                                       collect (append (list (intern (format nil "condition-~A" (car tc)) :openldk)
+                                                                     ;; when (car tc)
+                                                                       collect (append (list (intern
+                                                                                              (if (car tc)
+                                                                                                  (format nil "condition-~A" (car tc))
+                                                                                                  "condition")
+                                                                                              :openldk)
                                                                                              (list (intern "condition" :openldk)))
                                                                                        (list (cons 'tagbody
                                                                                                    (codegen (cdr tc) (try-exit-block basic-block))))))))
