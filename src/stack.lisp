@@ -48,3 +48,6 @@
       `(progn (format t "-- pop ~A~%" ,stack)
               (pop ,stack))
       `(pop ,stack)))
+
+(defmacro peek-item (stack)
+      `(car ,stack))
