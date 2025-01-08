@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2023, 2024  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; This file is part of OpenLDK.
 
@@ -392,36 +392,33 @@
               (dolist (successor successor-list)
                 (when successor
                   (setf lisp-code (append lisp-code (codegen successor (or stop-block (try-exit-block basic-block))))))))
-            ;; FIXME: need to clean up / remove handlers for certain FINALLY situations.
-            ;; Do this is BUILD-BASIC-BLOCKS.
-            #|
-            (loop for tc in (try-catch basic-block)
-                  unless (car tc)
-                    do (progn
-                         ;; This is a FINALLY block.  Wrap this in UNWIND-PROTECT.
-                         (setf lisp-code (append (list (append (list 'unwind-protect)
-                                                               (list (append (list 'tagbody) lisp-code))
-                                                               (list (cons 'tagbody
-                                                                           (codegen (cdr tc) (try-exit-block basic-block))))))
-            (codegen (try-exit-block basic-block))))))
-            |#
-            (loop for tc in (try-catch basic-block)
-                  ;; when (car tc)
-                    do (progn
-                         ;; This is a TRY-CATCH block.  Wrap this in HANDLER-CASE.
-                         (setf lisp-code (append (list (append (list 'handler-case)
-                                                               (list (append (list 'tagbody) lisp-code))
-                                                               (loop for tc in (try-catch basic-block)
-                                                                     ;; when (car tc)
-                                                                       collect (append (list (intern
-                                                                                              (if (car tc)
-                                                                                                  (format nil "condition-~A" (car tc))
-                                                                                                  "condition")
-                                                                                              :openldk)
-                                                                                             (list (intern "condition" :openldk)))
-                                                                                       (list (cons 'tagbody
-                                                                                                   (codegen (cdr tc) (try-exit-block basic-block))))))))
+
+            ;; Emit handlers for finally handlers. FIXME: in build-basic-blocks, sort try-catch list by end of range
+            (when (find-if (lambda (p) (null (car p))) (try-catch basic-block))
+              ;; This is a TRY-CATCH block.  Wrap this in HANDLER-CASE.
+              (loop for tc in (reverse (try-catch basic-block))
+                    unless (car tc)
+                      do (setf lisp-code (append (list (list 'handler-case
+                                                             (cons 'tagbody lisp-code)
+                                                             (list 'condition (list (intern "condition" :openldk))
+                                                                   (cons 'tagbody
+                                                                         (codegen (cdr tc) (try-exit-block basic-block))))))
                                                  (when (try-exit-block basic-block)
                                                    (codegen (try-exit-block basic-block)))))))
-            lisp-code))
-        nil)))
+
+            ;; Emit handler if there's a non-finally try-catch associated with this block.
+            (when (find-if (lambda (p) (car p)) (try-catch basic-block))
+              ;; This is a TRY-CATCH block.  Wrap this in HANDLER-CASE.
+              (setf lisp-code (append (list (append (list 'handler-case)
+                                                    (list (append (list 'tagbody) lisp-code))
+                                                    (loop for tc in (try-catch basic-block)
+                                                          when (car tc)
+                                                            collect (append (list (intern (format nil "condition-~A" (car tc)) :openldk)
+                                                                                  (list (intern "condition" :openldk)))
+                                                                            (list (cons 'tagbody
+                                                                                        (codegen (cdr tc) (try-exit-block basic-block))))))))
+                                      (when (try-exit-block basic-block)
+                                        (codegen (try-exit-block basic-block))))))
+
+          lisp-code))
+    nil)))

@@ -48,20 +48,21 @@
    (address)
    (predecessors
     :std (fset:empty-set)
-    :doc "Set of incoming blocks")
+    :doc "Set of incoming blocks.")
    (successors
     :std (fset:empty-set)
-    :doc "Set of outgoing blocks")
+    :doc "Set of outgoing blocks.")
    (dominates
-    :doc "Set of blocks that this block dominates in CFG")
+    :doc "Set of blocks that this block dominates in CFG.")
    (stop)
    (code-emitted-p)
-   (try-catch)
+   (try-catch
+    :doc "A list of conses of handler type and handler block.")
 	 (finally
 	  :doc "A list of finally blocks for each try-finally starting here.")
 	 (marks)
 	 (try-exit-block
-		:doc "The block at which try/catch handlers exit if this is a try block")
+		:doc "The block at which try/catch handlers exit if this is a try block.")
    (exception-end-blocks)
    (exception-table-entries)
    (catch-handlers)))
@@ -171,7 +172,7 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
                             (unless (eq :ATHROW opcode)
                               (list (+ (address (car (code block))) (gethash opcode +bytecode-lengths-table+)))))))
           (dolist (target targets)
-            (let ((target-block (gethash target block-by-address)))
+            (let ((target-block (gethash (floor target) block-by-address)))
               (when target-block
                 (fset:adjoinf (successors block) target-block)
                 (fset:adjoinf (predecessors target-block) block)))))
