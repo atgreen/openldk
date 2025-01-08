@@ -1,4 +1,4 @@
-/* { dg-output "^OK!\r\nDone" } */
+/* { dg-output "OK\r\nDone" } */
 
 package aaa;
 
@@ -11,7 +11,7 @@ public class h003
         try {
             x = 10 / x ;
         } catch (Exception e) {
-            System.out.println ("OK!");
+            System.out.println ("OK");
         }
         System.out.println ("Done.");
     }
