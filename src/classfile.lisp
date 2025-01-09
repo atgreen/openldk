@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2023, 2024  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; This file is part of OpenLDK.
 
@@ -119,6 +119,7 @@
   ((initialized-p
 		name
 		super
+    interfaces
 		constant-pool
 		access-flags
 		fields
@@ -139,11 +140,16 @@
 (defclass/std <method> (<field>)
   ())
 
+(define-print-object/std <method>)
+
 (defun native-p (method)
   (not (eq 0 (logand #x100 (slot-value method 'access-flags)))))
 
 (defun static-p (method)
   (not (eq 0 (logand #x8 (slot-value method 'access-flags)))))
+
+(defun bridge-p (method)
+  (not (eq 0 (logand #x40 (access-flags method)))))
 
 (defmethod print-object ((method <method>) out)
   (print-unreadable-object (method out :type t)
@@ -255,7 +261,7 @@ stream."
 
 (defun read-classfile (fin)
   (let ((class (make-instance '<class>)))
-    (with-slots (methods fields super) class
+    (with-slots (methods fields super interfaces) class
       (fast-io:with-fast-input (fin-fast nil fin)
         (let ((bitio (bitio:make-bitio fin-fast #'fast-io:fast-read-byte #'wrap-fast-read-sequence)))
           (flet ((read-u1 () (bitio:read-one-byte bitio)))
@@ -334,15 +340,22 @@ stream."
                 (let* ((access-flags (read-u2))
                        (this-class (read-u2))
                        (super-class (read-u2))
-                       (interface-count (read-u2))
-                       (interfaces (make-array interface-count :element-type '(unsigned-byte 16))))
+                       (interface-count (read-u2)))
+                  (when (> interface-count 0)
+                    (setf interfaces (make-array interface-count)))
                   (setf (slot-value class 'name) (slot-value (aref constant-pool (slot-value (aref constant-pool this-class) 'index)) 'value))
                   (setf (slot-value class 'access-flags) access-flags)
                   (if (> super-class 0)
                       (setf super
-                            (slot-value (aref constant-pool (slot-value (aref constant-pool super-class) 'index)) 'value)))
+                            (let ((super (slot-value (aref constant-pool (slot-value (aref constant-pool super-class) 'index)) 'value)))
+                              (if (and (not (eq 0 (logand #x200 access-flags)))
+                                       (string= super "java/lang/Object"))
+                                  nil
+                                  super))))
 
-                  (bitio:read-bytes bitio interfaces :bit-endian :be :bits-per-byte 16)
+                  (dotimes (i interface-count)
+                    (let ((interface (read-u2)))
+                      (setf (aref interfaces i) (slot-value (aref constant-pool (slot-value (aref constant-pool interface) 'index)) 'value))))
 
                   (let ((fields-count (read-u2)))
                     (setf fields (make-array fields-count))

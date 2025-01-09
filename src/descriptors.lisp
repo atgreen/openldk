@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2023, 2024  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; This file is part of OpenLDK.
 
@@ -54,7 +54,7 @@
                (t nil)))
     count))
 
-(defun void-return-p (name)
+(defun ends-in-V (name)
   (let ((len (length name)))
     (and (not (zerop len))
 	 (char= (char name (1- len))

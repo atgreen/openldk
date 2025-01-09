@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2023, 2024  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; This file is part of OpenLDK.
 
@@ -37,54 +37,55 @@
 
 (in-package :openldk)
 
-(defun |java/lang/Object.registerNatives()V| ()
+(defun |java/lang/Object.registerNatives()| ()
   ())
 
-(defun |java/lang/ClassLoader.registerNatives()V| ()
+(defun |java/lang/ClassLoader.registerNatives()| ()
   ())
 
-(defun |java/lang/System.registerNatives()V| ()
+(defun |java/lang/System.registerNatives()| ()
   ())
 
-(defun |java/lang/Class.registerNatives()V| ()
+(defun |java/lang/Class.registerNatives()| ()
   ())
 
-(defun |java/lang/Class.desiredAssertionStatus0(Ljava/lang/Class;)Z| (class)
+(defun |java/lang/Class.desiredAssertionStatus0(Ljava/lang/Class;)| (class)
   (print "desiredAssertionStatus0")
   (print class)
   nil)
 
-(defun |java/lang/Class.getSecurityManager()Ljava/lang/SecurityManager;| ()
-  (print "java/lang/Class.getSecurityManager()Ljava/lang/SecurityManager;")
+(defun |java/lang/Class.getSecurityManager()| ()
+  (print "java/lang/Class.getSecurityManager()")
   (classload "java/lang/SecurityManager")
   (eval (list 'make-instance (list 'quote '|java/lang/SecurityManager|))))
 
-(defmethod |println(Ljava/lang/String;)V| (stream string)
+(defmethod |println(Ljava/lang/String;)| (stream string)
   (format t "~A~%" (slot-value string '|value|)))
 
-(defmethod |println(I)V| (stream number)
+(defmethod |println(I)| (stream number)
   (format t "~A~%" number))
 
-(defmethod |println(Ljava/lang/Object;)V| (stream object)
+(defmethod |println(Ljava/lang/Object;)| (stream object)
   (format t "~A~%" object))
 
-(defmethod |fillInStackTrace(I)Ljava/lang/Throwable;| ((|this| |java/lang/Throwable|) dummy)
+(defmethod |fillInStackTrace(I)| ((|this| |java/lang/Throwable|) dummy)
   (let ((bt (trivial-backtrace:print-backtrace nil :output nil)))
     (print bt)))
 
-(defmethod |sun/reflect/Reflection.getCallerClass()Ljava/lang/Class;| ()
+(defmethod |sun/reflect/Reflection.getCallerClass()| ()
   (let* ((caller-string (format nil "~A" (third (sb-debug:backtrace-as-list))))
          (cstring (subseq caller-string 1 (position #\. caller-string))))
     (gethash cstring *java-classes*)))
 
-(defmethod |getClass()Ljava/lang/Class;| (object)
+(defmethod |getClass()| (object)
+  ;;; FIXME - throw nullpointerexception
 	(when *debug-trace*
-		(format t "tracing: java/lang/Object.getClass()Ljava/lang/Class~%"))
+		(format t "tracing: java/lang/Object.getClass(~A): ~A~%" object (gethash (format nil "~A" (type-of object)) *java-classes*)))
 	(gethash (format nil "~A" (type-of object)) *java-classes*))
 
-(defmethod |java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;| (name initialize loader caller)
+(defmethod |java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (name initialize loader caller)
 	(when *debug-trace*
-		(format t "tracing: java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;~%"))
+		(format t "tracing: java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)~%"))
   (let ((lname (substitute #\/ #\. (slot-value name '|value|))))
     (or (gethash lname *java-classes*)
         (progn (%clinit (classload lname))
@@ -96,11 +97,15 @@
                  (setf (gethash lname *java-classes*) java-class)
                  java-class)))))
 
-(defmethod |java/lang/System.currentTimeMillis()J| ()
+(defmethod |java/lang/System.currentTimeMillis()| ()
 	;;; FIXME: this probably isn't right.
   (floor (* (get-internal-real-time) 1000)
 				 internal-time-units-per-second))
 
-(defmethod |java/lang/System.arraycopy(Ljava/lang/Object;ILjava/lang/Object;II)V| (source_arr sourcePos dest_arr destPos len)
+(defmethod |java/lang/System.arraycopy(Ljava/lang/Object;ILjava/lang/Object;II)| (source_arr sourcePos dest_arr destPos len)
 	(dotimes (i len)
 		(setf (aref dest_arr (+ destPos i)) (aref source_arr (+ sourcePos i)))))
+
+(defmethod |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedAction;)| (action)
+  (format t "doPrivileged: ~A~%" action)
+  (|run()| action))

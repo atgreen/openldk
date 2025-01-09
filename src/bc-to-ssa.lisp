@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2023, 2024  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; This file is part of OpenLDK.
 
@@ -257,6 +257,13 @@
                            :target (make-instance 'ssa-local-variable
                                                   :address pc-start
                                                   :index 3))))))
+
+(defun :CALOAD (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-caload :address pc-start)))))
 
 (defun :ATHROW (context code)
   (declare (ignore code))
@@ -748,7 +755,8 @@
                  (parameter-count (1+ (count-parameters descriptor))))
             (list (make-instance 'ssa-call-virtual-method
                                  :address pc-start
-                                 :method-name (emit method-reference constant-pool)
+                                 :void-return-p (ends-in-V (emit method-reference constant-pool))
+                                 :method-name (lispize-method-name (emit method-reference constant-pool))
                                  :args (pop-args parameter-count)))))))))
 
 (defun :INVOKEVIRTUAL (context code)
@@ -770,7 +778,8 @@
                  (parameter-count (1+ (count-parameters descriptor))))
             (list (make-instance 'ssa-call-virtual-method
                                  :address pc-start
-                                 :method-name (emit method-reference constant-pool)
+                                 :void-return-p (ends-in-V (emit method-reference constant-pool))
+                                 :method-name (lispize-method-name (emit method-reference constant-pool))
                                  :args (pop-args parameter-count)))))))))
 
 (defun :INVOKESPECIAL (context code)
@@ -799,7 +808,8 @@
             (list (make-instance 'ssa-call-special-method
                                  :address pc-start
                                  :class class
-                                 :method-name (emit method-reference constant-pool)
+                                 :void-return-p (ends-in-V (emit method-reference constant-pool))
+                                 :method-name (lispize-method-name (emit method-reference constant-pool))
                                  :args (pop-args parameter-count)))))))))
 
 (defun :INVOKESTATIC (context code)
@@ -831,7 +841,8 @@
             (list (make-instance 'ssa-call-static-method
                                  :address pc-start
                                  :class callee-class
-                                 :method-name (emit method-reference constant-pool)
+                                 :void-return-p (ends-in-V (emit method-reference constant-pool))
+                                 :method-name (lispize-method-name (emit method-reference constant-pool))
                                  :args (pop-args parameter-count)))))))))
 
 

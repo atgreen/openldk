@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2023, 2024  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; This file is part of OpenLDK.
 
@@ -65,6 +65,9 @@
                             (invoke-restart 'muffle-warning))))
         (eval code))))
 
+(defun lispize-method-name (name)
+  (subseq name 0 (1+ (position #\) name))))
+
 (defun %compile-method (class-name method-index)
   (let* ((class (gethash class-name *classes*))
          (method (aref (slot-value class 'methods) (1- method-index)))
@@ -81,11 +84,11 @@
                                    :is-clinit-p (string= "<clinit>"
                                                          (slot-value method 'name)))))
     (when *debug-codegen*
-      (format t "; compiling ~A.~A~A~%" class-name (name method) (descriptor method))
+      (format t "; compiling ~A.~A~%" class-name (lispize-method-name (format nil "~A~A" (name method) (descriptor method))))
       (force-output))
     (if (static-p method)
-        (setf (fn-name *context*) (format nil "~A.~A~A" (slot-value class 'name) (slot-value method 'name) (slot-value method 'descriptor)))
-        (setf (fn-name *context*) (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor))))
+        (setf (fn-name *context*) (format nil "~A.~A" (slot-value class 'name) (lispize-method-name (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor)))))
+        (setf (fn-name *context*) (format nil "~A" (lispize-method-name (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor))))))
     (dump "compile-method" (list class-name method-index))
     (let* ((ssa-code-0
              (setf (ssa-code *context*)
@@ -101,6 +104,7 @@
            (lisp-code
              (list (list 'block nil
                          (cons 'tagbody (loop for bloc in blocks append (codegen bloc))))))
+           (traced-lisp-code (if *debug-trace* (list (list 'unwind-protect (car lisp-code) (list 'format 't "leaving: ~A.~A~%" class-name (fn-name *context*)))) lisp-code))
            (definition-code
              (let ((parameter-count (count-parameters (slot-value method 'descriptor))))
                (append (if (static-p method)
@@ -126,8 +130,8 @@
                                                                             collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" i) :openldk))))
                                                                 (loop for i from (+ 2 parameter-count) upto max-locals
                                                                       collect (list (intern (format nil "local-~A" (1- i)) :openldk))))))
-                                         lisp-code))
-                           lisp-code)))))
+                                         traced-lisp-code))
+                           traced-lisp-code)))))
       (%eval definition-code))))
 
 (defun %clinit (class)
@@ -144,7 +148,7 @@
                                                              (string= (slot-value method 'descriptor) "()V")))
                                        (slot-value class 'methods))))
                  (when <clinit>-method
-                   (%eval (list (intern (format nil "~A.<clinit>()V" (slot-value class 'name)) :openldk)))))))
+                   (%eval (list (intern (format nil "~A.<clinit>()" (slot-value class 'name)) :openldk)))))))
       (clinit class))))
 
 (defun open-java-classfile-on-classpath (class)
@@ -173,12 +177,12 @@
     (t nil)))
 
 (defun emit-<class> (class)
-  (let ((defclass-code (with-slots (name super fields) class
+  (let ((defclass-code (with-slots (name super interfaces fields) class
                          (list
                           'progn
                           (list
                            'defclass (intern name :openldk)
-                           (if super (list (intern super :openldk)) (list))
+                           (if (or super interfaces) (append (if super (list (intern super :openldk)) nil) (mapcar (lambda (i) (intern i :openldk)) (coerce interfaces  'list))) (list))
                            (map 'list
                                 (lambda (f)
                                   (list (intern (slot-value f 'name) :openldk)
@@ -195,24 +199,24 @@
             (with-slots (name super methods) class
               (remove nil (map 'list
                                (lambda (m)
-                                 (if (native-p m)
+                                 (if (or (bridge-p m) (native-p m))
                                      (progn
                                        (incf method-index)
                                        nil)
                                      (if (static-p m)
-                                         (list 'defun (intern (format nil "~A.~A~A" (slot-value class 'name) (slot-value m 'name) (slot-value m 'descriptor)) :openldk)
+                                         (list 'defun (intern (format nil "~A.~A" (slot-value class 'name) (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor)))) :openldk)
                                                (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
                                                      collect (intern (format nil "arg~A" i) :openldk))
                                                (list '%compile-method (slot-value class 'name) (incf method-index))
-                                               (cons (intern (format nil "~A.~A~A" (slot-value class 'name) (slot-value m 'name) (slot-value m 'descriptor)) :openldk)
+                                               (cons (intern (format nil "~A.~A" (slot-value class 'name) (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor)))) :openldk)
                                                      (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
                                                            collect (intern (format nil "arg~A" i) :openldk))))
-                                         (list 'defmethod (intern (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor)) :openldk)
+                                         (list 'defmethod (intern (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) :openldk)
                                                (cons (list (intern "this" :openldk) (intern (slot-value (slot-value m 'class) 'name) :openldk))
                                                      (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
                                                            collect (intern (format nil "arg~A" i) :openldk)))
                                                (list '%compile-method (slot-value class 'name) (incf method-index))
-                                               (cons (intern (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor)) :openldk)
+                                               (cons (intern (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) :openldk)
                                                      (cons (intern "this" :openldk)
                                                            (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
                                                                  collect (intern (format nil "arg~A" i) :openldk))))))))
@@ -232,7 +236,10 @@
                               (setf (gethash (substitute #\/ #\. classname) *classes*) c)
                               c))
                           (super (let ((super (slot-value class 'super)))
-                                   (when super (classload super)))))
+                                   (when super (classload super))))
+                          (interfaces (let ((interfaces (slot-value class 'interfaces)))
+                                        (when interfaces
+                                          (mapcar (lambda (i) (classload i)) (coerce interfaces 'list))))))
                      (let ((code (emit-<class> class)))
                        (%eval code))
                      (when (and (not (string= classname "java/lang/Throwable"))
@@ -304,7 +311,7 @@
   (%clinit (classload "java/lang/String"))
   (%clinit (classload "java/lang/ClassLoader"))
   (%clinit (classload "java/lang/Class"))
-
+  (%clinit (classload "java/security/PrivilegedAction"))
   (setf *bootstrapped* t)
 
   ;; Create a java/lang/Class for every class we've see so far.
@@ -327,7 +334,7 @@
         (setf (slot-value arg '|value|) (nth i args))
         (setf (aref argv i) arg)))
     (%clinit class)
-    (%eval (list (intern (format nil "~A.main([Ljava/lang/String;)V" (slot-value class 'name)) :openldk) argv))))
+    (%eval (list (intern (format nil "~A.main([Ljava/lang/String;)" (slot-value class 'name)) :openldk) argv))))
 
 (defun main-wrapper ()
   "Main entry point into OpenLDK.  Process command line errors here."

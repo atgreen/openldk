@@ -85,12 +85,22 @@
                                                           method-name)
                                                   :openldk))
                           (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))))))))
-      (if (void-return-p method-name)
+      (if (void-return-p insn)
           call
           (list 'push-item call)))))
 
+(defmethod codegen ((insn ssa-caload) &optional (stop-block nil))
+  ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
+  (flag-stack-usage *context*)
+  (list 'let (list (list 'index (list 'pop-item))
+                   (list 'arrayref (list 'pop-item)))
+        (list 'push-item (list 'aref 'arrayref 'index))))
+
 (defmethod codegen ((insn ssa-checkcast) &optional (stop-block nil))
-  (intern (format nil "#:checkcast-FIXME-~A" (slot-value insn 'index)) :openldk))
+  ;; FIXME
+  ;;  (intern (format nil "#:checkcast-FIXME-~A" (slot-value insn 'index)) :openldk))
+  (flag-stack-usage *context*)
+  (list 'pop-item))
 
 (defmethod codegen ((insn ssa-class) &optional (stop-block nil))
   (let* ((classname (slot-value (slot-value insn 'class) 'name))
@@ -99,8 +109,8 @@
         java-class
         (let ((java-class (make-instance '|java/lang/Class|)))
           (setf (slot-value java-class '|name|)
-                  (let ((s (make-instance '|java/lang/String|)))
-                    (setf (slot-value s '|value|) classname)))
+                (let ((s (make-instance '|java/lang/String|)))
+                  (setf (slot-value s '|value|) classname)))
           (setf (slot-value java-class '|classLoader|)
                 (make-instance '|java/lang/ClassLoader|))
           (setf (gethash classname *java-classes*) java-class)
@@ -180,22 +190,22 @@
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'progn
-    (list 'if (list '>= (list 'pop-item) 0)
-          (list 'go (intern (format nil "branch-target-~A" offset)))))))
+          (list 'if (list '>= (list 'pop-item) 0)
+                (list 'go (intern (format nil "branch-target-~A" offset)))))))
 
 (defmethod codegen ((insn ssa-ifle) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'progn
-    (list 'if (list '<= (list 'pop-item) 0)
-          (list 'go (intern (format nil "branch-target-~A" offset)))))))
+          (list 'if (list '<= (list 'pop-item) 0)
+                (list 'go (intern (format nil "branch-target-~A" offset)))))))
 
 (defmethod codegen ((insn ssa-iflt) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'progn
-    (list 'if (list '< (list 'pop-item) 0)
-          (list 'go (intern (format nil "branch-target-~A" offset)))))))
+          (list 'if (list '< (list 'pop-item) 0)
+                (list 'go (intern (format nil "branch-target-~A" offset)))))))
 
 (defmethod codegen ((insn ssa-ifne) &optional (stop-block nil))
   (flag-stack-usage *context*)
@@ -223,9 +233,9 @@
   (flag-stack-usage *context*)
   (list 'let (list (list 'op2 (list 'pop-item))
                    (list 'op1 (list 'pop-item)))
-  (list 'progn
-        (list 'format 't "ISHL ~A ~A~%" 'op1 'op2)
-        (list 'push-item (list 'ash 'op1 'op2)))))
+        (list 'progn
+              (list 'format 't "ISHL ~A ~A~%" 'op1 'op2)
+              (list 'push-item (list 'ash 'op1 'op2)))))
 
 (defmethod codegen ((insn ssa-lcmp) &optional (stop-block nil))
   (flag-stack-usage *context*)
@@ -254,23 +264,23 @@
 (defmethod codegen ((insn ssa-call-virtual-method) &optional (stop-block nil))
   (with-slots (method-name args) insn
     (let* ((nargs (length args))
-     (call (cond
-       ((eq nargs 0)
-        (error "internal error"))
-       ((eq nargs 1)
-        (list (intern (format nil "~A" method-name) :openldk) (codegen (car args))))
-       (t
-        (list 'apply
-        (list 'function (intern (format nil "~A"
-                method-name) :openldk))
-        (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))))))))
-      (if (void-return-p method-name)
-    call
-    (list 'push-item call)))))
+           (call (cond
+                   ((eq nargs 0)
+                    (error "internal error"))
+                   ((eq nargs 1)
+                    (list (intern (format nil "~A" method-name) :openldk) (codegen (car args))))
+                   (t
+                    (list 'apply
+                          (list 'function (intern (format nil "~A"
+                                                          method-name) :openldk))
+                          (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))))))))
+      (if (void-return-p insn)
+          call
+          (list 'push-item call)))))
 
 (defmethod codegen ((insn ssa-clinit) &optional (stop-block nil))
   (with-slots (class) insn
-    (list (intern (format nil "~A.<clinit>()V" (slot-value (slot-value class 'class) 'name)) :openldk))))
+    (list (intern (format nil "~A.<clinit>()" (slot-value (slot-value class 'class) 'name)) :openldk))))
 
 (defmethod codegen ((insn ssa-local-variable) &optional (stop-block nil))
   (with-slots (index) insn
@@ -312,25 +322,25 @@
 (defmethod codegen ((insn ssa-sub) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (list 'let (list (list 'op2 (list 'pop-item))
-       (list 'op1 (list 'pop-item)))
-  (list 'push-item (list '- 'op1 'op2))))
+                   (list 'op1 (list 'pop-item)))
+        (list 'push-item (list '- 'op1 'op2))))
 
 (defmethod codegen ((insn ssa-call-special-method) &optional (stop-block nil))
   (with-slots (class method-name args) insn
     (let ((call (list 'destructuring-bind (cons 'method 'next)
-          (list 'closer-mop:compute-applicable-methods-using-classes
-          (list 'function (intern (format nil "~A" method-name) :openldk))
-          ;; FIXME: This should be based on the args list
-          (cons 'list
-          (cons (find-class (intern (slot-value class 'name) :openldk))
-          (loop for a in args
-                collect t))))
-          (list 'let (list (list 'fn (list 'closer-mop:method-function 'method)))
-          (list 'apply 'fn
-          (list 'list (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))) 'next))))))
-      (if (void-return-p method-name)
-    call
-    (list 'push-item call)))))
+                      (list 'closer-mop:compute-applicable-methods-using-classes
+                            (list 'function (intern (format nil "~A" method-name) :openldk))
+                            ;; FIXME: This should be based on the args list
+                            (cons 'list
+                                  (cons (find-class (intern (slot-value class 'name) :openldk))
+                                        (loop for a in args
+                                              collect t))))
+                      (list 'let (list (list 'fn (list 'closer-mop:method-function 'method)))
+                            (list 'apply 'fn
+                                  (list 'list (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))) 'next))))))
+      (if (void-return-p insn)
+          call
+          (list 'push-item call)))))
 
 (defmethod codegen ((insn ssa-member) &optional (stop-block nil))
   (flag-stack-usage *context*)
@@ -420,5 +430,5 @@
                                       (when (try-exit-block basic-block)
                                         (codegen (try-exit-block basic-block))))))
 
-          lisp-code))
-    nil)))
+            lisp-code))
+        nil)))

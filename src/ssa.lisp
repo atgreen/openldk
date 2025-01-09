@@ -89,6 +89,9 @@
 (defclass/std ssa-long-literal (ssa-literal)
   ())
 
+(defclass/std ssa-caload (ssa-node)
+  ())
+
 (defclass/std ssa-class (ssa-node)
   ((class :with)))
 
@@ -165,7 +168,7 @@
   ())
 
 (defclass/std ssa-call (ssa-node)
-  ())
+  ((void-return-p)))
 
 (defclass/std ssa-branch-target (ssa-node)
   ((index)))

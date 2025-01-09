@@ -44,9 +44,12 @@
    (recursion-count :std 0)))
 
 (defun monitor-enter (object)
-  (let* ((monitor (monitor object))
-         (mutex (mutex monitor))
-         (current-thread (bordeaux-threads:current-thread)))
+  ;; FIXME: remove debug info.  Remove when object.
+  (format t "monitor-enter: ~A~%" object)
+  (when object
+    (let* ((monitor (monitor object))
+           (mutex (mutex monitor))
+           (current-thread (bordeaux-threads:current-thread)))
     (bordeaux-threads:with-lock-held (mutex)
       (if (eq (owner monitor) current-thread)
           (incf (recursion-count monitor))
@@ -54,16 +57,19 @@
             (loop while (owner monitor)
                   do (bordeaux-threads:condition-wait (condition-variable monitor) mutex))
             (setf (owner monitor) current-thread
-                  (recursion-count monitor) 1))))))
+                  (recursion-count monitor) 1)))))))
 
 (defun monitor-exit (object)
-  (let* ((monitor (monitor object))
-         (mutex (mutex monitor))
-         (current-thread (bordeaux-threads:current-thread)))
-    (bordeaux-threads:with-lock-held (mutex)
-      (unless (eq (owner monitor) current-thread)
-        (error "Current thread does not own the monitor"))
-      (decf (recursion-count monitor))
-      (when (zerop (recursion-count monitor))
-        (setf (owner monitor) nil)
-        (bordeaux-threads:condition-notify (condition-variable monitor))))))
+  ;; FIXME: remove debug info.  Remove when object.
+  (format t "monitor-exit: ~A~%" object)
+  (when object
+    (let* ((monitor (monitor object))
+           (mutex (mutex monitor))
+           (current-thread (bordeaux-threads:current-thread)))
+      (bordeaux-threads:with-lock-held (mutex)
+        (unless (eq (owner monitor) current-thread)
+          (error "Current thread does not own the monitor"))
+        (decf (recursion-count monitor))
+        (when (zerop (recursion-count monitor))
+          (setf (owner monitor) nil)
+          (bordeaux-threads:condition-notify (condition-variable monitor)))))))

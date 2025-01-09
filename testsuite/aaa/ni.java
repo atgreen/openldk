@@ -13,6 +13,7 @@ public class ni {
       try {
          // date object
          Date d = new Date();
+         System.out.println(d);
          Class cls = d.getClass();
          System.out.println("Time = " + d.toString());
 

@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2023, 2024  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; This file is part of OpenLDK.
 
@@ -43,13 +43,14 @@
 
 (defmacro push-item (item)
   (if *debug-stack*
-      `(progn (push ,item *stack*)
-              (format t "--- push ~A~%" *stack*))
+      `(let ((item ,item))
+         (format t "--- push ~A to ~A~%" item *stack*)
+         (push item *stack*))
       `(push ,item *stack*)))
 
 (defmacro pop-item ()
   (if *debug-stack*
-      `(progn (format t "-- pop ~A~%" *stack*)
+      `(progn (format t "-- pop from ~A~%" *stack*)
               (pop *stack*))
       `(pop *stack*)))
 
