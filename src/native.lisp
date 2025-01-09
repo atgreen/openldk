@@ -107,5 +107,4 @@
 		(setf (aref dest_arr (+ destPos i)) (aref source_arr (+ sourcePos i)))))
 
 (defmethod |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedAction;)| (action)
-  (format t "doPrivileged: ~A~%" action)
   (|run()| action))
