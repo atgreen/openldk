@@ -86,6 +86,9 @@
 (defclass/std ssa-fcmpg (ssa-node)
   ())
 
+(defclass/std ssa-fcmpl (ssa-node)
+  ())
+
 (defclass/std ssa-float-literal (ssa-literal)
   ())
 

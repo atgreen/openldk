@@ -49,9 +49,9 @@
     :DADD :DCONST_0 :DDIV :DLOAD_2 :DMUL :DSTORE_2 :DSUB
     :DUP
     :F2I
-    :FCMPG
+    :FCMPG :FCMPL
     :FCONST_0
-    :FLOAD_2
+    :FLOAD_0 :FLOAD_1 :FLOAD_2
     :FMUL
 		:I2F :I2L
     :IADD :IASTORE

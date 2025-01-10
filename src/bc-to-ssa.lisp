@@ -449,6 +449,14 @@
       (list (make-instance 'ssa-fcmpg
                            :address pc-start)))))
 
+(defun :FCMPL (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-fcmpl
+                           :address pc-start)))))
+
 (defun :FCONST_0 (context code)
   (declare (ignore code))
   (with-slots (pc) context
@@ -459,6 +467,28 @@
                            :value (make-instance 'ssa-float-literal
                                                  :address pc-start
                                                  :value 0.0))))))
+
+(defun :FLOAD_0 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-push
+                           :address pc-start
+                           :value (make-instance 'ssa-local-variable
+                                                 :address pc-start
+                                                 :index 0))))))
+
+(defun :FLOAD_1 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-push
+                           :address pc-start
+                           :value (make-instance 'ssa-local-variable
+                                                 :address pc-start
+                                                 :index 1))))))
 
 (defun :FLOAD_2 (context code)
   (declare (ignore code))
