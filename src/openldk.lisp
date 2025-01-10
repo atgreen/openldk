@@ -135,8 +135,6 @@
       (%eval definition-code))))
 
 (defun %clinit (class)
-  ;; (format t "%clinit ~A~%" class)
-  ;; (dump-classes)
   (let ((class (gethash (name class) *classes*)))
     (assert
      (or class (error "Can't find ~A" class)))
