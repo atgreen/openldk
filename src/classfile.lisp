@@ -47,6 +47,7 @@
 (defclass/std constant-value ()
   ((value)))
 
+(defclass/std constant-double (constant-value) ())
 (defclass/std constant-float (constant-value) ())
 (defclass/std constant-int (constant-value) ())
 (defclass/std constant-long (constant-value) ())
@@ -78,6 +79,9 @@
 
 (defmethod emit ((v constant-float) cp)
   (make-instance 'ssa-float-literal :value (slot-value v 'value)))
+
+(defmethod emit ((v constant-double) cp)
+  (make-instance 'ssa-double-literal :value (slot-value v 'value)))
 
 (defmethod emit ((v constant-int) cp)
   (make-instance 'ssa-int-literal :value (slot-value v 'value)))
@@ -300,6 +304,11 @@ stream."
                                    (setf skip t)
                                    (make-instance 'constant-long
                                                   :value (read-u8))))
+                                (6
+                                 (progn
+                                   (setf skip t)
+                                   (make-instance 'constant-double
+                                                  :value (float-features:bits-double-float (read-u8)))))
                                 (7
                                  (make-instance 'constant-class-reference
                                                 :index (read-u2)))

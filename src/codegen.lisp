@@ -153,6 +153,14 @@
                    (list 'arrayref (list 'pop-item)))
         (list 'setf (list 'aref 'arrayref 'index) 'value)))
 
+(defmethod codegen ((insn ssa-f2i) &optional (stop-block nil))
+  (with-slots (index const) insn
+    (list 'push-item (list 'floor (list 'pop-item)))))
+
+(defmethod codegen ((insn ssa-i2f) &optional (stop-block nil))
+  (with-slots (index const) insn
+    (list 'push-item (list 'float (list 'pop-item)))))
+
 (defmethod codegen ((insn ssa-iinc) &optional (stop-block nil))
   (with-slots (index const) insn
     (list 'incf (intern (format nil "local-~A" index) :openldk) const)))

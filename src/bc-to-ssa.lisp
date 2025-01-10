@@ -471,6 +471,28 @@
                                                  :address pc-start
                                                  :index 2))))))
 
+(defun :F2I (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-f2i :address pc-start)))))
+
+(defun :FMUL (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-mul
+                           :address pc-start)))))
+
+(defun :I2F (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-i2f :address pc-start)))))
+
 (defun :I2L (context code)
   (declare (ignore code))
   (with-slots (pc) context

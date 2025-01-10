@@ -89,6 +89,9 @@
 (defclass/std ssa-float-literal (ssa-literal)
   ())
 
+(defclass/std ssa-double-literal (ssa-literal)
+  ())
+
 (defclass/std ssa-int-literal (ssa-literal)
   ())
 
@@ -127,6 +130,12 @@
   ())
 
 (defclass/std ssa-goto (ssa-branch)
+  ())
+
+(defclass/std ssa-f2i (ssa-node)
+  ())
+
+(defclass/std ssa-i2f (ssa-node)
   ())
 
 (defclass/std ssa-iinc (ssa-node)
@@ -236,6 +245,9 @@
   ())
 
 (defclass/std ssa-lushr (ssa-node)
+  ())
+
+(defclass/std ssa-fmul (ssa-node)
   ())
 
 (defclass/std ssa-mul (ssa-node)

@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2023, 2024  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; This file is part of OpenLDK.
 
@@ -37,6 +37,7 @@
 
 (defpackage #:openldk
   (:use #:cl #:defclass-std)
+  (:shadow "PI")
   (:local-nicknames
 	 (#:cli #:whereiseveryone.command-line-args))
   (:export :main-wrapper))
