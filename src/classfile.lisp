@@ -76,6 +76,9 @@
   (make-instance 'ssa-string-literal
                  :value (format nil "~A" (emit (aref cp (slot-value v 'index)) cp))))
 
+(defmethod emit ((v constant-float) cp)
+  (make-instance 'ssa-float-literal :value (slot-value v 'value)))
+
 (defmethod emit ((v constant-int) cp)
   (make-instance 'ssa-int-literal :value (slot-value v 'value)))
 
@@ -291,7 +294,7 @@ stream."
                                                 :value (read-u4)))
                                 (4
                                  (make-instance 'constant-float
-                                                :value (read-u4)))
+                                                :value (ieee-floats:decode-float32 (read-u4))))
                                 (5
                                  (progn
                                    (setf skip t)

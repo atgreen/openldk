@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2023, 2024  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; This file is part of OpenLDK.
 
@@ -64,7 +64,7 @@
   "(lambda (thunk)
      (cl-annot:enable-annot-syntax)
      (funcall thunk))"
-  :depends-on (:cl-annot :whereiseveryone.command-line-args :flexi-streams :zip :str :defclass-std :fast-io :bitio :pathname-utils :cl-store :trivial-backtrace :fset :bordeaux-threads)
+  :depends-on (:cl-annot :whereiseveryone.command-line-args :flexi-streams :zip :str :defclass-std :fast-io :bitio :pathname-utils :cl-store :trivial-backtrace :fset :bordeaux-threads :ieee-floats)
   :build-operation "program-op"
   :build-pathname "openldk"
   :entry-point "openldk:main-wrapper")

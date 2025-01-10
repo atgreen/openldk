@@ -83,6 +83,9 @@
 (defclass/std ssa-iastore (ssa-node)
   ())
 
+(defclass/std ssa-float-literal (ssa-literal)
+  ())
+
 (defclass/std ssa-int-literal (ssa-literal)
   ())
 
