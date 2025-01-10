@@ -91,16 +91,16 @@
 
 (defmethod codegen ((insn ssa-caload) &optional (stop-block nil))
   ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
-  (flag-stack-usage *context*)
   (list 'let (list (list 'index (list 'pop-item))
                    (list 'arrayref (list 'pop-item)))
         (list 'push-item (list 'aref 'arrayref 'index))))
 
 (defmethod codegen ((insn ssa-checkcast) &optional (stop-block nil))
-  ;; FIXME
-  ;;  (intern (format nil "#:checkcast-FIXME-~A" (slot-value insn 'index)) :openldk))
-  (flag-stack-usage *context*)
-  (list 'pop-item))
+  (with-slots (class) insn
+    (list 'unless (list 'typep (list 'peek-item)
+                        (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))
+          (list 'push-item (list 'make-instance (list 'quote '|java/lang/ClassCastException|)))
+          (list 'error (list 'lisp-condition (list 'peek-item))))))
 
 (defmethod codegen ((insn ssa-class) &optional (stop-block nil))
   (let* ((classname (slot-value (slot-value insn 'class) 'name))
@@ -227,7 +227,9 @@
 
 (defmethod codegen ((insn ssa-instanceof) &optional (stop-block nil))
   (with-slots (class) insn
-    (list 'push-item (list 'typep (list 'pop-item) class))))
+    (list 'push-item
+          (list 'if (list 'typep (list 'pop-item)
+                          (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk))) 1 0))))
 
 (defmethod codegen ((insn ssa-ishl) &optional (stop-block nil))
   (flag-stack-usage *context*)

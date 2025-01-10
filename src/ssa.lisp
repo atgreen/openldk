@@ -94,6 +94,7 @@
 
 (defclass/std ssa-class (ssa-node)
   ((class :with)))
+(define-print-object/std ssa-class)
 
 (defclass/std ssa-array-length (ssa-node)
   ())
@@ -187,7 +188,7 @@
 (define-print-object/std ssa-call-static-method)
 
 (defclass/std ssa-checkcast (ssa-node)
-  ((index)))
+  ((class :with)))
 
 (defclass/std ssa-clinit (ssa-call)
   ((class :with)))

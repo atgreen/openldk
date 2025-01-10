@@ -37,14 +37,6 @@
 
 (in-package :openldk)
 
-#|
-(let ((vreg 10000))
-  (defmethod next-vreg ((context <context>))
-    (let ((vreg (intern (format nil "vreg~A" (incf vreg)))))
-      (push vreg (slot-value context 'locals))
-      (make-instance 'ssa-variable :name vreg))))
-|#
-
 (defun pop-args (num-args)
   (loop repeat num-args
         collect (make-instance 'ssa-pop)))
@@ -273,15 +265,16 @@
       (list (make-instance 'ssa-throw :address pc-start)))))
 
 (defun :CHECKCAST (context code)
-  (declare (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc)
-          (index (+ (* (aref code (incf pc)) 256)
-                    (aref code (incf pc)))))
-      (incf pc)
-      (list (make-instance 'ssa-checkcast
-                           :address pc-start
-                           :index index)))))
+  (with-slots (pc class) context
+    (let ((pc-start pc))
+      (with-slots (constant-pool) class
+        (let* ((index (+ (* (aref code (incf pc)) 256)
+                         (aref code (incf pc))))
+               (class (aref constant-pool index)))
+          (incf pc)
+          (list (make-instance 'ssa-checkcast
+                               :address pc-start
+                               :class (emit class constant-pool))))))))
 
 (defun :DADD (context code)
   (declare (ignore code))
