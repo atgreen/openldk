@@ -67,6 +67,14 @@
   (flag-stack-usage *context*)
   (list 'push-item (list '+ (list 'pop-item) (list 'pop-item))))
 
+(defmethod codegen ((insn ssa-iand) &optional (stop-block nil))
+  (declare (ignore stop-block))
+  (list 'push-item (list 'logand (list 'pop-item) (list 'pop-item))))
+
+(defmethod codegen ((insn ssa-ior) &optional (stop-block nil))
+  (declare (ignore stop-block))
+  (list 'push-item (list 'logor (list 'pop-item) (list 'pop-item))))
+
 (defmethod codegen ((insn ssa-array-length) &optional (stop-block nil))
   (declare (ignore stop-block))
   (list 'push-item (list 'length (list 'pop-item))))
@@ -305,6 +313,15 @@
         (list 'progn
               (list 'format 't "ISHL ~A ~A~%" 'op1 'op2)
               (list 'push-item (list 'ash 'op1 'op2)))))
+
+(defmethod codegen ((insn ssa-ishr) &optional (stop-block nil))
+  (declare (ignore stop-block))
+  (flag-stack-usage *context*)
+  (list 'let (list (list 'op2 (list 'pop-item))
+                   (list 'op1 (list 'pop-item)))
+        (list 'progn
+              (list 'format 't "ISHR ~A ~A~%" 'op1 'op2)
+              (list 'push-item (list 'ash 'op1 (list '- 0 'op2))))))
 
 (defmethod codegen ((insn ssa-lcmp) &optional (stop-block nil))
   (declare (ignore stop-block))

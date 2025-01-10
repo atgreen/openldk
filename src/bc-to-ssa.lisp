@@ -299,6 +299,22 @@
       (list (make-instance 'ssa-add
                            :address pc-start)))))
 
+(defun :IAND (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-iand
+                           :address pc-start)))))
+
+(defun :IOR (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-ior
+                           :address pc-start)))))
+
 (defun :ISUB (context code)
   (declare (ignore code))
   (with-slots (pc) context
@@ -943,6 +959,14 @@
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ssa-ishl
+                           :address pc-start)))))
+
+(defun :ISHR (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-ishr
                            :address pc-start)))))
 
 (defun :ARETURN (context code)
