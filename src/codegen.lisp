@@ -140,6 +140,12 @@
   (flag-stack-usage *context*)
   (list 'push-item (list 'peek-item)))
 
+(defmethod codegen ((insn ssa-fcmpg) &optional (stop-block nil))
+  (flag-stack-usage *context*)
+  (list 'let (list (list 'op2 (list 'pop-item))
+                   (list 'op1 (list 'pop-item)))
+        (list 'if (list '> 'op1 'op2) 1 0)))
+
 (defmethod codegen ((insn ssa-iastore) &optional (stop-block nil))
   (flag-stack-usage *context*)
   (list 'let (list (list 'value (list 'pop-item))

@@ -294,7 +294,7 @@ stream."
                                                 :value (read-u4)))
                                 (4
                                  (make-instance 'constant-float
-                                                :value (ieee-floats:decode-float32 (read-u4))))
+                                                :value (float-features:bits-single-float (read-u4))))
                                 (5
                                  (progn
                                    (setf skip t)

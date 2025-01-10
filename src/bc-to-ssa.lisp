@@ -441,6 +441,36 @@
                                :address pc-start
                                :offset (+ pc-start offset))))))))
 
+(defun :FCMPG (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-fcmpg
+                           :address pc-start)))))
+
+(defun :FCONST_0 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-push
+                           :address pc-start
+                           :value (make-instance 'ssa-float-literal
+                                                 :address pc-start
+                                                 :value 0.0))))))
+
+(defun :FLOAD_2 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-push
+                           :address pc-start
+                           :value (make-instance 'ssa-local-variable
+                                                 :address pc-start
+                                                 :index 2))))))
+
 (defun :I2L (context code)
   (declare (ignore code))
   (with-slots (pc) context

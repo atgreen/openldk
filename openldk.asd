@@ -64,7 +64,7 @@
   "(lambda (thunk)
      (cl-annot:enable-annot-syntax)
      (funcall thunk))"
-  :depends-on (:cl-annot :whereiseveryone.command-line-args :flexi-streams :zip :str :defclass-std :fast-io :bitio :pathname-utils :cl-store :trivial-backtrace :fset :bordeaux-threads :ieee-floats)
+  :depends-on (:cl-annot :whereiseveryone.command-line-args :flexi-streams :zip :str :defclass-std :fast-io :bitio :pathname-utils :cl-store :trivial-backtrace :fset :bordeaux-threads :float-features)
   :build-operation "program-op"
   :build-pathname "openldk"
   :entry-point "openldk:main-wrapper")

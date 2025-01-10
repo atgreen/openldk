@@ -94,4 +94,5 @@ multilang-documentation-utils, ghcr.io/ocicl/documentation-utils@sha256:b2a1b3f3
 documentation-utils, ghcr.io/ocicl/documentation-utils@sha256:b2a1b3f3bcd1a738af85ae2b0168d408c177661eab6d6bbebb254e394d983f54, documentation-utils-20230511-98630dd/documentation-utils.asd
 trivial-indent, ghcr.io/ocicl/trivial-indent@sha256:f1ae624eb2ca37133912e9920587488ea6e2f1d6419ba4a1776e63c2bdff0fd9, trivial-indent-20240503-b5d490f/trivial-indent.asd
 named-readtables, ghcr.io/ocicl/named-readtables@sha256:c13ae35d957cf55f8c877762a24537daee5e8322d9968b14f8c86e8cfc1b2df3, named-readtables-20230809-2c05652/named-readtables.asd
-ieee-floats, ghcr.io/ocicl/ieee-floats@sha256:dcc1ef35f12ab6c611839a64338dc55a1c8e9b211274ffa8cbfd95d15b55c766, ieee-floats-20240503-9566ce8/ieee-floats.asd
+float-features, ghcr.io/ocicl/float-features@sha256:536e1bea5ec427500be32f5c7e6f627c4dfd3c7d6277ad7af5eaf298aed857e1, float-features-20240503-f10113a/float-features.asd
+float-features-tests, ghcr.io/ocicl/float-features@sha256:536e1bea5ec427500be32f5c7e6f627c4dfd3c7d6277ad7af5eaf298aed857e1, float-features-20240503-f10113a/float-features-tests.asd
