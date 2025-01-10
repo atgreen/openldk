@@ -257,6 +257,13 @@
       (incf pc)
       (list (make-instance 'ssa-caload :address pc-start)))))
 
+(defun :CASTORE (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-castore :address pc-start)))))
+
 (defun :ATHROW (context code)
   (declare (ignore code))
   (with-slots (pc) context

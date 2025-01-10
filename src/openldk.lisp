@@ -312,6 +312,7 @@
   (%clinit (classload "java/lang/ClassLoader"))
   (%clinit (classload "java/lang/Class"))
   (%clinit (classload "java/security/PrivilegedAction"))
+  (%clinit (classload "java/util/Properties"))
   (setf *bootstrapped* t)
 
   ;; Create a java/lang/Class for every class we've see so far.

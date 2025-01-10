@@ -92,6 +92,9 @@
 (defclass/std ssa-caload (ssa-node)
   ())
 
+(defclass/std ssa-castore (ssa-node)
+  ())
+
 (defclass/std ssa-class (ssa-node)
   ((class :with)))
 (define-print-object/std ssa-class)

@@ -95,6 +95,13 @@
                    (list 'arrayref (list 'pop-item)))
         (list 'push-item (list 'aref 'arrayref 'index))))
 
+(defmethod codegen ((insn ssa-castore) &optional (stop-block nil))
+  ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
+  (list 'let (list (list 'value (list 'pop-item))
+                   (list 'index (list 'pop-item))
+                   (list 'arrayref (list 'pop-item)))
+        (list 'setf (list 'aref 'arrayref 'index) 'value)))
+
 (defmethod codegen ((insn ssa-checkcast) &optional (stop-block nil))
   (with-slots (class) insn
     (list 'unless (list 'typep (list 'peek-item)
