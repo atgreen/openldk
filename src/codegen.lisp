@@ -409,7 +409,10 @@
 (defmethod codegen ((insn ssa-clinit) &optional (stop-block nil))
   (declare (ignore stop-block))
   (with-slots (class) insn
-    (list (intern (format nil "~A.<clinit>()" (slot-value (slot-value class 'class) 'name)) :openldk))))
+    (let ((class (ssa-class-class class)))
+      (list 'unless (list 'initialized-p class)
+            (list 'setf (list 'initialized-p class) t)
+            (list (intern (format nil "~A.<clinit>()" (slot-value class 'name)) :openldk))))))
 
 (defmethod codegen ((insn ssa-local-variable) &optional (stop-block nil))
   (declare (ignore stop-block))

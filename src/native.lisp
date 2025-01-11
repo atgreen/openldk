@@ -122,3 +122,6 @@
 
 (defmethod |java/lang/Double.doubleToRawLongBits(D)| (double)
   (float-features:double-float-bits double))
+
+(defmethod |java/lang/Double.longBitsToDouble(J)| (long-bits)
+  (float-features:bits-double-float long-bits))
