@@ -44,7 +44,6 @@
 (defvar *java-classes* (make-hash-table :test #'equal))
 (defvar *context* nil)
 (defvar *condition-table* (make-hash-table))
-(defvar *bootstrapped* nil)
 
 (defvar *dump-dir* nil)
 (defvar *debug-codegen* nil)
@@ -89,7 +88,7 @@
     (if (static-p method)
         (setf (fn-name *context*) (format nil "~A.~A" (slot-value class 'name) (lispize-method-name (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor)))))
         (setf (fn-name *context*) (format nil "~A" (lispize-method-name (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor))))))
-    (dump "compile-method" (list class-name method-index))
+    ;; (dump "compile-method" (list class-name method-index))
     (let* ((ssa-code-0
              (setf (ssa-code *context*)
                    (apply #'append
@@ -121,11 +120,13 @@
                          (list (list 'format 't "tracing: ~A.~A~%" class-name (fn-name *context*))))
                        (if (slot-value *context* 'uses-stack-p)
                            (list (append (list 'let (if (static-p method)
-                                                        (append (loop for i from 1 upto parameter-count
+                                                        (append (list (list 'stack nil))
+                                                                (loop for i from 1 upto parameter-count
                                                                       collect (list (intern (format nil "local-~A" (1- i)) :openldk) (intern (format nil "arg~A" (1- i)) :openldk)))
                                                                 (loop for i from (1+ parameter-count) upto max-locals
                                                                       collect (list (intern (format nil "local-~A" (1- i)) :openldk))))
-                                                        (append (cons (list (intern "local-0" :openldk) (intern "this" :openldk))
+                                                        (append (list (list 'stack nil))
+                                                                (cons (list (intern "local-0" :openldk) (intern "this" :openldk))
                                                                       (loop for i from 1 upto parameter-count
                                                                             collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" i) :openldk))))
                                                                 (loop for i from (+ 2 parameter-count) upto max-locals
@@ -238,6 +239,15 @@
                           (interfaces (let ((interfaces (slot-value class 'interfaces)))
                                         (when interfaces
                                           (mapcar (lambda (i) (classload i)) (coerce interfaces 'list))))))
+                     (let ((klass (make-instance '|java/lang/Class|))
+                           (cname (make-instance '|java/lang/String|))
+                           (cloader nil)) ;; (make-instance '|java/lang/ClassLoader|)))
+                       (with-slots (|name| |classLoader|) klass
+                         (setf (slot-value cname '|value|) (substitute #\/ #\. classname))
+                         (setf |name| cname)
+                         (setf |classLoader| cloader))
+                       (setf (java-class class) klass)
+                       (setf (gethash (substitute #\/ #\. classname) *java-classes*) klass))
                      (let ((code (emit-<class> class)))
                        (%eval code))
                      (when (and (not (string= classname "java/lang/Throwable"))
@@ -250,18 +260,14 @@
                          (let ((ccode (list 'defmethod 'lisp-condition (list (list 'throwable (intern (format nil "~A" classname) :openldk)))
                                             (list 'make-condition (list 'quote (intern (format nil "condition-~A" classname) :openldk))))))
                            (%eval ccode))))
-                     (when *bootstrapped*
-                       (let ((klass (make-instance '|java/lang/Class|))
-                             (cname (make-instance '|java/lang/String|))
-                             (cloader (make-instance '|java/lang/ClassLoader|)))
-                         (with-slots (|name| |classLoader|) klass
-                           (setf (slot-value cname '|value|) (substitute #\/ #\. classname))
-                           (setf |name| cname)
-                           (setf |classLoader| cloader))
-                         (setf (gethash (substitute #\/ #\. classname) *java-classes*) klass)))
                      class)
                 (close classfile-stream))
               (format t "ERROR: Can't find ~A on classpath~%" classname))))))
+
+(defun jstring (value)
+  (let ((s (make-instance '|java/lang/String|)))
+    (setf (slot-value s '|value|) value)
+    s))
 
 @cli:command
 (defun main (mainclass &optional (args (list)) &key dump-dir classpath)
@@ -305,25 +311,21 @@
                           (make-instance 'jar-classpath-entry :jarfile cpe)
                           (make-instance 'dir-classpath-entry :dir cpe))))
 
+  ;; We need to hand load these before Class.forName0 will work.
   (%clinit (classload "java/lang/Object"))
   (%clinit (classload "java/lang/String"))
-  (%clinit (classload "java/lang/ClassLoader"))
   (%clinit (classload "java/lang/Class"))
-  (%clinit (classload "java/security/PrivilegedAction"))
-  (%clinit (classload "java/util/Properties"))
-  (setf *bootstrapped* t)
 
-  ;; Create a java/lang/Class for every class we've see so far.
-  (maphash (lambda (k v)
-             (let ((klass (make-instance '|java/lang/Class|))
-                   (cname (make-instance '|java/lang/String|))
-                   (cloader (make-instance '|java/lang/ClassLoader|)))
-               (with-slots (|name| |classLoader|) klass
-                 (setf (slot-value cname '|value|) k)
-                 (setf |name| cname)
-                 (setf |classLoader| cloader))
-               (setf (gethash k *java-classes*) klass)))
-           *classes*)
+  ;; Preload some important classes.
+  (dolist (c '("java/lang/Float"
+               "java/lang/ClassLoader"
+               "java/security/PrivilegedAction"
+               "java/util/Properties"))
+    (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil nil nil))
+
+  (let ((props (make-instance '|java/util/Properties|)))
+    (|<init>()| props)
+    (setf (slot-value |+static-java/lang/System+| '|props|) props))
 
   (let* ((class (classload mainclass))
          (argv (make-array (length args))))

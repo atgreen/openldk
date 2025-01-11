@@ -71,9 +71,17 @@
   (declare (ignore stop-block))
   (list 'push-item (list 'logand (list 'pop-item) (list 'pop-item))))
 
+(defmethod codegen ((insn ssa-land) &optional (stop-block nil))
+  (declare (ignore stop-block))
+  (list 'push-item (list 'logand (list 'pop-item) (list 'pop-item))))
+
 (defmethod codegen ((insn ssa-ior) &optional (stop-block nil))
   (declare (ignore stop-block))
-  (list 'push-item (list 'logor (list 'pop-item) (list 'pop-item))))
+  (list 'push-item (list 'logior (list 'pop-item) (list 'pop-item))))
+
+(defmethod codegen ((insn ssa-lor) &optional (stop-block nil))
+  (declare (ignore stop-block))
+  (list 'push-item (list 'logior (list 'pop-item) (list 'pop-item))))
 
 (defmethod codegen ((insn ssa-array-length) &optional (stop-block nil))
   (declare (ignore stop-block))
@@ -130,18 +138,8 @@
 
 (defmethod codegen ((insn ssa-class) &optional (stop-block nil))
   (declare (ignore stop-block))
-  (let* ((classname (slot-value (slot-value insn 'class) 'name))
-         (java-class (gethash classname *java-classes*)))
-    (if java-class
-        java-class
-        (let ((java-class (make-instance '|java/lang/Class|)))
-          (setf (slot-value java-class '|name|)
-                (let ((s (make-instance '|java/lang/String|)))
-                  (setf (slot-value s '|value|) classname)))
-          (setf (slot-value java-class '|classLoader|)
-                (make-instance '|java/lang/ClassLoader|))
-          (setf (gethash classname *java-classes*) java-class)
-          java-class))))
+  (let* ((classname (slot-value (slot-value insn 'class) 'name)))
+    (java-class (gethash classname *classes*))))
 
 (defmethod codegen ((insn ssa-branch-target) &optional (stop-block nil))
   (declare (ignore stop-block))
@@ -239,6 +237,13 @@
     (list 'if (list '<= (list 'pop-item) (list 'pop-item))
           (list 'go (intern (format nil "branch-target-~A" offset))))))
 
+(defmethod codegen ((insn ssa-if-icmplt) &optional (stop-block nil))
+  (declare (ignore stop-block))
+  (flag-stack-usage *context*)
+  (with-slots (offset) insn
+    (list 'if (list '> (list 'pop-item) (list 'pop-item))
+          (list 'go (intern (format nil "branch-target-~A" offset))))))
+
 (defmethod codegen ((insn ssa-if-icmpne) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
@@ -277,6 +282,14 @@
           (list 'if (list '< (list 'pop-item) 0)
                 (list 'go (intern (format nil "branch-target-~A" offset)))))))
 
+(defmethod codegen ((insn ssa-ifgt) &optional (stop-block nil))
+  (declare (ignore stop-block))
+  (flag-stack-usage *context*)
+  (with-slots (offset) insn
+    (list 'progn
+          (list 'if (list '> (list 'pop-item) 0)
+                (list 'go (intern (format nil "branch-target-~A" offset)))))))
+
 (defmethod codegen ((insn ssa-ifne) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
@@ -305,14 +318,39 @@
           (list 'if (list 'typep (list 'pop-item)
                           (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk))) 1 0))))
 
+(defun shl (x width bits)
+  "Compute bitwise left shift of x by 'bits' bits, represented on 'width' bits"
+  (logand (ash x bits)
+          (1- (ash 1 width))))
+
+(defun shr (x width bits)
+  "Compute bitwise right shift of x by 'bits' bits, represented on 'width' bits"
+  (logand (ash x (- bits))
+          (1- (ash 1 width))))
+
 (defmethod codegen ((insn ssa-ishl) &optional (stop-block nil))
   (declare (ignore stop-block))
-  (flag-stack-usage *context*)
   (list 'let (list (list 'op2 (list 'pop-item))
                    (list 'op1 (list 'pop-item)))
         (list 'progn
               (list 'format 't "ISHL ~A ~A~%" 'op1 'op2)
               (list 'push-item (list 'ash 'op1 'op2)))))
+
+(defmethod codegen ((insn ssa-lshl) &optional (stop-block nil))
+  (declare (ignore stop-block))
+  (list 'let (list (list 'op2 (list 'pop-item))
+                   (list 'op1 (list 'pop-item)))
+        (list 'progn
+              (list 'format 't "LSHL ~A ~A~%" 'op1 'op2)
+              (list 'push-item (list 'shl 'op1 'op2 32)))))
+
+(defmethod codegen ((insn ssa-lshr) &optional (stop-block nil))
+  (declare (ignore stop-block))
+  (list 'let (list (list 'op2 (list 'pop-item))
+                   (list 'op1 (list 'pop-item)))
+        (list 'progn
+              (list 'format 't "LSHR ~A ~A~%" 'op1 'op2)
+              (list 'push-item (list 'shr 'op1 'op2 32)))))
 
 (defmethod codegen ((insn ssa-ishr) &optional (stop-block nil))
   (declare (ignore stop-block))
@@ -508,6 +546,10 @@
             (pop (slot-value *context* 'blocks))
             ;; sort by address
             (let ((successor-list (sort (fset:convert 'list (successors basic-block)) (lambda (a b) (< (address a) (address b))))))
+              (if (eq 1 (length successor-list))
+                  (if (slot-value (car successor-list) 'code-emitted-p)
+                      (when (and (<= (address (car successor-list)) (+ (address (car (last (code basic-block)))) 4)))
+                        (setf lisp-code (append lisp-code (list (list 'go (intern (format nil "branch-target-~A" (address (car successor-list)))))))))))
               (dolist (successor successor-list)
                 (when successor
                   (setf lisp-code (append lisp-code (codegen successor (or stop-block (try-exit-block basic-block))))))))

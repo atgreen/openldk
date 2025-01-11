@@ -47,12 +47,14 @@
     :ATHROW
     :CALOAD :CASTORE
     :DADD :DCONST_0 :DDIV :DLOAD_2 :DMUL :DSTORE_2 :DSUB
+    :DRETURN
     :DUP
     :F2I
     :FCMPG :FCMPL
     :FCONST_0
     :FLOAD_0 :FLOAD_1 :FLOAD_2
     :FMUL
+    :FRETURN
 		:I2F :I2L
     :IADD :IAND :IASTORE :IOR
     :ICONST_0 :ICONST_1 :ICONST_2 :ICONST_3 :ICONST_4 :ICONST_5
@@ -62,9 +64,12 @@
     :IRETURN
     :ISHL :ISHR
     :ISUB
+    :LADD :LAND
+    :LOR
 		:LCMP
     :LCONST_0 :LCONST_1
     :LLOAD_0 :LLOAD_1 :LLOAD_2 :LLOAD_3
+    :LSHL :LSHR
 		:LSUB
     :LUSHR
     :MONITORENTER :MONITOREXIT
@@ -78,8 +83,8 @@
 (defparameter +bytecode-3-byte+
   '(:CHECKCAST
     :GETFIELD :GETSTATIC :GOTO :IINC
-    :IF_ACMPEQ :IF_ACMPNE :IF_ICMPEQ :IF_ICMPGE :IF_ICMPLE :IF_ICMPNE :IFEQ :IFGE :IFLE
-    :IFLT :IFNE :IFNONNULL :IFNULL
+    :IF_ACMPEQ :IF_ACMPNE :IF_ICMPEQ :IF_ICMPGE :IF_ICMPLE :IF_ICMPLT :IF_ICMPNE :IFEQ :IFGE :IFLE
+    :IFLT :IFGT :IFNE :IFNONNULL :IFNULL
     :INSTANCEOF :INVOKEVIRTUAL :INVOKESPECIAL :INVOKESTATIC
 		:LDC2_W
 		:NEW :ANEWARRAY
@@ -90,13 +95,13 @@
 
 (defparameter +bytecode-short-branch-table+
   (let ((sbtable (make-hash-table)))
-    (dolist (o '(:GOTO :IF_ACMPEQ :IF_ACMPNE :IF_ICMPLE :IF_ICMPEQ :IF_ICMPGE :IF_ICMPNE :IFEQ :IFGE :IFLE :IFLT :IFNE :IFNONNULL :IFNULL))
+    (dolist (o '(:GOTO :IF_ACMPEQ :IF_ACMPNE :IF_ICMPLE :IF_ICMPLT :IF_ICMPEQ :IF_ICMPGE :IF_ICMPNE :IFEQ :IFGE :IFLE :IFLT :IFGT :IFNE :IFNONNULL :IFNULL))
       (setf (gethash o sbtable) t))
     sbtable))
 
 (defparameter +bytecode-conditional-branch-table+
   (let ((cbtable (make-hash-table)))
-    (dolist (o '(:IF_ACMPEQ :IF_ACMPNE :IF_ICMPLE :IF_ICMPEQ :IF_ICMPGE :IF_ICMPNE :IFEQ :IFGE :IFLE :IFLT :IFNE :IFNONNULL :IFNULL))
+    (dolist (o '(:IF_ACMPEQ :IF_ACMPNE :IF_ICMPLE :IF_ICMPLT :IF_ICMPEQ :IF_ICMPGE :IF_ICMPNE :IFEQ :IFGE :IFLE :IFLT :IFGT :IFNE :IFNONNULL :IFNULL))
       (setf (gethash o cbtable) t))
     cbtable))
 

@@ -68,34 +68,34 @@
 (defmethod |println(Ljava/lang/Object;)| (stream object)
   (format t "~A~%" object))
 
+(defmethod |println(Ljava/lang/Object;)| (stream (object (eql nil)))
+  (format t "null~%"))
+
 (defmethod |fillInStackTrace(I)| ((|this| |java/lang/Throwable|) dummy)
   (let ((bt (trivial-backtrace:print-backtrace nil :output nil)))
     (print bt)))
 
 (defmethod |sun/reflect/Reflection.getCallerClass()| ()
-  (let* ((caller-string (format nil "~A" (third (sb-debug:backtrace-as-list))))
+  (let* ((caller-string (format nil "~A" (fourth (sb-debug:backtrace-as-list))))
          (cstring (subseq caller-string 1 (position #\. caller-string))))
-    (gethash cstring *java-classes*)))
+    (format t "CALLER-CLASS = ~A~%" cstring)
+    (java-class (gethash cstring *classes*))))
 
 (defmethod |getClass()| (object)
   ;;; FIXME - throw nullpointerexception
 	(when *debug-trace*
-		(format t "tracing: java/lang/Object.getClass(~A): ~A~%" object (gethash (format nil "~A" (type-of object)) *java-classes*)))
-	(gethash (format nil "~A" (type-of object)) *java-classes*))
+		(format t "tracing: java/lang/Object.getClass(~A): ~A~%" object (java-class (gethash (format nil "~A" (type-of object)) *classes*))))
+	(java-class (gethash (format nil "~A" (type-of object)) *classes*)))
 
 (defmethod |java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (name initialize loader caller)
 	(when *debug-trace*
 		(format t "tracing: java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)~%"))
   (let ((lname (substitute #\/ #\. (slot-value name '|value|))))
-    (or (gethash lname *java-classes*)
-        (progn (%clinit (classload lname))
-               (let ((java-class (make-instance '|java/lang/Class|)))
-                 (setf (slot-value java-class '|name|)
-                       (let ((s (make-instance '|java/lang/String|)))
-                         (setf (slot-value s '|value|) name)))
-                 (setf (slot-value java-class '|classLoader|) loader)
-                 (setf (gethash lname *java-classes*) java-class)
-                 java-class)))))
+    (or (and (gethash lname *classes*)
+             (java-class (gethash lname *classes*)))
+        (progn (let ((klass (classload lname)))
+                 (%clinit klass)
+                 (java-class klass))))))
 
 (defmethod |java/lang/System.currentTimeMillis()| ()
 	;;; FIXME: this probably isn't right.
@@ -108,3 +108,17 @@
 
 (defmethod |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedAction;)| (action)
   (|run()| action))
+
+(defmethod |java/lang/Class.getPrimitiveClass(Ljava/lang/String;)| (class-name)
+  (let ((name (slot-value class-name '|value|)))
+    (cond
+      ((string= name "float")
+       (let ((jc (java-class (gethash "java/lang/Float" *classes*))))
+         jc))
+      (t (error (format nil "getPrimitiveClass(~A)" name))))))
+
+(defmethod |java/lang/Float.floatToRawIntBits(F)| (float)
+  (float-features:single-float-bits float))
+
+(defmethod |java/lang/Double.doubleToRawLongBits(D)| (double)
+  (float-features:double-float-bits double))

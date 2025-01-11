@@ -120,6 +120,18 @@
 (defclass/std ssa-add (ssa-node)
   ())
 
+(defclass/std ssa-iand (ssa-node)
+  ())
+
+(defclass/std ssa-land (ssa-node)
+  ())
+
+(defclass/std ssa-ior (ssa-node)
+  ())
+
+(defclass/std ssa-lor (ssa-node)
+  ())
+
 (defmethod uses-stack-p (ssa-add)
   t)
 
@@ -159,6 +171,9 @@
 (defclass/std ssa-if-icmple (ssa-branch)
   ())
 
+(defclass/std ssa-if-icmplt (ssa-branch)
+  ())
+
 (defclass/std ssa-if-icmpne (ssa-branch)
   ())
 
@@ -174,6 +189,9 @@
 (defclass/std ssa-iflt (ssa-branch)
   ())
 
+(defclass/std ssa-ifgt (ssa-branch)
+  ())
+
 (defclass/std ssa-ifne (ssa-branch)
   ())
 
@@ -187,6 +205,15 @@
   ((class :with)))
 
 (defclass/std ssa-ishl (ssa-node)
+  ())
+
+(defclass/std ssa-ishr (ssa-node)
+  ())
+
+(defclass/std ssa-lshl (ssa-node)
+  ())
+
+(defclass/std ssa-lshr (ssa-node)
   ())
 
 (defclass/std ssa-call (ssa-node)

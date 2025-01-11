@@ -669,6 +669,17 @@
                                :address pc-start
                                :offset (+ pc-start offset))))))))
 
+(defun :IF_ICMPLT (context code)
+  (with-slots (pc class) context
+    (let ((pc-start pc))
+      (with-slots (constant-pool) class
+        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
+                                              (aref code (incf pc))))))
+          (incf pc)
+          (list (make-instance 'ssa-if-icmplt
+                               :address pc-start
+                               :offset (+ pc-start offset))))))))
+
 (defun :IF_ICMPNE (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
@@ -729,6 +740,17 @@
                                               (aref code (incf pc))))))
           (incf pc)
           (list (make-instance 'ssa-iflt
+                               :address pc-start
+                               :offset (+ pc-start offset))))))))
+
+(defun :IFGT (context code)
+  (with-slots (pc class) context
+    (let ((pc-start pc))
+      (with-slots (constant-pool) class
+        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
+                                              (aref code (incf pc))))))
+          (incf pc)
+          (list (make-instance 'ssa-ifgt
                                :address pc-start
                                :offset (+ pc-start offset))))))))
 
@@ -969,7 +991,48 @@
       (list (make-instance 'ssa-ishr
                            :address pc-start)))))
 
+(defun :LADD (context code)
+  (:IADD context code))
+
+(defun :LAND (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-land
+                           :address pc-start)))))
+
+(defun :LOR (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-lor
+                           :address pc-start)))))
+
+(defun :LSHL (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-ishl
+                           :address pc-start)))))
+
+(defun :LSHR (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-lshr
+                           :address pc-start)))))
+
 (defun :ARETURN (context code)
+  (:IRETURN context code))
+
+(defun :DRETURN (context code)
+  (:IRETURN context code))
+
+(defun :FRETURN (context code)
   (:IRETURN context code))
 
 (defun :LCMP (context code)

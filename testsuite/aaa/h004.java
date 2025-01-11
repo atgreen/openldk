@@ -1,4 +1,4 @@
-/* { dg-output "OK\r\nDone\r\nFin" } */
+/* { dg-output "OK\r\nDone\r\nFin\r\n" } */
 
 package aaa;
 

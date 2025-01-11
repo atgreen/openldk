@@ -44,15 +44,15 @@
 (defmacro push-item (item)
   (if *debug-stack*
       `(let ((item ,item))
-         (format t "--- push ~A to ~A~%" item *stack*)
-         (push item *stack*))
-      `(push ,item *stack*)))
+         (format t "--- push ~A to ~A~%" item stack)
+         (push item stack))
+      `(push ,item stack)))
 
 (defmacro pop-item ()
   (if *debug-stack*
-      `(progn (format t "-- pop from ~A~%" *stack*)
-              (pop *stack*))
-      `(pop *stack*)))
+      `(progn (format t "-- pop from ~A~%" stack)
+              (pop stack))
+      `(pop stack)))
 
 (defmacro peek-item ()
-  `(car *stack*))
+  `(car stack))

@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2023, 2024  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; This file is part of OpenLDK.
 
@@ -46,6 +46,29 @@
    (|serialVersionUID| :initform NIL :allocation :class)
    (|serialPersistentFields| :initform NIL :allocation :class)
    (CASE_INSENSITIVE_ORDER :initform NIL :allocation :class)))
+
+(defclass |java/lang/Class| (|java/lang/Object|)
+  ((ANNOTATION :initform 0 :allocation :class)
+   (ENUM :initform 0 :allocation :class)
+   (SYNTHETIC :initform 0 :allocation :class)
+   (|cachedConstructor| :initform nil :allocation :instance)
+   (|newInstanceCallerCache| :initform nil :allocation :instance)
+   (|name| :initform nil :allocation :instance)
+   (|classLoader| :initform nil :allocation :instance)
+   (|allPermDomain| :initform nil :allocation :class)
+   (|useCaches| :initform nil :allocation :class)
+   (|reflectionData| :initform nil :allocation :instance)
+   (|classRedefinedCount| :initform 0 :allocation :instance)
+   (|genericInfo| :initform nil :allocation :instance)
+   (|serialVersionUID| :initform 0 :allocation :class)
+   (|serialPersistentFields| :initform nil :allocation :class)
+   (|reflectionFactory| :initform nil :allocation :class)
+   (|initted| :initform nil :allocation :class)
+   (|enumConstants| :initform nil :allocation :instance)
+   (|enumConstantDirectory| :initform nil :allocation :instance)
+   (|annotationData| :initform nil :allocation :instance)
+   (|annotationType| :initform nil :allocation :instance)
+   (|classValueMap| :initform nil :allocation :instance)))
 
 (defmethod print-object ((s |java/lang/String|) out)
   (print-unreadable-object (s out :type t)

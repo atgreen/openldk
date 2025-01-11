@@ -55,7 +55,8 @@
    (dominates
     :doc "Set of blocks that this block dominates in CFG.")
    (stop)
-   (code-emitted-p)
+   (code-emitted-p
+    :doc "True if this block's code has already been emitted.")
    (try-catch
     :doc "A list of conses of handler type and handler block.")
 	 (finally
@@ -147,7 +148,7 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
 
 (defun build-basic-blocks (ssa-code)
   "Build <BASIC-BLOCK> objects from SSA-CODE. Return the entry block."
-  (dump "build-basic-blocks" ssa-code)
+  ;; (dump "build-basic-blocks" ssa-code)
   (let ((block-starts (find-block-starts)))
     (let* ((block-by-address (make-hash-table))
            (blocks (loop while ssa-code
