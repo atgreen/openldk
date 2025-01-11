@@ -63,9 +63,14 @@
         (list 'setf (list 'aref 'arrayref 'index) 'value)))
 
 (defmethod codegen ((insn ssa-add) &optional (stop-block nil))
+  ;; FIXME -- need iadd to mask lower 32-bits
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
   (list 'push-item (list '+ (list 'pop-item) (list 'pop-item))))
+
+(defmethod codegen ((insn ssa-imul) &optional (stop-block nil))
+  (declare (ignore stop-block))
+  (list 'push-item (list 'logand (list '* (list 'pop-item) (list 'pop-item)) #xFFFFFFFF)))
 
 (defmethod codegen ((insn ssa-iand) &optional (stop-block nil))
   (declare (ignore stop-block))
@@ -118,7 +123,7 @@
   ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
   (list 'let (list (list 'index (list 'pop-item))
                    (list 'arrayref (list 'pop-item)))
-        (list 'push-item (list 'aref 'arrayref 'index))))
+        (list 'push-item (list 'char-code (list 'aref 'arrayref 'index)))))
 
 (defmethod codegen ((insn ssa-castore) &optional (stop-block nil))
   (declare (ignore stop-block))
@@ -144,6 +149,17 @@
 (defmethod codegen ((insn ssa-branch-target) &optional (stop-block nil))
   (declare (ignore stop-block))
   (intern (format nil "branch-target-~A" (slot-value insn 'index))))
+
+(defmethod codegen ((insn ssa-irem) &optional (stop-block nil))
+  (declare (ignore stop-block))
+  (flag-stack-usage *context*)
+  (list 'handler-case
+        (list 'let (list (list 'op2 (list 'pop-item))
+                         (list 'op1 (list 'pop-item)))
+              (list 'push-item (list 'rem 'op1 'op2)))
+        (list 'division-by-zero (list 'e)
+              (list 'push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
+              (list 'error (list 'lisp-condition (list 'peek-item))))))
 
 (defmethod codegen ((insn ssa-div) &optional (stop-block nil))
   (declare (ignore stop-block))

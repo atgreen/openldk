@@ -691,12 +691,28 @@
                                :address pc-start
                                :offset (+ pc-start offset))))))))
 
+(defun :IMUL (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-imul
+                           :address pc-start)))))
+
 (defun :IDIV (context code)
   (declare (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ssa-div
+                           :address pc-start)))))
+
+(defun :IREM (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-irem
                            :address pc-start)))))
 
 (defun :IFEQ (context code)

@@ -138,7 +138,13 @@
 (defclass/std ssa-branch (ssa-node)
   ((offset successors)))
 
+(defclass/std ssa-imul (ssa-node)
+  ())
+
 (defclass/std ssa-div (ssa-node)
+  ())
+
+(defclass/std ssa-irem (ssa-node)
   ())
 
 (defclass/std ssa-dup (ssa-node)
