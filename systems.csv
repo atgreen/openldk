@@ -96,3 +96,5 @@ trivial-indent, ghcr.io/ocicl/trivial-indent@sha256:f1ae624eb2ca37133912e9920587
 named-readtables, ghcr.io/ocicl/named-readtables@sha256:c13ae35d957cf55f8c877762a24537daee5e8322d9968b14f8c86e8cfc1b2df3, named-readtables-20230809-2c05652/named-readtables.asd
 float-features, ghcr.io/ocicl/float-features@sha256:536e1bea5ec427500be32f5c7e6f627c4dfd3c7d6277ad7af5eaf298aed857e1, float-features-20240503-f10113a/float-features.asd
 float-features-tests, ghcr.io/ocicl/float-features@sha256:536e1bea5ec427500be32f5c7e6f627c4dfd3c7d6277ad7af5eaf298aed857e1, float-features-20240503-f10113a/float-features-tests.asd
+local-time, ghcr.io/ocicl/local-time@sha256:ed7c32afa2aadc798f4183017b6bb4ceea9e287be83da8f24b212442207ba532, local-time-20241119-bcfaeb2/local-time.asd
+cl-postgres_plus_local-time, ghcr.io/ocicl/local-time@sha256:ed7c32afa2aadc798f4183017b6bb4ceea9e287be83da8f24b212442207ba532, local-time-20241119-bcfaeb2/cl-postgres+local-time.asd
