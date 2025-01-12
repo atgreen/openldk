@@ -50,8 +50,6 @@
   ())
 
 (defun |java/lang/Class.desiredAssertionStatus0(Ljava/lang/Class;)| (class)
-  (print "desiredAssertionStatus0")
-  (print class)
   nil)
 
 (defun |java/lang/Class.getSecurityManager()| ()
@@ -78,7 +76,6 @@
 (defmethod |sun/reflect/Reflection.getCallerClass()| ()
   (let* ((caller-string (format nil "~A" (fourth (sb-debug:backtrace-as-list))))
          (cstring (subseq caller-string 1 (position #\. caller-string))))
-    (format t "CALLER-CLASS = ~A~%" cstring)
     (java-class (gethash cstring *classes*))))
 
 (defmethod |getClass()| (object)
@@ -125,3 +122,28 @@
 
 (defmethod |java/lang/Double.longBitsToDouble(J)| (long-bits)
   (float-features:bits-double-float long-bits))
+
+(defmethod |java/util/TimeZone.getSystemTimeZoneID(Ljava/lang/String;)| (arg)
+  (jstring (local-time:format-timestring nil (local-time:now) :format '(:timezone))))
+
+(defmethod |length()| ((str string))
+  (length str))
+
+(defmethod |java/util/TimeZone.getSystemGMTOffsetID()| ()
+  (jstring (local-time:format-timestring nil (local-time:now) :format '(:gmt-offset))))
+
+
+(defun %stringize-array (array)
+  "Convert an array of characters and integers (ASCII values) into a string."
+  (coerce
+   (map 'list
+        (lambda (x)
+          (if (integerp x)
+              (code-char x) ;; Convert integer to character
+              x))           ;; Keep character as is
+        array)
+   'string))
+
+(defmethod print-object ((str |java/lang/String|) out)
+  (print-unreadable-object (str out :type t)
+    (format out "~S" (%stringize-array (slot-value str '|value|)))))
