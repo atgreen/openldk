@@ -81,7 +81,7 @@
     :RETURN))
 
 (defparameter +bytecode-2-byte+
-  '(:ALOAD :ASTORE :BIPUSH :DLOAD :DSTORE :ILOAD :LLOAD :ISTORE :LDC :NEWARRAY))
+  '(:ALOAD :ASTORE :BIPUSH :DLOAD :DSTORE :ILOAD :LLOAD :LSTORE :ISTORE :LDC :NEWARRAY))
 
 (defparameter +bytecode-3-byte+
   '(:CHECKCAST
