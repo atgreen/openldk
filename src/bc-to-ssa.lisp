@@ -358,6 +358,17 @@
                                                  :address pc-start
                                                  :value 0.0))))))
 
+(defun :DCONST_1 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-push
+                           :address pc-start
+                           :value (make-instance 'ssa-double-literal
+                                                 :address pc-start
+                                                 :value 1.0))))))
+
 (defun :DDIV (context code)
   (declare (ignore code))
   (with-slots (pc) context
@@ -406,6 +417,9 @@
                            :target (make-instance 'ssa-local-variable
                                                   :address pc-start
                                                   :index index))))))
+
+(defun :LSTORE (context code)
+  (:DSTORE context code))
 
 (defun :DSTORE_2 (context code)
   (declare (ignore code))
@@ -533,12 +547,48 @@
                                                  :address pc-start
                                                  :index 2))))))
 
+(defun :L2I (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-l2i :address pc-start)))))
+
+(defun :L2F (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-l2f :address pc-start)))))
+
 (defun :F2I (context code)
   (declare (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ssa-f2i :address pc-start)))))
+
+(defun :D2L (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-d2l :address pc-start)))))
+
+(defun :F2D (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-nop)))))
+
+(defun :FDIV (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-fdiv
+                           :address pc-start)))))
 
 (defun :FMUL (context code)
   (declare (ignore code))
@@ -874,6 +924,9 @@
                                                  :address pc-start
                                                  :index index))))))
 
+(defun :LLOAD (context code)
+  (:ILOAD context code))
+
 (defun :ILOAD_0 (context code)
   (declare (ignore code))
   (with-slots (pc) context
@@ -1136,7 +1189,7 @@
           (list (make-instance 'ssa-push :address pc-start
                                          :value (emit (aref constant-pool index) constant-pool))))))))
 
-(defun :LDC2_W (context code)
+(defun :LDC_W (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
@@ -1145,6 +1198,9 @@
           (incf pc)
           (list (make-instance 'ssa-push :address pc-start
                                          :value (emit (aref constant-pool index) constant-pool))))))))
+
+(defun :LDC2_W (context code)
+  (:LDC_W context code))
 
 (defun :LCONST_0 (context code)
   (declare (ignore code))

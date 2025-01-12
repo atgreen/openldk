@@ -165,7 +165,16 @@
 (defclass/std ssa-goto (ssa-branch)
   ())
 
+(defclass/std ssa-l2f (ssa-node)
+  ())
+
+(defclass/std ssa-l2i (ssa-node)
+  ())
+
 (defclass/std ssa-f2i (ssa-node)
+  ())
+
+(defclass/std ssa-d2l (ssa-node)
   ())
 
 (defclass/std ssa-i2c (ssa-node)
@@ -302,6 +311,9 @@
   ())
 
 (defclass/std ssa-lushr (ssa-node)
+  ())
+
+(defclass/std ssa-fdiv (ssa-node)
   ())
 
 (defclass/std ssa-fmul (ssa-node)

@@ -175,6 +175,18 @@
               (list 'push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
               (list 'error (list 'lisp-condition (list 'peek-item))))))
 
+(defmethod codegen ((insn ssa-fdiv) &optional (stop-block nil))
+  ;; FIXME - handle all weird conditions
+  (declare (ignore stop-block))
+  (flag-stack-usage *context*)
+  (list 'handler-case
+        (list 'let (list (list 'op2 (list 'pop-item))
+                         (list 'op1 (list 'pop-item)))
+              (list 'push-item (list '/ 'op1 'op2)))
+        (list 'division-by-zero (list 'e)
+              (list 'push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
+              (list 'error (list 'lisp-condition (list 'peek-item))))))
+
 (defmethod codegen ((insn ssa-idiv) &optional (stop-block nil))
   ;; FIXME - handle all weird conditions
   (declare (ignore stop-block))
@@ -240,7 +252,22 @@
   (with-slots (index const) insn
     (list 'push-item (list 'code-char (list 'pop-item)))))
 
+(defmethod codegen ((insn ssa-l2f) &optional (stop-block nil))
+  (declare (ignore stop-block))
+  (with-slots (index const) insn
+    (list 'push-item (list 'float (list 'pop-item)))))
+
+(defmethod codegen ((insn ssa-l2i) &optional (stop-block nil))
+  (declare (ignore stop-block))
+  (with-slots (index const) insn
+    (list 'push-item (list 'logand #xffffffff (list 'pop-item)))))
+
 (defmethod codegen ((insn ssa-f2i) &optional (stop-block nil))
+  (declare (ignore stop-block))
+  (with-slots (index const) insn
+    (list 'push-item (list 'floor (list 'pop-item)))))
+
+(defmethod codegen ((insn ssa-d2l) &optional (stop-block nil))
   (declare (ignore stop-block))
   (with-slots (index const) insn
     (list 'push-item (list 'floor (list 'pop-item)))))
