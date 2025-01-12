@@ -84,6 +84,10 @@
   (declare (ignore stop-block))
   (list 'push-item (list 'logior (list 'pop-item) (list 'pop-item))))
 
+(defmethod codegen ((insn ssa-ixor) &optional (stop-block nil))
+  (declare (ignore stop-block))
+  (list 'push-item (list 'logxor (list 'pop-item) (list 'pop-item))))
+
 (defmethod codegen ((insn ssa-lor) &optional (stop-block nil))
   (declare (ignore stop-block))
   (list 'push-item (list 'logior (list 'pop-item) (list 'pop-item))))
@@ -125,6 +129,13 @@
                    (list 'arrayref (list 'pop-item)))
         (list 'push-item (list 'char-code (list 'aref 'arrayref 'index)))))
 
+(defmethod codegen ((insn ssa-iaload) &optional (stop-block nil))
+  (declare (ignore stop-block))
+  ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
+  (list 'let (list (list 'index (list 'pop-item))
+                   (list 'arrayref (list 'pop-item)))
+        (list 'push-item (list 'aref 'arrayref 'index))))
+
 (defmethod codegen ((insn ssa-castore) &optional (stop-block nil))
   (declare (ignore stop-block))
   ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
@@ -136,10 +147,13 @@
 (defmethod codegen ((insn ssa-checkcast) &optional (stop-block nil))
   (declare (ignore stop-block))
   (with-slots (class) insn
-    (list 'unless (list 'typep (list 'peek-item)
-                        (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))
-          (list 'push-item (list 'make-instance (list 'quote '|java/lang/ClassCastException|)))
-          (list 'error (list 'lisp-condition (list 'peek-item))))))
+    (list 'progn
+          (list 'format t "CHECKCAST: ~A ~A~%" (list 'peek-item) (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))
+          (list 'when (list 'peek-item)
+                (list 'unless (list 'typep (list 'peek-item)
+                                    (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))
+                      (list 'push-item (list 'make-instance (list 'quote '|java/lang/ClassCastException|)))
+                      (list 'error (list 'lisp-condition (list 'peek-item))))))))
 
 (defmethod codegen ((insn ssa-class) &optional (stop-block nil))
   (declare (ignore stop-block))
@@ -161,13 +175,26 @@
               (list 'push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
               (list 'error (list 'lisp-condition (list 'peek-item))))))
 
-(defmethod codegen ((insn ssa-div) &optional (stop-block nil))
+(defmethod codegen ((insn ssa-idiv) &optional (stop-block nil))
+  ;; FIXME - handle all weird conditions
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
   (list 'handler-case
         (list 'let (list (list 'op2 (list 'pop-item))
                          (list 'op1 (list 'pop-item)))
-              (list 'push-item (list '/ 'op1 'op2)))
+              (list 'push-item (list 'floor (list '/ 'op1 'op2))))
+        (list 'division-by-zero (list 'e)
+              (list 'push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
+              (list 'error (list 'lisp-condition (list 'peek-item))))))
+
+(defmethod codegen ((insn ssa-ldiv) &optional (stop-block nil))
+  ;; FIXME - handle all weird conditions
+  (declare (ignore stop-block))
+  (flag-stack-usage *context*)
+  (list 'handler-case
+        (list 'let (list (list 'op2 (list 'pop-item))
+                         (list 'op1 (list 'pop-item)))
+              (list 'push-item (list 'floor (list '/ 'op1 'op2))))
         (list 'division-by-zero (list 'e)
               (list 'push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
               (list 'error (list 'lisp-condition (list 'peek-item))))))
@@ -202,6 +229,16 @@
                    (list 'index (list 'pop-item))
                    (list 'arrayref (list 'pop-item)))
         (list 'setf (list 'aref 'arrayref 'index) 'value)))
+
+(defmethod codegen ((insn ssa-ineg) &optional (stop-block nil))
+  (declare (ignore stop-block))
+  (with-slots (index const) insn
+    (list 'push-item (list '- (list 'pop-item)))))
+
+(defmethod codegen ((insn ssa-i2c) &optional (stop-block nil))
+  (declare (ignore stop-block))
+  (with-slots (index const) insn
+    (list 'push-item (list 'code-char (list 'pop-item)))))
 
 (defmethod codegen ((insn ssa-f2i) &optional (stop-block nil))
   (declare (ignore stop-block))
@@ -258,6 +295,13 @@
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'if (list '> (list 'pop-item) (list 'pop-item))
+          (list 'go (intern (format nil "branch-target-~A" offset))))))
+
+(defmethod codegen ((insn ssa-if-icmpgt) &optional (stop-block nil))
+  (declare (ignore stop-block))
+  (flag-stack-usage *context*)
+  (with-slots (offset) insn
+    (list 'if (list '< (list 'pop-item) (list 'pop-item))
           (list 'go (intern (format nil "branch-target-~A" offset))))))
 
 (defmethod codegen ((insn ssa-if-icmpne) &optional (stop-block nil))
@@ -334,6 +378,11 @@
           (list 'if (list 'typep (list 'pop-item)
                           (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk))) 1 0))))
 
+(defun logical-shift-right-32 (integer shift)
+  (logand
+   (ash (logand integer #xffffffff) (- shift))
+   #xffffffff))
+
 (defun shl (x width bits)
   "Compute bitwise left shift of x by 'bits' bits, represented on 'width' bits"
   (logand (ash x bits)
@@ -346,6 +395,7 @@
 
 (defmethod codegen ((insn ssa-ishl) &optional (stop-block nil))
   (declare (ignore stop-block))
+  ;; FIXME: this is wrong.
   (list 'let (list (list 'op2 (list 'pop-item))
                    (list 'op1 (list 'pop-item)))
         (list 'progn
@@ -354,14 +404,24 @@
 
 (defmethod codegen ((insn ssa-lshl) &optional (stop-block nil))
   (declare (ignore stop-block))
+  ;; FIXME: this is wrong.
   (list 'let (list (list 'op2 (list 'pop-item))
                    (list 'op1 (list 'pop-item)))
         (list 'progn
               (list 'format 't "LSHL ~A ~A~%" 'op1 'op2)
               (list 'push-item (list 'shl 'op1 'op2 32)))))
 
+(defmethod codegen ((insn ssa-iushr) &optional (stop-block nil))
+  (declare (ignore stop-block))
+  ;; FIXME: this is wrong.
+  (list 'let (list (list 'op2 (list 'pop-item))
+                   (list 'op1 (list 'pop-item)))
+        (list 'progn
+              (list 'push-item (list 'shr 'op1 'op2 32)))))
+
 (defmethod codegen ((insn ssa-lshr) &optional (stop-block nil))
   (declare (ignore stop-block))
+  ;; FIXME: this is wrong.
   (list 'let (list (list 'op2 (list 'pop-item))
                    (list 'op1 (list 'pop-item)))
         (list 'progn
@@ -370,7 +430,7 @@
 
 (defmethod codegen ((insn ssa-ishr) &optional (stop-block nil))
   (declare (ignore stop-block))
-  (flag-stack-usage *context*)
+  ;; FIXME: this is wrong.
   (list 'let (list (list 'op2 (list 'pop-item))
                    (list 'op1 (list 'pop-item)))
         (list 'progn
@@ -459,7 +519,7 @@
 (defmethod codegen ((insn ssa-new-array) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
-  (list 'make-array (list 'pop-item)))
+  (list 'make-array (list 'pop-item) :initial-element nil))
 
 (defmethod codegen ((insn ssa-nop) &optional (stop-block nil))
   (declare (ignore stop-block))

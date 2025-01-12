@@ -104,6 +104,9 @@
 (defclass/std ssa-caload (ssa-node)
   ())
 
+(defclass/std ssa-iaload (ssa-node)
+  ())
+
 (defclass/std ssa-castore (ssa-node)
   ())
 
@@ -121,6 +124,12 @@
   ())
 
 (defclass/std ssa-iand (ssa-node)
+  ())
+
+(defclass/std ssa-ixor (ssa-node)
+  ())
+
+(defclass/std ssa-ineg (ssa-node)
   ())
 
 (defclass/std ssa-land (ssa-node)
@@ -141,7 +150,10 @@
 (defclass/std ssa-imul (ssa-node)
   ())
 
-(defclass/std ssa-div (ssa-node)
+(defclass/std ssa-idiv (ssa-node)
+  ())
+
+(defclass/std ssa-ldiv (ssa-node)
   ())
 
 (defclass/std ssa-irem (ssa-node)
@@ -154,6 +166,9 @@
   ())
 
 (defclass/std ssa-f2i (ssa-node)
+  ())
+
+(defclass/std ssa-i2c (ssa-node)
   ())
 
 (defclass/std ssa-i2f (ssa-node)
@@ -178,6 +193,9 @@
   ())
 
 (defclass/std ssa-if-icmplt (ssa-branch)
+  ())
+
+(defclass/std ssa-if-icmpgt (ssa-branch)
   ())
 
 (defclass/std ssa-if-icmpne (ssa-branch)
@@ -214,6 +232,9 @@
   ())
 
 (defclass/std ssa-ishr (ssa-node)
+  ())
+
+(defclass/std ssa-iushr (ssa-node)
   ())
 
 (defclass/std ssa-lshl (ssa-node)
