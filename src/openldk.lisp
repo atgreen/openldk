@@ -80,8 +80,7 @@
                                    :exception-table exception-table
                                    :bytecode code
                                    :pc 0
-                                   :is-clinit-p (string= "<clinit>"
-                                                         (slot-value method 'name)))))
+                                   :is-clinit-p (string= "<clinit>" (slot-value method 'name)))))
     (when *debug-codegen*
       (format t "; compiling ~A.~A~%" class-name (lispize-method-name (format nil "~A~A" (name method) (descriptor method))))
       (force-output))
