@@ -37,6 +37,29 @@
 
 (in-package :openldk)
 
+(defun gen-push-item (item)
+  (if *debug-stack*
+      (list 'let (list (list 'item item))
+            (list 'format t "; --- push ~A to ~A~%" 'item 'stack)
+            (list 'push 'item 'stack))
+      (list 'push item 'stack)))
+
+(defun gen-pop-item ()
+  (if *debug-stack*
+      (list 'progn
+            (list 'format t "; -- pop from ~A~%" 'stack)
+            (list 'pop 'stack))
+      (list 'pop 'stack)))
+
+(defun trace-insn (insn code)
+  (if *debug-trace*
+      (list 'progn
+            (list 'format t (format nil "~&; [~A]~%" (address insn)))
+            code)))
+
+(defun gen-peek-item ()
+  (list 'car 'stack))
+
 (defmethod codegen ((insn ssa-literal) &optional (stop-block nil))
   (declare (ignore stop-block))
   (slot-value insn 'value))
@@ -50,51 +73,67 @@
 (defmethod codegen ((insn ssa-aaload) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
-  (list 'let (list (list 'index (list 'pop-item))
-                   (list 'arrayref (list 'pop-item)))
-        (list 'push-item (list 'aref 'arrayref 'index))))
+  (trace-insn
+   insn
+   (list 'let (list (list 'index (gen-pop-item))
+                    (list 'arrayref (gen-pop-item)))
+         (gen-push-item (list 'aref 'arrayref 'index)))))
 
 (defmethod codegen ((insn ssa-aastore) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
-  (list 'let (list (list 'value (list 'pop-item))
-                   (list 'index (list 'pop-item))
-                   (list 'arrayref (list 'pop-item)))
-        (list 'setf (list 'aref 'arrayref 'index) 'value)))
+  (trace-insn
+   insn
+   (list 'let (list (list 'value (gen-pop-item))
+                    (list 'index (gen-pop-item))
+                    (list 'arrayref (gen-pop-item)))
+         (list 'setf (list 'aref 'arrayref 'index) 'value))))
 
 (defmethod codegen ((insn ssa-add) &optional (stop-block nil))
   ;; FIXME -- need iadd to mask lower 32-bits
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
-  (list 'push-item (list '+ (list 'pop-item) (list 'pop-item))))
+  (trace-insn
+   insn
+   (gen-push-item (list '+ (gen-pop-item) (gen-pop-item)))))
+
+(defmethod codegen ((insn ssa-fadd) &optional (stop-block nil))
+  ;; FIXME -- handle NaN cases
+  (declare (ignore stop-block))
+  (flag-stack-usage *context*)
+  (trace-insn
+   insn
+   (gen-push-item (list '+ (gen-pop-item) (gen-pop-item)))))
 
 (defmethod codegen ((insn ssa-imul) &optional (stop-block nil))
   (declare (ignore stop-block))
-  (list 'push-item (list 'logand (list '* (list 'pop-item) (list 'pop-item)) #xFFFFFFFF)))
+  (trace-insn
+   insn
+   (gen-push-item (list 'logand (list '* (gen-pop-item) (gen-pop-item)) #xFFFFFFFF))))
 
 (defmethod codegen ((insn ssa-iand) &optional (stop-block nil))
   (declare (ignore stop-block))
-  (list 'push-item (list 'logand (list 'pop-item) (list 'pop-item))))
+  (gen-push-item (list 'logand (gen-pop-item) (gen-pop-item))))
 
 (defmethod codegen ((insn ssa-land) &optional (stop-block nil))
   (declare (ignore stop-block))
-  (list 'push-item (list 'logand (list 'pop-item) (list 'pop-item))))
+  (gen-push-item (list 'logand (gen-pop-item) (gen-pop-item))))
 
 (defmethod codegen ((insn ssa-ior) &optional (stop-block nil))
   (declare (ignore stop-block))
-  (list 'push-item (list 'logior (list 'pop-item) (list 'pop-item))))
+  (gen-push-item (list 'logior (gen-pop-item) (gen-pop-item))))
 
 (defmethod codegen ((insn ssa-ixor) &optional (stop-block nil))
   (declare (ignore stop-block))
-  (list 'push-item (list 'logxor (list 'pop-item) (list 'pop-item))))
+  (gen-push-item (list 'logxor (gen-pop-item) (gen-pop-item))))
 
 (defmethod codegen ((insn ssa-lor) &optional (stop-block nil))
   (declare (ignore stop-block))
-  (list 'push-item (list 'logior (list 'pop-item) (list 'pop-item))))
+  (gen-push-item (list 'logior (gen-pop-item) (gen-pop-item))))
 
 (defmethod codegen ((insn ssa-array-length) &optional (stop-block nil))
   (declare (ignore stop-block))
-  (list 'push-item (list 'length (list 'pop-item))))
+  (gen-push-item (list 'length (gen-pop-item))))
 
 (defmethod codegen ((insn ssa-assign) &optional (stop-block nil))
   (declare (ignore stop-block))
@@ -104,56 +143,65 @@
 
 (defmethod codegen ((insn ssa-call-static-method) &optional (stop-block nil))
   (declare (ignore stop-block))
-  (with-slots (class method-name args) insn
-    (let* ((nargs (length args))
-           (call (cond
-                   ((eq nargs 0)
-                    (list (intern (format nil "~A.~A" class method-name) :openldk)))
-                   ((eq nargs 1)
-                    (list (intern (format nil "~A.~A" class method-name) :openldk) (codegen (car args))))
-                   (t
-                    (list 'apply
-                          (list 'function (intern (format nil "~A.~A"
-                                                          class
-                                                          method-name)
-                                                  :openldk))
-                          (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))))))))
-      (if (void-return-p insn)
-          call
-          (list 'push-item call)))))
+  (trace-insn
+   insn
+   (with-slots (class method-name args) insn
+     (let* ((nargs (length args))
+            (call (cond
+                    ((eq nargs 0)
+                     (list (intern (format nil "~A.~A" class method-name) :openldk)))
+                    ((eq nargs 1)
+                     (list (intern (format nil "~A.~A" class method-name) :openldk) (codegen (car args))))
+                    (t
+                     (list 'apply
+                           (list 'function (intern (format nil "~A.~A"
+                                                           class
+                                                           method-name)
+                                                   :openldk))
+                           (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))))))))
+       (if (void-return-p insn)
+           call
+           (gen-push-item call))))))
 
 (defmethod codegen ((insn ssa-caload) &optional (stop-block nil))
   (declare (ignore stop-block))
   ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
-  (list 'let (list (list 'index (list 'pop-item))
-                   (list 'arrayref (list 'pop-item)))
-        (list 'push-item (list 'char-code (list 'aref 'arrayref 'index)))))
+  (list 'let (list (list 'index (gen-pop-item))
+                   (list 'arrayref (gen-pop-item)))
+        (gen-push-item (list 'char-code (list 'aref 'arrayref 'index)))))
 
 (defmethod codegen ((insn ssa-iaload) &optional (stop-block nil))
   (declare (ignore stop-block))
   ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
-  (list 'let (list (list 'index (list 'pop-item))
-                   (list 'arrayref (list 'pop-item)))
-        (list 'push-item (list 'aref 'arrayref 'index))))
+  (list 'let (list (list 'index (gen-pop-item))
+                   (list 'arrayref (gen-pop-item)))
+        (gen-push-item (list 'aref 'arrayref 'index))))
 
 (defmethod codegen ((insn ssa-castore) &optional (stop-block nil))
   (declare (ignore stop-block))
   ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
-  (list 'let (list (list 'value (list 'pop-item))
-                   (list 'index (list 'pop-item))
-                   (list 'arrayref (list 'pop-item)))
-        (list 'setf (list 'aref 'arrayref 'index) 'value)))
+  (list 'let (list (list 'value (gen-pop-item))
+                   (list 'index (gen-pop-item))
+                   (list 'arrayref (gen-pop-item)))
+        (list 'setf (list 'aref 'arrayref 'index) (list 'code-char 'value))))
 
 (defmethod codegen ((insn ssa-checkcast) &optional (stop-block nil))
   (declare (ignore stop-block))
+  ;; FIXME: the array test can be done at compiletime
   (with-slots (class) insn
     (list 'progn
-          (list 'format t "CHECKCAST: ~A ~A~%" (list 'peek-item) (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))
-          (list 'when (list 'peek-item)
-                (list 'unless (list 'typep (list 'peek-item)
-                                    (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))
-                      (list 'push-item (list 'make-instance (list 'quote '|java/lang/ClassCastException|)))
-                      (list 'error (list 'lisp-condition (list 'peek-item))))))))
+          (list 'format t "CHECKCAST: ~A ~A~%" (gen-peek-item) (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))
+          (list 'when (gen-peek-item)
+                (list 'unless (list 'or
+                                    (list 'typep (gen-peek-item)
+                                          (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))
+                                    (list 'and
+                                          (list 'arrayp (gen-peek-item))
+                                          (list 'eq (list 'quote '|java/util/Arrays|) (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))))
+
+
+                      (gen-push-item (list 'make-instance (list 'quote '|java/lang/ClassCastException|)))
+                      (list 'error (list 'lisp-condition (gen-peek-item))))))))
 
 (defmethod codegen ((insn ssa-class) &optional (stop-block nil))
   (declare (ignore stop-block))
@@ -168,114 +216,141 @@
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
   (list 'handler-case
-        (list 'let (list (list 'op2 (list 'pop-item))
-                         (list 'op1 (list 'pop-item)))
-              (list 'push-item (list 'rem 'op1 'op2)))
+        (list 'let (list (list 'value2 (gen-pop-item))
+                         (list 'value1 (gen-pop-item)))
+              (gen-push-item (list 'rem 'value1 'value2)))
         (list 'division-by-zero (list 'e)
-              (list 'push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
-              (list 'error (list 'lisp-condition (list 'peek-item))))))
+              (gen-push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
+              (list 'error (list 'lisp-condition (gen-peek-item))))))
 
 (defmethod codegen ((insn ssa-fdiv) &optional (stop-block nil))
   ;; FIXME - handle all weird conditions
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
   (list 'handler-case
-        (list 'let (list (list 'op2 (list 'pop-item))
-                         (list 'op1 (list 'pop-item)))
-              (list 'push-item (list '/ 'op1 'op2)))
+        (list 'let (list (list 'value2 (gen-pop-item))
+                         (list 'value1 (gen-pop-item)))
+              (gen-push-item (list '/ 'value1 'value2)))
         (list 'division-by-zero (list 'e)
-              (list 'push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
-              (list 'error (list 'lisp-condition (list 'peek-item))))))
+              (gen-push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
+              (list 'error (list 'lisp-condition (gen-peek-item))))))
 
 (defmethod codegen ((insn ssa-idiv) &optional (stop-block nil))
   ;; FIXME - handle all weird conditions
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
   (list 'handler-case
-        (list 'let (list (list 'op2 (list 'pop-item))
-                         (list 'op1 (list 'pop-item)))
-              (list 'push-item (list 'floor (list '/ 'op1 'op2))))
+        (list 'let (list (list 'value2 (gen-pop-item))
+                         (list 'value1 (gen-pop-item)))
+              (gen-push-item (list 'floor (list '/ 'value1 'value2))))
         (list 'division-by-zero (list 'e)
-              (list 'push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
-              (list 'error (list 'lisp-condition (list 'peek-item))))))
+              (gen-push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
+              (list 'error (list 'lisp-condition (gen-peek-item))))))
 
 (defmethod codegen ((insn ssa-ldiv) &optional (stop-block nil))
   ;; FIXME - handle all weird conditions
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
   (list 'handler-case
-        (list 'let (list (list 'op2 (list 'pop-item))
-                         (list 'op1 (list 'pop-item)))
-              (list 'push-item (list 'floor (list '/ 'op1 'op2))))
+        (list 'let (list (list 'value2 (gen-pop-item))
+                         (list 'value1 (gen-pop-item)))
+              (gen-push-item (list 'floor (list '/ 'value1 'value2))))
         (list 'division-by-zero (list 'e)
-              (list 'push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
-              (list 'error (list 'lisp-condition (list 'peek-item))))))
+              (gen-push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
+              (list 'error (list 'lisp-condition (gen-peek-item))))))
 
 (defmethod codegen ((insn ssa-dup) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
-  (list 'push-item (list 'peek-item)))
+  (gen-push-item (gen-peek-item)))
+
+(defmethod codegen ((insn ssa-dup-x1) &optional (stop-block nil))
+  (declare (ignore stop-block))
+  (flag-stack-usage *context*)
+  (list 'let (list (list 'value1 (gen-pop-item))
+                   (list 'value2 (gen-pop-item)))
+        (gen-push-item 'value1)
+        (gen-push-item 'value2)
+        (gen-push-item 'value1)))
+
+(defmethod codegen ((insn ssa-dup2) &optional (stop-block nil))
+  (declare (ignore stop-block))
+  (flag-stack-usage *context*)
+  (list 'let (list (list 'value1 (gen-pop-item))
+                   (list 'value2 (gen-pop-item)))
+        (gen-push-item 'value2)
+        (gen-push-item 'value1)
+        (gen-push-item 'value2)
+        (gen-push-item 'value1)))
 
 (defmethod codegen ((insn ssa-fcmpg) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
-  (list 'let (list (list 'op2 (list 'pop-item))
-                   (list 'op1 (list 'pop-item)))
-        (list 'if (list '> 'op1 'op2)
-              (list 'push-item 1)
-              (list 'push-item 0))))
+  (list 'let (list (list 'value2 (gen-pop-item))
+                   (list 'value1 (gen-pop-item)))
+        (list 'if (list 'or (list 'float-features:float-nan-p 'value1) (list 'float-features:float-nan-p 'value2))
+              (gen-push-item 1)
+              (list 'if (list '> 'value1 'value2)
+                    (gen-push-item 1)
+                    (list 'if (list '< 'value1 'value2)
+                          (gen-push-item -1)
+                          (gen-push-item 0))))))
 
 (defmethod codegen ((insn ssa-fcmpl) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
-  (list 'let (list (list 'op2 (list 'pop-item))
-                   (list 'op1 (list 'pop-item)))
-        (list 'if (list '< 'op1 'op2)
-              (list 'push-item 1)
-              (list 'push-item 0))))
+  (list 'let (list (list 'value2 (gen-pop-item))
+                   (list 'value1 (gen-pop-item)))
+        (list 'if (list 'or (list 'float-features:float-nan-p 'value1) (list 'float-features:float-nan-p 'value2))
+              (gen-push-item -1)
+              (list 'if (list '> 'value1 'value2)
+                    (gen-push-item 1)
+                    (list 'if (list '< 'value1 'value2)
+                          (gen-push-item -1)
+                          (gen-push-item 0))))))
 
 (defmethod codegen ((insn ssa-iastore) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
-  (list 'let (list (list 'value (list 'pop-item))
-                   (list 'index (list 'pop-item))
-                   (list 'arrayref (list 'pop-item)))
+  (list 'let (list (list 'value (gen-pop-item))
+                   (list 'index (gen-pop-item))
+                   (list 'arrayref (gen-pop-item)))
         (list 'setf (list 'aref 'arrayref 'index) 'value)))
 
 (defmethod codegen ((insn ssa-ineg) &optional (stop-block nil))
   (declare (ignore stop-block))
   (with-slots (index const) insn
-    (list 'push-item (list '- (list 'pop-item)))))
+    (gen-push-item (list '- (gen-pop-item)))))
 
 (defmethod codegen ((insn ssa-i2c) &optional (stop-block nil))
   (declare (ignore stop-block))
   (with-slots (index const) insn
-    (list 'push-item (list 'code-char (list 'pop-item)))))
+    (gen-push-item (list 'code-char (gen-pop-item)))))
 
 (defmethod codegen ((insn ssa-l2f) &optional (stop-block nil))
   (declare (ignore stop-block))
   (with-slots (index const) insn
-    (list 'push-item (list 'float (list 'pop-item)))))
+    (gen-push-item (list 'float (gen-pop-item)))))
 
 (defmethod codegen ((insn ssa-l2i) &optional (stop-block nil))
   (declare (ignore stop-block))
   (with-slots (index const) insn
-    (list 'push-item (list 'logand #xffffffff (list 'pop-item)))))
+    (gen-push-item (list 'logand #xffffffff (gen-pop-item)))))
 
 (defmethod codegen ((insn ssa-f2i) &optional (stop-block nil))
   (declare (ignore stop-block))
   (with-slots (index const) insn
-    (list 'push-item (list 'floor (list 'pop-item)))))
+    (gen-push-item (list 'floor (gen-pop-item)))))
 
 (defmethod codegen ((insn ssa-d2l) &optional (stop-block nil))
   (declare (ignore stop-block))
   (with-slots (index const) insn
-    (list 'push-item (list 'floor (list 'pop-item)))))
+    (gen-push-item (list 'floor (gen-pop-item)))))
 
 (defmethod codegen ((insn ssa-i2f) &optional (stop-block nil))
   (declare (ignore stop-block))
   (with-slots (index const) insn
-    (list 'push-item (list 'float (list 'pop-item)))))
+    (gen-push-item (list 'float (gen-pop-item)))))
 
 (defmethod codegen ((insn ssa-iinc) &optional (stop-block nil))
   (declare (ignore stop-block))
@@ -286,63 +361,63 @@
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
-    (list 'if (list 'eq (list 'pop-item) (list 'pop-item))
+    (list 'if (list 'eq (gen-pop-item) (gen-pop-item))
           (list 'go (intern (format nil "branch-target-~A" offset))))))
 
 (defmethod codegen ((insn ssa-if-acmpne) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
-    (list 'if (list 'not (list 'eq (list 'pop-item) (list 'pop-item)))
+    (list 'if (list 'not (list 'eq (gen-pop-item) (gen-pop-item)))
           (list 'go (intern (format nil "branch-target-~A" offset))))))
 
 (defmethod codegen ((insn ssa-if-icmpeq) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
-    (list 'if (list 'equal (list 'pop-item) (list 'pop-item))
+    (list 'if (list 'equal (gen-pop-item) (gen-pop-item))
           (list 'go (intern (format nil "branch-target-~A" offset))))))
 
 (defmethod codegen ((insn ssa-if-icmple) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
-    (list 'if (list '>= (list 'pop-item) (list 'pop-item))
+    (list 'if (list '>= (gen-pop-item) (gen-pop-item))
           (list 'go (intern (format nil "branch-target-~A" offset))))))
 
 (defmethod codegen ((insn ssa-if-icmpge) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
-    (list 'if (list '<= (list 'pop-item) (list 'pop-item))
+    (list 'if (list '<= (gen-pop-item) (gen-pop-item))
           (list 'go (intern (format nil "branch-target-~A" offset))))))
 
 (defmethod codegen ((insn ssa-if-icmplt) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
-    (list 'if (list '> (list 'pop-item) (list 'pop-item))
+    (list 'if (list '> (gen-pop-item) (gen-pop-item))
           (list 'go (intern (format nil "branch-target-~A" offset))))))
 
 (defmethod codegen ((insn ssa-if-icmpgt) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
-    (list 'if (list '< (list 'pop-item) (list 'pop-item))
+    (list 'if (list '< (gen-pop-item) (gen-pop-item))
           (list 'go (intern (format nil "branch-target-~A" offset))))))
 
 (defmethod codegen ((insn ssa-if-icmpne) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
-    (list 'if (list 'not (list 'eq (list 'pop-item) (list 'pop-item)))
+    (list 'if (list 'not (list 'eq (gen-pop-item) (gen-pop-item)))
           (list 'go (intern (format nil "branch-target-~A" offset))))))
 
 (defmethod codegen ((insn ssa-ifeq) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
-    (list 'if (list 'eq (list 'pop-item) 0)
+    (list 'if (list 'eq (gen-pop-item) 0)
           (list 'go (intern (format nil "branch-target-~A" offset))))))
 
 (defmethod codegen ((insn ssa-ifge) &optional (stop-block nil))
@@ -350,7 +425,7 @@
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'progn
-          (list 'if (list '>= (list 'pop-item) 0)
+          (list 'if (list '>= (gen-pop-item) 0)
                 (list 'go (intern (format nil "branch-target-~A" offset)))))))
 
 (defmethod codegen ((insn ssa-ifle) &optional (stop-block nil))
@@ -358,7 +433,7 @@
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'progn
-          (list 'if (list '<= (list 'pop-item) 0)
+          (list 'if (list '<= (gen-pop-item) 0)
                 (list 'go (intern (format nil "branch-target-~A" offset)))))))
 
 (defmethod codegen ((insn ssa-iflt) &optional (stop-block nil))
@@ -366,7 +441,7 @@
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'progn
-          (list 'if (list '< (list 'pop-item) 0)
+          (list 'if (list '< (gen-pop-item) 0)
                 (list 'go (intern (format nil "branch-target-~A" offset)))))))
 
 (defmethod codegen ((insn ssa-ifgt) &optional (stop-block nil))
@@ -374,36 +449,37 @@
   (flag-stack-usage *context*)
   (with-slots (offset) insn
     (list 'progn
-          (list 'if (list '> (list 'pop-item) 0)
+          (list 'if (list '> (gen-pop-item) 0)
                 (list 'go (intern (format nil "branch-target-~A" offset)))))))
 
 (defmethod codegen ((insn ssa-ifne) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
-  (with-slots (offset) insn
-    (list 'if (list 'not (list 'eq (list 'pop-item) '0))
-          (list 'go (intern (format nil "branch-target-~A" offset))))))
+  (trace-insn
+   insn (with-slots (offset) insn
+          (list 'if (list 'not (list 'eq (gen-pop-item) '0))
+                (list 'go (intern (format nil "branch-target-~A" offset)))))))
 
 (defmethod codegen ((insn ssa-ifnonnull) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
-    (list 'if (list 'not (list 'null (list 'pop-item)))
+    (list 'if (list 'not (list 'null (gen-pop-item)))
           (list 'go (intern (format nil "branch-target-~A" offset))))))
 
 (defmethod codegen ((insn ssa-ifnull) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
   (with-slots (offset) insn
-    (list 'if (list 'null (list 'pop-item))
+    (list 'if (list 'null (gen-pop-item))
           (list 'go (intern (format nil "branch-target-~A" offset))))))
 
 (defmethod codegen ((insn ssa-instanceof) &optional (stop-block nil))
   (declare (ignore stop-block))
   (with-slots (class) insn
-    (list 'push-item
-          (list 'if (list 'typep (list 'pop-item)
-                          (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk))) 1 0))))
+    (gen-push-item
+     (list 'if (list 'typep (gen-pop-item)
+                     (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk))) 1 0))))
 
 (defun logical-shift-right-32 (integer shift)
   (logand
@@ -423,68 +499,68 @@
 (defmethod codegen ((insn ssa-ishl) &optional (stop-block nil))
   (declare (ignore stop-block))
   ;; FIXME: this is wrong.
-  (list 'let (list (list 'op2 (list 'pop-item))
-                   (list 'op1 (list 'pop-item)))
+  (list 'let (list (list 'value2 (gen-pop-item))
+                   (list 'value1 (gen-pop-item)))
         (list 'progn
-              (list 'format 't "ISHL ~A ~A~%" 'op1 'op2)
-              (list 'push-item (list 'ash 'op1 'op2)))))
+              ;; (list 'format 't "ISHL ~A ~A~%" 'value1 'value2)
+              (gen-push-item (list 'ash 'value1 'value2)))))
 
 (defmethod codegen ((insn ssa-lshl) &optional (stop-block nil))
   (declare (ignore stop-block))
   ;; FIXME: this is wrong.
-  (list 'let (list (list 'op2 (list 'pop-item))
-                   (list 'op1 (list 'pop-item)))
+  (list 'let (list (list 'value2 (gen-pop-item))
+                   (list 'value1 (gen-pop-item)))
         (list 'progn
-              (list 'format 't "LSHL ~A ~A~%" 'op1 'op2)
-              (list 'push-item (list 'shl 'op1 'op2 32)))))
+              ;; (list 'format 't "LSHL ~A ~A~%" 'value1 'value2)
+              (gen-push-item (list 'shl 'value1 'value2 32)))))
 
 (defmethod codegen ((insn ssa-iushr) &optional (stop-block nil))
   (declare (ignore stop-block))
   ;; FIXME: this is wrong.
-  (list 'let (list (list 'op2 (list 'pop-item))
-                   (list 'op1 (list 'pop-item)))
+  (list 'let (list (list 'value2 (gen-pop-item))
+                   (list 'value1 (gen-pop-item)))
         (list 'progn
-              (list 'push-item (list 'shr 'op1 'op2 32)))))
+              (gen-push-item (list 'shr 'value1 'value2 32)))))
 
 (defmethod codegen ((insn ssa-lshr) &optional (stop-block nil))
   (declare (ignore stop-block))
   ;; FIXME: this is wrong.
-  (list 'let (list (list 'op2 (list 'pop-item))
-                   (list 'op1 (list 'pop-item)))
+  (list 'let (list (list 'value2 (gen-pop-item))
+                   (list 'value1 (gen-pop-item)))
         (list 'progn
-              (list 'format 't "LSHR ~A ~A~%" 'op1 'op2)
-              (list 'push-item (list 'shr 'op1 'op2 32)))))
+              (list 'format 't "LSHR ~A ~A~%" 'value1 'value2)
+              (gen-push-item (list 'shr 'value1 'value2 32)))))
 
 (defmethod codegen ((insn ssa-ishr) &optional (stop-block nil))
   (declare (ignore stop-block))
   ;; FIXME: this is wrong.
-  (list 'let (list (list 'op2 (list 'pop-item))
-                   (list 'op1 (list 'pop-item)))
+  (list 'let (list (list 'value2 (gen-pop-item))
+                   (list 'value1 (gen-pop-item)))
         (list 'progn
-              (list 'format 't "ISHR ~A ~A~%" 'op1 'op2)
-              (list 'push-item (list 'ash 'op1 (list '- 0 'op2))))))
+              (list 'format 't "ISHR ~A ~A~%" 'value1 'value2)
+              (gen-push-item (list 'ash 'value1 (list '- 0 'value2))))))
 
 (defmethod codegen ((insn ssa-lcmp) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
-  (list 'let (list (list 'op2 (list 'pop-item))
-                   (list 'op1 (list 'pop-item)))
+  (list 'let (list (list 'value2 (gen-pop-item))
+                   (list 'value1 (gen-pop-item)))
         (list 'cond
-              (list (list 'eq 'op1 'op2)
-                    (list 'push-item 0))
-              (list (list '> 'op1 'op2)
-                    (list 'push-item 1))
+              (list (list 'eq 'value1 'value2)
+                    (gen-push-item 0))
+              (list (list '> 'value1 'value2)
+                    (gen-push-item 1))
               (list 't
-                    (list 'push-item -1)))))
+                    (gen-push-item -1)))))
 
 (defmethod codegen ((insn ssa-lushr) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
-  (list 'let (list (list 'op2 (list 'pop-item))
-                   (list 'op1 (list 'pop-item)))
+  (list 'let (list (list 'value2 (gen-pop-item))
+                   (list 'value1 (gen-pop-item)))
         (list 'progn
-              (list 'format 't "LUSHR ~A ~A~%" 'op1 'op2)
-              (list 'push-item (list 'ash 'op1 (list \- 'op2))))))
+              (list 'format 't "LUSHR ~A ~A~%" 'value1 'value2)
+              (gen-push-item (list 'ash 'value1 (list \- 'value2))))))
 
 (defmethod codegen ((insn ssa-goto) &optional (stop-block nil))
   (declare (ignore stop-block))
@@ -493,21 +569,23 @@
 
 (defmethod codegen ((insn ssa-call-virtual-method) &optional (stop-block nil))
   (declare (ignore stop-block))
-  (with-slots (method-name args) insn
-    (let* ((nargs (length args))
-           (call (cond
-                   ((eq nargs 0)
-                    (error "internal error"))
-                   ((eq nargs 1)
-                    (list (intern (format nil "~A" method-name) :openldk) (codegen (car args))))
-                   (t
-                    (list 'apply
-                          (list 'function (intern (format nil "~A"
-                                                          method-name) :openldk))
-                          (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))))))))
-      (if (void-return-p insn)
-          call
-          (list 'push-item call)))))
+  (trace-insn
+   insn
+   (with-slots (method-name args) insn
+     (let* ((nargs (length args))
+            (call (cond
+                    ((eq nargs 0)
+                     (error "internal error"))
+                    ((eq nargs 1)
+                     (list (intern (format nil "~A" method-name) :openldk) (codegen (car args))))
+                    (t
+                     (list 'apply
+                           (list 'function (intern (format nil "~A"
+                                                           method-name) :openldk))
+                           (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))))))))
+       (if (void-return-p insn)
+           call
+           (gen-push-item call))))))
 
 (defmethod codegen ((insn ssa-clinit) &optional (stop-block nil))
   (declare (ignore stop-block))
@@ -525,17 +603,17 @@
 (defmethod codegen ((insn ssa-monitorenter) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
-  (list 'monitor-enter (list 'pop-item)))
+  (list 'monitor-enter (gen-pop-item)))
 
 (defmethod codegen ((insn ssa-monitorexit) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
-  (list 'monitor-exit (list 'pop-item)))
+  (list 'monitor-exit (gen-pop-item)))
 
 (defmethod codegen ((insn ssa-mul) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
-  (list 'push-item (list '* (list 'pop-item) (list 'pop-item))))
+  (gen-push-item (list '* (gen-pop-item) (gen-pop-item))))
 
 (defmethod codegen ((insn ssa-new) &optional (stop-block nil))
   (declare (ignore stop-block))
@@ -546,7 +624,9 @@
 (defmethod codegen ((insn ssa-new-array) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
-  (list 'make-array (list 'pop-item) :initial-element nil))
+  (trace-insn
+   insn
+   (list 'make-array (gen-pop-item) :initial-element nil)))
 
 (defmethod codegen ((insn ssa-nop) &optional (stop-block nil))
   (declare (ignore stop-block))
@@ -555,45 +635,51 @@
 (defmethod codegen ((insn ssa-pop) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
-  (list 'pop-item))
+  (trace-insn
+   insn
+   (gen-pop-item)))
 
 (defmethod codegen ((insn ssa-push) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
-  (with-slots (value) insn
-    (list 'push-item (codegen value))))
+  (trace-insn
+   insn
+   (with-slots (value) insn
+     (gen-push-item (codegen value)))))
 
 (defmethod codegen ((insn ssa-sub) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
-  (list 'let (list (list 'op2 (list 'pop-item))
-                   (list 'op1 (list 'pop-item)))
-        (list 'push-item (list '- 'op1 'op2))))
+  (list 'let (list (list 'value2 (gen-pop-item))
+                   (list 'value1 (gen-pop-item)))
+        (gen-push-item (list '- 'value1 'value2))))
 
 (defmethod codegen ((insn ssa-call-special-method) &optional (stop-block nil))
   (declare (ignore stop-block))
-  (with-slots (class method-name args) insn
-    (let ((call (list 'destructuring-bind (cons 'method 'next)
-                      (list 'closer-mop:compute-applicable-methods-using-classes
-                            (list 'function (intern (format nil "~A" method-name) :openldk))
-                            ;; FIXME: This should be based on the args list
-                            (cons 'list
-                                  (cons (find-class (intern (slot-value class 'name) :openldk))
-                                        (loop for a in args
-                                              collect t))))
-                      (list 'let (list (list 'fn (list 'closer-mop:method-function 'method)))
-                            (list 'apply 'fn
-                                  (list 'list (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))) 'next))))))
-      (if (void-return-p insn)
-          call
-          (list 'push-item call)))))
+  (trace-insn
+   insn
+   (with-slots (class method-name args) insn
+     (let ((call (list 'destructuring-bind (cons 'method 'next)
+                       (list 'closer-mop:compute-applicable-methods-using-classes
+                             (list 'function (intern (format nil "~A" method-name) :openldk))
+                             ;; FIXME: This should be based on the args list
+                             (cons 'list
+                                   (cons (find-class (intern (slot-value class 'name) :openldk))
+                                         (loop for a in args
+                                               collect t))))
+                       (list 'let (list (list 'fn (list 'closer-mop:method-function 'method)))
+                             (list 'apply 'fn
+                                   (list 'list (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))) 'next))))))
+       (if (void-return-p insn)
+           call
+           (gen-push-item call))))))
 
 (defmethod codegen ((insn ssa-member) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
   (with-slots (member-name) insn
     (list 'slot-value
-          (list 'let (list (list 'objref (list 'pop-item)))
+          (list 'let (list (list 'objref (gen-pop-item)))
                 (list 'when (list 'null 'objref) (list 'error
                                                        (format nil "Null Pointer Exception ~A" (slot-value insn 'address))))
                 'objref)
@@ -609,8 +695,10 @@
 (defmethod codegen ((insn ssa-store) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
-  (with-slots (target) insn
-    (list 'setf (codegen target) (list 'pop-item))))
+  (trace-insn
+   insn
+   (with-slots (target) insn
+     (list 'setf (codegen target) (gen-pop-item)))))
 
 (define-condition java-lang-throwable (error)
   ((throwable :initarg :throwable :reader throwable)))
@@ -621,19 +709,23 @@
 (defmethod codegen ((insn ssa-throw) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
-  (list 'let (list (list 'c (list 'lisp-condition (list 'peek-item))))
-        (list 'error 'c)))
+  (trace-insn
+   insn
+   (list 'let (list (list 'c (list 'lisp-condition (gen-peek-item))))
+         (list 'error 'c))))
 
 (defmethod codegen ((insn ssa-return) &optional (stop-block nil))
   (declare (ignore stop-block))
-  (list 'return))
+  (trace-insn
+   insn
+   (list 'return)))
 
 (defmethod codegen ((insn ssa-return-value) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
   (list 'return-from
         (intern (slot-value insn 'fn-name) :openldk)
-        (list 'pop-item)))
+        (gen-pop-item)))
 
 (defmethod codegen ((insn ssa-variable) &optional (stop-block nil))
   (declare (ignore stop-block))

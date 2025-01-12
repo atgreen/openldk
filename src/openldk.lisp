@@ -102,7 +102,7 @@
            (lisp-code
              (list (list 'block nil
                          (cons 'tagbody (loop for bloc in blocks append (codegen bloc))))))
-           (traced-lisp-code (if *debug-trace* (list (list 'unwind-protect (car lisp-code) (list 'format 't "leaving: ~A.~A~%" class-name (fn-name *context*)))) lisp-code))
+           (traced-lisp-code (if *debug-trace* (list (list 'unwind-protect (car lisp-code) (list 'format 't "; trace: leaving  ~A.~A~%" class-name (fn-name *context*)))) lisp-code))
            (definition-code
              (let ((parameter-count (count-parameters (slot-value method 'descriptor))))
                (append (if (static-p method)
@@ -116,7 +116,7 @@
                                        (loop for i from 1 upto parameter-count
                                              collect (intern (format nil "arg~A" i) :openldk)))))
                        (when *debug-trace*
-                         (list (list 'format 't "tracing: ~A.~A~%" class-name (fn-name *context*))))
+                         (list (list 'format 't "; trace: entering ~A.~A~%" class-name (fn-name *context*))))
                        (if (slot-value *context* 'uses-stack-p)
                            (list (append (list 'let (if (static-p method)
                                                         (append (list (list 'stack nil))
@@ -172,6 +172,8 @@
      0)
     ((string= descriptor "C")
      #\0)
+    ((string= descriptor "Z")
+     0)
     (t nil)))
 
 (defun emit-<class> (class)
@@ -181,13 +183,16 @@
                           (list
                            'defclass (intern name :openldk)
                            (if (or super interfaces) (append (if super (list (intern super :openldk)) nil) (mapcar (lambda (i) (intern i :openldk)) (coerce interfaces  'list))) (list))
-                           (map 'list
-                                (lambda (f)
-                                  (list (intern (slot-value f 'name) :openldk)
-                                        :initform (initform-from-descriptor (slot-value f 'descriptor))
-                                        :allocation
-                                        (if (eq 0 (logand 8 (slot-value f 'access-flags))) :instance :class)))
-                                fields))
+                           (append
+                            (map 'list
+                                 (lambda (f)
+                                   (list (intern (slot-value f 'name) :openldk)
+                                         :initform (initform-from-descriptor (slot-value f 'descriptor))
+                                         :allocation
+                                         (if (eq 0 (logand 8 (slot-value f 'access-flags))) :instance :class)))
+                                 fields)
+                            (when (string= name "java/lang/Object")
+                              (list (list '%hash-code :initform nil)))))
                           (list
                            'defparameter (intern (format nil "+static-~A+" (intern name)) :openldk)
                            (list
@@ -319,6 +324,10 @@
   (dolist (c '("java/lang/Float"
                "java/lang/ClassLoader"
                "java/security/PrivilegedAction"
+               "java/lang/System"
+               "java/lang/ThreadGroup"
+               "java/lang/Thread"
+               "java/lang/ref/SoftReference"
                "java/util/Properties"))
     (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil nil nil))
 
@@ -338,6 +347,7 @@
 
 (defun main-wrapper ()
   "Main entry point into OpenLDK.  Process command line errors here."
+  (format t "DYNAMIC SPACE (GB) = ~A~%" (ceiling (sb-ext:dynamic-space-size) (* 1024 1024 1024)))
   (handler-case
       (main-command)
     (cli:wrong-number-of-args (e)

@@ -95,6 +95,8 @@
 
 (defmethod emit ((v constant-class-reference) cp)
   (let ((classname (emit (aref cp (slot-value v 'index)) cp)))
+    (if (eq (aref classname 0) #\[)
+        (setf classname "java/util/Arrays"))
     (make-instance 'ssa-class :class (classload classname))))
 
 (defmethod emit-name ((v constant-class-reference) cp)

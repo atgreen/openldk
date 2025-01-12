@@ -58,7 +58,6 @@
 							 (:file "src/descriptors")
 							 (:file "src/classfile")
 							 (:file "src/native")
-							 (:file "src/stack")
 							 (:file "src/openldk"))
   :around-compile
   "(lambda (thunk)

@@ -38,7 +38,7 @@
 (in-package :openldk)
 
 (defclass/std |java/lang/Object| ()
-  ((monitor :std (make-instance '<java-monitor>))))
+  ())
 
 (defclass |java/lang/String| (|java/lang/Object|)
   ((|value| :initform NIL :allocation :instance)
@@ -73,6 +73,9 @@
 (defmethod print-object ((s |java/lang/String|) out)
   (print-unreadable-object (s out :type t)
     (format out "~S" (slot-value s '|value|))))
+
+(defclass |java/lang/Thread| (|java/lang/Object|)
+  ())
 
 (defclass |java/lang/Throwable| (|java/lang/Object|)
   ())

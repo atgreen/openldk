@@ -190,12 +190,18 @@
       (list (make-instance 'ssa-iastore
                            :address pc-start)))))
 
+(defun %unsigned-to-signed-byte (value)
+  "Convert an unsigned byte (0-255) to a signed byte (-128 to 127)."
+  (if (> value 127)
+      (- value 256)
+      value))
+
 (defun :IINC (context code)
   (with-slots (pc) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
         (let* ((index (aref code (incf pc)))
-               (const (aref code (incf pc))))
+               (const (%unsigned-to-signed-byte (aref code (incf pc)))))
           (incf pc)
           (list (make-instance 'ssa-iinc
                                :address pc-start
@@ -212,6 +218,17 @@
                            :target (make-instance 'ssa-local-variable
                                                   :address pc-start
                                                   :index index))))))
+
+(defun :ISTORE_0 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-store
+                           :address pc-start
+                           :target (make-instance 'ssa-local-variable
+                                                  :address pc-start
+                                                  :index 0))))))
 
 (defun :ISTORE_1 (context code)
   (declare (ignore code))
@@ -290,14 +307,6 @@
                                :address pc-start
                                :class (emit class constant-pool))))))))
 
-(defun :DADD (context code)
-  (declare (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ssa-add
-                           :address pc-start)))))
-
 (defun :IADD (context code)
   (declare (ignore code))
   (with-slots (pc) context
@@ -305,6 +314,17 @@
       (incf pc)
       (list (make-instance 'ssa-add
                            :address pc-start)))))
+
+(defun :FADD (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-fadd
+                           :address pc-start)))))
+
+(defun :DADD (context code)
+  (:FADD context code))
 
 (defun :IAND (context code)
   (declare (ignore code))
@@ -421,6 +441,9 @@
 (defun :LSTORE (context code)
   (:DSTORE context code))
 
+(defun :FSTORE (context code)
+  (:DSTORE context code))
+
 (defun :DSTORE_2 (context code)
   (declare (ignore code))
   (with-slots (pc) context
@@ -446,6 +469,22 @@
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ssa-dup
+                           :address pc-start)))))
+
+(defun :DUP2 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-dup2
+                           :address pc-start)))))
+
+(defun :DUP_X1 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-dup-x1
                            :address pc-start)))))
 
 (defun :GETSTATIC (context code)
@@ -513,6 +552,17 @@
                            :value (make-instance 'ssa-float-literal
                                                  :address pc-start
                                                  :value 0.0))))))
+
+(defun :FCONST_1 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ssa-push
+                           :address pc-start
+                           :value (make-instance 'ssa-float-literal
+                                                 :address pc-start
+                                                 :value 1.0))))))
 
 (defun :FLOAD_0 (context code)
   (declare (ignore code))
@@ -927,6 +977,9 @@
 (defun :LLOAD (context code)
   (:ILOAD context code))
 
+(defun :FLOAD (context code)
+  (:ILOAD context code))
+
 (defun :ILOAD_0 (context code)
   (declare (ignore code))
   (with-slots (pc) context
@@ -1103,6 +1156,9 @@
       (list (make-instance 'ssa-return-value
                            :fn-name (slot-value context 'fn-name)
                            :address pc-start)))))
+
+(defun :LRETURN (context code)
+  (:IRETURN context code))
 
 (defun :ISHL (context code)
   (declare (ignore code))

@@ -43,11 +43,20 @@
    (owner)
    (recursion-count :std 0)))
 
+(defvar *monitors* (make-hash-table))
+
+(defun %get-monitor (object)
+  ;; FIXME: This grows forever!!
+  (or (gethash object *monitors*)
+      (let ((monitor (make-instance '<java-monitor>)))
+        (setf (gethash object *monitors*) monitor)
+        monitor)))
+
 (defun monitor-enter (object)
   ;; FIXME: remove debug info.  Remove when object.
   (format t "monitor-enter: ~A~%" object)
   (when object
-    (let* ((monitor (monitor object))
+    (let* ((monitor (%get-monitor object))
            (mutex (mutex monitor))
            (current-thread (bordeaux-threads:current-thread)))
     (bordeaux-threads:with-lock-held (mutex)
@@ -63,7 +72,7 @@
   ;; FIXME: remove debug info.  Remove when object.
   (format t "monitor-exit: ~A~%" object)
   (when object
-    (let* ((monitor (monitor object))
+    (let* ((monitor (%get-monitor object))
            (mutex (mutex monitor))
            (current-thread (bordeaux-threads:current-thread)))
       (bordeaux-threads:with-lock-held (mutex)

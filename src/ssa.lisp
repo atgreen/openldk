@@ -162,6 +162,12 @@
 (defclass/std ssa-dup (ssa-node)
   ())
 
+(defclass/std ssa-dup2 (ssa-node)
+  ())
+
+(defclass/std ssa-dup-x1 (ssa-node)
+  ())
+
 (defclass/std ssa-goto (ssa-branch)
   ())
 
@@ -311,6 +317,9 @@
   ())
 
 (defclass/std ssa-lushr (ssa-node)
+  ())
+
+(defclass/std ssa-fadd (ssa-node)
   ())
 
 (defclass/std ssa-fdiv (ssa-node)

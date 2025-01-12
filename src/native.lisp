@@ -85,14 +85,18 @@
 	(java-class (gethash (format nil "~A" (type-of object)) *classes*)))
 
 (defmethod |java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (name initialize loader caller)
-	(when *debug-trace*
-		(format t "tracing: java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)~%"))
-  (let ((lname (substitute #\/ #\. (slot-value name '|value|))))
-    (or (and (gethash lname *classes*)
-             (java-class (gethash lname *classes*)))
-        (progn (let ((klass (classload lname)))
-                 (%clinit klass)
-                 (java-class klass))))))
+  (unwind-protect
+       (progn
+         (when *debug-trace*
+           (format t "; trace: entering java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)~%"))
+         (let ((lname (substitute #\/ #\. (slot-value name '|value|))))
+           (or (and (gethash lname *classes*)
+                    (java-class (gethash lname *classes*)))
+               (progn (let ((klass (classload lname)))
+                        (%clinit klass)
+                        (java-class klass))))))
+    (when *debug-trace*
+      (format t "; trace: leaving  java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)~%"))))
 
 (defmethod |java/lang/System.currentTimeMillis()| ()
 	;;; FIXME: this probably isn't right.
@@ -111,6 +115,9 @@
     (cond
       ((string= name "float")
        (let ((jc (java-class (gethash "java/lang/Float" *classes*))))
+         jc))
+      ((string= name "int")
+       (let ((jc (java-class (gethash "java/lang/Integer" *classes*))))
          jc))
       (t (error (format nil "getPrimitiveClass(~A)" name))))))
 
@@ -147,3 +154,49 @@
 (defmethod print-object ((str |java/lang/String|) out)
   (print-unreadable-object (str out :type t)
     (format out "~S" (%stringize-array (slot-value str '|value|)))))
+
+(defmethod |intern()| ((str |java/lang/String|))
+  ;; FIXME: What does this do??
+  str)
+
+(defmethod |java/lang/Thread.registerNatives()| ()
+  ;; FIXME: What does this do??
+  )
+
+;;; The current |java/lang/Thread| object.
+(defvar *current-thread* nil)
+
+(defmethod |java/lang/Thread.currentThread()| ()
+  (or *current-thread*
+      (let ((thread (make-instance '|java/lang/Thread|))
+            (thread-group (make-instance '|java/lang/ThreadGroup|)))
+        (|<init>()| thread-group)
+        (setf *current-thread* thread)
+        (setf (slot-value thread '|priority|) 1)
+        (|add(Ljava/lang/Thread;)| thread-group thread)
+        (|<init>(Ljava/lang/ThreadGroup;Ljava/lang/Runnable;Ljava/lang/String;J)| thread thread-group nil (jstring "Init-Thread") 0)
+        thread)))
+
+(defmethod |setPriority0(I)| ((thread |java/lang/Thread|) priority)
+  ;; FIXME
+  )
+
+(defmethod |isAlive()| ((thread |java/lang/Thread|))
+  ;; FIXME
+  0)
+
+(defmethod |start0()| ((thread |java/lang/Thread|))
+  ;; FIXME
+  )
+
+(defun |sun/misc/Unsafe.registerNatives()| ()
+  ;; FIXME
+  )
+
+(defvar hash-code-counter 2025)
+
+(defmethod |hashCode()| (obj)
+  (with-slots (%hash-code) obj
+    (or %hash-code
+        (setf %hash-code (incf hash-code-counter))
+        hash-code-counter)))
