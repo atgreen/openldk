@@ -94,6 +94,13 @@
     (|condition-java/lang/Exception|)
   ((objref)))
 
+(defclass |java/lang/ClassCastException| (|java/lang/Exception|)
+  ())
+
+(define-condition |condition-java/lang/ClassCastException|
+    (|condition-java/lang/Exception|)
+  ((objref)))
+
 (defmethod lisp-condition ((throwable |java/lang/ArithmeticException|))
   (make-condition '|condition-java/lang/ArithmeticException|))
 
