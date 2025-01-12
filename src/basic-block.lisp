@@ -109,6 +109,27 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
         (list (+ start_pc offset) (1+ pc))
         (list (+ start_pc offset)))))
 
+(defun merge-exception-entries (entries)
+  "Merge exception table entries in an array where end-pc of one is start-pc-1 of another,
+   and handler-pc and catch-type are the same. Return a new array with merged entries."
+  (let* ((sorted-entries (sort (coerce entries 'list)
+                               #'<
+                               :key (lambda (entry) (slot-value entry 'start-pc))))
+         (merged (loop
+                  with result = nil
+                  for entry in sorted-entries
+                  do (if (and result
+                              (= (1- (slot-value entry 'start-pc)) (slot-value (car result) 'end-pc))
+                              (= (slot-value entry 'handler-pc) (slot-value (car result) 'handler-pc))
+                              (equal (slot-value entry 'catch-type) (slot-value (car result) 'catch-type)))
+                         ;; Merge the current entry into the last merged one
+                         (setf (slot-value (car result) 'end-pc) (slot-value entry 'end-pc))
+                         ;; Otherwise, add the current entry as a new merged entry
+                         (push entry result))
+                  finally (return (reverse result)))))
+    ;; Convert the result back to an array
+    (make-array (length merged) :initial-contents merged)))
+
 (defun find-block-starts ()
   "Return a hashtable keyed on instruction address where the value is
  T if the instruction at the address is the start of a block.  It is
@@ -122,6 +143,9 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
 
     ;; The start of the method...
     (setf (gethash 0 block-starts) t)
+
+    ;; Merge exception ranges where possible
+    (setf (exception-table *context*) (merge-exception-entries (exception-table *context*)))
 
     ;; Handle all of the exception table entries
     (let ((exception-table (exception-table *context*)))
