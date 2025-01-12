@@ -128,7 +128,7 @@
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ssa-array-length
-			   :address pc-start)))))
+                           :address pc-start)))))
 
 
 (defun :ASTORE (context code)
@@ -436,8 +436,9 @@
 
 (defun :GETSTATIC (context code)
   (with-slots (pc class is-clinit-p) context
-    (let ((pc-start pc))
-      (with-slots (constant-pool) class
+    (let ((context-class class)
+          (pc-start pc))
+      (with-slots (constant-pool) context-class
         (let* ((index (+ (* (aref code (incf pc)) 256)
                          (aref code (incf pc)))))
           (multiple-value-bind (fieldname class)
@@ -449,7 +450,7 @@
                                                                    :address pc-start
                                                                    :class class
                                                                    :member-name fieldname)))))
-              (if is-clinit-p
+              (if (and is-clinit-p (equal (ssa-class-class class) context-class))
                   code
                   (cons (make-instance 'ssa-clinit
                                        :address pc-start
@@ -940,13 +941,13 @@
           (incf pc)
           (incf pc)
           (let* ((descriptor
-                  (slot-value (aref constant-pool
-                                    (slot-value
-                                     (aref constant-pool
-                                           (slot-value method-reference
-                                                       'method-descriptor-index))
-                                     'type-descriptor-index))
-                              'value))
+                   (slot-value (aref constant-pool
+                                     (slot-value
+                                      (aref constant-pool
+                                            (slot-value method-reference
+                                                        'method-descriptor-index))
+                                      'type-descriptor-index))
+                               'value))
                  (parameter-count (1+ (count-parameters descriptor))))
             (list (make-instance 'ssa-call-virtual-method
                                  :address pc-start
@@ -963,13 +964,13 @@
                (method-reference (aref constant-pool index)))
           (incf pc)
           (let* ((descriptor
-                  (slot-value (aref constant-pool
-                                    (slot-value
-                                     (aref constant-pool
-                                           (slot-value method-reference
-                                                       'method-descriptor-index))
-                                     'type-descriptor-index))
-                              'value))
+                   (slot-value (aref constant-pool
+                                     (slot-value
+                                      (aref constant-pool
+                                            (slot-value method-reference
+                                                        'method-descriptor-index))
+                                      'type-descriptor-index))
+                               'value))
                  (parameter-count (1+ (count-parameters descriptor))))
             (list (make-instance 'ssa-call-virtual-method
                                  :address pc-start
@@ -992,13 +993,13 @@
                                      constant-pool)
                                'class))
                  (descriptor
-                  (slot-value (aref constant-pool
-                                    (slot-value
-                                     (aref constant-pool
-                                           (slot-value method-reference
-                                                       'method-descriptor-index))
-                                     'type-descriptor-index))
-                              'value))
+                   (slot-value (aref constant-pool
+                                     (slot-value
+                                      (aref constant-pool
+                                            (slot-value method-reference
+                                                        'method-descriptor-index))
+                                      'type-descriptor-index))
+                               'value))
                  (parameter-count (1+ (count-parameters descriptor))))
             (list (make-instance 'ssa-call-special-method
                                  :address pc-start
@@ -1223,13 +1224,13 @@
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
-      (let* ((index (+ (* (aref code (incf pc)) 256)
-                       (aref code (incf pc))))
-             (class (emit (aref constant-pool index) constant-pool)))
-        (incf pc)
-        (list (make-instance 'ssa-push
-                             :address pc-start
-                             :value (make-instance 'ssa-new :address pc-start :class class))))))))
+        (let* ((index (+ (* (aref code (incf pc)) 256)
+                         (aref code (incf pc))))
+               (class (emit (aref constant-pool index) constant-pool)))
+          (incf pc)
+          (list (make-instance 'ssa-push
+                               :address pc-start
+                               :value (make-instance 'ssa-new :address pc-start :class class))))))))
 
 (defun :NOP (context code)
   (with-slots (pc class) context
@@ -1241,20 +1242,20 @@
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
-      (let* ((index (+ (* (aref code (incf pc)) 256)
-                       (aref code (incf pc))))
-             (class (emit (aref constant-pool index) constant-pool)))
-        (incf pc)
-        (list (make-instance 'ssa-push
-                             :address pc-start
-                             :value (make-instance 'ssa-new-array :address pc-start :class class))))))))
+        (let* ((index (+ (* (aref code (incf pc)) 256)
+                         (aref code (incf pc))))
+               (class (emit (aref constant-pool index) constant-pool)))
+          (incf pc)
+          (list (make-instance 'ssa-push
+                               :address pc-start
+                               :value (make-instance 'ssa-new-array :address pc-start :class class))))))))
 
 (defun :NEWARRAY (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (let ((atype (aref code (incf pc))))
         (incf pc)
-	;; FIXME: just throw away the type?
+        ;; FIXME: just throw away the type?
         (list (make-instance 'ssa-push
                              :address pc-start
                              :value (make-instance 'ssa-new-array :address pc-start :class nil)))))))
@@ -1299,8 +1300,9 @@
 
 (defun :PUTSTATIC (context code)
   (with-slots (pc class is-clinit-p) context
-    (let ((pc-start pc))
-      (with-slots (constant-pool) class
+    (let ((context-class class)
+          (pc-start pc))
+      (with-slots (constant-pool) context-class
         (let* ((index (+ (* (aref code (incf pc)) 256)
                          (aref code (incf pc)))))
           (multiple-value-bind (fieldname class)
@@ -1313,7 +1315,7 @@
                                                                     :address pc-start
                                                                     :class class
                                                                     :member-name fieldname)))))
-              (if is-clinit-p
+              (if (and is-clinit-p (equal (ssa-class-class class) context-class))
                   code
                   (cons (make-instance 'ssa-clinit
                                        :address pc-start
