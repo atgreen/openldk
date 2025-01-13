@@ -53,8 +53,6 @@
         monitor)))
 
 (defun monitor-enter (object)
-  ;; FIXME: remove debug info.  Remove when object.
-  (format t "monitor-enter: ~A~%" object)
   (when object
     (let* ((monitor (%get-monitor object))
            (mutex (mutex monitor))
@@ -69,8 +67,6 @@
                   (recursion-count monitor) 1)))))))
 
 (defun monitor-exit (object)
-  ;; FIXME: remove debug info.  Remove when object.
-  (format t "monitor-exit: ~A~%" object)
   (when object
     (let* ((monitor (%get-monitor object))
            (mutex (mutex monitor))
