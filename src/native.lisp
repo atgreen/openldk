@@ -200,3 +200,15 @@
     (or %hash-code
         (setf %hash-code (incf hash-code-counter))
         hash-code-counter)))
+
+(defmethod |arrayBaseOffset(Ljava/lang/Class;)| (unsafe obj)
+  ;; FIXME
+  999)
+
+(defmethod |arrayIndexScale(Ljava/lang/Class;)| (unsafe obj)
+  ;; FIXME
+  998)
+
+(defmethod |addressSize()| (unsafe)
+  ;; FIXME
+  997)
