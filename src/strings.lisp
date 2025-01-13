@@ -35,40 +35,29 @@
 ;;; library, but you are not obligated to do so.  If you do not wish
 ;;; to do so, delete this exception statement from your version.
 
-(sb-ext:restrict-compiler-policy 'debug 3)
+(in-package :openldk)
 
-(asdf:defsystem #:openldk
-  :description "Java in Common Lisp"
-  :author "Anthony Green <green@moxielogic.com>"
-  :license "GPL3+Classpath Exception"
-  :version "1"
-  :serial t
-  :components ((:file "src/package")
-							 (:file "src/debug")
-							 (:file "src/monitor")
-							 (:file "src/context")
-							 (:file "src/bootstrap")
-               (:file "src/strings")
-							 (:file "src/opcodes")
-							 (:file "src/bc-to-ssa")
-							 (:file "src/bytecode-branches")
-							 (:file "src/classpath")
-							 (:file "src/basic-block")
-							 (:file "src/ssa")
-							 (:file "src/codegen")
-							 (:file "src/descriptors")
-							 (:file "src/classfile")
-							 (:file "src/native")
-							 (:file "src/openldk"))
-  :around-compile
-  "(lambda (thunk)
-     (cl-annot:enable-annot-syntax)
-     (funcall thunk))"
-  :depends-on (:cl-annot :whereiseveryone.command-line-args :flexi-streams :zip :str :defclass-std :fast-io :bitio :pathname-utils :cl-store :trivial-backtrace :fset :bordeaux-threads :float-features :local-time :closer-mop)
-  :build-operation "program-op"
-  :build-pathname "openldk"
-  :entry-point "openldk:main-wrapper")
+(defvar interned-string-table (make-hash-table :test #'equal))
 
-#+sb-core-compression
-(defmethod asdf:perform ((o asdf:image-op) (c asdf:system))
-  (uiop:dump-image (asdf:output-file o c) :executable t :compression t))
+(defun jstring (value)
+  (let ((s (make-instance '|java/lang/String|)))
+    (setf (slot-value s '|value|) value)
+    s))
+
+(defun ijstring (value)
+  (let ((s (make-instance '|java/lang/String|)))
+    (setf (slot-value s '|value|) value)
+    (|intern()| s)))
+
+(defmethod |intern()| ((str |java/lang/String|))
+  (let ((istr (gethash (slot-value str '|value|) interned-string-table)))
+    (or istr
+        (let ((istr (setf (gethash (slot-value str '|value|) interned-string-table) str)))
+          istr))))
+
+(defmethod |intern()| ((str string))
+  (format t "INTERNING ~A~%" str)
+  (let ((istr (gethash str interned-string-table)))
+    (or istr
+        (let ((istr (setf (gethash str interned-string-table) (jstring str))))
+          istr))))

@@ -73,10 +73,31 @@
   (let ((bt (trivial-backtrace:print-backtrace nil :output nil)))
     (print bt)))
 
+(defun %remove-adjacent-repeats (list)
+  "Remove all adjacent repeated objects from LIST."
+  (let ((result nil)
+        (last nil))
+    (loop for item in list
+          unless (equal item last)
+            do (push item result)
+          do (setf last item))
+    (nreverse result)))
+
 (defmethod |sun/reflect/Reflection.getCallerClass()| ()
-  (let* ((caller-string (format nil "~A" (fourth (sb-debug:backtrace-as-list))))
-         (cstring (subseq caller-string 1 (position #\. caller-string))))
-    (java-class (gethash cstring *classes*))))
+  ;; FIXME: this only works for static methods at the moment
+  ;; FIXME: we don't need the whole backtrace
+  (let* ((caller-string (format nil "~A" (fourth (%remove-adjacent-repeats (sb-debug:list-backtrace))))))
+    ;; (cstring (subseq caller-string 1 (position #\. caller-string))))
+    (java-class
+     (gethash
+      (let ((dot-position (position #\. caller-string)))
+        (cond
+          ((str:starts-with? "(%clinit-" caller-string)
+           (subseq caller-string 9 (1- (length caller-string))))
+          (dot-position
+           (subseq caller-string 1 dot-position))
+          (t (error (format nil "ERROR in sun/reflect/Reflection.getCallerClass(): don't recognize ~S" caller-string)))))
+      *classes*))))
 
 (defmethod |getClass()| (object)
   ;;; FIXME - throw nullpointerexception
@@ -119,7 +140,28 @@
       ((string= name "int")
        (let ((jc (java-class (gethash "java/lang/Integer" *classes*))))
          jc))
-      (t (error (format nil "getPrimitiveClass(~A)" name))))))
+      ((string= name "byte")
+       (let ((jc (java-class (gethash "java/lang/Byte" *classes*))))
+         jc))
+      ((string= name "long")
+       (let ((jc (java-class (gethash "java/lang/Long" *classes*))))
+         jc))
+      ((string= name "boolean")
+       (let ((jc (java-class (gethash "java/lang/Boolean" *classes*))))
+         jc))
+      ((string= name "char")
+       (let ((jc (java-class (gethash "java/lang/Character" *classes*))))
+         jc))
+      ((string= name "short")
+       (let ((jc (java-class (gethash "java/lang/Short" *classes*))))
+         jc))
+      ((string= name "double")
+       (let ((jc (java-class (gethash "java/lang/Double" *classes*))))
+         jc))
+      ((string= name "void")
+       (let ((jc (java-class (gethash "java/lang/Void" *classes*))))
+         jc))
+       (t (error (format nil "getPrimitiveClass(~A)" name))))))
 
 (defmethod |java/lang/Float.floatToRawIntBits(F)| (float)
   (float-features:single-float-bits float))
@@ -155,9 +197,9 @@
   (print-unreadable-object (str out :type t)
     (format out "~S" (%stringize-array (slot-value str '|value|)))))
 
-(defmethod |intern()| ((str |java/lang/String|))
-  ;; FIXME: What does this do??
-  str)
+(defmethod print-object ((class |java/lang/Class|) out)
+  (print-unreadable-object (class out :type t)
+    (format out "~A" (slot-value class '|name|))))
 
 (defmethod |java/lang/Thread.registerNatives()| ()
   ;; FIXME: What does this do??
@@ -212,3 +254,44 @@
 (defmethod |addressSize()| (unsafe)
   ;; FIXME
   997)
+
+(defmethod |availableProcessors()| ((runtime |java/lang/Runtime|))
+  ;; FIXME
+  1)
+
+(defmethod |isArray()| ((class |java/lang/Class|))
+  ;; FIXME
+  (let ((name-string (format nil "~A" (slot-value (slot-value class '|name|) '|value|))))
+    (if (string= name-string "java/util/Arrays")
+        1
+        0)))
+
+(defmethod |getComponentType()| ((class |java/lang/Class|))
+  ;; FIXME
+  (java-class (gethash "java/lang/Object" *classes*)))
+
+(defmethod |isPrimitive()| ((class |java/lang/Class|))
+  (let ((name-string (format nil "~A" (slot-value (slot-value class '|name|) '|value|))))
+    (if (null (find name-string '("java/lang/Boolean"
+                                  "java/lang/Character"
+                                  "java/lang/Byte"
+                                  "java/lang/Short"
+                                  "java/lang/Integer"
+                                  "java/lang/Long"
+                                  "java/lang/Float"
+                                  "java/lang/Double"
+                                  "java/lang/Void")
+                    :test #'equal))
+        0
+        1)))
+
+(defmethod |getDeclaredFields0(Z)| ((class |java/lang/Class|) arg)
+  ;; FIXME
+  ;; Load java/lang/reflect/Field if it hasn't been yet.
+  (unless (gethash "java/lang/reflect/Field" *classes*)
+    (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/reflect/Field") nil nil nil))
+
+  ;; TEST
+  (let ((field (make-instance '|java/lang/reflect/Field|)))
+    (|<init>(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;IILjava/lang/String;[B)| field arg (ijstring "reflectionData") nil nil nil nil nil)
+    `#(,field)))

@@ -286,11 +286,6 @@
                 (close classfile-stream))
               (format t "ERROR: Can't find ~A on classpath~%" classname))))))
 
-(defun jstring (value)
-  (let ((s (make-instance '|java/lang/String|)))
-    (setf (slot-value s '|value|) value)
-    s))
-
 @cli:command
 (defun main (mainclass &optional (args (list)) &key dump-dir classpath)
   (declare
@@ -339,7 +334,15 @@
   (%clinit (classload "java/lang/Class"))
 
   ;; Preload some important classes.
-  (dolist (c '("java/lang/Float"
+  (dolist (c '("java/lang/Boolean"
+               "java/lang/Character"
+               "java/lang/Byte"
+               "java/lang/Short"
+               "java/lang/Integer"
+               "java/lang/Long"
+               "java/lang/Float"
+               "java/lang/Double"
+               "java/lang/Void"
                "java/lang/ClassLoader"
                "java/security/PrivilegedAction"
                "java/lang/System"

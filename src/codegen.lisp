@@ -359,22 +359,32 @@
 
 (defmethod codegen ((insn ssa-iinc) &optional (stop-block nil))
   (declare (ignore stop-block))
-  (with-slots (index const) insn
-    (list 'incf (intern (format nil "local-~A" index) :openldk) const)))
+  (trace-insn
+   insn
+   (with-slots (index const) insn
+     (list 'incf (intern (format nil "local-~A" index) :openldk) const))))
 
 (defmethod codegen ((insn ssa-if-acmpeq) &optional (stop-block nil))
   (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (with-slots (offset) insn
-    (list 'if (list 'eq (gen-pop-item) (gen-pop-item))
-          (list 'go (intern (format nil "branch-target-~A" offset))))))
+  (trace-insn
+   insn
+   (with-slots (offset) insn
+     (list 'let (list (list 'o1 (list 'sxhash (gen-pop-item)))
+                      (list 'o2 (list 'sxhash (gen-pop-item))))
+           ;; (list 'format t "acmpeq ~A ~A~%" 'o1 'o2)
+           (list 'if (list 'eq 'o1 'o2)
+                 (list 'go (intern (format nil "branch-target-~A" offset))))))))
 
 (defmethod codegen ((insn ssa-if-acmpne) &optional (stop-block nil))
   (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (with-slots (offset) insn
-    (list 'if (list 'not (list 'eq (gen-pop-item) (gen-pop-item)))
-          (list 'go (intern (format nil "branch-target-~A" offset))))))
+  (trace-insn
+   insn
+   (with-slots (offset) insn
+     (list 'let (list (list 'o1 (gen-pop-item))
+                      (list 'o2 (gen-pop-item)))
+           ;; (list 'format t "acmpne ~A ~A ~A ~A~%" 'o1 'o2 (list 'sxhash 'o1) (list 'sxhash 'o2))
+           (list 'if (list 'not (list 'eq (list 'sxhash 'o1) (list 'sxhash 'o2)))
+                 (list 'go (intern (format nil "branch-target-~A" offset))))))))
 
 (defmethod codegen ((insn ssa-if-icmpeq) &optional (stop-block nil))
   (declare (ignore stop-block))
@@ -542,7 +552,7 @@
   (list 'let (list (list 'value2 (gen-pop-item))
                    (list 'value1 (gen-pop-item)))
         (list 'progn
-              (list 'format 't "ISHR ~A ~A~%" 'value1 'value2)
+              ;; (list 'format 't "ISHR ~A ~A~%" 'value1 'value2)
               (gen-push-item (list 'ash 'value1 (list '- 0 'value2))))))
 
 (defmethod codegen ((insn ssa-lcmp) &optional (stop-block nil))
@@ -564,13 +574,15 @@
   (list 'let (list (list 'value2 (gen-pop-item))
                    (list 'value1 (gen-pop-item)))
         (list 'progn
-              (list 'format 't "LUSHR ~A ~A~%" 'value1 'value2)
+              ;; (list 'format 't "LUSHR ~A ~A~%" 'value1 'value2)
               (gen-push-item (list 'ash 'value1 (list \- 'value2))))))
 
 (defmethod codegen ((insn ssa-goto) &optional (stop-block nil))
   (declare (ignore stop-block))
-  (with-slots (offset) insn
-    (list 'go (intern (format nil "branch-target-~A" offset)))))
+  (trace-insn
+   insn
+   (with-slots (offset) insn
+     (list 'go (intern (format nil "branch-target-~A" offset))))))
 
 (defmethod codegen ((insn ssa-call-virtual-method) &optional (stop-block nil))
   (declare (ignore stop-block))

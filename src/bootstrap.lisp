@@ -74,6 +74,9 @@
   (print-unreadable-object (s out :type t)
     (format out "~S" (slot-value s '|value|))))
 
+(defclass |java/lang/Runtime| (|java/lang/Object|)
+  ())
+
 (defclass |java/lang/Thread| (|java/lang/Object|)
   ())
 
