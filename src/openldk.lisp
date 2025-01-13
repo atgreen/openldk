@@ -140,12 +140,15 @@
      (or class (error "Can't find ~A" class)))
     (labels ((clinit (class)
                (let ((super-class (gethash (slot-value class 'super) *classes*)))
-                 (when super-class (clinit super-class)))
+                 (when (and super-class
+                            (not (initialized-p super-class)))
+                   (clinit super-class)))
                (let ((<clinit>-method (find-if
                                        (lambda (method) (and (string= (slot-value method 'name) "<clinit>")
                                                              (string= (slot-value method 'descriptor) "()V")))
                                        (slot-value class 'methods))))
                  (when <clinit>-method
+                   (setf (initialized-p class) t)
                    (%eval (list (intern (format nil "~A.<clinit>()" (slot-value class 'name)) :openldk)))))))
       (clinit class))))
 
@@ -254,6 +257,21 @@
                        (setf (gethash (substitute #\/ #\. classname) *java-classes*) klass))
                      (let ((code (emit-<class> class)))
                        (%eval code))
+
+                     ;; Emit the class initializer
+                     (let ((lisp-class (find-class (intern (substitute #\/ #\. classname) :openldk))))
+                       (closer-mop:finalize-inheritance lisp-class)
+                       (let ((icc (append (list 'defun (intern (format nil "%clinit-~A" (substitute #\/ #\. classname)) :openldk) (list))
+                                          ;; (list (list 'format 't ">>> clinit ~A~%" lisp-class))
+                                          (loop for k in (reverse (closer-mop:class-precedence-list lisp-class))
+                                                for clinit-function = (intern (format nil "~a.<clinit>()" (class-name k)) :openldk)
+                                                when (fboundp clinit-function)
+                                                  collect (let ((ldkclass (gethash (format nil "~A" (class-name k)) *classes*)))
+                                                            (list 'unless (list 'initialized-p ldkclass)
+                                                                  (list 'setf (list 'initialized-p ldkclass) t)
+                                                                  (list clinit-function)))))))
+                         (%eval icc)))
+
                      (when (and (not (string= classname "java/lang/Throwable"))
                                 (subtypep (find-class internal-classname) (find-class '|java/lang/Throwable|)))
                        (let ((condition-symbol (intern (format nil "condition-~A" classname) :openldk)))

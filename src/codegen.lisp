@@ -55,7 +55,8 @@
   (if *debug-trace*
       (list 'progn
             (list 'format t (format nil "~&; [~A]~%" (address insn)))
-            code)))
+            code)
+      code))
 
 (defun gen-peek-item ()
   (list 'car 'stack))
@@ -190,7 +191,7 @@
   ;; FIXME: the array test can be done at compiletime
   (with-slots (class) insn
     (list 'progn
-          (list 'format t "CHECKCAST: ~A ~A~%" (gen-peek-item) (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))
+          ;; (list 'format t "CHECKCAST: ~A ~A~%" (gen-peek-item) (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))
           (list 'when (gen-peek-item)
                 (list 'unless (list 'or
                                     (list 'typep (gen-peek-item)
@@ -262,7 +263,9 @@
 (defmethod codegen ((insn ssa-dup) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
-  (gen-push-item (gen-peek-item)))
+  (trace-insn
+   insn
+   (gen-push-item (gen-peek-item))))
 
 (defmethod codegen ((insn ssa-dup-x1) &optional (stop-block nil))
   (declare (ignore stop-block))
@@ -276,12 +279,14 @@
 (defmethod codegen ((insn ssa-dup2) &optional (stop-block nil))
   (declare (ignore stop-block))
   (flag-stack-usage *context*)
-  (list 'let (list (list 'value1 (gen-pop-item))
-                   (list 'value2 (gen-pop-item)))
-        (gen-push-item 'value2)
-        (gen-push-item 'value1)
-        (gen-push-item 'value2)
-        (gen-push-item 'value1)))
+  (trace-insn
+   insn
+   (list 'let (list (list 'value1 (gen-pop-item))
+                    (list 'value2 (gen-pop-item)))
+         (gen-push-item 'value2)
+         (gen-push-item 'value1)
+         (gen-push-item 'value2)
+         (gen-push-item 'value1))))
 
 (defmethod codegen ((insn ssa-fcmpg) &optional (stop-block nil))
   (declare (ignore stop-block))
@@ -590,10 +595,9 @@
 (defmethod codegen ((insn ssa-clinit) &optional (stop-block nil))
   (declare (ignore stop-block))
   (with-slots (class) insn
-    (let ((class (ssa-class-class class)))
+    (let* ((class (ssa-class-class class)))
       (list 'unless (list 'initialized-p class)
-            (list 'setf (list 'initialized-p class) t)
-            (list (intern (format nil "~A.<clinit>()" (slot-value class 'name)) :openldk))))))
+            (list (intern (format nil "%clinit-~A" (slot-value class 'name)) :openldk))))))
 
 (defmethod codegen ((insn ssa-local-variable) &optional (stop-block nil))
   (declare (ignore stop-block))
