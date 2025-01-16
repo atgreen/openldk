@@ -60,6 +60,41 @@
 	 (char= (char name (1- len))
 		#\V))))
 
+(defun gen-parameter-hints (descriptor)
+  "Parse the Java method descriptor and return a list representing
+ parameter types.  Longs are #\J.  Doubles are #\D.  Everything else
+ is T."
+  (let ((param-hints nil)
+        (index 0)
+        (descriptor (subseq descriptor (1+ (position #\( descriptor)) (position #\) descriptor))))
+    (loop while (< index (length descriptor))
+          do (let ((ch (char descriptor index)))
+               (cond
+                 ;; For simple types
+                 ((char= ch #\J) (push #\L param-hints) (incf index))
+                 ((char= ch #\D) (push #\D param-hints) (incf index))
+
+                 ;; For object types
+                 ((char= ch #\L)
+                  (let ((obj-end (position #\; descriptor :start index)))
+                    (push t param-hints)
+                    (setf index (1+ obj-end))))
+
+                 ;; For array types
+                 ((char= ch #\[)
+                  (incf index)
+                  (loop until (not (member (char descriptor index) '(#\I #\J #\S #\B #\C #\D #\F #\Z #\[)))
+                        do (incf index))
+                  (when (char= (char descriptor index) #\L)
+                    (setf index (position #\; descriptor :start index)))
+                  (push t param-hints)
+                  (incf index))
+
+                 (t
+                  (push ch param-hints)
+                  (incf index)))))
+    (nreverse param-hints))) ; Reverse the list before returning it, since we used push
+
 (defun parse-parameter-types (descriptor)
   "Parse the Java method descriptor and return a list of parameter types as strings."
   (let ((param-list nil)
@@ -67,8 +102,6 @@
         (descriptor (subseq descriptor (position #\( descriptor) (position #\) descriptor))))
     (loop while (< index (length descriptor))
           do (let ((ch (char descriptor index)))
-               (print index)
-               (print ch)
                (cond
                  ;; For simple types
                  ((char= ch #\I) (push "int" param-list) (incf index))

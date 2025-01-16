@@ -427,7 +427,7 @@
       (list (make-instance 'ssa-mul
                            :address pc-start)))))
 
-(defun :DSTORE (context code)
+(defun :LSTORE (context code)
   (with-slots (pc) context
     (let ((pc-start pc)
           (index (aref code (incf pc))))
@@ -436,10 +436,15 @@
                            :address pc-start
                            :target (make-instance 'ssa-local-variable
                                                   :address pc-start
-                                                  :index index))))))
+                                                  :index index))
+            (make-instance 'ssa-store
+                           :address pc-start
+                           :target (make-instance 'ssa-local-variable
+                                                  :address pc-start
+                                                  :index (1+ index)))))))
 
-(defun :LSTORE (context code)
-  (:DSTORE context code))
+(defun :DSTORE (context code)
+  (:LSTORE context code))
 
 (defun :FSTORE (context code)
   (:DSTORE context code))
@@ -496,6 +501,8 @@
                          (aref code (incf pc)))))
           (multiple-value-bind (fieldname class)
               (emit (aref constant-pool index) constant-pool)
+            (format t "BMG: ~A~%"
+                    (aref constant-pool (slot-value (aref constant-pool (slot-value (aref constant-pool index) 'type-descriptor-index)) 'type-descriptor-index)))
             (incf pc)
             (let ((code (list (make-instance 'ssa-push
                                              :address (if (and is-clinit-p (equal (ssa-class-class class) context-class)) pc-start (+ pc-start 0.1))
@@ -602,7 +609,8 @@
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
-      (list (make-instance 'ssa-l2i :address pc-start)))))
+      ;; Just pop the high-order bits off
+      (list (make-instance 'ssa-pop :address pc-start)))))
 
 (defun :L2F (context code)
   (declare (ignore code))
@@ -864,6 +872,7 @@
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
+      (error "LONG FIXME")
       (list (make-instance 'ssa-ldiv
                            :address pc-start)))))
 
@@ -975,7 +984,20 @@
                                                  :index index))))))
 
 (defun :LLOAD (context code)
-  (:ILOAD context code))
+  (with-slots (pc) context
+    (let ((pc-start pc)
+          (index (aref code (incf pc))))
+      (incf pc)
+      (list (make-instance 'ssa-push
+                           :address pc-start
+                           :value (make-instance 'ssa-local-variable
+                                                 :address pc-start
+                                                 :index index))
+            (make-instance 'ssa-push
+                           :address (+ pc-start 0.2)
+                           :value (make-instance 'ssa-local-variable
+                                                 :address pc-start
+                                                 :index (1+ index)))))))
 
 (defun :FLOAD (context code)
   (:ILOAD context code))
@@ -1164,6 +1186,7 @@
                            :address pc-start)))))
 
 (defun :LRETURN (context code)
+  (error "LONG FIXME")
   (:IRETURN context code))
 
 (defun :ISHL (context code)
@@ -1191,10 +1214,12 @@
                            :address pc-start)))))
 
 (defun :LADD (context code)
+  (error "LONG FIXME")
   (:IADD context code))
 
 (defun :LAND (context code)
   (declare (ignore code))
+  (error "LONG FIXME")
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -1203,6 +1228,7 @@
 
 (defun :LOR (context code)
   (declare (ignore code))
+  (error "LONG FIXME")
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -1211,6 +1237,7 @@
 
 (defun :LSHL (context code)
   (declare (ignore code))
+  (error "LONG FIXME")
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -1219,6 +1246,7 @@
 
 (defun :LSHR (context code)
   (declare (ignore code))
+  (error "LONG FIXME")
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -1236,6 +1264,7 @@
 
 (defun :LCMP (context code)
   (declare (ignore code))
+  (error "LONG FIXME")
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -1253,6 +1282,7 @@
 
 (defun :LDC_W (context code)
   (with-slots (pc class) context
+    (error "LONG FIXME")
     (let ((pc-start pc))
       (with-slots (constant-pool) class
 				(let ((index (+ (* (aref code (incf pc)) 256)
@@ -1262,6 +1292,7 @@
                                          :value (emit (aref constant-pool index) constant-pool))))))))
 
 (defun :LDC2_W (context code)
+  (error "LONG FIXME")
   (:LDC_W context code))
 
 (defun :LCONST_0 (context code)
@@ -1270,6 +1301,11 @@
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ssa-push
+                           :address pc-start
+                           :value (make-instance 'ssa-long-literal
+                                                 :address pc-start
+                                                 :value 0))
+            (make-instance 'ssa-push
                            :address pc-start
                            :value (make-instance 'ssa-long-literal
                                                  :address pc-start
@@ -1284,10 +1320,16 @@
                            :address pc-start
                            :value (make-instance 'ssa-long-literal
                                                  :address pc-start
-                                                 :value 1))))))
+                                                 :value 1))
+            (make-instance 'ssa-push
+                           :address pc-start
+                           :value (make-instance 'ssa-long-literal
+                                                 :address pc-start
+                                                 :value 0))))))
 
 (defun :LLOAD_0 (context code)
   (declare (ignore code))
+  (error "LONG FIXME")
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -1299,6 +1341,7 @@
 
 (defun :LLOAD_1 (context code)
   (declare (ignore code))
+  (error "LONG FIXME")
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -1310,6 +1353,7 @@
 
 (defun :LSUB (context code)
   (declare (ignore code))
+  (error "LONG FIXME")
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -1318,6 +1362,7 @@
 
 (defun :LUSHR (context code)
   (declare (ignore code))
+  (error "LONG FIXME")
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)

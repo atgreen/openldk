@@ -144,9 +144,11 @@
 
 (defmethod codegen ((insn ssa-call-static-method) &optional (stop-block nil))
   (declare (ignore stop-block))
+  (print "CSTATM")
   (trace-insn
    insn
    (with-slots (class method-name args) insn
+     (format t "GPH: ~A ~A~%" method-name (gen-parameter-hints method-name))
      (let* ((nargs (length args))
             (call (cond
                     ((eq nargs 0)
@@ -333,12 +335,7 @@
 (defmethod codegen ((insn ssa-l2f) &optional (stop-block nil))
   (declare (ignore stop-block))
   (with-slots (index const) insn
-    (gen-push-item (list 'float (gen-pop-item)))))
-
-(defmethod codegen ((insn ssa-l2i) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (with-slots (index const) insn
-    (gen-push-item (list 'logand #xffffffff (gen-pop-item)))))
+    (gen-push-item (list 'float (list '+ (list 'ash (gen-pop-item) 32) (gen-pop-item))))))
 
 (defmethod codegen ((insn ssa-f2i) &optional (stop-block nil))
   (declare (ignore stop-block))
@@ -584,14 +581,17 @@
 
 (defmethod codegen ((insn ssa-call-virtual-method) &optional (stop-block nil))
   (declare (ignore stop-block))
+  (print "CVM")
   (trace-insn
    insn
    (with-slots (method-name args) insn
+     (format t "GPH: ~A ~A~%" method-name (gen-parameter-hints method-name))
      (let* ((nargs (length args))
             (call (cond
                     ((eq nargs 0)
                      (error "internal error"))
                     ((eq nargs 1)
+                     ;; FIXME: handle long/double
                      (list (intern (format nil "~A" method-name) :openldk) (codegen (car args))))
                     (t
                      (list 'apply
@@ -668,11 +668,27 @@
                    (list 'value1 (gen-pop-item)))
         (gen-push-item (list '- 'value1 'value2))))
 
+(defun gen-arguments (components hints)
+  (let ((result '()))
+    (loop for comp in components
+          for hint in hints
+          while comp
+          do (cond
+               ((eq hint #\L)
+                ;; Merge the current component with the next one
+                (let ((next (pop components)))
+                  (push (list '+ (list 'ash (codegen comp) 32) (codegen next)) result)))
+               (t
+                ;; Add the current component as is
+                (push (codegen comp) result))))
+    (nreverse (append result (list 'list)))))
+
 (defmethod codegen ((insn ssa-call-special-method) &optional (stop-block nil))
   (declare (ignore stop-block))
   (trace-insn
    insn
    (with-slots (class method-name args) insn
+     (setf args (gen-arguments args (cons t (reverse (gen-parameter-hints method-name)))))
      (let ((call (list 'destructuring-bind (cons 'method 'next)
                        (list 'closer-mop:compute-applicable-methods-using-classes
                              (list 'function (intern (format nil "~A" method-name) :openldk))
@@ -683,7 +699,7 @@
                                                collect t))))
                        (list 'let (list (list 'fn (list 'closer-mop:method-function 'method)))
                              (list 'apply 'fn
-                                   (list 'list (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))) 'next))))))
+                                   (list 'list (cons 'reverse (list args)) 'next))))))
        (if (void-return-p insn)
            call
            (gen-push-item call))))))
@@ -712,6 +728,15 @@
   (trace-insn
    insn
    (with-slots (target) insn
+     (list 'setf (codegen target) (gen-pop-item)))))
+
+(defmethod codegen ((insn ssa-lstore) &optional (stop-block nil))
+  (declare (ignore stop-block))
+  (flag-stack-usage *context*)
+  (trace-insn
+   insn
+   (with-slots (target) insn
+     (list 'setf (codegen target) (gen-pop-item))
      (list 'setf (codegen target) (gen-pop-item)))))
 
 (define-condition java-lang-throwable (error)

@@ -174,9 +174,6 @@
 (defclass/std ssa-l2f (ssa-node)
   ())
 
-(defclass/std ssa-l2i (ssa-node)
-  ())
-
 (defclass/std ssa-f2i (ssa-node)
   ())
 
@@ -297,6 +294,9 @@
    (member-name)))
 
 (defclass/std ssa-store (ssa-node)
+  ((target)))
+
+(defclass/std ssa-lstore (ssa-node)
   ((target)))
 
 (defclass/std ssa-if (ssa-node)
