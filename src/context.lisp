@@ -48,7 +48,7 @@
 		:doc "A hashtable mapping addresses to blocks")
    (fn-name)
    (blocks)
-   (ssa-code)
+   (ir-code)
    (pc :std 0)))
 
 (defmethod flag-stack-usage ((context <context>))

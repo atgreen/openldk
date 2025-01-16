@@ -74,20 +74,20 @@
 		type-descriptor-index)))
 
 (defmethod emit ((v constant-string-reference) cp)
-  (make-instance 'ssa-string-literal
+  (make-instance 'ir-string-literal
                  :value (format nil "~A" (emit (aref cp (slot-value v 'index)) cp))))
 
 (defmethod emit ((v constant-float) cp)
-  (make-instance 'ssa-float-literal :value (slot-value v 'value)))
+  (make-instance 'ir-float-literal :value (slot-value v 'value)))
 
 (defmethod emit ((v constant-double) cp)
-  (make-instance 'ssa-double-literal :value (slot-value v 'value)))
+  (make-instance 'ir-double-literal :value (slot-value v 'value)))
 
 (defmethod emit ((v constant-int) cp)
-  (make-instance 'ssa-int-literal :value (slot-value v 'value)))
+  (make-instance 'ir-int-literal :value (slot-value v 'value)))
 
 (defmethod emit ((v constant-long) cp)
-  (make-instance 'ssa-int-literal :value (slot-value v 'value)))
+  (make-instance 'ir-int-literal :value (slot-value v 'value)))
 
 (defmethod emit ((v constant-field-reference) cp)
   (let ((class (emit (aref cp (slot-value v 'class-index)) cp)))
@@ -97,7 +97,7 @@
   (let ((classname (emit (aref cp (slot-value v 'index)) cp)))
     (if (eq (aref classname 0) #\[)
         (setf classname "java/util/Arrays"))
-    (make-instance 'ssa-class :class (classload classname))))
+    (make-instance 'ir-class :class (classload classname))))
 
 (defmethod emit-name ((v constant-class-reference) cp)
   (emit (aref cp (slot-value v 'index)) cp))
@@ -293,7 +293,7 @@ stream."
                                         (string
                                           (flexi-streams:octets-to-string (read-buffer size)
                                                                           :external-format :utf-8)))
-                                   (make-instance 'ssa-string-literal
+                                   (make-instance 'ir-string-literal
                                                   :value string)))
                                 (3
                                  (make-instance 'constant-int

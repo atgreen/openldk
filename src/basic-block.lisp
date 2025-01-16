@@ -170,24 +170,24 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
 
     block-starts))
 
-(defun build-basic-blocks (ssa-code)
-  "Build <BASIC-BLOCK> objects from SSA-CODE. Return the entry block."
-  ;; (dump "build-basic-blocks" ssa-code)
+(defun build-basic-blocks (ir-code)
+  "Build <BASIC-BLOCK> objects from IR-CODE. Return the entry block."
+  ;; (dump "build-basic-blocks" ir-code)
   (let ((block-starts (find-block-starts)))
     (let* ((block-by-address (make-hash-table))
-           (blocks (loop while ssa-code
-                         for insn = (car ssa-code)
+           (blocks (loop while ir-code
+                         for insn = (car ir-code)
                          unless (gethash (address insn) block-starts)
-                           do (setf ssa-code (cdr ssa-code))
+                           do (setf ir-code (cdr ir-code))
                          when (gethash (address insn) block-starts)
                            collect (let ((block (make-instance '<basic-block> :address (address insn))))
-                                     (loop while ssa-code
-                                           for insn = (car ssa-code)
+                                     (loop while ir-code
+                                           for insn = (car ir-code)
                                            for address = (address insn)
                                            do (push insn (code block))
                                            do (setf (gethash address block-by-address) block)
-                                           do (setf ssa-code (cdr ssa-code))
-                                           until (and (car ssa-code) (gethash (address (car ssa-code)) block-starts)))
+                                           do (setf ir-code (cdr ir-code))
+                                           until (and (car ir-code) (gethash (address (car ir-code)) block-starts)))
                                      block))))
       (dolist (block blocks)
         ;; Make connections between basic blocks.
@@ -239,10 +239,10 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
 								 (unless (gethash block seen-table)
 									 (setf (gethash block seen-table) t)
 									 (let ((last-insn (car (last (code block)))))
-										 (when (and (eq (type-of last-insn) 'ssa-goto)
+										 (when (and (eq (type-of last-insn) 'ir-goto)
 																(eq target-address (slot-value last-insn 'offset)))
 											 ;; Replace the goto with a nop
-											 (setf (code block) (append (butlast (code block)) (list (make-instance 'ssa-nop :address (address last-insn)))))))
+											 (setf (code block) (append (butlast (code block)) (list (make-instance 'ir-nop :address (address last-insn)))))))
 									 (fset:do-set (b (successors block))
 										 (remove-goto b target-address seen-table))
 									 (dolist (b (mapcar (lambda (tc) (cdr tc)) (try-catch block)))

@@ -88,8 +88,8 @@
         (setf (fn-name *context*) (format nil "~A.~A" (slot-value class 'name) (lispize-method-name (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor)))))
         (setf (fn-name *context*) (format nil "~A" (lispize-method-name (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor))))))
     ;; (dump "compile-method" (list class-name method-index))
-    (let* ((ssa-code-0
-             (setf (ssa-code *context*)
+    (let* ((ir-code-0
+             (setf (ir-code *context*)
                    (apply #'append
                           (loop
                             while (< (pc *context*) length)
@@ -98,7 +98,7 @@
                                           *context* code)
                             unless (null result)
                               collect result))))
-           (blocks (build-basic-blocks ssa-code-0))
+           (blocks (build-basic-blocks ir-code-0))
            (lisp-code
              (list (list 'block nil
                          (cons 'tagbody (loop for bloc in blocks append (codegen bloc))))))
