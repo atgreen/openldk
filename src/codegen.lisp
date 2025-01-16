@@ -199,8 +199,6 @@
                                     (list 'and
                                           (list 'arrayp (gen-peek-item))
                                           (list 'eq (list 'quote '|java/util/Arrays|) (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))))
-
-
                       (gen-push-item (list 'make-instance (list 'quote '|java/lang/ClassCastException|)))
                       (list 'error (list 'lisp-condition (gen-peek-item))))))))
 

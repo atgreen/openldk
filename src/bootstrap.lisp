@@ -77,6 +77,9 @@
 (defclass |java/lang/Runtime| (|java/lang/Object|)
   ())
 
+(defclass |sun/misc/Unsafe| (|java/lang/Object|)
+  ())
+
 (defclass |java/lang/Thread| (|java/lang/Object|)
   ())
 

@@ -476,7 +476,7 @@
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
-      (list (make-instance 'ssa-dup2
+      (list (make-instance 'ssa-dup  ;; FIXME HACK!
                            :address pc-start)))))
 
 (defun :DUP_X1 (context code)
@@ -498,7 +498,7 @@
               (emit (aref constant-pool index) constant-pool)
             (incf pc)
             (let ((code (list (make-instance 'ssa-push
-                                             :address (if is-clinit-p pc-start (+ pc-start 0.1))
+                                             :address (if (and is-clinit-p (equal (ssa-class-class class) context-class)) pc-start (+ pc-start 0.1))
                                              :value (make-instance 'ssa-static-member
                                                                    :address pc-start
                                                                    :class class
@@ -1115,8 +1115,9 @@
                                  :args (pop-args parameter-count)))))))))
 
 (defun :INVOKESTATIC (context code)
-  (with-slots (pc class) context
-    (let ((pc-start pc))
+  (with-slots (pc class is-clinit-p) context
+    (let ((context-class class)
+          (pc-start pc))
       (with-slots (constant-pool) class
         (let* ((index (+ (* (aref code (incf pc)) 256)
                          (aref code (incf pc))))
@@ -1140,13 +1141,18 @@
                                'value))
                  (parameter-count (count-parameters descriptor)))
             (classload callee-class)
-            (list (make-instance 'ssa-call-static-method
-                                 :address pc-start
-                                 :class callee-class
-                                 :void-return-p (ends-in-V (emit method-reference constant-pool))
-                                 :method-name (lispize-method-name (emit method-reference constant-pool))
-                                 :args (pop-args parameter-count)))))))))
-
+            (let ((code (list (make-instance 'ssa-call-static-method
+                                             :address (if (and is-clinit-p (equal callee-class (name context-class))) pc-start (+ pc-start 0.1))
+                                             :class callee-class
+                                             :void-return-p (ends-in-V (emit method-reference constant-pool))
+                                             :method-name (lispize-method-name (emit method-reference constant-pool))
+                                             :args (pop-args parameter-count)))))
+              (if (and is-clinit-p (equal callee-class (name context-class)))
+                  code
+                  (cons (make-instance 'ssa-clinit
+                                       :address pc-start
+                                       :class (make-instance 'ssa-class :class (classload callee-class)))
+                        code)))))))))
 
 (defun :IRETURN (context code)
   (declare (ignore code))
@@ -1421,7 +1427,7 @@
               (emit (aref constant-pool index) constant-pool)
             (incf pc)
             (let ((code (list (make-instance 'ssa-assign
-                                             :address (if is-clinit-p pc-start (+ pc-start 0.1))
+                                             :address (if (and is-clinit-p (equal (ssa-class-class class) context-class)) pc-start (+ pc-start 0.1))
                                              :source (make-instance 'ssa-pop :address pc-start)
                                              :target (make-instance 'ssa-static-member
                                                                     :address pc-start

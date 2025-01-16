@@ -181,6 +181,16 @@
 (defmethod |java/util/TimeZone.getSystemGMTOffsetID()| ()
   (jstring (local-time:format-timestring nil (local-time:now) :format '(:gmt-offset))))
 
+(defvar field-offset-table (make-hash-table :test #'equal))
+
+(defmethod |objectFieldOffset(Ljava/lang/reflect/Field;)| ((unsafe |sun/misc/Unsafe|) field)
+  (let ((offset (sxhash field)))
+    (setf (gethash offset field-offset-table) field)
+    offset))
+
+(defun |java/lang/Class$Atomic.objectFieldOffset([Ljava/lang/reflect/Field;Ljava/lang/String;)| (field name)
+  ;; FIXME
+  0)
 
 (defun %stringize-array (array)
   "Convert an array of characters and integers (ASCII values) into a string."
@@ -243,15 +253,18 @@
         (setf %hash-code (incf hash-code-counter))
         hash-code-counter)))
 
-(defmethod |arrayBaseOffset(Ljava/lang/Class;)| (unsafe obj)
-  ;; FIXME
-  999)
+(defclass %array-base-offset ()
+  ((array :initarg :array)))
 
-(defmethod |arrayIndexScale(Ljava/lang/Class;)| (unsafe obj)
-  ;; FIXME
-  998)
+(defmethod |arrayBaseOffset(Ljava/lang/Class;)| ((unsafe |sun/misc/Unsafe|) array)
+  0)
+;  (make-instance '%array-base-offset :array array))
 
-(defmethod |addressSize()| (unsafe)
+(defmethod |arrayIndexScale(Ljava/lang/Class;)| ((unsafe |sun/misc/Unsafe|) array)
+  ;; Always use 2, which is 2x what we really need.
+  2)
+
+(defmethod |addressSize()| ((unsafe |sun/misc/Unsafe|))
   ;; FIXME
   997)
 
@@ -285,13 +298,77 @@
         0
         1)))
 
-(defmethod |getDeclaredFields0(Z)| ((class |java/lang/Class|) arg)
+(defmethod |getDeclaredFields0(Z)| ((this |java/lang/Class|) arg)
   ;; FIXME
   ;; Load java/lang/reflect/Field if it hasn't been yet.
   (unless (gethash "java/lang/reflect/Field" *classes*)
     (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/reflect/Field") nil nil nil))
 
-  ;; TEST
-  (let ((field (make-instance '|java/lang/reflect/Field|)))
-    (|<init>(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;IILjava/lang/String;[B)| field arg (ijstring "reflectionData") nil nil nil nil nil)
-    `#(,field)))
+  ;; Get the ldk-class for THIS
+  (let ((ldk-class (gethash (slot-value (slot-value this '|name|) '|value|) *classes*)))
+    (format t "GDF0: ~A ~A~%" (slot-value (slot-value this '|name|) '|value|) ldk-class)
+    (labels ((get-fields (ldk-class)
+               (when ldk-class
+                 (append (loop for field across (fields ldk-class)
+                               collect (let ((f (make-instance '|java/lang/reflect/Field|)))
+                                         (|<init>(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;IILjava/lang/String;[B)| f this (ijstring (name field)) nil nil nil nil nil)
+                                         f))
+                         (get-fields (gethash (super ldk-class) *classes*))))))
+      (coerce (get-fields ldk-class) 'vector))))
+
+(defun |sun/misc/VM.initialize()| ()
+  ;; FIXME
+  )
+
+#|
+boolean compareAndSwapObject(Object obj, long fieldId, Object expectedValue, Object newValue) {
+    synchronized (globalExchangeLock) {
+        if (obj.fieldArray.get(fieldId) == expectedValue) {
+            obj.fieldArray.set(fieldId, newValue);
+            return true;
+        }
+    }
+    return false;
+}
+|#
+
+(defmethod |compareAndSwapObject(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)| ((unsafe |sun/misc/Unsafe|) obj field-id expected-value new-value)
+  ;; FIXME
+  (cond
+    ((vectorp obj)
+     (if (equal (aref obj field-id) expected-value)
+         (progn
+           (setf (aref obj field-id) new-value)
+           (print "ASWAPPED!")
+           1)
+         0))
+    (t
+     (let* ((field (gethash field-id field-offset-table))
+            (key (intern (slot-value (slot-value field '|name|) '|value|) :openldk)))
+       (if (equal (slot-value obj key) expected-value)
+           (progn
+             (setf (slot-value obj key) new-value)
+             (print "SWAPPED!")
+             1)
+           0)))))
+
+(defmethod |compareAndSwapInt(Ljava/lang/Object;JII)| ((unsafe |sun/misc/Unsafe|) obj field-id expected-value new-value)
+  ;; FIXME
+  (let* ((field (gethash field-id field-offset-table))
+         (key (intern (slot-value (slot-value field '|name|) '|value|) :openldk)))
+    (if (equal (slot-value obj key) expected-value)
+        (progn
+          (setf (slot-value obj key) new-value)
+          (print "SWAPPED!")
+          1)
+        0)))
+
+(defmethod |compareAndSwapLong(Ljava/lang/Object;JJJ)| ((unsafe |sun/misc/Unsafe|) obj field-id expected-value new-value)
+  (|compareAndSwapInt(Ljava/lang/Object;JII)| unsafe obj field-id expected-value new-value))
+
+(defmethod |getObjectVolatile(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) obj l)
+  ;; FIXME
+  (cond
+    ((vectorp obj)
+     (aref obj (ash l -2)))
+    (t (error "Unrecognized object type in getObjectVolatile: " obj))))
