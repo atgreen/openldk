@@ -312,7 +312,7 @@
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
-      (list (make-instance 'ir-add
+      (list (make-instance 'ir-iadd
                            :address pc-start)))))
 
 (defun :FADD (context code)
@@ -1215,8 +1215,12 @@
                            :address pc-start)))))
 
 (defun :LADD (context code)
-  (error "LONG FIXME")
-  (:IADD context code))
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (list (make-instance 'ir-ladd
+                           :address pc-start)))))
 
 (defun :LAND (context code)
   (declare (ignore code))

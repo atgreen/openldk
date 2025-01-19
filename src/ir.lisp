@@ -121,7 +121,10 @@
 (defclass/std ir-assign (ir-node)
   ((target source)))
 
-(defclass/std ir-add (ir-node)
+(defclass/std ir-iadd (ir-node)
+  ())
+
+(defclass/std ir-ladd (ir-node)
   ())
 
 (defclass/std ir-iand (ir-node)
@@ -273,6 +276,7 @@
 
 (defclass/std ir-call-virtual-method (ir-call)
   ((method-name)
+   (return-type)
    (args)))
 
 (defclass/std ir-call-static-method (ir-call-virtual-method)

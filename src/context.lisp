@@ -40,7 +40,7 @@
 (defclass/std <context> ()
   ((class :with)
    (is-clinit-p)
-   (uses-stack-p)
+   (uses-stack-p :std t)
    (classes)
    (bytecode)
    (exception-table)
@@ -49,7 +49,8 @@
    (fn-name)
    (blocks)
    (ir-code)
-   (pc :std 0)))
+   (pc :std 0)
+   (stack)))
 
 (defmethod flag-stack-usage ((context <context>))
   (setf (slot-value context 'uses-stack-p) t))

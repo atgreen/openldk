@@ -65,7 +65,7 @@
                   (#\C . :CHAR)
                   (#\D . :DOUBLE)
                   (#\F . :FLOAT)
-                  (#\L . :REFERENCE
+                  (#\L . :REFERENCE)
                   (#\Z . :BOOLEAN)
                   (#\V . :VOID)
                   (#\[ . :ARRAY))))))
