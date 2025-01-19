@@ -63,7 +63,8 @@
   ())
 
 (defclass/std ir-literal (ir-node)
-  ((value type)))
+  ((value)
+   (type :with)))
 
 (defmethod emit ((v ir-literal) cp)
   (slot-value v 'value))

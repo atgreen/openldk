@@ -40,7 +40,7 @@
 (defclass/std <expression> ()
   ((insn
     code
-    type)))
+    expression-type)))
 
 (defun gen-push-item (item)
   (if *debug-stack*
@@ -70,7 +70,7 @@
   (make-instance '<expression>
                  :insn insn
                  :code (slot-value insn 'value)
-                 :type (slot-value insn 'type)))
+                 :expression-type (slot-value insn 'type)))
 
 (defmethod codegen ((insn ir-string-literal) stack)
   (make-instance '<expression>
@@ -78,7 +78,7 @@
                  :code (let ((s (make-instance '|java/lang/String|)))
                          (setf (slot-value s '|value|) (slot-value insn 'value))
                          s)
-                 :type :REF))
+                 :expression-type :REFERENCE))
 
 (defmethod codegen ((insn ir-aaload) stack)
   (let ((expr (make-instance '<expression>
@@ -86,7 +86,7 @@
                              :code (list 'let (list (list 'index (gen-pop-item))
                                                     (list 'arrayref (gen-pop-item)))
                                          (gen-push-item (list 'aref 'arrayref 'index)))
-                             :type :REF)))
+                             :expression-type :REFERENCE)))
     (pop stack) (pop stack) (push expr stack)
     expr))
 
@@ -104,7 +104,7 @@
   (let ((expr (make-instance '<expression>
                              :insn insn
                              :code (gen-push-itme (list 'logand (list '+ (gen-pop-item) (gen-pop-item)) #xFFFFFFFF))
-                             :type :INTEGER)))
+                             :expression-type :INTEGER)))
     (pop stack) (pop stack) (push expr stack)
     expr))
 
@@ -113,7 +113,7 @@
   (let ((expr (make-instance '<expression>
                              :insn insn
                              :code (gen-push-item (list '+ (gen-pop-item) (gen-pop-item)))
-                             :type :FLOAT)))
+                             :expression-type :FLOAT)))
     (pop stack) (pop stack) (push expr stack)
     expr))
 
@@ -121,7 +121,7 @@
   (let ((expr (make-instance '<expression>
                              :insn insn
                              :code (gen-push-item (list 'logand (list '* (gen-pop-item) (gen-pop-item)) #xFFFFFFFF))
-                             :type :INTEGER)))
+                             :expression-type :INTEGER)))
     (pop stack) (pop stack) (push expr stack)
     expr))
 
@@ -129,7 +129,7 @@
   (let ((expr (make-instance '<expression>
                              :insn insn
                              :code (gen-push-item (list 'logand (gen-pop-item) (gen-pop-item)))
-                             :type :INTEGER)))
+                             :expression-type :INTEGER)))
     (pop stack) (pop stack) (push expr stack)
     expr))
 
@@ -137,7 +137,7 @@
   (let ((expr (make-instance '<expression>
                              :insn insn
                              :code (gen-push-item (list 'logand (gen-pop-item) (gen-pop-item)))
-                             :type :LONG)))
+                             :expression-type :LONG)))
     (pop stack) (pop stack) (push expr stack)
     expr))
 
@@ -145,7 +145,7 @@
   (let ((expr (make-instance '<expression>
                              :insn insn
                              :code (gen-push-item (list 'logior (gen-pop-item) (gen-pop-item)))
-                             :type :INTEGER)))
+                             :expression-type :INTEGER)))
     (pop stack) (pop stack) (push expr stack)
     expr))
 
@@ -153,7 +153,7 @@
   (let ((expr (make-instance '<expression>
                              :insn insn
                              :code (gen-push-item (list 'logxor (gen-pop-item) (gen-pop-item)))
-                             :type :INTEGER)))
+                             :expression-type :INTEGER)))
     (pop stack) (pop stack) (push expr stack)
     expr))
 
@@ -161,7 +161,7 @@
   (let ((expr (make-instance '<expression>
                              :insn insn
                              :code (gen-push-item (list 'logior (gen-pop-item) (gen-pop-item)))
-                             :type :LONG)))
+                             :expression-type :LONG)))
     (pop stack) (pop stack) (push expr stack)
     expr))
 
@@ -169,7 +169,7 @@
   (let ((expr (make-instance '<expression>
                              :insn insn
                              :code (gen-push-item (list 'logxor (gen-pop-item) (gen-pop-item)))
-                             :type :LONG)))
+                             :expression-type :LONG)))
     (pop stack) (pop stack) (push expr stack)
     expr))
 
@@ -177,7 +177,7 @@
   (let ((expr (make-instance '<expression>
                              :insn insn
                              :code (gen-push-item (list 'length (gen-pop-item))))
-                             :type :INTEGER))
+                             :expression-type :INTEGER))
     (pop stack) (push expr stack)
     expr))
 
@@ -187,7 +187,7 @@
                                :insn insn
                                :code (list 'let (list (list 'value (codegen source stack)))
                                            (list 'setf (codegen target stack) 'value))
-                               :type :INTEGER)))
+                               :expression-type :INTEGER)))
     expr)))
 
 (defmethod codegen ((insn ir-call-static-method) stack)
@@ -210,7 +210,7 @@
                                        (if (void-return-p insn)
                                            call
                                            (gen-push-item call)))
-                               :type (return-type insn))))
+                               :expression-type (return-type insn))))
       (unless (void-return-p insn)
         (push expr stack))
       expr)))
@@ -222,8 +222,8 @@
                                :insn insn
                                :code (list 'let (list (list 'index (gen-pop-item))
                                                       (list 'arrayref (gen-pop-item)))
-                                           (gen-push-item (list 'aref 'arrayref 'index))))
-                               :type :CHAR))
+                                           (gen-push-item (list 'aref 'arrayref 'index)))
+                               :expression-type :CHAR)))
       (pop stack) (pop stack) (push stack expr)
       expr)))
 
@@ -235,7 +235,7 @@
                                :code (list 'let (list (list 'index (gen-pop-item))
                                                       (list 'arrayref (gen-pop-item)))
                                            (gen-push-item (list 'aref 'arrayref 'index))))
-                               :type :INTEGER))
+                               :expression-type :INTEGER))
       (pop stack) (pop stack) (push stack expr)
       expr)))
 
@@ -247,7 +247,7 @@
                                                     (list 'index (gen-pop-item))
                                                     (list 'arrayref (gen-pop-item)))
                                          (list 'setf (list 'aref 'arrayref 'index) (list 'code-char 'value)))
-                             :type nil)))
+                             :expression-type nil)))
     (pop stack) (pop stack) (pop-stack)
     expr))
 
@@ -268,7 +268,7 @@
                                                                            (list 'eq (list 'quote '|java/util/Arrays|) (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))))
                                                        (gen-push-item (list 'make-instance (list 'quote '|java/lang/ClassCastException|)))
                                                        (list 'error (list 'lisp-condition (gen-peek-item))))))
-                               :type nil)))
+                               :expression-type nil)))
       expr)))
 
 (defmethod codegen ((insn ir-class) stack)
@@ -277,7 +277,7 @@
     (let ((expr (make-instance '<expression>
                                :insn insn
                                :code (java-class (gethash classname *classes*))
-                               :type :REFERENCE)))
+                               :expression-type :REFERENCE)))
       expr)))
 
 (defmethod codegen ((insn ir-branch-target) stack)
@@ -285,7 +285,7 @@
   (let ((expr (make-instance '<expression>
                              :insn insn
                              :code (intern (format nil "branch-target-~A" (slot-value insn 'index)))
-                             :type nil)))
+                             :expression-type nil)))
     expr))
 
 (defmethod codegen ((insn ir-irem) stack)
@@ -298,7 +298,7 @@
                                          (list 'division-by-zero (list 'e)
                                                (gen-push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
                                                (list 'error (list 'lisp-condition (gen-peek-item)))))
-                             :type INTEGER)))
+                             :expression-type INTEGER)))
     expr))
 
 (defmethod codegen ((insn ir-fdiv) stack)
@@ -312,7 +312,7 @@
                                          (list 'division-by-zero (list 'e)
                                                (gen-push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
                                                (list 'error (list 'lisp-condition (gen-peek-item)))))
-                             :type :FLOAT)))
+                             :expression-type :FLOAT)))
     (pop stack) (pop stack) (push expr stack)
     expr))
 
@@ -327,7 +327,7 @@
                                          (list 'division-by-zero (list 'e)
                                                (gen-push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
                                                (list 'error (list 'lisp-condition (gen-peek-item)))))
-                             :type :INTEGER)))
+                             :expression-type :INTEGER)))
     (pop stack) (pop stack) (push expr stack)
     expr))
 
@@ -342,7 +342,7 @@
                                          (list 'division-by-zero (list 'e)
                                                (gen-push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
                                                (list 'error (list 'lisp-condition (gen-peek-item)))))
-                             :type :LONG)))
+                             :expression-type :LONG)))
     (pop stack) (pop stack) (push expr stack)
     expr))
 
@@ -350,7 +350,7 @@
   (let ((expr (make-instance '<expression>
                              :insn insn
                              :code (gen-push-item (gen-peek-item))
-                             :type (type (car stack)))))
+                             :expression-type (type (car stack)))))
     (push expr stack)
     expr))
 
@@ -363,7 +363,7 @@
                                          (gen-push-item 'value1)
                                          (gen-push-item 'value2)
                                          (gen-push-item 'value1)
-                                         :type (type (car stack))))))
+                                         :expression-type (type (car stack))))))
     (let ((expr1 (pop stack))
           (expr2 (pop stack)))
       (push expr1 stack)
@@ -401,7 +401,7 @@
                                                      (list 'if (list '< 'value1 'value2)
                                                            (gen-push-item -1)
                                                            (gen-push-item 0)))))
-                             :type :INTEGER)))
+                             :expression-type :INTEGER)))
     (pop stack) (pop stack) (push expr stack)
     expr))
 
@@ -417,7 +417,7 @@
                                                      (list 'if (list '< 'value1 'value2)
                                                            (gen-push-item -1)
                                                            (gen-push-item 0)))))
-                             :type :INTEGER)))
+                             :expression-type :INTEGER)))
     (pop stack) (pop stack) (push expr stack)
     expr))
 
@@ -438,7 +438,7 @@
   (let ((expr (make-instance '<expression>
                              :insn insn
                              :code (gen-push-item (list '- (gen-pop-item)))
-                             :type :INTEGER)))
+                             :expression-type :INTEGER)))
     (pop stack) (push expr stack)
     expr))
 
@@ -446,7 +446,7 @@
   (let ((expr (make-instance '<expression>
                              :insn insn
                              :code (gen-push-item (list 'code-char (gen-pop-item)))
-                             :type :CHAR)))
+                             :expression-type :CHAR)))
     (pop stack) (push expr stack)
     expr))
 
@@ -454,7 +454,7 @@
   (let ((expr (make-instance '<expression>
                              :insn insn
                              :code (gen-push-item (list 'float (gen-pop-item)))
-                             :type :FLOAT)))
+                             :expression-type :FLOAT)))
     (pop stack) (push expr stack)
     expr))
 
@@ -462,7 +462,7 @@
   (let ((expr (make-instance '<expression>
                              :insn insn
                              :code (gen-push-item (list 'floor (gen-pop-item)))
-                             :type :INTEGER)))
+                             :expression-type :INTEGER)))
     (pop stack) (push expr stack)
     expr))
 
@@ -470,7 +470,7 @@
   (let ((expr (make-instance '<expression>
                              :insn insn
                              :code (gen-push-item (list 'floor (gen-pop-item)))
-                             :type :LONG)))
+                             :expression-type :LONG)))
     (pop stack) (push expr stack)
     expr))
 
@@ -478,7 +478,7 @@
   (let ((expr (make-instance '<expression>
                              :insn insn
                              :code (gen-push-item (list 'float (gen-pop-item)))
-                             :type :FLOAT)))
+                             :expression-type :FLOAT)))
     (pop stack) (push expr stack)
     expr))
 
@@ -644,7 +644,7 @@
                                :code (gen-push-item
                                       (list 'if (list 'typep (gen-pop-item)
                                                       (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk))) 1 0))
-                               :type :INTEGER)))
+                               :expression-type :INTEGER)))
       (pop stack) (push expr stack)
       expr)))
 
@@ -670,7 +670,7 @@
                              :code (list 'let (list (list 'value2 (gen-pop-item))
                                                     (list 'value1 (gen-pop-item)))
                                          (gen-push-item (list 'ash 'value1 'value2)))
-                             :type :INTEGER)))
+                             :expression-type :INTEGER)))
     (pop stack) (pop stack) (push expr stack)
     expr))
 
@@ -681,7 +681,7 @@
                              :code (list 'let (list (list 'value2 (gen-pop-item))
                                                     (list 'value1 (gen-pop-item)))
                                          (gen-push-item (list 'shl 'value1 'value2 32)))
-                             :type :INTEGER)))
+                             :expression-type :INTEGER)))
     (pop stack) (pop stack) (push expr stack)
     expr))
 
@@ -692,7 +692,7 @@
                              :code (list 'let (list (list 'value2 (gen-pop-item))
                                                     (list 'value1 (gen-pop-item)))
                                          (gen-push-item (list 'shr 'value1 'value2 32)))
-                             :type :INTEGER)))
+                             :expression-type :INTEGER)))
     (pop stack) (pop stack) (push expr stack)
     expr))
 
@@ -703,7 +703,7 @@
                              :code (list 'let (list (list 'value2 (gen-pop-item))
                                                     (list 'value1 (gen-pop-item)))
                                          (gen-push-item (list 'shr 'value1 'value2 64)))
-                             :type :LONG)))
+                             :expression-type :LONG)))
     (pop stack) (pop stack) (push expr stack)
     expr))
 
@@ -714,7 +714,7 @@
                              :code (list 'let (list (list 'value2 (gen-pop-item))
                                                     (list 'value1 (gen-pop-item)))
                                          (gen-push-item (list 'ash 'value1 (list '- 0 'value2))))
-                             :type :INTEGER)))
+                             :expression-type :INTEGER)))
     (pop stack) (pop stack) (push expr stack)
     expr))
 
@@ -730,7 +730,7 @@
                                                      (gen-push-item 1))
                                                (list 't
                                                      (gen-push-item -1))))
-                             :type :INTEGER)))
+                             :expression-type :INTEGER)))
     (pop stack) (pop stack) (push expr stack)
     expr))
 
@@ -740,7 +740,7 @@
                              :code (list 'let (list (list 'value2 (gen-pop-item))
                                                     (list 'value1 (gen-pop-item)))
                                          (gen-push-item (list 'ash 'value1 (list \- 'value2))))
-                             :type :LONG)))
+                             :expression-type :LONG)))
     (pop stack) (pop stack) (push expr stack)
     expr))
 
@@ -822,7 +822,7 @@
       (let ((expr (make-instance '<expression>
                                  :insn insn
                                  :code (list 'make-instance (list 'quote (intern (slot-value class 'name) :openldk)))
-                                 :type :REFERENCE)))
+                                 :expression-type :REFERENCE)))
         (push expr stack)
         expr))))
 
@@ -830,7 +830,7 @@
   (let ((expr (make-instance '<expression>
                              :insn insn
                              :code (list 'make-array (gen-pop-item) :initial-element nil)
-                             :type :ARRAY)))
+                             :expression-type :ARRAY)))
     (push expr stack)
     expr))
 
@@ -853,7 +853,7 @@
          (expr (make-instance '<expression>
                               :insn insn
                               :code (gen-push-item value)
-                              :type (type value))))
+                              :expression-type (type value))))
     (push expr stack)
     expr))
 
