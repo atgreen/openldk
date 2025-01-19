@@ -54,11 +54,27 @@
                (t nil)))
     count))
 
+(defun get-return-type (name)
+  (let ((return-type-descriptor
+          (subseq name (1+ (position #\) name)))))
+    (cdr (assoc (char return-type-descriptor 0)
+                '((#\I . :INTEGER)
+                  (#\J . :LONG)
+                  (#\S . :SHORT)
+                  (#\B . :BYTE)
+                  (#\C . :CHAR)
+                  (#\D . :DOUBLE)
+                  (#\F . :FLOAT)
+                  (#\L . :REFERENCE
+                  (#\Z . :BOOLEAN)
+                  (#\V . :VOID)
+                  (#\[ . :ARRAY))))))
+
 (defun ends-in-V (name)
   (let ((len (length name)))
     (and (not (zerop len))
-	 (char= (char name (1- len))
-		#\V))))
+         (char= (char name (1- len))
+                #\V))))
 
 (defun gen-parameter-hints (descriptor)
   "Parse the Java method descriptor and return a list representing

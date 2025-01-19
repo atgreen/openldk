@@ -37,6 +37,11 @@
 
 (in-package :openldk)
 
+(defclass/std <expression> ()
+  ((insn
+    code
+    type)))
+
 (defun gen-push-item (item)
   (if *debug-stack*
       (list 'let (list (list 'item item))
@@ -61,435 +66,587 @@
 (defun gen-peek-item ()
   (list 'car 'stack))
 
-(defmethod codegen ((insn ir-literal) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (slot-value insn 'value))
+(defmethod codegen ((insn ir-literal) stack)
+  (make-instance '<expression>
+                 :insn insn
+                 :code (slot-value insn 'value)
+                 :type (slot-value insn 'type)))
 
-(defmethod codegen ((insn ir-string-literal) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (let ((s (make-instance '|java/lang/String|)))
-    (setf (slot-value s '|value|) (slot-value insn 'value))
-    s))
+(defmethod codegen ((insn ir-string-literal) stack)
+  (make-instance '<expression>
+                 :insn insn
+                 :code (let ((s (make-instance '|java/lang/String|)))
+                         (setf (slot-value s '|value|) (slot-value insn 'value))
+                         s)
+                 :type :REF))
 
-(defmethod codegen ((insn ir-aaload) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (trace-insn
-   insn
-   (list 'let (list (list 'index (gen-pop-item))
-                    (list 'arrayref (gen-pop-item)))
-         (gen-push-item (list 'aref 'arrayref 'index)))))
+(defmethod codegen ((insn ir-aaload) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (list 'let (list (list 'index (gen-pop-item))
+                                                    (list 'arrayref (gen-pop-item)))
+                                         (gen-push-item (list 'aref 'arrayref 'index)))
+                             :type :REF)))
+    (pop stack) (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-aastore) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (trace-insn
-   insn
-   (list 'let (list (list 'value (gen-pop-item))
-                    (list 'index (gen-pop-item))
-                    (list 'arrayref (gen-pop-item)))
-         (list 'setf (list 'aref 'arrayref 'index) 'value))))
+(defmethod codegen ((insn ir-aastore) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (list 'let (list (list 'value (gen-pop-item))
+                                                    (list 'index (gen-pop-item))
+                                                    (list 'arrayref (gen-pop-item)))
+                                         (list 'setf (list 'aref 'arrayref 'index) 'value)))))
+    (pop stack) (pop stack) (pop stack)
+    expr))
 
-(defmethod codegen ((insn ir-add) &optional (stop-block nil))
-  ;; FIXME -- need iadd to mask lower 32-bits
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (trace-insn
-   insn
-   (gen-push-item (list '+ (gen-pop-item) (gen-pop-item)))))
+(defmethod codegen ((insn ir-iadd) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (gen-push-itme (list 'logand (list '+ (gen-pop-item) (gen-pop-item)) #xFFFFFFFF))
+                             :type :INTEGER)))
+    (pop stack) (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-fadd) &optional (stop-block nil))
+(defmethod codegen ((insn ir-fadd) stack)
   ;; FIXME -- handle NaN cases
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (trace-insn
-   insn
-   (gen-push-item (list '+ (gen-pop-item) (gen-pop-item)))))
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (gen-push-item (list '+ (gen-pop-item) (gen-pop-item)))
+                             :type :FLOAT)))
+    (pop stack) (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-imul) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (trace-insn
-   insn
-   (gen-push-item (list 'logand (list '* (gen-pop-item) (gen-pop-item)) #xFFFFFFFF))))
+(defmethod codegen ((insn ir-imul) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (gen-push-item (list 'logand (list '* (gen-pop-item) (gen-pop-item)) #xFFFFFFFF))
+                             :type :INTEGER)))
+    (pop stack) (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-iand) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (gen-push-item (list 'logand (gen-pop-item) (gen-pop-item))))
+(defmethod codegen ((insn ir-iand) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (gen-push-item (list 'logand (gen-pop-item) (gen-pop-item)))
+                             :type :INTEGER)))
+    (pop stack) (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-land) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (gen-push-item (list 'logand (gen-pop-item) (gen-pop-item))))
+(defmethod codegen ((insn ir-land) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (gen-push-item (list 'logand (gen-pop-item) (gen-pop-item)))
+                             :type :LONG)))
+    (pop stack) (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-ior) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (gen-push-item (list 'logior (gen-pop-item) (gen-pop-item))))
+(defmethod codegen ((insn ir-ior) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (gen-push-item (list 'logior (gen-pop-item) (gen-pop-item)))
+                             :type :INTEGER)))
+    (pop stack) (pop stack) (push expr stack)
+    expr))
 
 (defmethod codegen ((insn ir-ixor) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (gen-push-item (list 'logxor (gen-pop-item) (gen-pop-item))))
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (gen-push-item (list 'logxor (gen-pop-item) (gen-pop-item)))
+                             :type :INTEGER)))
+    (pop stack) (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-lor) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (gen-push-item (list 'logior (gen-pop-item) (gen-pop-item))))
+(defmethod codegen ((insn ir-lor) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (gen-push-item (list 'logior (gen-pop-item) (gen-pop-item)))
+                             :type :LONG)))
+    (pop stack) (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-array-length) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (gen-push-item (list 'length (gen-pop-item))))
+(defmethod codegen ((insn ir-lxor) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (gen-push-item (list 'logxor (gen-pop-item) (gen-pop-item)))
+                             :type :LONG)))
+    (pop stack) (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-assign) &optional (stop-block nil))
-  (declare (ignore stop-block))
+(defmethod codegen ((insn ir-array-length) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (gen-push-item (list 'length (gen-pop-item))))
+                             :type :INTEGER))
+    (pop stack) (push expr stack)
+    expr))
+
+(defmethod codegen ((insn ir-assign) stack)
   (with-slots (source target) insn
-    (list 'let (list (list 'value (codegen source)))
-          (list 'setf (codegen target) 'value))))
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (list 'let (list (list 'value (codegen source stack)))
+                                           (list 'setf (codegen target stack) 'value))
+                               :type :INTEGER)))
+    expr)))
 
-(defmethod codegen ((insn ir-call-static-method) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (print "CSTATM")
-  (trace-insn
-   insn
-   (with-slots (class method-name args) insn
-     (format t "GPH: ~A ~A~%" method-name (gen-parameter-hints method-name))
-     (let* ((nargs (length args))
-            (call (cond
-                    ((eq nargs 0)
-                     (list (intern (format nil "~A.~A" class method-name) :openldk)))
-                    ((eq nargs 1)
-                     (list (intern (format nil "~A.~A" class method-name) :openldk) (codegen (car args))))
-                    (t
-                     (list 'apply
-                           (list 'function (intern (format nil "~A.~A"
-                                                           class
-                                                           method-name)
-                                                   :openldk))
-                           (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))))))))
-       (if (void-return-p insn)
-           call
-           (gen-push-item call))))))
+(defmethod codegen ((insn ir-call-static-method) stack)
+  (with-slots (source target) insn
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (let* ((nargs (length args))
+                                            (call (cond
+                                                    ((eq nargs 0)
+                                                     (list (intern (format nil "~A.~A" class method-name) :openldk)))
+                                                    ((eq nargs 1)
+                                                     (list (intern (format nil "~A.~A" class method-name) :openldk) (codegen (car args) stack)))
+                                                    (t
+                                                     (list 'apply
+                                                           (list 'function (intern (format nil "~A.~A"
+                                                                                           class
+                                                                                           method-name)
+                                                                                   :openldk))
+                                                           (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a stack)) args))))))))
+                                       (if (void-return-p insn)
+                                           call
+                                           (gen-push-item call)))
+                               :type (return-type insn))))
+      (unless (void-return-p insn)
+        (push expr stack))
+      expr)))
 
-(defmethod codegen ((insn ir-caload) &optional (stop-block nil))
-  (declare (ignore stop-block))
+(defmethod codegen ((insn ir-caload) stack)
   ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
-  (list 'let (list (list 'index (gen-pop-item))
-                   (list 'arrayref (gen-pop-item)))
-        (gen-push-item (list 'char-code (list 'aref 'arrayref 'index)))))
+  (with-slots (source target) insn
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (list 'let (list (list 'index (gen-pop-item))
+                                                      (list 'arrayref (gen-pop-item)))
+                                           (gen-push-item (list 'aref 'arrayref 'index))))
+                               :type :CHAR))
+      (pop stack) (pop stack) (push stack expr)
+      expr)))
 
-(defmethod codegen ((insn ir-iaload) &optional (stop-block nil))
-  (declare (ignore stop-block))
+(defmethod codegen ((insn ir-iaload) stack)
   ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
-  (list 'let (list (list 'index (gen-pop-item))
-                   (list 'arrayref (gen-pop-item)))
-        (gen-push-item (list 'aref 'arrayref 'index))))
+  (with-slots (source target) insn
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (list 'let (list (list 'index (gen-pop-item))
+                                                      (list 'arrayref (gen-pop-item)))
+                                           (gen-push-item (list 'aref 'arrayref 'index))))
+                               :type :INTEGER))
+      (pop stack) (pop stack) (push stack expr)
+      expr)))
 
-(defmethod codegen ((insn ir-castore) &optional (stop-block nil))
-  (declare (ignore stop-block))
+(defmethod codegen ((insn ir-castore) stack)
   ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
-  (list 'let (list (list 'value (gen-pop-item))
-                   (list 'index (gen-pop-item))
-                   (list 'arrayref (gen-pop-item)))
-        (list 'setf (list 'aref 'arrayref 'index) (list 'code-char 'value))))
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (list 'let (list (list 'value (gen-pop-item))
+                                                    (list 'index (gen-pop-item))
+                                                    (list 'arrayref (gen-pop-item)))
+                                         (list 'setf (list 'aref 'arrayref 'index) (list 'code-char 'value)))
+                             :type nil)))
+    (pop stack) (pop stack) (pop-stack)
+    expr))
 
-(defmethod codegen ((insn ir-checkcast) &optional (stop-block nil))
-  (declare (ignore stop-block))
+
+(defmethod codegen ((insn ir-checkcast) stack)
+  (declare (ignore stack))
   ;; FIXME: the array test can be done at compiletime
   (with-slots (class) insn
-    (list 'progn
-          ;; (list 'format t "CHECKCAST: ~A ~A~%" (gen-peek-item) (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))
-          (list 'when (gen-peek-item)
-                (list 'unless (list 'or
-                                    (list 'typep (gen-peek-item)
-                                          (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))
-                                    (list 'and
-                                          (list 'arrayp (gen-peek-item))
-                                          (list 'eq (list 'quote '|java/util/Arrays|) (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))))
-                      (gen-push-item (list 'make-instance (list 'quote '|java/lang/ClassCastException|)))
-                      (list 'error (list 'lisp-condition (gen-peek-item))))))))
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (list 'progn
+                                           (list 'when (gen-peek-item)
+                                                 (list 'unless (list 'or
+                                                                     (list 'typep (gen-peek-item)
+                                                                           (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))
+                                                                     (list 'and
+                                                                           (list 'arrayp (gen-peek-item))
+                                                                           (list 'eq (list 'quote '|java/util/Arrays|) (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))))
+                                                       (gen-push-item (list 'make-instance (list 'quote '|java/lang/ClassCastException|)))
+                                                       (list 'error (list 'lisp-condition (gen-peek-item))))))
+                               :type nil)))
+      expr)))
 
-(defmethod codegen ((insn ir-class) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (let* ((classname (slot-value (slot-value insn 'class) 'name)))
-    (java-class (gethash classname *classes*))))
+(defmethod codegen ((insn ir-class) stack)
+  (declare (ignore stack))
+  (let ((classname (slot-value (slot-value insn 'class) 'name)))
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (java-class (gethash classname *classes*))
+                               :type :REFERENCE)))
+      expr)))
 
-(defmethod codegen ((insn ir-branch-target) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (intern (format nil "branch-target-~A" (slot-value insn 'index))))
+(defmethod codegen ((insn ir-branch-target) stack)
+  (declare (ignore stack))
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (intern (format nil "branch-target-~A" (slot-value insn 'index)))
+                             :type nil)))
+    expr))
 
-(defmethod codegen ((insn ir-irem) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (list 'handler-case
-        (list 'let (list (list 'value2 (gen-pop-item))
-                         (list 'value1 (gen-pop-item)))
-              (gen-push-item (list 'rem 'value1 'value2)))
-        (list 'division-by-zero (list 'e)
-              (gen-push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
-              (list 'error (list 'lisp-condition (gen-peek-item))))))
+(defmethod codegen ((insn ir-irem) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (list 'handler-case
+                                         (list 'let (list (list 'value2 (gen-pop-item))
+                                                          (list 'value1 (gen-pop-item)))
+                                               (gen-push-item (list 'rem 'value1 'value2)))
+                                         (list 'division-by-zero (list 'e)
+                                               (gen-push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
+                                               (list 'error (list 'lisp-condition (gen-peek-item)))))
+                             :type INTEGER)))
+    expr))
 
-(defmethod codegen ((insn ir-fdiv) &optional (stop-block nil))
+(defmethod codegen ((insn ir-fdiv) stack)
   ;; FIXME - handle all weird conditions
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (list 'handler-case
-        (list 'let (list (list 'value2 (gen-pop-item))
-                         (list 'value1 (gen-pop-item)))
-              (gen-push-item (list '/ 'value1 'value2)))
-        (list 'division-by-zero (list 'e)
-              (gen-push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
-              (list 'error (list 'lisp-condition (gen-peek-item))))))
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                              :code (list 'handler-case
+                                         (list 'let (list (list 'value2 (gen-pop-item))
+                                                          (list 'value1 (gen-pop-item)))
+                                              (gen-push-item (list '/ 'value1 'value2)))
+                                         (list 'division-by-zero (list 'e)
+                                               (gen-push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
+                                               (list 'error (list 'lisp-condition (gen-peek-item)))))
+                             :type :FLOAT)))
+    (pop stack) (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-idiv) &optional (stop-block nil))
+(defmethod codegen ((insn ir-idiv) stack)
   ;; FIXME - handle all weird conditions
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (list 'handler-case
-        (list 'let (list (list 'value2 (gen-pop-item))
-                         (list 'value1 (gen-pop-item)))
-              (gen-push-item (list 'floor (list '/ 'value1 'value2))))
-        (list 'division-by-zero (list 'e)
-              (gen-push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
-              (list 'error (list 'lisp-condition (gen-peek-item))))))
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (list 'handler-case
+                                         (list 'let (list (list 'value2 (gen-pop-item))
+                                                          (list 'value1 (gen-pop-item)))
+                                               (gen-push-item (list 'floor (list '/ 'value1 'value2))))
+                                         (list 'division-by-zero (list 'e)
+                                               (gen-push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
+                                               (list 'error (list 'lisp-condition (gen-peek-item)))))
+                             :type :INTEGER)))
+    (pop stack) (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-ldiv) &optional (stop-block nil))
+(defmethod codegen ((insn ir-ldiv) stack)
   ;; FIXME - handle all weird conditions
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (list 'handler-case
-        (list 'let (list (list 'value2 (gen-pop-item))
-                         (list 'value1 (gen-pop-item)))
-              (gen-push-item (list 'floor (list '/ 'value1 'value2))))
-        (list 'division-by-zero (list 'e)
-              (gen-push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
-              (list 'error (list 'lisp-condition (gen-peek-item))))))
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (list 'handler-case
+                                         (list 'let (list (list 'value2 (gen-pop-item))
+                                                          (list 'value1 (gen-pop-item)))
+                                               (gen-push-item (list 'floor (list '/ 'value1 'value2))))
+                                         (list 'division-by-zero (list 'e)
+                                               (gen-push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
+                                               (list 'error (list 'lisp-condition (gen-peek-item)))))
+                             :type :LONG)))
+    (pop stack) (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-dup) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (trace-insn
-   insn
-   (gen-push-item (gen-peek-item))))
+(defmethod codegen ((insn ir-dup) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (gen-push-item (gen-peek-item))
+                             :type (type (car stack)))))
+    (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-dup-x1) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (list 'let (list (list 'value1 (gen-pop-item))
-                   (list 'value2 (gen-pop-item)))
-        (gen-push-item 'value1)
-        (gen-push-item 'value2)
-        (gen-push-item 'value1)))
+(defmethod codegen ((insn ir-dup-x1) stacl)
+  (error "FIXME: handle long on stack")
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (list 'let (list (list 'value1 (gen-pop-item))
+                                                    (list 'value2 (gen-pop-item)))
+                                         (gen-push-item 'value1)
+                                         (gen-push-item 'value2)
+                                         (gen-push-item 'value1)
+                                         :type (type (car stack))))))
+    (let ((expr1 (pop stack))
+          (expr2 (pop stack)))
+      (push expr1 stack)
+      (push expr2 stack)
+      (push expr1 stack))
+    expr))
 
-(defmethod codegen ((insn ir-dup2) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (trace-insn
-   insn
-   (list 'let (list (list 'value1 (gen-pop-item))
-                    (list 'value2 (gen-pop-item)))
-         (gen-push-item 'value2)
-         (gen-push-item 'value1)
-         (gen-push-item 'value2)
-         (gen-push-item 'value1))))
+(defmethod codegen ((insn ir-dup2) stack)
+  (error "FIXME: handle long on stack")
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (list 'let (list (list 'value1 (gen-pop-item))
+                                                    (list 'value2 (gen-pop-item)))
+                                         (gen-push-item 'value2)
+                                         (gen-push-item 'value1)
+                                         (gen-push-item 'value2)
+                                         (gen-push-item 'value1)))))
+    (let ((expr1 (pop stack))
+          (expr2 (pop stack)))
+      (push expr2 stack)
+      (push expr1 stack)
+      (push expr2 stack)
+      (push expr1 stack))
+    expr))
 
-(defmethod codegen ((insn ir-fcmpg) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (list 'let (list (list 'value2 (gen-pop-item))
-                   (list 'value1 (gen-pop-item)))
-        (list 'if (list 'or (list 'float-features:float-nan-p 'value1) (list 'float-features:float-nan-p 'value2))
-              (gen-push-item 1)
-              (list 'if (list '> 'value1 'value2)
-                    (gen-push-item 1)
-                    (list 'if (list '< 'value1 'value2)
-                          (gen-push-item -1)
-                          (gen-push-item 0))))))
+(defmethod codegen ((insn ir-fcmpg) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (list 'let (list (list 'value2 (gen-pop-item))
+                                                    (list 'value1 (gen-pop-item)))
+                                         (list 'if (list 'or (list 'float-features:float-nan-p 'value1) (list 'float-features:float-nan-p 'value2))
+                                               (gen-push-item 1)
+                                               (list 'if (list '> 'value1 'value2)
+                                                     (gen-push-item 1)
+                                                     (list 'if (list '< 'value1 'value2)
+                                                           (gen-push-item -1)
+                                                           (gen-push-item 0)))))
+                             :type :INTEGER)))
+    (pop stack) (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-fcmpl) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (list 'let (list (list 'value2 (gen-pop-item))
-                   (list 'value1 (gen-pop-item)))
-        (list 'if (list 'or (list 'float-features:float-nan-p 'value1) (list 'float-features:float-nan-p 'value2))
-              (gen-push-item -1)
-              (list 'if (list '> 'value1 'value2)
-                    (gen-push-item 1)
-                    (list 'if (list '< 'value1 'value2)
-                          (gen-push-item -1)
-                          (gen-push-item 0))))))
+(defmethod codegen ((insn ir-fcmpl) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (list 'let (list (list 'value2 (gen-pop-item))
+                                                    (list 'value1 (gen-pop-item)))
+                                         (list 'if (list 'or (list 'float-features:float-nan-p 'value1) (list 'float-features:float-nan-p 'value2))
+                                               (gen-push-item -1)
+                                               (list 'if (list '> 'value1 'value2)
+                                                     (gen-push-item 1)
+                                                     (list 'if (list '< 'value1 'value2)
+                                                           (gen-push-item -1)
+                                                           (gen-push-item 0)))))
+                             :type :INTEGER)))
+    (pop stack) (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-iastore) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (list 'let (list (list 'value (gen-pop-item))
-                   (list 'index (gen-pop-item))
-                   (list 'arrayref (gen-pop-item)))
-        (list 'setf (list 'aref 'arrayref 'index) 'value)))
+(defmethod codegen ((insn ir-iastore) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (list 'let (list (list 'value (gen-pop-item))
+                                                    (list 'index (gen-pop-item))
+                                                    (list 'arrayref (gen-pop-item)))
+                                         (list 'setf (list 'aref 'arrayref 'index) 'value)))))
+    (pop stack)
+    (pop stack)
+    (pop stack)
+    expr))
 
-(defmethod codegen ((insn ir-ineg) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (with-slots (index const) insn
-    (gen-push-item (list '- (gen-pop-item)))))
+(defmethod codegen ((insn ir-ineg) stack)
+  ;; FIXME: handle integer overflow
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (gen-push-item (list '- (gen-pop-item)))
+                             :type :INTEGER)))
+    (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-i2c) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (with-slots (index const) insn
-    (gen-push-item (list 'code-char (gen-pop-item)))))
+(defmethod codegen ((insn ir-i2c) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (gen-push-item (list 'code-char (gen-pop-item)))
+                             :type :CHAR)))
+    (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-l2f) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (with-slots (index const) insn
-    (gen-push-item (list 'float (list '+ (list 'ash (gen-pop-item) 32) (gen-pop-item))))))
+(defmethod codegen ((insn ir-l2f) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (gen-push-item (list 'float (gen-pop-item)))
+                             :type :FLOAT)))
+    (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-f2i) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (with-slots (index const) insn
-    (gen-push-item (list 'floor (gen-pop-item)))))
+(defmethod codegen ((insn ir-f2i) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (gen-push-item (list 'floor (gen-pop-item)))
+                             :type :INTEGER)))
+    (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-d2l) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (with-slots (index const) insn
-    (gen-push-item (list 'floor (gen-pop-item)))))
+(defmethod codegen ((insn ir-d2l) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (gen-push-item (list 'floor (gen-pop-item)))
+                             :type :LONG)))
+    (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-i2f) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (with-slots (index const) insn
-    (gen-push-item (list 'float (gen-pop-item)))))
+(defmethod codegen ((insn ir-i2f) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (gen-push-item (list 'float (gen-pop-item)))
+                             :type :FLOAT)))
+    (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-iinc) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (trace-insn
-   insn
+(defmethod codegen ((insn ir-iinc) stack)
    (with-slots (index const) insn
-     (list 'incf (intern (format nil "local-~A" index) :openldk) const))))
+     (let ((expr (make-instance '<expression>
+                                :insn insn
+                                :code (list 'incf (intern (format nil "local-~A" index) :openldk) const))))
+       expr)))
 
-(defmethod codegen ((insn ir-if-acmpeq) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (trace-insn
-   insn
+(defmethod codegen ((insn ir-if-acmpeq) stack)
+   (with-slots (index offset const) insn
+     (let ((expr (make-instance '<expression>
+                                :insn insn
+                                :code (list 'let (list (list 'o1 (list 'sxhash (gen-pop-item)))
+                                                       (list 'o2 (list 'sxhash (gen-pop-item))))
+                                            (list 'when (list 'eq 'o1 'o2)
+                                                  (list 'go (intern (format nil "branch-target-~A" offset))))))))
+       (pop stack) (pop stack)
+       expr)))
+
+(defmethod codegen ((insn ir-if-acmpne) stack)
    (with-slots (offset) insn
-     (list 'let (list (list 'o1 (list 'sxhash (gen-pop-item)))
-                      (list 'o2 (list 'sxhash (gen-pop-item))))
-           ;; (list 'format t "acmpeq ~A ~A~%" 'o1 'o2)
-           (list 'if (list 'eq 'o1 'o2)
-                 (list 'go (intern (format nil "branch-target-~A" offset))))))))
+     (let ((expr (make-instance '<expression>
+                                :insn insn
+                                :code (list 'let (list (list 'o1 (gen-pop-item))
+                                                       (list 'o2 (gen-pop-item)))
+                                            (list 'when (list 'not (list 'eq (list 'sxhash 'o1) (list 'sxhash 'o2)))
+                                                  (list 'go (intern (format nil "branch-target-~A" offset))))))))
+       (pop stack) (pop stack)
+       expr)))
 
-(defmethod codegen ((insn ir-if-acmpne) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (trace-insn
-   insn
-   (with-slots (offset) insn
-     (list 'let (list (list 'o1 (gen-pop-item))
-                      (list 'o2 (gen-pop-item)))
-           ;; (list 'format t "acmpne ~A ~A ~A ~A~%" 'o1 'o2 (list 'sxhash 'o1) (list 'sxhash 'o2))
-           (list 'if (list 'not (list 'eq (list 'sxhash 'o1) (list 'sxhash 'o2)))
-                 (list 'go (intern (format nil "branch-target-~A" offset))))))))
-
-(defmethod codegen ((insn ir-if-icmpeq) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
+(defmethod codegen ((insn ir-if-icmpeq) &optional stack)
   (with-slots (offset) insn
-    (list 'if (list 'equal (gen-pop-item) (gen-pop-item))
-          (list 'go (intern (format nil "branch-target-~A" offset))))))
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (list 'when (list 'equal (gen-pop-item) (gen-pop-item))
+                                           (list 'go (intern (format nil "branch-target-~A" offset)))))))
+      (pop stack) (pop stack)
+      expr)))
 
-(defmethod codegen ((insn ir-if-icmple) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
+(defmethod codegen ((insn ir-if-icmple) stack)
   (with-slots (offset) insn
-    (list 'if (list '>= (gen-pop-item) (gen-pop-item))
-          (list 'go (intern (format nil "branch-target-~A" offset))))))
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (list 'when (list '>= (gen-pop-item) (gen-pop-item))
+                                           (list 'go (intern (format nil "branch-target-~A" offset)))))))
+      (pop stack) (pop stack)
+      expr)))
 
-(defmethod codegen ((insn ir-if-icmpge) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
+(defmethod codegen ((insn ir-if-icmpge) stack)
   (with-slots (offset) insn
-    (list 'if (list '<= (gen-pop-item) (gen-pop-item))
-          (list 'go (intern (format nil "branch-target-~A" offset))))))
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (list 'when (list '<= (gen-pop-item) (gen-pop-item))
+                                           (list 'go (intern (format nil "branch-target-~A" offset)))))))
+      (pop stack) (pop stack)
+      expr)))
 
-(defmethod codegen ((insn ir-if-icmplt) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
+(defmethod codegen ((insn ir-if-icmplt) stack)
   (with-slots (offset) insn
-    (list 'if (list '> (gen-pop-item) (gen-pop-item))
-          (list 'go (intern (format nil "branch-target-~A" offset))))))
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (list 'when (list '> (gen-pop-item) (gen-pop-item))
+                                           (list 'go (intern (format nil "branch-target-~A" offset)))))))
+      (pop stack) (pop stack)
+      expr)))
 
-(defmethod codegen ((insn ir-if-icmpgt) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
+(defmethod codegen ((insn ir-if-icmpgt) stack)
   (with-slots (offset) insn
-    (list 'if (list '< (gen-pop-item) (gen-pop-item))
-          (list 'go (intern (format nil "branch-target-~A" offset))))))
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (list 'when (list '< (gen-pop-item) (gen-pop-item))
+                                           (list 'go (intern (format nil "branch-target-~A" offset)))))))
+      (pop stack) (pop stack)
+      expr)))
 
-(defmethod codegen ((insn ir-if-icmpne) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
+(defmethod codegen ((insn ir-if-icmpne) stack)
   (with-slots (offset) insn
-    (list 'if (list 'not (list 'eq (gen-pop-item) (gen-pop-item)))
-          (list 'go (intern (format nil "branch-target-~A" offset))))))
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (list 'when (list 'not (list 'eq (gen-pop-item) (gen-pop-item)))
+                                           (list 'go (intern (format nil "branch-target-~A" offset)))))))
+      (pop stack) (pop stack)
+      expr)))
 
-(defmethod codegen ((insn ir-ifeq) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
+(defmethod codegen ((insn ir-ifeq) stack)
   (with-slots (offset) insn
-    (list 'if (list 'eq (gen-pop-item) 0)
-          (list 'go (intern (format nil "branch-target-~A" offset))))))
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (list 'when (list 'eq (gen-pop-item) 0)
+                                           (list 'go (intern (format nil "branch-target-~A" offset)))))))
+      (pop stack) (pop stack)
+      expr)))
 
-(defmethod codegen ((insn ir-ifge) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
+(defmethod codegen ((insn ir-ifge) stack)
   (with-slots (offset) insn
-    (list 'progn
-          (list 'if (list '>= (gen-pop-item) 0)
-                (list 'go (intern (format nil "branch-target-~A" offset)))))))
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (list 'when (list '>= (gen-pop-item) 0)
+                                           (list 'go (intern (format nil "branch-target-~A" offset)))))))
+      (pop stack)
+      expr)))
 
-(defmethod codegen ((insn ir-ifle) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
+(defmethod codegen ((insn ir-ifle) stack)
   (with-slots (offset) insn
-    (list 'progn
-          (list 'if (list '<= (gen-pop-item) 0)
-                (list 'go (intern (format nil "branch-target-~A" offset)))))))
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (list 'when (list '<= (gen-pop-item) 0)
+                                           (list 'go (intern (format nil "branch-target-~A" offset)))))))
+      (pop stack)
+      expr)))
 
-(defmethod codegen ((insn ir-iflt) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
+(defmethod codegen ((insn ir-iflt) stack)
   (with-slots (offset) insn
-    (list 'progn
-          (list 'if (list '< (gen-pop-item) 0)
-                (list 'go (intern (format nil "branch-target-~A" offset)))))))
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (list 'when (list '< (gen-pop-item) 0)
+                                           (list 'go (intern (format nil "branch-target-~A" offset)))))))
+      (pop stack)
+      expr)))
 
-(defmethod codegen ((insn ir-ifgt) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
+(defmethod codegen ((insn ir-ifgt) stack)
   (with-slots (offset) insn
-    (list 'progn
-          (list 'if (list '> (gen-pop-item) 0)
-                (list 'go (intern (format nil "branch-target-~A" offset)))))))
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (list 'when (list '> (gen-pop-item) 0)
+                                           (list 'go (intern (format nil "branch-target-~A" offset)))))))
+      (pop stack)
+      expr)))
 
-(defmethod codegen ((insn ir-ifne) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (trace-insn
-   insn (with-slots (offset) insn
-          (list 'if (list 'not (list 'eq (gen-pop-item) '0))
-                (list 'go (intern (format nil "branch-target-~A" offset)))))))
-
-(defmethod codegen ((insn ir-ifnonnull) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
+(defmethod codegen ((insn ir-ifne) stack)
   (with-slots (offset) insn
-    (list 'if (list 'not (list 'null (gen-pop-item)))
-          (list 'go (intern (format nil "branch-target-~A" offset))))))
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (list 'when (list 'not (list 'eq (gen-pop-item) '0))
+                                           (list 'go (intern (format nil "branch-target-~A" offset)))))))
+      (pop stack)
+      expr)))
 
-(defmethod codegen ((insn ir-ifnull) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
+(defmethod codegen ((insn ir-ifnonnull) stack)
   (with-slots (offset) insn
-    (list 'if (list 'null (gen-pop-item))
-          (list 'go (intern (format nil "branch-target-~A" offset))))))
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (list 'when (list 'not (list 'null (gen-pop-item)))
+                                           (list 'go (intern (format nil "branch-target-~A" offset)))))))
+      (pop stack)
+      expr)))
 
-(defmethod codegen ((insn ir-instanceof) &optional (stop-block nil))
-  (declare (ignore stop-block))
+(defmethod codegen ((insn ir-ifnull) stack)
+  (with-slots (offset) insn
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (list 'when (list 'null (gen-pop-item))
+                                           (list 'go (intern (format nil "branch-target-~A" offset)))))))
+      (pop stack)
+      expr)))
+
+(defmethod codegen ((insn ir-instanceof) stack)
   (with-slots (class) insn
-    (gen-push-item
-     (list 'if (list 'typep (gen-pop-item)
-                     (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk))) 1 0))))
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (gen-push-item
+                                      (list 'if (list 'typep (gen-pop-item)
+                                                      (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk))) 1 0))
+                               :type :INTEGER)))
+      (pop stack) (push expr stack)
+      expr)))
 
 (defun logical-shift-right-32 (integer shift)
   (logand
@@ -506,238 +663,271 @@
   (logand (ash x (- bits))
           (1- (ash 1 width))))
 
-(defmethod codegen ((insn ir-ishl) &optional (stop-block nil))
-  (declare (ignore stop-block))
+(defmethod codegen ((insn ir-ishl) stack)
   ;; FIXME: this is wrong.
-  (list 'let (list (list 'value2 (gen-pop-item))
-                   (list 'value1 (gen-pop-item)))
-        (list 'progn
-              ;; (list 'format 't "ISHL ~A ~A~%" 'value1 'value2)
-              (gen-push-item (list 'ash 'value1 'value2)))))
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (list 'let (list (list 'value2 (gen-pop-item))
+                                                    (list 'value1 (gen-pop-item)))
+                                         (gen-push-item (list 'ash 'value1 'value2)))
+                             :type :INTEGER)))
+    (pop stack) (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-lshl) &optional (stop-block nil))
-  (declare (ignore stop-block))
+(defmethod codegen ((insn ir-lshl) stack)
   ;; FIXME: this is wrong.
-  (list 'let (list (list 'value2 (gen-pop-item))
-                   (list 'value1 (gen-pop-item)))
-        (list 'progn
-              ;; (list 'format 't "LSHL ~A ~A~%" 'value1 'value2)
-              (gen-push-item (list 'shl 'value1 'value2 32)))))
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (list 'let (list (list 'value2 (gen-pop-item))
+                                                    (list 'value1 (gen-pop-item)))
+                                         (gen-push-item (list 'shl 'value1 'value2 32)))
+                             :type :INTEGER)))
+    (pop stack) (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-iushr) &optional (stop-block nil))
-  (declare (ignore stop-block))
+(defmethod codegen ((insn ir-iushr) stack)
   ;; FIXME: this is wrong.
-  (list 'let (list (list 'value2 (gen-pop-item))
-                   (list 'value1 (gen-pop-item)))
-        (list 'progn
-              (gen-push-item (list 'shr 'value1 'value2 32)))))
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (list 'let (list (list 'value2 (gen-pop-item))
+                                                    (list 'value1 (gen-pop-item)))
+                                         (gen-push-item (list 'shr 'value1 'value2 32)))
+                             :type :INTEGER)))
+    (pop stack) (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-lshr) &optional (stop-block nil))
-  (declare (ignore stop-block))
+(defmethod codegen ((insn ir-lshr) stack)
   ;; FIXME: this is wrong.
-  (list 'let (list (list 'value2 (gen-pop-item))
-                   (list 'value1 (gen-pop-item)))
-        (list 'progn
-              (list 'format 't "LSHR ~A ~A~%" 'value1 'value2)
-              (gen-push-item (list 'shr 'value1 'value2 32)))))
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (list 'let (list (list 'value2 (gen-pop-item))
+                                                    (list 'value1 (gen-pop-item)))
+                                         (gen-push-item (list 'shr 'value1 'value2 64)))
+                             :type :LONG)))
+    (pop stack) (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-ishr) &optional (stop-block nil))
-  (declare (ignore stop-block))
+(defmethod codegen ((insn ir-ishr) stack)
   ;; FIXME: this is wrong.
-  (list 'let (list (list 'value2 (gen-pop-item))
-                   (list 'value1 (gen-pop-item)))
-        (list 'progn
-              ;; (list 'format 't "ISHR ~A ~A~%" 'value1 'value2)
-              (gen-push-item (list 'ash 'value1 (list '- 0 'value2))))))
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (list 'let (list (list 'value2 (gen-pop-item))
+                                                    (list 'value1 (gen-pop-item)))
+                                         (gen-push-item (list 'ash 'value1 (list '- 0 'value2))))
+                             :type :INTEGER)))
+    (pop stack) (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-lcmp) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (list 'let (list (list 'value2 (gen-pop-item))
-                   (list 'value1 (gen-pop-item)))
-        (list 'cond
-              (list (list 'eq 'value1 'value2)
-                    (gen-push-item 0))
-              (list (list '> 'value1 'value2)
-                    (gen-push-item 1))
-              (list 't
-                    (gen-push-item -1)))))
+(defmethod codegen ((insn ir-lcmp) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (list 'let (list (list 'value2 (gen-pop-item))
+                                                    (list 'value1 (gen-pop-item)))
+                                         (list 'cond
+                                               (list (list 'eq 'value1 'value2)
+                                                     (gen-push-item 0))
+                                               (list (list '> 'value1 'value2)
+                                                     (gen-push-item 1))
+                                               (list 't
+                                                     (gen-push-item -1))))
+                             :type :INTEGER)))
+    (pop stack) (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-lushr) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (list 'let (list (list 'value2 (gen-pop-item))
-                   (list 'value1 (gen-pop-item)))
-        (list 'progn
-              ;; (list 'format 't "LUSHR ~A ~A~%" 'value1 'value2)
-              (gen-push-item (list 'ash 'value1 (list \- 'value2))))))
+(defmethod codegen ((insn ir-lushr) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (list 'let (list (list 'value2 (gen-pop-item))
+                                                    (list 'value1 (gen-pop-item)))
+                                         (gen-push-item (list 'ash 'value1 (list \- 'value2))))
+                             :type :LONG)))
+    (pop stack) (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-goto) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (trace-insn
-   insn
-   (with-slots (offset) insn
-     (list 'go (intern (format nil "branch-target-~A" offset))))))
+(defmethod codegen ((insn ir-goto) stack)
+  (declare (ignore stack))
+  (with-slots (offset) insn
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (list 'go (intern (format nil "branch-target-~A" offset))))))
+      expr)))
 
-(defmethod codegen ((insn ir-call-virtual-method) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (print "CVM")
-  (trace-insn
-   insn
-   (with-slots (method-name args) insn
-     (format t "GPH: ~A ~A~%" method-name (gen-parameter-hints method-name))
-     (let* ((nargs (length args))
-            (call (cond
-                    ((eq nargs 0)
-                     (error "internal error"))
-                    ((eq nargs 1)
-                     ;; FIXME: handle long/double
-                     (list (intern (format nil "~A" method-name) :openldk) (codegen (car args))))
-                    (t
-                     (list 'apply
-                           (list 'function (intern (format nil "~A"
-                                                           method-name) :openldk))
-                           (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))))))))
-       (if (void-return-p insn)
-           call
-           (gen-push-item call))))))
+(defmethod codegen ((insn ir-call-virtual-method) stack)
+  (with-slots (method-name args) insn
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (let* ((nargs (length args))
+                                            (call (cond
+                                                    ((eq nargs 0)
+                                                     (error "internal error"))
+                                                    ((eq nargs 1)
+                                                     ;; FIXME: handle long/double
+                                                     (list (intern (format nil "~A" method-name) :openldk) (codegen (car args))))
+                                                    (t
+                                                     (list 'apply
+                                                           (list 'function (intern (format nil "~A"
+                                                                                           method-name) :openldk))
+                                                           (list 'reverse (cons 'list (mapcar (lambda (a) (codegen a)) args))))))))
+                                       (if (void-return-p insn)
+                                           call
+                                           (gen-push-item call))))))
+      (loop for arg in args
+            do (pop stack))
+      (unless (void-return-p insn)
+        (push expr stack))
+      expr)))
 
-(defmethod codegen ((insn ir-clinit) &optional (stop-block nil))
-  (declare (ignore stop-block))
+(defmethod codegen ((insn ir-clinit) stack)
   (with-slots (class) insn
-    (let* ((class (ir-class-class class)))
-      (list 'unless (list 'initialized-p class)
-            (list (intern (format nil "%clinit-~A" (slot-value class 'name)) :openldk))))))
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (let ((class (ir-class-class class)))
+                                       (list 'unless (list 'initialized-p class)
+                                             (list (intern (format nil "%clinit-~A" (slot-value class 'name)) :openldk)))))))
+      expr)))
 
-(defmethod codegen ((insn ir-local-variable) &optional (stop-block nil))
-  (declare (ignore stop-block))
+(defmethod codegen ((insn ir-local-variable) stack)
   (with-slots (index) insn
-    (intern (format nil "local-~A" index) :openldk)))
+    ;; FIXME: track type of local vars
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (intern (format nil "local-~A" index) :openldk))))
+      expr)))
 
-(defmethod codegen ((insn ir-monitorenter) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (list 'monitor-enter (gen-pop-item)))
+(defmethod codegen ((insn ir-monitorenter) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (list 'monitor-enter (gen-pop-item)))))
+    (pop stack)
+    expr))
 
-(defmethod codegen ((insn ir-monitorexit) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (list 'monitor-exit (gen-pop-item)))
+(defmethod codegen ((insn ir-monitorexit) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (list 'monitor-exit (gen-pop-item)))))
+    (pop stack)
+    expr))
 
-(defmethod codegen ((insn ir-mul) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (gen-push-item (list '* (gen-pop-item) (gen-pop-item))))
+(defmethod codegen ((insn ir-mul) stack)
+  ;; FIXME: track type
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (gen-push-item (list '* (gen-pop-item) (gen-pop-item))))))
+    (pop stack) (pop stack) (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-new) &optional (stop-block nil))
-  (declare (ignore stop-block))
+(defmethod codegen ((insn ir-new) stack)
   (with-slots (class) insn
     (with-slots (class) class
-      (list 'make-instance (list 'quote (intern (slot-value class 'name) :openldk))))))
+      (let ((expr (make-instance '<expression>
+                                 :insn insn
+                                 :code (list 'make-instance (list 'quote (intern (slot-value class 'name) :openldk)))
+                                 :type :REFERENCE)))
+        (push expr stack)
+        expr))))
 
-(defmethod codegen ((insn ir-new-array) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (trace-insn
-   insn
-   (list 'make-array (gen-pop-item) :initial-element nil)))
+(defmethod codegen ((insn ir-new-array) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (list 'make-array (gen-pop-item) :initial-element nil)
+                             :type :ARRAY)))
+    (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-nop) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (gensym "NOP-"))
+(defmethod codegen ((insn ir-nop) stack)
+  (declare (ignore stack))
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (gensym "NOP-"))))
+    expr))
 
-(defmethod codegen ((insn ir-pop) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (trace-insn
-   insn
-   (gen-pop-item)))
+(defmethod codegen ((insn ir-pop) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (gen-pop-item))))
+    (pop stack)
+    expr))
 
-(defmethod codegen ((insn ir-push) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (trace-insn
-   insn
-   (with-slots (value) insn
-     (gen-push-item (codegen value)))))
+(defmethod codegen ((insn ir-push) stack)
+  (let* ((value (codegen value stack))
+         (expr (make-instance '<expression>
+                              :insn insn
+                              :code (gen-push-item value)
+                              :type (type value))))
+    (push expr stack)
+    expr))
 
-(defmethod codegen ((insn ir-sub) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (list 'let (list (list 'value2 (gen-pop-item))
-                   (list 'value1 (gen-pop-item)))
-        (gen-push-item (list '- 'value1 'value2))))
+(defmethod codegen ((insn ir-sub) stack)
+  ;; FIXME: type!
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (list 'let (list (list 'value2 (gen-pop-item))
+                                                    (list 'value1 (gen-pop-item)))
+                                         (gen-push-item (list '- 'value1 'value2))))))
+    (pop stack) (pop stack) (push expr stack)
+    expr))
 
-(defun gen-arguments (components hints)
-  (let ((result '()))
-    (loop for comp in components
-          for hint in hints
-          while comp
-          do (cond
-               ((eq hint #\L)
-                ;; Merge the current component with the next one
-                (let ((next (pop components)))
-                  (push (list '+ (list 'ash (codegen comp) 32) (codegen next)) result)))
-               (t
-                ;; Add the current component as is
-                (push (codegen comp) result))))
-    (nreverse (append result (list 'list)))))
-
-(defmethod codegen ((insn ir-call-special-method) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (trace-insn
-   insn
+(defmethod codegen ((insn ir-call-special-method) stack)
    (with-slots (class method-name args) insn
-     (setf args (gen-arguments args (cons t (reverse (gen-parameter-hints method-name)))))
-     (let ((call (list 'destructuring-bind (cons 'method 'next)
-                       (list 'closer-mop:compute-applicable-methods-using-classes
-                             (list 'function (intern (format nil "~A" method-name) :openldk))
-                             ;; FIXME: This should be based on the args list
-                             (cons 'list
-                                   (cons (find-class (intern (slot-value class 'name) :openldk))
-                                         (loop for a in args
-                                               collect t))))
-                       (list 'let (list (list 'fn (list 'closer-mop:method-function 'method)))
-                             (list 'apply 'fn
-                                   (list 'list (cons 'reverse (list args)) 'next))))))
-       (if (void-return-p insn)
-           call
-           (gen-push-item call))))))
+     (let ((expr (make-instance '<expression>
+                                :insn insn
+                                :code (let ((call (list 'destructuring-bind (cons 'method 'next)
+                                                        (list 'closer-mop:compute-applicable-methods-using-classes
+                                                              (list 'function (intern (format nil "~A" method-name) :openldk))
+                                                              ;; FIXME: This should be based on the args list
+                                                              (cons 'list
+                                                                    (cons (find-class (intern (slot-value class 'name) :openldk))
+                                                                          (loop for a in args
+                                                                                collect t))))
+                                                        (list 'let (list (list 'fn (list 'closer-mop:method-function 'method)))
+                                                              (list 'apply 'fn
+                                                                    (list 'list (cons 'reverse (list args)) 'next))))))
+                                        (if (void-return-p insn)
+                                            call
+                                            (gen-push-item call))))))
+       (loop for arg in args
+             do (pop stack))
+       (unless (void-return-p insn)
+         (push expr stack))
+       expr)))
 
-(defmethod codegen ((insn ir-member) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
+(defmethod codegen ((insn ir-member) stack)
   (with-slots (member-name) insn
-    (list 'slot-value
-          (list 'let (list (list 'objref (gen-pop-item)))
-                (list 'when (list 'null 'objref) (list 'error
-                                                       (format nil "Null Pointer Exception ~A" (slot-value insn 'address))))
-                'objref)
-          (list 'quote (intern member-name :openldk)))))
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (list 'slot-value
+                                           (list 'let (list (list 'objref (gen-pop-item)))
+                                                 (list 'when (list 'null 'objref) (list 'error
+                                                                                        (format nil "Null Pointer Exception ~A" (slot-value insn 'address))))
+                                                 'objref)
+                                           (list 'quote (intern member-name :openldk))))))
+      (pop stack)
+      expr)))
 
-(defmethod codegen ((insn ir-static-member) &optional (stop-block nil))
-  (declare (ignore stop-block))
+(defmethod codegen ((insn ir-static-member) stack)
+  (declare (ignore stack)
   (with-slots (class member-name) insn
-    (list 'slot-value
-          (intern (format nil "+static-~A+" (slot-value (slot-value class 'class) 'name)) :openldk)
-          (list 'quote (intern member-name :openldk)))))
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (list 'slot-value
+                                           (intern (format nil "+static-~A+" (slot-value (slot-value class 'class) 'name)) :openldk)
+                                           (list 'quote (intern member-name :openldk))))))
+      expr))))
 
-(defmethod codegen ((insn ir-store) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (trace-insn
-   insn
-   (with-slots (target) insn
-     (list 'setf (codegen target) (gen-pop-item)))))
+(defmethod codegen ((insn ir-store) stack)
+  (with-slots (target) insn
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (list 'setf (codegen target) (gen-pop-item)))))
+      (pop stack)
+      expr)))
 
-(defmethod codegen ((insn ir-lstore) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (trace-insn
-   insn
-   (with-slots (target) insn
-     (list 'setf (codegen target) (gen-pop-item))
-     (list 'setf (codegen target) (gen-pop-item)))))
+(defmethod codegen ((insn ir-lstore) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (with-slots (target) insn
+                                     (list 'setf (codegen target) (gen-pop-item))))))
+    (pop stack)))
 
 (define-condition java-lang-throwable (error)
   ((throwable :initarg :throwable :reader throwable)))
@@ -745,32 +935,38 @@
 (defun make-java-condition (e)
   (make-condition (gethash (class-of e) *condition-table*) :objref e))
 
-(defmethod codegen ((insn ir-throw) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (trace-insn
-   insn
-   (list 'let (list (list 'c (list 'lisp-condition (gen-peek-item))))
-         (list 'error 'c))))
+(defmethod codegen ((insn ir-throw) stack)
+  (declare (ignore stack))
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (list 'let (list (list 'c (list 'lisp-condition (gen-peek-item))))
+                                         (list 'error 'c)))))
+    expr))
 
-(defmethod codegen ((insn ir-return) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (trace-insn
-   insn
-   (list 'return)))
+(defmethod codegen ((insn ir-return) stack)
+  (declare (ignore stack))
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (list 'return))))
+    expr))
 
-(defmethod codegen ((insn ir-return-value) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (flag-stack-usage *context*)
-  (list 'return-from
-        (intern (slot-value insn 'fn-name) :openldk)
-        (gen-pop-item)))
+(defmethod codegen ((insn ir-return-value) stack)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (list 'return-from
+                                         (intern (slot-value insn 'fn-name) :openldk)
+                                         (gen-pop-item)))))
+    (pop stack)
+    expr))
 
-(defmethod codegen ((insn ir-variable) &optional (stop-block nil))
-  (declare (ignore stop-block))
-  (slot-value insn 'name))
+(defmethod codegen ((insn ir-variable) stack)
+  (declare (ignore stack))
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (slot-value insn 'name))))
+    expr))
 
-(defmethod codegen ((basic-block <basic-block>) &optional (stop-block nil))
+(defmethod codegen-block ((basic-block <basic-block>) &optional (stop-block nil))
   (unless (equal basic-block stop-block)
     (if (not (slot-value basic-block 'code-emitted-p))
         (progn
@@ -789,7 +985,7 @@
                         (setf lisp-code (append lisp-code (list (list 'go (intern (format nil "branch-target-~A" (address (car successor-list)))))))))))
               (dolist (successor successor-list)
                 (when successor
-                  (setf lisp-code (append lisp-code (codegen successor (or stop-block (try-exit-block basic-block))))))))
+                  (setf lisp-code (append lisp-code (codegen-block successor (or stop-block (try-exit-block basic-block))))))))
 
             ;; Emit handlers for finally handlers. FIXME: in build-basic-blocks, sort try-catch list by end of range
             (when (find-if (lambda (p) (null (car p))) (try-catch basic-block))
@@ -800,9 +996,9 @@
                                                              (cons 'tagbody lisp-code)
                                                              (list 'condition (list (intern "condition" :openldk))
                                                                    (cons 'tagbody
-                                                                         (codegen (cdr tc) (try-exit-block basic-block))))))
+                                                                         (codegen-block (cdr tc) (try-exit-block basic-block))))))
                                                  (when (try-exit-block basic-block)
-                                                   (codegen (try-exit-block basic-block)))))))
+                                                   (codegen-block (try-exit-block basic-block)))))))
 
             ;; Emit handler if there's a non-finally try-catch associated with this block.
             (when (find-if (lambda (p) (car p)) (try-catch basic-block))
@@ -814,9 +1010,9 @@
                                                             collect (append (list (intern (format nil "condition-~A" (car tc)) :openldk)
                                                                                   (list (intern "condition" :openldk)))
                                                                             (list (cons 'tagbody
-                                                                                        (codegen (cdr tc) (try-exit-block basic-block))))))))
+                                                                                        (codegen-block (cdr tc) (try-exit-block basic-block))))))))
                                       (when (try-exit-block basic-block)
-                                        (codegen (try-exit-block basic-block))))))
+                                        (codegen-block (try-exit-block basic-block))))))
 
             lisp-code))
         nil)))

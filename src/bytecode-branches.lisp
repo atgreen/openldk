@@ -68,7 +68,7 @@
     :ISUB
     :L2F :L2I
     :LADD :LAND :LDIV
-    :LOR
+    :LOR :LXOR
 		:LCMP
     :LCONST_0 :LCONST_1
     :LLOAD_0 :LLOAD_1 :LLOAD_2 :LLOAD_3

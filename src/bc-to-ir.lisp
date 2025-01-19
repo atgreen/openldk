@@ -1167,6 +1167,7 @@
                                              :address (if (and is-clinit-p (equal callee-class (name context-class))) pc-start (+ pc-start 0.1))
                                              :class callee-class
                                              :void-return-p (ends-in-V (emit method-reference constant-pool))
+                                             :return-type (get-return-type (emit method-reference constant-pool))
                                              :method-name (lispize-method-name (emit method-reference constant-pool))
                                              :args (pop-args parameter-count)))))
               (if (and is-clinit-p (equal callee-class (name context-class)))

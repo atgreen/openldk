@@ -63,7 +63,7 @@
   ())
 
 (defclass/std ir-literal (ir-node)
-  ((value)))
+  ((value type)))
 
 (defmethod emit ((v ir-literal) cp)
   (slot-value v 'value))
@@ -127,6 +127,9 @@
   ())
 
 (defclass/std ir-ixor (ir-node)
+  ())
+
+(defclass/std ir-lxor (ir-node)
   ())
 
 (defclass/std ir-ineg (ir-node)
@@ -264,7 +267,8 @@
 (defclass/std ir-call-special-method (ir-call)
   ((class :with)
    (method-name)
-   (args)))
+   (args)
+   (return-type)))
 
 (defclass/std ir-call-virtual-method (ir-call)
   ((method-name)

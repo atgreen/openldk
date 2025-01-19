@@ -101,7 +101,7 @@
            (blocks (build-basic-blocks ir-code-0))
            (lisp-code
              (list (list 'block nil
-                         (cons 'tagbody (loop for bloc in blocks append (codegen bloc))))))
+                         (cons 'tagbody (loop for bloc in blocks append (codegen-block bloc))))))
            (traced-lisp-code (if *debug-trace* (list (list 'unwind-protect (car lisp-code) (list 'format 't "; trace: leaving  ~A.~A~%" class-name (fn-name *context*)))) lisp-code))
            (definition-code
              (let ((parameter-count (count-parameters (slot-value method 'descriptor))))
