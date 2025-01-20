@@ -42,6 +42,10 @@
     code
     expression-type)))
 
+(defmethod print-object ((expr <expression>) out)
+  (print-unreadable-object (expr out :type t)
+    (format out "{~A : ~A}" (slot-value expr 'insn) (slot-value expr 'code))))
+
 (defun gen-push-item (item)
   (assert (not (eq (type-of item) '<expression>)))
   (if *debug-stack*
@@ -310,6 +314,7 @@
                                                (gen-push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
                                                (list 'error (list 'lisp-condition (gen-peek-item)))))
                              :expression-type :INTEGER)))
+    (pop (stack context)) (pop (stack context)) (push expr (stack context))
     expr))
 
 (defmethod codegen ((insn ir-fdiv) context)
@@ -786,8 +791,6 @@
                                        (if (void-return-p insn)
                                            call
                                            (gen-push-item call))))))
-      (loop for arg in args
-            do (pop (stack context)))
       (unless (void-return-p insn)
         (push expr (stack context)))
       expr)))
@@ -846,7 +849,7 @@
                                  :insn insn
                                  :code (list 'make-instance (list 'quote (intern (slot-value class 'name) :openldk)))
                                  :expression-type :REFERENCE)))
-        (push expr (stack context))
+        ;; We don't push this. bc-2-ir pushes this.
         expr))))
 
 (defmethod codegen ((insn ir-new-array) context)
@@ -854,7 +857,7 @@
                              :insn insn
                              :code (list 'make-array (gen-pop-item) :initial-element nil)
                              :expression-type :ARRAY)))
-    (push expr (stack context))
+    ;; We don't push this. bc-2-ir pushes this.
     expr))
 
 (defmethod codegen ((insn ir-nop) context)
@@ -901,7 +904,7 @@
     expr))
 
 (defmethod codegen ((insn ir-call-special-method) context)
-   (with-slots (class method-name args) insn
+  (with-slots (class method-name args) insn
      (let ((expr (make-instance '<expression>
                                 :insn insn
                                 :code (let ((call (list 'destructuring-bind (cons 'method 'next)
@@ -917,8 +920,6 @@
                                         (if (void-return-p insn)
                                             call
                                             (gen-push-item call))))))
-       (loop for arg in args
-             do (pop (stack context)))
        (unless (void-return-p insn)
          (push expr (stack context)))
        expr)))
