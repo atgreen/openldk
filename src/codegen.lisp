@@ -233,7 +233,7 @@
                                :insn insn
                                :code (list 'let (list (list 'index (gen-pop-item))
                                                       (list 'arrayref (gen-pop-item)))
-                                           (gen-push-item (list 'aref 'arrayref 'index)))
+                                           (gen-push-item (list 'char-code (list 'aref 'arrayref 'index))))
                                :expression-type :CHAR)))
       (pop (stack context)) (pop (stack context)) (push expr (stack context))
       expr)))
