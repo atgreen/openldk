@@ -501,8 +501,6 @@
                          (aref code (incf pc)))))
           (multiple-value-bind (fieldname class)
               (emit (aref constant-pool index) constant-pool)
-            (format t "BMG: ~A~%"
-                    (aref constant-pool (slot-value (aref constant-pool (slot-value (aref constant-pool index) 'type-descriptor-index)) 'type-descriptor-index)))
             (incf pc)
             (let ((code (list (make-instance 'ir-push
                                              :address (if (and is-clinit-p (equal (ir-class-class class) context-class)) pc-start (+ pc-start 0.1))
