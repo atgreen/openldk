@@ -72,6 +72,9 @@
 (defclass/std ir-local-variable (ir-node)
   ((index)))
 
+(defclass/std ir-long-local-variable (ir-node)
+  ((index)))
+
 (defclass/std ir-null-literal (ir-literal)
   ())
 

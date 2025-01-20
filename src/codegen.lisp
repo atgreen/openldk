@@ -106,7 +106,7 @@
 (defmethod codegen ((insn ir-iadd) context)
   (let ((expr (make-instance '<expression>
                              :insn insn
-                             :code (gen-push-itme (list 'logand (list '+ (gen-pop-item) (gen-pop-item)) #xFFFFFFFF))
+                             :code (gen-push-item (list 'logand (list '+ (gen-pop-item) (gen-pop-item)) #xFFFFFFFF))
                              :expression-type :INTEGER)))
     (pop (stack context)) (pop (stack context)) (push expr (stack context))
     expr))
@@ -114,7 +114,7 @@
 (defmethod codegen ((insn ir-ladd) context)
   (let ((expr (make-instance '<expression>
                              :insn insn
-                             :code (gen-push-itme (list 'logand (list '+ (gen-pop-item) (gen-pop-item)) #xFFFFFFFFFFFFFFFF))
+                             :code (gen-push-item (list 'logand (list '+ (gen-pop-item) (gen-pop-item)) #xFFFFFFFFFFFFFFFF))
                              :expression-type :LONG)))
     (pop (stack context)) (pop (stack context)) (push expr (stack context))
     expr))
@@ -196,7 +196,7 @@
   (with-slots (source target) insn
     (let ((expr (make-instance '<expression>
                                :insn insn
-                               :code (list 'let (list (list 'value (codegen source context)))
+                               :code (list 'let (list (list 'value (code (codegen source context))))
                                            (list 'setf (code (codegen target context)) 'value))
                                :expression-type :INTEGER)))
     expr)))
@@ -235,7 +235,7 @@
                                                       (list 'arrayref (gen-pop-item)))
                                            (gen-push-item (list 'aref 'arrayref 'index)))
                                :expression-type :CHAR)))
-      (pop (stack context)) (pop (stack context)) (push (stack context) expr)
+      (pop (stack context)) (pop (stack context)) (push expr (stack context))
       expr)))
 
 (defmethod codegen ((insn ir-iaload) context)
@@ -247,7 +247,7 @@
                                                       (list 'arrayref (gen-pop-item)))
                                            (gen-push-item (list 'aref 'arrayref 'index)))
                                :expression-type :INTEGER)))
-      (pop (stack context)) (pop (stack context)) (push (stack context) expr)
+      (pop (stack context)) (pop (stack context)) (push expr (stack context))
       expr)))
 
 (defmethod codegen ((insn ir-castore) context)
@@ -259,7 +259,7 @@
                                                     (list 'arrayref (gen-pop-item)))
                                          (list 'setf (list 'aref 'arrayref 'index) (list 'code-char 'value)))
                              :expression-type nil)))
-    (pop (stack context)) (pop (stack context)) (pop-stack)
+    (pop (stack context)) (pop (stack context)) (pop (stack context))
     expr))
 
 
@@ -365,8 +365,10 @@
     (push expr (stack context))
     expr))
 
-(defmethod codegen ((insn ir-dup-x1) stacl)
-  (error "FIXME: handle long on stack")
+(defmethod codegen ((insn ir-dup-x1) context)
+  (let ((tos-type (expression-type (car (stack context)))))
+    (when (or (eq tos-type :LONG) (eq tos-type :DOUBLE))
+      (error "FIXME: handle long/double on stack")))
   (let ((expr (make-instance '<expression>
                              :insn insn
                              :code (list 'let (list (list 'value1 (gen-pop-item))
@@ -383,7 +385,9 @@
     expr))
 
 (defmethod codegen ((insn ir-dup2) context)
-  (error "FIXME: handle long on stack")
+  (let ((tos-type (expression-type (car (stack context)))))
+    (when (or (eq tos-type :LONG) (eq tos-type :DOUBLE))
+      (error "FIXME: handle long/double on stack")))
   (let ((expr (make-instance '<expression>
                              :insn insn
                              :code (list 'let (list (list 'value1 (gen-pop-item))
@@ -805,6 +809,14 @@
                                :code (intern (format nil "local-~A" index) :openldk))))
       expr)))
 
+(defmethod codegen ((insn ir-long-local-variable) context)
+  (with-slots (index) insn
+    (let ((expr (make-instance '<expression>
+                               :insn insn
+                               :code (intern (format nil "local-~A" index) :openldk)
+                               :expression-type :LONG)))
+      expr)))
+
 (defmethod codegen ((insn ir-monitorenter) context)
   (let ((expr (make-instance '<expression>
                              :insn insn
@@ -888,7 +900,7 @@
                                                               ;; FIXME: This should be based on the args list
                                                               (cons 'list
                                                                     (cons (find-class (intern (slot-value class 'name) :openldk))
-                                                                          (loop for a in args
+                                                                          (loop for a in (cdr args)
                                                                                 collect t))))
                                                         (list 'let (list (list 'fn (list 'closer-mop:method-function 'method)))
                                                               (list 'apply 'fn
@@ -986,7 +998,8 @@
           (let ((lisp-code
                   (cons (intern (format nil "branch-target-~A" (address (car (slot-value basic-block 'code)))))
                         (loop for insn in (slot-value basic-block 'code)
-                              collect (code (codegen insn *context*))))))
+                              for expr = (codegen insn *context*)
+                              collect (trace-insn insn (code expr))))))
             (setf (slot-value basic-block 'code-emitted-p) t)
             (pop (slot-value *context* 'blocks))
             ;; sort by address

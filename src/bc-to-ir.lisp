@@ -872,7 +872,6 @@
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
-      (error "LONG FIXME")
       (list (make-instance 'ir-ldiv
                            :address pc-start)))))
 
@@ -992,12 +991,7 @@
                            :address pc-start
                            :value (make-instance 'ir-local-variable
                                                  :address pc-start
-                                                 :index index))
-            (make-instance 'ir-push
-                           :address (+ pc-start 0.2)
-                           :value (make-instance 'ir-local-variable
-                                                 :address pc-start
-                                                 :index (1+ index)))))))
+                                                 :index index))))))
 
 (defun :FLOAD (context code)
   (:ILOAD context code))
@@ -1187,7 +1181,6 @@
                            :address pc-start)))))
 
 (defun :LRETURN (context code)
-  (error "LONG FIXME")
   (:IRETURN context code))
 
 (defun :ISHL (context code)
@@ -1224,7 +1217,6 @@
 
 (defun :LAND (context code)
   (declare (ignore code))
-  (error "LONG FIXME")
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -1233,7 +1225,6 @@
 
 (defun :LOR (context code)
   (declare (ignore code))
-  (error "LONG FIXME")
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -1242,16 +1233,14 @@
 
 (defun :LSHL (context code)
   (declare (ignore code))
-  (error "LONG FIXME")
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
-      (list (make-instance 'ir-ishl
+      (list (make-instance 'ir-lshl
                            :address pc-start)))))
 
 (defun :LSHR (context code)
   (declare (ignore code))
-  (error "LONG FIXME")
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -1269,7 +1258,6 @@
 
 (defun :LCMP (context code)
   (declare (ignore code))
-  (error "LONG FIXME")
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -1287,17 +1275,15 @@
 
 (defun :LDC_W (context code)
   (with-slots (pc class) context
-    (error "LONG FIXME")
     (let ((pc-start pc))
       (with-slots (constant-pool) class
 				(let ((index (+ (* (aref code (incf pc)) 256)
 												(aref code (incf pc)))))
           (incf pc)
           (list (make-instance 'ir-push :address pc-start
-                                         :value (emit (aref constant-pool index) constant-pool))))))))
+                                        :value (emit (aref constant-pool index) constant-pool))))))))
 
 (defun :LDC2_W (context code)
-  (error "LONG FIXME")
   (:LDC_W context code))
 
 (defun :LCONST_0 (context code)
@@ -1334,40 +1320,36 @@
 
 (defun :LLOAD_0 (context code)
   (declare (ignore code))
-  (error "LONG FIXME")
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-push
                            :address pc-start
-                           :value (make-instance 'ir-local-variable
+                           :value (make-instance 'ir-long-local-variable
                                                  :address pc-start
                                                  :index 0))))))
 
 (defun :LLOAD_1 (context code)
   (declare (ignore code))
-  (error "LONG FIXME")
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-push
                            :address pc-start
-                           :value (make-instance 'ir-local-variable
+                           :value (make-instance 'ir-long-local-variable
                                                  :address pc-start
                                                  :index 1))))))
 
 (defun :LSUB (context code)
   (declare (ignore code))
-  (error "LONG FIXME")
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
-      (list (make-instance 'ir-sub
+      (list (make-instance 'ir-lsub
                            :address pc-start)))))
 
 (defun :LUSHR (context code)
   (declare (ignore code))
-  (error "LONG FIXME")
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
