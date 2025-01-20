@@ -309,7 +309,7 @@
                                          (list 'division-by-zero (list 'e)
                                                (gen-push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
                                                (list 'error (list 'lisp-condition (gen-peek-item)))))
-                             :expression-type INTEGER)))
+                             :expression-type :INTEGER)))
     expr))
 
 (defmethod codegen ((insn ir-fdiv) context)
@@ -880,13 +880,23 @@
     (push expr (stack context))
     expr))
 
-(defmethod codegen ((insn ir-sub) context)
-  ;; FIXME: type!
+(defmethod codegen ((insn ir-isub) context)
   (let ((expr (make-instance '<expression>
                              :insn insn
                              :code (list 'let (list (list 'value2 (gen-pop-item))
                                                     (list 'value1 (gen-pop-item)))
-                                         (gen-push-item (list '- 'value1 'value2))))))
+                                         (gen-push-item (list 'logand (list '- 'value1 'value2) #xFFFFFFFF)))
+                             :expression-type :INTEGER)))
+    (pop (stack context)) (pop (stack context)) (push expr (stack context))
+    expr))
+
+(defmethod codegen ((insn ir-lsub) context)
+  (let ((expr (make-instance '<expression>
+                             :insn insn
+                             :code (list 'let (list (list 'value2 (gen-pop-item))
+                                                    (list 'value1 (gen-pop-item)))
+                                         (gen-push-item (list 'logand (list '- 'value1 'value2) #xFFFFFFFFFFFFFFFF)))
+                             :expression-type :LONG)))
     (pop (stack context)) (pop (stack context)) (push expr (stack context))
     expr))
 
@@ -900,8 +910,7 @@
                                                               ;; FIXME: This should be based on the args list
                                                               (cons 'list
                                                                     (cons (find-class (intern (slot-value class 'name) :openldk))
-                                                                          (loop for a in (cdr args)
-                                                                                collect t))))
+                                                                          (loop for a in args collect t))))
                                                         (list 'let (list (list 'fn (list 'closer-mop:method-function 'method)))
                                                               (list 'apply 'fn
                                                                     (list 'list (cons 'reverse (list (cons 'list (mapcar (lambda (a) (code (codegen a context))) args)))) 'next))))))

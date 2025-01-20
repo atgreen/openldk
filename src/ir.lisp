@@ -358,7 +358,10 @@
 (defclass/std ir-return-value (ir-return)
   ((fn-name)))
 
-(defclass/std ir-sub (ir-node)
+(defclass/std ir-isub (ir-node)
+  ())
+
+(defclass/std ir-lsub (ir-node)
   ())
 
 (defclass/std ir-throw (ir-branch)

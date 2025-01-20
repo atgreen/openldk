@@ -116,7 +116,7 @@
                                        (loop for i from 1 upto parameter-count
                                              collect (intern (format nil "arg~A" i) :openldk)))))
                        (when *debug-trace*
-                         (list (list 'format 't "; trace: entering ~A.~A~%" class-name (fn-name *context*))))
+                         (list (list 'format 't "; trace: entering ~A ~A.~A~%" (if (not (static-p method)) (intern "this" :openldk) "") class-name (fn-name *context*))))
                        (if (slot-value *context* 'uses-stack-p)
                            (list (append (list 'let (if (static-p method)
                                                         (append (list (list 'stack nil))

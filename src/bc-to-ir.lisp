@@ -355,7 +355,7 @@
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
-      (list (make-instance 'ir-sub
+      (list (make-instance 'ir-isub
                            :address pc-start)))))
 
 (defun :BIPUSH (context code)
@@ -465,7 +465,7 @@
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
-      (list (make-instance 'ir-sub
+      (list (make-instance 'ir-dsub
                            :address pc-start)))))
 
 (defun :DUP (context code)
@@ -1295,11 +1295,6 @@
                            :address pc-start
                            :value (make-instance 'ir-long-literal
                                                  :address pc-start
-                                                 :value 0))
-            (make-instance 'ir-push
-                           :address pc-start
-                           :value (make-instance 'ir-long-literal
-                                                 :address pc-start
                                                  :value 0))))))
 
 (defun :LCONST_1 (context code)
@@ -1311,12 +1306,7 @@
                            :address pc-start
                            :value (make-instance 'ir-long-literal
                                                  :address pc-start
-                                                 :value 1))
-            (make-instance 'ir-push
-                           :address pc-start
-                           :value (make-instance 'ir-long-literal
-                                                 :address pc-start
-                                                 :value 0))))))
+                                                 :value 1))))))
 
 (defun :LLOAD_0 (context code)
   (declare (ignore code))
