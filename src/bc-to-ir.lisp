@@ -434,14 +434,9 @@
       (incf pc)
       (list (make-instance 'ir-store
                            :address pc-start
-                           :target (make-instance 'ir-local-variable
+                           :target (make-instance 'ir-long-local-variable
                                                   :address pc-start
-                                                  :index index))
-            (make-instance 'ir-store
-                           :address pc-start
-                           :target (make-instance 'ir-local-variable
-                                                  :address pc-start
-                                                  :index (1+ index)))))))
+                                                  :index index))))))
 
 (defun :DSTORE (context code)
   (:LSTORE context code))
@@ -607,8 +602,8 @@
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
-      ;; Just pop the high-order bits off
-      (list (make-instance 'ir-pop :address pc-start)))))
+      ;; Do nothing.
+      (list (make-instance 'ir-nop :address pc-start)))))
 
 (defun :L2F (context code)
   (declare (ignore code))
