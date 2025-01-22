@@ -49,6 +49,10 @@
    (fn-name)
    (blocks)
    (ir-code)
+   (svcount :std 0)
+   (stack-state-table
+    :doc "A hashtable mapping addresses to stack states")
+   (stack-variables)
    (pc :std 0)
    (stack)))
 

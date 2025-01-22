@@ -37,38 +37,58 @@
 
 (in-package :openldk)
 
-(defun pop-args (num-args)
-  (loop repeat num-args
-        collect (make-instance 'ir-pop)))
+(defmacro define-bytecode-transpiler-TODO (name args &body body)
+  (declare (ignore args))
+  (declare (ignore body))
+  `(defun ,name ()
+     (format t "TODO transpiling ~A~%" ,name)
+     (error "TODO")))
 
-(defun :AALOAD (context code)
-  (declare (ignore code))
+(defmacro define-bytecode-transpiler (name args &body body)
+  `(defun ,name ,args
+     ,@body))
+
+(defmacro declare-IGNORE (x)
+  (declare (ignore x)))
+
+(defun pop-args (num-args context)
+  (loop for i below num-args
+        collect (pop (stack context))))
+
+(define-bytecode-transpiler-TODO :AALOAD (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-aaload
                            :address pc-start)))))
 
-(defun :AASTORE (context code)
+(define-bytecode-transpiler :AASTORE (context code)
   (declare (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-aastore
-                           :address pc-start)))))
+                           :address pc-start
+                           :value (pop (stack context))
+                           :index (pop (stack context))
+                           :arrayref (pop (stack context)))))))
 
-(defun :ACONST_NULL (context code)
+(define-bytecode-transpiler :ACONST_NULL (context code)
   (declare (ignore code))
   (with-slots (pc) context
-    (let ((pc-start pc))
+    (let* ((pc-start pc)
+           (var (make-stack-variable context pc-start :INTEGER)))
       (incf pc)
-      (list (make-instance 'ir-push
+      (push var (stack context))
+      (list (make-instance 'ir-assign
                            :address pc-start
-                           :value (make-instance 'ir-null-literal
-                                                 :address pc-start))))))
+                           :lvalue var
+                           :rvalue (make-instance 'ir-null-literal
+                                                  :address pc-start))))))
 
-(defun :ALOAD (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :ALOAD (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc)
           (index (aref code (incf pc))))
@@ -79,51 +99,36 @@
                                                  :address pc-start
                                                  :index index))))))
 
-(defun :ALOAD_0 (context code)
-  (declare (ignore code))
+(defun %transpile-aload-x (context index)
   (with-slots (pc) context
-    (let ((pc-start pc))
+    (let* ((pc-start pc)
+           (var (make-stack-variable context pc-start :REFERENCE)))
       (incf pc)
-      (list (make-instance 'ir-push
+      (push var (stack context))
+      (list (make-instance 'ir-assign
                            :address pc-start
-                           :value (make-instance 'ir-local-variable
-                                                 :address pc-start
-                                                 :index 0))))))
+                           :lvalue var
+                           :rvalue (make-instance 'ir-local-variable
+                                                  :address pc-start
+                                                  :index index))))))
 
-(defun :ALOAD_1 (context code)
+(define-bytecode-transpiler :ALOAD_0 (context code)
   (declare (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-push
-                           :address pc-start
-                           :value (make-instance 'ir-local-variable
-                                                 :address pc-start
-                                                 :index 1))))))
+  (%transpile-aload-x context 0))
 
-(defun :ALOAD_2 (context code)
+(define-bytecode-transpiler :ALOAD_1 (context code)
   (declare (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-push
-                           :address pc-start
-                           :value (make-instance 'ir-local-variable
-                                                 :address pc-start
-                                                 :index 2))))))
+  (%transpile-aload-x context 1))
 
-(defun :ALOAD_3 (context code)
+(define-bytecode-transpiler :ALOAD_2 (context code)
   (declare (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-push
-                           :address pc-start
-                           :value (make-instance 'ir-local-variable
-                                                 :address pc-start
-                                                 :index 3))))))
+  (%transpile-aload-x context 2))
 
-(defun :ARRAYLENGTH (context code)
+(define-bytecode-transpiler :ALOAD_3 (context code)
+  (declare (ignore code))
+  (%transpile-aload-x context 3))
+
+(define-bytecode-transpiler-TODO :ARRAYLENGTH (context code)
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -131,7 +136,7 @@
                            :address pc-start)))))
 
 
-(defun :ASTORE (context code)
+(define-bytecode-transpiler-TODO :ASTORE (context code)
   (with-slots (pc) context
     (let ((pc-start pc)
           (index (aref code (incf pc))))
@@ -142,48 +147,43 @@
                                                   :address pc-start
                                                   :index index))))))
 
-(defun :ASTORE_0 (context code)
-  (declare (ignore code))
+(defun %transpile-astore-x (context index)
   (with-slots (pc) context
-    (let ((pc-start pc))
+    (let* ((pc-start pc))
       (incf pc)
-      (list (make-instance 'ir-store
+      (list (make-instance 'ir-assign
                            :address pc-start
-                           :target (make-instance 'ir-local-variable
+                           :lvalue (make-instance 'ir-local-variable
                                                   :address pc-start
-                                                  :index 0))))))
+                                                  :index index
+                                                  :jtype :REFERENCE)
+                           :rvalue (pop (stack context)))))))
 
-(defun :ASTORE_1 (context code)
+(define-bytecode-transpiler :ASTORE_0 (context code)
   (declare (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-store
-                           :address pc-start
-                           :target (make-instance 'ir-local-variable
-                                                  :address pc-start
-                                                  :index 1))))))
+  (%transpile-astore-x context 0))
 
-(defun :ASTORE_2 (context code)
+(define-bytecode-transpiler :ASTORE_1 (context code)
   (declare (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-store
-                           :address pc-start
-                           :target (make-instance 'ir-local-variable
-                                                  :address pc-start
-                                                  :index 2))))))
+  (%transpile-astore-x context 1))
 
-(defun :IALOAD (context code)
+(define-bytecode-transpiler :ASTORE_2 (context code)
   (declare (ignore code))
+  (%transpile-astore-x context 2))
+
+(define-bytecode-transpiler :ASTORE_3 (context code)
+  (declare (ignore code))
+  (%transpile-astore-x context 3))
+
+(define-bytecode-transpiler-TODO :IALOAD (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-iaload :address pc-start)))))
 
-(defun :IASTORE (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :IASTORE (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -196,7 +196,7 @@
       (- value 256)
       value))
 
-(defun :IINC (context code)
+(define-bytecode-transpiler-TODO :IINC (context code)
   (with-slots (pc) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
@@ -208,7 +208,7 @@
                                :index index
                                :const const)))))))
 
-(defun :ISTORE (context code)
+(define-bytecode-transpiler-TODO :ISTORE (context code)
   (with-slots (pc) context
     (let ((pc-start pc)
           (index (aref code (incf pc))))
@@ -219,8 +219,8 @@
                                                   :address pc-start
                                                   :index index))))))
 
-(defun :ISTORE_0 (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :ISTORE_0 (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -230,8 +230,8 @@
                                                   :address pc-start
                                                   :index 0))))))
 
-(defun :ISTORE_1 (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :ISTORE_1 (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -241,8 +241,8 @@
                                                   :address pc-start
                                                   :index 1))))))
 
-(defun :ISTORE_2 (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :ISTORE_2 (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -252,8 +252,8 @@
                                                   :address pc-start
                                                   :index 2))))))
 
-(defun :ISTORE_3 (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :ISTORE_3 (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -263,39 +263,28 @@
                                                   :address pc-start
                                                   :index 3))))))
 
-(defun :ASTORE_3 (context code)
-  (declare (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-store
-                           :address pc-start
-                           :target (make-instance 'ir-local-variable
-                                                  :address pc-start
-                                                  :index 3))))))
-
-(defun :CALOAD (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :CALOAD (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-caload :address pc-start)))))
 
-(defun :CASTORE (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :CASTORE (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-castore :address pc-start)))))
 
-(defun :ATHROW (context code)
+(define-bytecode-transpiler :ATHROW (context code)
   (declare (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
-      (list (make-instance 'ir-throw :address pc-start)))))
+      (list (make-instance 'ir-throw :address pc-start :objref (pop (stack context)))))))
 
-(defun :CHECKCAST (context code)
+(define-bytecode-transpiler-TODO :CHECKCAST (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
@@ -307,58 +296,58 @@
                                :address pc-start
                                :class (emit class constant-pool))))))))
 
-(defun :IADD (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :IADD (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-iadd
                            :address pc-start)))))
 
-(defun :FADD (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :FADD (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-fadd
                            :address pc-start)))))
 
-(defun :DADD (context code)
+(define-bytecode-transpiler-TODO :DADD (context code)
   (:FADD context code))
 
-(defun :IAND (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :IAND (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-iand
                            :address pc-start)))))
 
-(defun :IOR (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :IOR (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-ior
                            :address pc-start)))))
 
-(defun :IXOR (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :IXOR (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-ixor
                            :address pc-start)))))
 
-(defun :ISUB (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :ISUB (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-isub
                            :address pc-start)))))
 
-(defun :BIPUSH (context code)
+(define-bytecode-transpiler-TODO :BIPUSH (context code)
   (with-slots (pc) context
     (let ((pc-start pc))
       (let* ((byte (aref code (incf pc))))
@@ -367,8 +356,8 @@
                              :address pc-start
                              :value (make-instance 'ir-int-literal :address pc-start :value byte)))))))
 
-(defun :DCONST_0 (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :DCONST_0 (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -378,8 +367,8 @@
                                                  :address pc-start
                                                  :value 0.0))))))
 
-(defun :DCONST_1 (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :DCONST_1 (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -389,15 +378,15 @@
                                                  :address pc-start
                                                  :value 1.0))))))
 
-(defun :DDIV (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :DDIV (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-div
                            :address pc-start)))))
 
-(defun :DLOAD (context code)
+(define-bytecode-transpiler-TODO :DLOAD (context code)
   (with-slots (pc) context
     (let ((pc-start pc)
           (index (aref code (incf pc))))
@@ -408,8 +397,8 @@
                                                  :address pc-start
                                                  :index index))))))
 
-(defun :DLOAD_2 (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :DLOAD_2 (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -419,15 +408,15 @@
                                                  :address pc-start
                                                  :index 2))))))
 
-(defun :DMUL (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :DMUL (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-mul
                            :address pc-start)))))
 
-(defun :LSTORE (context code)
+(define-bytecode-transpiler-TODO :LSTORE (context code)
   (with-slots (pc) context
     (let ((pc-start pc)
           (index (aref code (incf pc))))
@@ -438,14 +427,14 @@
                                                   :address pc-start
                                                   :index index))))))
 
-(defun :DSTORE (context code)
+(define-bytecode-transpiler-TODO :DSTORE (context code)
   (:LSTORE context code))
 
-(defun :FSTORE (context code)
+(define-bytecode-transpiler-TODO :FSTORE (context code)
   (:DSTORE context code))
 
-(defun :DSTORE_2 (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :DSTORE_2 (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -455,39 +444,44 @@
                                                   :address pc-start
                                                   :index 2))))))
 
-(defun :DSUB (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :DSUB (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-dsub
                            :address pc-start)))))
 
-(defun :DUP (context code)
+(define-bytecode-transpiler :DUP (context code)
   (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc)
+          (var (make-stack-variable context pc (var-type (car (stack context))))))
+      (incf pc)
+      (let ((code (list (make-instance 'ir-assign
+                                       :address pc-start
+                                       :lvalue var
+                                       :rvalue (car (stack context))))))
+        (push var (stack context))
+        code))))
+
+(define-bytecode-transpiler-TODO :DUP2 (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
-      (list (make-instance 'ir-dup
+      (list (make-instance 'ir-dup2
                            :address pc-start)))))
 
-(defun :DUP2 (context code)
-  (declare (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-dup  ;; FIXME HACK!
-                           :address pc-start)))))
-
-(defun :DUP_X1 (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :DUP_X1 (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-dup-x1
                            :address pc-start)))))
 
-(defun :GETSTATIC (context code)
+(define-bytecode-transpiler-TODO :GETSTATIC (context code)
   (with-slots (pc class is-clinit-p) context
     (let ((context-class class)
           (pc-start pc))
@@ -515,35 +509,38 @@
       (- unsigned-value 65536)
       unsigned-value))
 
-(defun :GOTO (context code)
+(define-bytecode-transpiler :GOTO (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
         (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
                                               (aref code (incf pc))))))
           (incf pc)
-          (list (make-instance 'ir-goto
-                               :address pc-start
-                               :offset (+ pc-start offset))))))))
+          (let ((code (list (make-instance 'ir-goto
+                                           :address pc-start
+                                           :offset (+ pc-start offset)))))
+            (%record-stack-state (+ pc-start offset) context)
+            (setf (stack context) nil)
+            code))))))
 
-(defun :FCMPG (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :FCMPG (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-fcmpg
                            :address pc-start)))))
 
-(defun :FCMPL (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :FCMPL (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-fcmpl
                            :address pc-start)))))
 
-(defun :FCONST_0 (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :FCONST_0 (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -553,8 +550,8 @@
                                                  :address pc-start
                                                  :value 0.0))))))
 
-(defun :FCONST_1 (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :FCONST_1 (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -564,8 +561,8 @@
                                                  :address pc-start
                                                  :value 1.0))))))
 
-(defun :FLOAD_0 (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :FLOAD_0 (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -575,8 +572,8 @@
                                                  :address pc-start
                                                  :index 0))))))
 
-(defun :FLOAD_1 (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :FLOAD_1 (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -586,8 +583,8 @@
                                                  :address pc-start
                                                  :index 1))))))
 
-(defun :FLOAD_2 (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :FLOAD_2 (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -597,81 +594,81 @@
                                                  :address pc-start
                                                  :index 2))))))
 
-(defun :L2I (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :L2I (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       ;; Do nothing.
       (list (make-instance 'ir-nop :address pc-start)))))
 
-(defun :L2F (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :L2F (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-l2f :address pc-start)))))
 
-(defun :F2I (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :F2I (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-f2i :address pc-start)))))
 
-(defun :D2L (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :D2L (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-d2l :address pc-start)))))
 
-(defun :F2D (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :F2D (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-nop)))))
 
-(defun :FDIV (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :FDIV (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-fdiv
                            :address pc-start)))))
 
-(defun :FMUL (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :FMUL (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-mul
                            :address pc-start)))))
 
-(defun :INEG (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :INEG (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-ineg :address pc-start)))))
 
-(defun :I2C (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :I2C (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-i2c :address pc-start)))))
 
-(defun :I2F (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :I2F (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-i2f :address pc-start)))))
 
-(defun :I2L (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :I2L (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -679,8 +676,8 @@
                            :address pc-start
                            :value (make-instance 'ir-pop :address pc-start))))))
 
-(defun :ICONST_M1 (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :ICONST_M1 (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -689,74 +686,60 @@
                            :value (make-instance 'ir-int-literal
                                                  :address pc-start
                                                  :value -1))))))
+(defclass/std <stack-variable> (ir-node)
+  ((var-numbers)
+   (var-type)))
 
-(defun :ICONST_0 (context code)
-  (declare (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
+(defmethod print-object ((sv <stack-variable>) out)
+  (print-unreadable-object (sv out :type t)
+    (format out "s{~{~A~^,~}}[~A]" (sort (slot-value sv 'var-numbers) #'<) (slot-value sv 'var-type))))
+
+(defun make-stack-variable (context pc-start type)
+  (let ((var (make-instance '<stack-variable>
+                            :address pc-start
+                            :var-numbers (list (incf (svcount context)))
+                            :var-type type)))
+    (push var (stack-variables context))
+    var))
+
+(defun %transpile-iconst-x (context value)
+  (with-slots (pc stack) context
+    (let* ((pc-start pc)
+           (var (make-stack-variable context pc-start :INTEGER)))
       (incf pc)
-      (list (make-instance 'ir-push
+      (push var (stack context))
+      (list (make-instance 'ir-assign
                            :address pc-start
-                           :value (make-instance 'ir-int-literal
-                                                 :address pc-start
-                                                 :value 0))))))
+                           :lvalue var
+                           :rvalue (make-instance 'ir-int-literal
+                                                  :address pc-start
+                                                  :value value))))))
 
-(defun :ICONST_1 (context code)
+(define-bytecode-transpiler :ICONST_0 (context code)
   (declare (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-push
-                           :address pc-start
-                           :value (make-instance 'ir-int-literal
-                                                 :address pc-start
-                                                 :value 1))))))
+  (%transpile-iconst-x context 0))
 
-(defun :ICONST_2 (context code)
+(define-bytecode-transpiler :ICONST_1 (context code)
   (declare (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-push
-                           :address pc-start
-                           :value (make-instance 'ir-int-literal
-                                                 :address pc-start
-                                                 :value 2))))))
+  (%transpile-iconst-x context 1))
 
-(defun :ICONST_3 (context code)
+(define-bytecode-transpiler :ICONST_2 (context code)
   (declare (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-push
-                           :address pc-start
-                           :value (make-instance 'ir-int-literal
-                                                 :address pc-start
-                                                 :value 3))))))
+  (%transpile-iconst-x context 2))
 
-(defun :ICONST_4 (context code)
+(define-bytecode-transpiler :ICONST_3 (context code)
   (declare (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-push
-                           :address pc-start
-                           :value (make-instance 'ir-int-literal
-                                                 :address pc-start
-                                                 :value 4))))))
+  (%transpile-iconst-x context 3))
 
-(defun :ICONST_5 (context code)
+(define-bytecode-transpiler :ICONST_4 (context code)
   (declare (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-push
-                           :address pc-start
-                           :value (make-instance 'ir-int-literal
-                                                 :address pc-start
-                                                 :value 5))))))
+  (%transpile-iconst-x context 4))
 
-(defun :IF_ACMPEQ (context code)
+(define-bytecode-transpiler :ICONST_5 (context code)
+  (declare (ignore code))
+  (%transpile-iconst-x context 5))
+
+(define-bytecode-transpiler-TODO :IF_ACMPEQ (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
@@ -767,7 +750,7 @@
                                :address pc-start
                                :offset (+ pc-start offset))))))))
 
-(defun :IF_ACMPNE (context code)
+(define-bytecode-transpiler-TODO :IF_ACMPNE (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
@@ -778,7 +761,7 @@
                                :address pc-start
                                :offset (+ pc-start offset))))))))
 
-(defun :IF_ICMPEQ (context code)
+(define-bytecode-transpiler-TODO :IF_ICMPEQ (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
@@ -789,7 +772,7 @@
                                :address pc-start
                                :offset (+ pc-start offset))))))))
 
-(defun :IF_ICMPGE (context code)
+(define-bytecode-transpiler-TODO :IF_ICMPGE (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
@@ -800,7 +783,7 @@
                                :address pc-start
                                :offset (+ pc-start offset))))))))
 
-(defun :IF_ICMPLE (context code)
+(define-bytecode-transpiler-TODO :IF_ICMPLE (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
@@ -811,7 +794,7 @@
                                :address pc-start
                                :offset (+ pc-start offset))))))))
 
-(defun :IF_ICMPGT (context code)
+(define-bytecode-transpiler-TODO :IF_ICMPGT (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
@@ -822,7 +805,7 @@
                                :address pc-start
                                :offset (+ pc-start offset))))))))
 
-(defun :IF_ICMPLT (context code)
+(define-bytecode-transpiler-TODO :IF_ICMPLT (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
@@ -833,7 +816,7 @@
                                :address pc-start
                                :offset (+ pc-start offset))))))))
 
-(defun :IF_ICMPNE (context code)
+(define-bytecode-transpiler-TODO :IF_ICMPNE (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
@@ -844,127 +827,73 @@
                                :address pc-start
                                :offset (+ pc-start offset))))))))
 
-(defun :IMUL (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :IMUL (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-imul
                            :address pc-start)))))
 
-(defun :IDIV (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :IDIV (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-idiv
                            :address pc-start)))))
 
-(defun :LDIV (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :LDIV (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-ldiv
                            :address pc-start)))))
 
-(defun :IREM (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :IREM (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-irem
                            :address pc-start)))))
 
-(defun :IFEQ (context code)
-  (with-slots (pc class) context
-    (let ((pc-start pc))
-      (with-slots (constant-pool) class
-        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
-                                              (aref code (incf pc))))))
-          (incf pc)
-          (list (make-instance 'ir-ifeq
-                               :address pc-start
-                               :offset (+ pc-start offset))))))))
+(defun %record-stack-state (pc context)
+  (push (stack context) (gethash pc (stack-state-table context))))
 
-(defun :IFGE (context code)
-  (with-slots (pc class) context
-    (let ((pc-start pc))
-      (with-slots (constant-pool) class
-        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
-                                              (aref code (incf pc))))))
-          (incf pc)
-          (list (make-instance 'ir-ifge
-                               :address pc-start
-                               :offset (+ pc-start offset))))))))
+(defmacro %define-if<cond>-transpilers (&rest opcodes)
+  `(progn
+     ,@(mapcar (lambda (opcode)
+                 (let ((name (car opcode))
+                       (ir-class (cadr opcode)))
+                   `(define-bytecode-transpiler ,name (context code)
+                      (with-slots (pc class) context
+                        (let ((pc-start pc))
+                          (with-slots (constant-pool) class
+                            (let* ((offset (unsigned-to-signed
+                                             (+ (* (aref code (incf pc)) 256)
+                                                (aref code (incf pc))))))
+                              (incf pc)
+                              (let ((code (list (make-instance ',ir-class
+                                                               :address pc-start
+                                                               :offset (+ pc-start offset)
+                                                               :value (pop (stack context))))))
+                                (%record-stack-state (+ pc-start offset) context)
+                                code))))))))
+               opcodes)))
 
-(defun :IFLE (context code)
-  (with-slots (pc class) context
-    (let ((pc-start pc))
-      (with-slots (constant-pool) class
-        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
-                                              (aref code (incf pc))))))
-          (incf pc)
-          (list (make-instance 'ir-ifle
-                               :address pc-start
-                               :offset (+ pc-start offset))))))))
+(%define-if<cond>-transpilers
+ (:IFEQ ir-ifeq)
+ (:IFNE ir-ifne)
+ (:IFGE ir-ifge)
+ (:IFGT ir-ifgt)
+ (:IFLE ir-ifle)
+ (:IFLT ir-iflt)
+ (:IFNULL ir-ifnull)
+ (:IFNONNULL ir-ifnonnull))
 
-(defun :IFLT (context code)
-  (with-slots (pc class) context
-    (let ((pc-start pc))
-      (with-slots (constant-pool) class
-        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
-                                              (aref code (incf pc))))))
-          (incf pc)
-          (list (make-instance 'ir-iflt
-                               :address pc-start
-                               :offset (+ pc-start offset))))))))
-
-(defun :IFGT (context code)
-  (with-slots (pc class) context
-    (let ((pc-start pc))
-      (with-slots (constant-pool) class
-        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
-                                              (aref code (incf pc))))))
-          (incf pc)
-          (list (make-instance 'ir-ifgt
-                               :address pc-start
-                               :offset (+ pc-start offset))))))))
-
-(defun :IFNE (context code)
-  (with-slots (pc class) context
-    (let ((pc-start pc))
-      (with-slots (constant-pool) class
-        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
-                                              (aref code (incf pc))))))
-          (incf pc)
-          (list (make-instance 'ir-ifne
-                               :address pc-start
-                               :offset (+ pc-start offset))))))))
-
-(defun :IFNONNULL (context code)
-  (with-slots (pc class) context
-    (let ((pc-start pc))
-      (with-slots (constant-pool) class
-        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
-                                              (aref code (incf pc))))))
-          (incf pc)
-          (list (make-instance 'ir-ifnonnull
-                               :address pc-start
-                               :offset (+ pc-start offset))))))))
-
-(defun :IFNULL (context code)
-  (with-slots (pc class) context
-    (let ((pc-start pc))
-      (with-slots (constant-pool) class
-        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
-                                              (aref code (incf pc))))))
-          (incf pc)
-          (list (make-instance 'ir-ifnull
-                               :address pc-start
-                               :offset (+ pc-start offset))))))))
-
-(defun :ILOAD (context code)
+(define-bytecode-transpiler-TODO :ILOAD (context code)
   (with-slots (pc) context
     (let ((pc-start pc)
           (index (aref code (incf pc))))
@@ -975,7 +904,7 @@
                                                  :address pc-start
                                                  :index index))))))
 
-(defun :LLOAD (context code)
+(define-bytecode-transpiler-TODO :LLOAD (context code)
   (with-slots (pc) context
     (let ((pc-start pc)
           (index (aref code (incf pc))))
@@ -986,54 +915,40 @@
                                                  :address pc-start
                                                  :index index))))))
 
-(defun :FLOAD (context code)
+(define-bytecode-transpiler-TODO :FLOAD (context code)
   (:ILOAD context code))
 
-(defun :ILOAD_0 (context code)
-  (declare (ignore code))
+(defun %transpile-iload-x (context index)
   (with-slots (pc) context
-    (let ((pc-start pc))
+    (let* ((pc-start pc)
+           (var (make-stack-variable context pc-start :INTEGER)))
       (incf pc)
-      (list (make-instance 'ir-push
+      (push var (stack context))
+      (list (make-instance 'ir-assign
                            :address pc-start
-                           :value (make-instance 'ir-local-variable
-                                                 :address pc-start
-                                                 :index 0))))))
+                           :lvalue var
+                           :rvalue (make-instance 'ir-local-variable
+                                                  :address pc-start
+                                                  :index index))))))
 
-(defun :ILOAD_1 (context code)
+
+(define-bytecode-transpiler :ILOAD_0 (context code)
   (declare (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-push
-                           :address pc-start
-                           :value (make-instance 'ir-local-variable
-                                                 :address pc-start
-                                                 :index 1))))))
+  (%transpile-iload-x context 0))
 
-(defun :ILOAD_2 (context code)
+(define-bytecode-transpiler :ILOAD_1 (context code)
   (declare (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-push
-                           :address pc-start
-                           :value (make-instance 'ir-local-variable
-                                                 :address pc-start
-                                                 :index 2))))))
+  (%transpile-iload-x context 1))
 
-(defun :ILOAD_3 (context code)
+(define-bytecode-transpiler :ILOAD_2 (context code)
   (declare (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-push
-                           :address pc-start
-                           :value (make-instance 'ir-local-variable
-                                                 :address pc-start
-                                                 :index 3))))))
+  (%transpile-iload-x context 2))
 
-(defun :INSTANCEOF (context code)
+(define-bytecode-transpiler :ILOAD_3 (context code)
+  (declare (ignore code))
+  (%transpile-iload-x context 3))
+
+(define-bytecode-transpiler-TODO :INSTANCEOF (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
@@ -1045,7 +960,7 @@
                                :address pc-start
                                :class (emit class constant-pool))))))))
 
-(defun :INVOKEINTERFACE (context code)
+(define-bytecode-transpiler-TODO :INVOKEINTERFACE (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
@@ -1066,11 +981,11 @@
                  (parameter-count (1+ (count-parameters descriptor))))
             (list (make-instance 'ir-call-virtual-method
                                  :address pc-start
-                                 :void-return-p (ends-in-V (emit method-reference constant-pool))
+                                 :return-type (get-return-type (emit method-reference constant-pool))
                                  :method-name (lispize-method-name (emit method-reference constant-pool))
-                                 :args (pop-args parameter-count)))))))))
+                                 :args (pop-args parameter-count context)))))))))
 
-(defun :INVOKEVIRTUAL (context code)
+(define-bytecode-transpiler :INVOKEVIRTUAL (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
@@ -1087,13 +1002,23 @@
                                       'type-descriptor-index))
                                'value))
                  (parameter-count (1+ (count-parameters descriptor))))
-            (list (make-instance 'ir-call-virtual-method
-                                 :address pc-start
-                                 :void-return-p (ends-in-V (emit method-reference constant-pool))
-                                 :method-name (lispize-method-name (emit method-reference constant-pool))
-                                 :args (pop-args parameter-count)))))))))
+            (list (let* ((return-type (get-return-type (emit method-reference constant-pool)))
+                         (call (make-instance 'ir-call-virtual-method
+                                              :address pc-start
+                                              :return-type return-type
+                                              :method-name (lispize-method-name (emit method-reference constant-pool))
+                                              :args (pop-args parameter-count context))))
+                    (if (eq return-type :VOID)
+                        call
+                        (let ((var (make-stack-variable context pc-start return-type)))
+                          (push var (stack context))
+                          (make-instance 'ir-assign
+                                         :address pc-start
+                                         :lvalue var
+                                         :rvalue call)))))))))))
 
-(defun :INVOKESPECIAL (context code)
+
+(define-bytecode-transpiler :INVOKESPECIAL (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
@@ -1116,14 +1041,23 @@
                                       'type-descriptor-index))
                                'value))
                  (parameter-count (1+ (count-parameters descriptor))))
-            (list (make-instance 'ir-call-special-method
-                                 :address pc-start
-                                 :class class
-                                 :void-return-p (ends-in-V (emit method-reference constant-pool))
-                                 :method-name (lispize-method-name (emit method-reference constant-pool))
-                                 :args (pop-args parameter-count)))))))))
+            (list (let* ((return-type (get-return-type (emit method-reference constant-pool)))
+                         (call (make-instance 'ir-call-special-method
+                                              :address pc-start
+                                              :class class
+                                              :return-type return-type
+                                              :method-name (lispize-method-name (emit method-reference constant-pool))
+                                              :args (pop-args parameter-count context))))
+                    (if (eq return-type :VOID)
+                        call
+                        (let ((var (make-stack-variable context pc-start return-type)))
+                          (push var (stack context))
+                          (make-instance 'ir-assign
+                                         :address pc-start
+                                         :lvalue var
+                                         :rvalue call)))))))))))
 
-(defun :INVOKESTATIC (context code)
+(define-bytecode-transpiler :INVOKESTATIC (context code)
   (with-slots (pc class is-clinit-p) context
     (let ((context-class class)
           (pc-start pc))
@@ -1150,123 +1084,136 @@
                                'value))
                  (parameter-count (count-parameters descriptor)))
             (classload callee-class)
-            (let ((code (list (make-instance 'ir-call-static-method
-                                             :address (if (and is-clinit-p (equal callee-class (name context-class))) pc-start (+ pc-start 0.1))
-                                             :class callee-class
-                                             :void-return-p (ends-in-V (emit method-reference constant-pool))
-                                             :return-type (get-return-type (emit method-reference constant-pool))
-                                             :method-name (lispize-method-name (emit method-reference constant-pool))
-                                             :args (pop-args parameter-count)))))
+            (let* ((return-type (get-return-type (emit method-reference constant-pool)))
+                   (call (make-instance 'ir-call-static-method
+                                        :address (if (and is-clinit-p (equal callee-class (name context-class))) pc-start (+ pc-start 0.1))
+                                        :class callee-class
+                                        :return-type return-type
+                                        :method-name (lispize-method-name (emit method-reference constant-pool))
+                                        :args (pop-args parameter-count context))))
+              (if (not (eq return-type :VOID))
+                  (let ((var (make-stack-variable context pc-start return-type)))
+                    (push var (stack context))
+                    (setf call (make-instance 'ir-assign
+                                              :address (if (and is-clinit-p (equal callee-class (name context-class))) pc-start (+ pc-start 0.1))
+                                              :lvalue var
+                                              :rvalue call))))
               (if (and is-clinit-p (equal callee-class (name context-class)))
-                  code
-                  (cons (make-instance 'ir-clinit
+                  (list call)
+                  (list (make-instance 'ir-clinit
                                        :address pc-start
                                        :class (make-instance 'ir-class :class (classload callee-class)))
-                        code)))))))))
+                        call)))))))))
 
-(defun :IRETURN (context code)
+(define-bytecode-transpiler :IRETURN (context code)
   (declare (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-return-value
                            :fn-name (slot-value context 'fn-name)
-                           :address pc-start)))))
+                           :address pc-start
+                           :value (pop (stack context)))))))
 
-(defun :LRETURN (context code)
+(define-bytecode-transpiler-TODO :LRETURN (context code)
   (:IRETURN context code))
 
-(defun :ISHL (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :ISHL (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-ishl
                            :address pc-start)))))
 
-(defun :ISHR (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :ISHR (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-ishr
                            :address pc-start)))))
 
-(defun :IUSHR (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :IUSHR (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-iushr
                            :address pc-start)))))
 
-(defun :LADD (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :LADD (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-ladd
                            :address pc-start)))))
 
-(defun :LAND (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :LAND (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-land
                            :address pc-start)))))
 
-(defun :LOR (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :LOR (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-lor
                            :address pc-start)))))
 
-(defun :LSHL (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :LSHL (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-lshl
                            :address pc-start)))))
 
-(defun :LSHR (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :LSHR (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-lshr
                            :address pc-start)))))
 
-(defun :ARETURN (context code)
+(define-bytecode-transpiler :ARETURN (context code)
   (:IRETURN context code))
 
-(defun :DRETURN (context code)
+(define-bytecode-transpiler :DRETURN (context code)
   (:IRETURN context code))
 
-(defun :FRETURN (context code)
+(define-bytecode-transpiler :FRETURN (context code)
   (:IRETURN context code))
 
-(defun :LCMP (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :LCMP (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-lcmp
                            :address pc-start)))))
 
-(defun :LDC (context code)
-  (with-slots (pc class) context
-    (let ((pc-start pc))
+(define-bytecode-transpiler :LDC (context code)
+  (with-slots (pc class stack) context
+    (let* ((pc-start pc)
+           (var (make-stack-variable context pc-start :INTEGER))) ;; FIXME - real type!
+      (push var (stack context))
       (with-slots (constant-pool) class
         (let ((index (aref code (incf pc))))
           (incf pc)
-          (list (make-instance 'ir-push :address pc-start
-                                         :value (emit (aref constant-pool index) constant-pool))))))))
+          (list (make-instance 'ir-assign
+                               :address pc-start
+                               :lvalue var
+                               :rvalue (emit (aref constant-pool index) constant-pool))))))))
 
-(defun :LDC_W (context code)
+
+(define-bytecode-transpiler-TODO :LDC_W (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
@@ -1276,11 +1223,11 @@
           (list (make-instance 'ir-push :address pc-start
                                         :value (emit (aref constant-pool index) constant-pool))))))))
 
-(defun :LDC2_W (context code)
+(define-bytecode-transpiler-TODO :LDC2_W (context code)
   (:LDC_W context code))
 
-(defun :LCONST_0 (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :LCONST_0 (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -1290,8 +1237,8 @@
                                                  :address pc-start
                                                  :value 0))))))
 
-(defun :LCONST_1 (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :LCONST_1 (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -1301,8 +1248,8 @@
                                                  :address pc-start
                                                  :value 1))))))
 
-(defun :LLOAD_0 (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :LLOAD_0 (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -1312,8 +1259,8 @@
                                                  :address pc-start
                                                  :index 0))))))
 
-(defun :LLOAD_1 (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :LLOAD_1 (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -1323,67 +1270,74 @@
                                                  :address pc-start
                                                  :index 1))))))
 
-(defun :LSUB (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :LSUB (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-lsub
                            :address pc-start)))))
 
-(defun :LUSHR (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :LUSHR (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-lushr
                            :address pc-start)))))
 
-(defun :MONITORENTER (context code)
+(define-bytecode-transpiler :MONITORENTER (context code)
   (declare (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
-      (list (make-instance 'ir-monitorenter :address pc-start)))))
+      (list (make-instance 'ir-monitorenter :address pc-start :objref (pop (stack context)))))))
 
-(defun :MONITOREXIT (context code)
+(define-bytecode-transpiler :MONITOREXIT (context code)
   (declare (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
-      (list (make-instance 'ir-monitorexit :address pc-start)))))
+      (list (make-instance 'ir-monitorexit :address pc-start :objref (pop (stack context)))))))
 
-(defun :NEW (context code)
+(define-bytecode-transpiler :NEW (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
         (let* ((index (+ (* (aref code (incf pc)) 256)
                          (aref code (incf pc))))
-               (class (emit (aref constant-pool index) constant-pool)))
+               (class (emit (aref constant-pool index) constant-pool))
+               (var (make-stack-variable context pc-start :REFERENCE)))
           (incf pc)
-          (list (make-instance 'ir-push
+          (push var (stack context))
+          (list (make-instance 'ir-assign
                                :address pc-start
-                               :value (make-instance 'ir-new :address pc-start :class class))))))))
+                               :lvalue var
+                               :rvalue (make-instance 'ir-new :address pc-start :class class))))))))
 
-(defun :NOP (context code)
+(define-bytecode-transpiler-TODO :NOP (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-nop :address pc-start)))))
 
-(defun :ANEWARRAY (context code)
+(define-bytecode-transpiler :ANEWARRAY (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
         (let* ((index (+ (* (aref code (incf pc)) 256)
                          (aref code (incf pc))))
-               (class (emit (aref constant-pool index) constant-pool)))
+               (class (emit (aref constant-pool index) constant-pool))
+               (var (make-stack-variable context pc-start :ARRAY))
+               (size (pop (stack context))))
           (incf pc)
-          (list (make-instance 'ir-push
+          (push var (stack context))
+          (list (make-instance 'ir-assign
                                :address pc-start
-                               :value (make-instance 'ir-new-array :address pc-start :class class))))))))
+                               :lvalue var
+                               :rvalue (make-instance 'ir-new-array :address pc-start :class class :size size))))))))
 
-(defun :NEWARRAY (context code)
+(define-bytecode-transpiler-TODO :NEWARRAY (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (let ((atype (aref code (incf pc))))
@@ -1393,29 +1347,34 @@
                              :address pc-start
                              :value (make-instance 'ir-new-array :address pc-start :class nil)))))))
 
-(defun :POP (context code)
-  (declare (ignore code))
+(define-bytecode-transpiler-TODO :POP (context code)
+  (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-pop :address pc-start)))))
 
-(defun :GETFIELD (context code)
+(define-bytecode-transpiler :GETFIELD (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
         (let* ((index (+ (* (aref code (incf pc)) 256)
-                         (aref code (incf pc)))))
+                         (aref code (incf pc))))
+               (var (make-stack-variable context pc-start :INTEGER))) ;; FIXME: get correct type
           (multiple-value-bind (fieldname)
               (emit (aref constant-pool index) constant-pool)
             (incf pc)
-            (list (make-instance 'ir-push
-                                 :address pc-start
-                                 :value (make-instance 'ir-member
-                                                       :address pc-start
-                                                       :member-name fieldname)))))))))
+            (let ((code (list (make-instance 'ir-assign
+                                             :address pc-start
+                                             :lvalue var
+                                             :rvalue (make-instance 'ir-member
+                                                                    :address pc-start
+                                                                    :objref (pop (stack context))
+                                                                    :member-name fieldname)))))
+              (push var (stack context)))))))))
 
-(defun :PUTFIELD (context code)
+
+(define-bytecode-transpiler :PUTFIELD (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
@@ -1426,12 +1385,13 @@
             (incf pc)
             (list (make-instance 'ir-assign
                                  :address pc-start
-                                 :source (make-instance 'ir-pop :address pc-start)
-                                 :target (make-instance 'ir-member
+                                 :rvalue (pop (stack context))
+                                 :lvalue (make-instance 'ir-member
                                                         :address pc-start
+                                                        :objref (pop (stack context))
                                                         :member-name fieldname)))))))))
 
-(defun :PUTSTATIC (context code)
+(define-bytecode-transpiler :PUTSTATIC (context code)
   (with-slots (pc class is-clinit-p) context
     (let ((context-class class)
           (pc-start pc))
@@ -1443,8 +1403,8 @@
             (incf pc)
             (let ((code (list (make-instance 'ir-assign
                                              :address (if (and is-clinit-p (equal (ir-class-class class) context-class)) pc-start (+ pc-start 0.1))
-                                             :source (make-instance 'ir-pop :address pc-start)
-                                             :target (make-instance 'ir-static-member
+                                             :rvalue (pop (stack context))
+                                             :lvalue (make-instance 'ir-static-member
                                                                     :address pc-start
                                                                     :class class
                                                                     :member-name fieldname)))))
@@ -1455,7 +1415,7 @@
                                        :class class)
                         code)))))))))
 
-(defun :RETURN (context code)
+(define-bytecode-transpiler :RETURN (context code)
   (declare (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
@@ -1463,7 +1423,7 @@
       (list (make-instance 'ir-return
                            :address pc-start)))))
 
-(defun :SIPUSH (context code)
+(define-bytecode-transpiler-TODO :SIPUSH (context code)
   (with-slots (pc) context
     (let ((pc-start pc))
       (let* ((short (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
@@ -1472,3 +1432,17 @@
         (list (make-instance 'ir-push
                              :address pc-start
                              :value (make-instance 'ir-int-literal :address pc-start :value short)))))))
+
+(defun merge-stack-variables (stack-var1 stack-var2)
+  "Merge the var-numbers of two stack-variable objects."
+  (let ((unums (union (slot-value stack-var1 'var-numbers)
+                      (slot-value stack-var2 'var-numbers) :test #'eql)))
+    (setf (slot-value stack-var1 'var-numbers) unums)
+    (setf (slot-value stack-var2 'var-numbers) unums)
+    stack-var1))
+
+(defun merge-stacks (list1 list2)
+  "Merge two lists of stack-variable objects into one."
+  (loop for sv1 in list1
+        for sv2 in list2
+        collect (merge-stack-variables sv1 sv2)))

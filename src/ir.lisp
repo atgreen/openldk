@@ -54,7 +54,9 @@
   ())
 
 (defclass/std ir-aastore (ir-node)
-  ())
+  ((arrayref)
+   (index)
+   (value)))
 
 (defclass/std ir-aload (ir-node)
   ((index)))
@@ -70,7 +72,8 @@
   (slot-value v 'value))
 
 (defclass/std ir-local-variable (ir-node)
-  ((index)))
+  ((index)
+   (jtype)))
 
 (defclass/std ir-long-local-variable (ir-node)
   ((index)))
@@ -122,7 +125,7 @@
   ())
 
 (defclass/std ir-assign (ir-node)
-  ((target source)))
+  ((lvalue rvalue)))
 
 (defclass/std ir-iadd (ir-node)
   ())
@@ -223,28 +226,31 @@
 (defclass/std ir-if-icmpne (ir-branch)
   ())
 
-(defclass/std ir-ifeq (ir-branch)
+(defclass/std ir-if<cond> (ir-branch)
+  ((value)))
+
+(defclass/std ir-ifeq (ir-if<cond>)
   ())
 
-(defclass/std ir-ifge (ir-branch)
+(defclass/std ir-ifge (ir-if<cond>)
   ())
 
-(defclass/std ir-ifle (ir-branch)
+(defclass/std ir-ifle (ir-if<cond>)
   ())
 
-(defclass/std ir-iflt (ir-branch)
+(defclass/std ir-iflt (ir-if<cond>)
   ())
 
-(defclass/std ir-ifgt (ir-branch)
+(defclass/std ir-ifgt (ir-if<cond>)
   ())
 
-(defclass/std ir-ifne (ir-branch)
+(defclass/std ir-ifne (ir-if<cond>)
   ())
 
-(defclass/std ir-ifnonnull (ir-branch)
+(defclass/std ir-ifnonnull (ir-if<cond>)
   ())
 
-(defclass/std ir-ifnull (ir-branch)
+(defclass/std ir-ifnull (ir-if<cond>)
   ())
 
 (defclass/std ir-instanceof (ir-node)
@@ -266,7 +272,7 @@
   ())
 
 (defclass/std ir-call (ir-node)
-  ((void-return-p)))
+  ((return-type)))
 
 (defclass/std ir-branch-target (ir-node)
   ((index)))
@@ -274,12 +280,10 @@
 (defclass/std ir-call-special-method (ir-call)
   ((class :with)
    (method-name)
-   (args)
-   (return-type)))
+   (args)))
 
 (defclass/std ir-call-virtual-method (ir-call)
   ((method-name)
-   (return-type)
    (args)))
 
 (defclass/std ir-call-static-method (ir-call-virtual-method)
@@ -293,20 +297,18 @@
   ((class :with)))
 
 (defclass/std ir-member (ir-node)
-  ((member-name)))
+  ((objref)
+   (member-name)))
 
 (defclass/std ir-monitorenter (ir-node)
-  (()))
+  ((objref)))
 
 (defclass/std ir-monitorexit (ir-node)
-  (()))
+  ((objref)))
 
 (defclass/std ir-static-member (ir-node)
   ((class :with)
    (member-name)))
-
-(defclass/std ir-store (ir-node)
-  ((target)))
 
 (defclass/std ir-lstore (ir-node)
   ((target)))
@@ -320,7 +322,7 @@
   ((class :with)))
 
 (defclass/std ir-new-array (ir-new)
-  ())
+  ((size)))
 
 (defclass/std ir-lcmp (ir-node)
   ())
@@ -349,6 +351,10 @@
 (defclass/std ir-push (ir-node)
   ((value)))
 
+;; FIXME: delete this
+(defmethod initialize-instance ((ir ir-push) &key)
+  (error "IR-PUSH"))
+
 (defmethod uses-stack-p ((node ir-node))
   t)
 
@@ -356,7 +362,8 @@
   ())
 
 (defclass/std ir-return-value (ir-return)
-  ((fn-name)))
+  ((fn-name)
+   (value)))
 
 (defclass/std ir-isub (ir-node)
   ())
@@ -365,7 +372,7 @@
   ())
 
 (defclass/std ir-throw (ir-branch)
-  ())
+  ((objref)))
 
 (defclass/std ir-variable (ir-node)
   ((name)))

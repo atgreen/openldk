@@ -46,9 +46,10 @@
 (defvar *condition-table* (make-hash-table))
 
 (defvar *dump-dir* nil)
+(defvar *debug-bytecode* nil)
 (defvar *debug-codegen* nil)
-(defvar *debug-trace* nil)
 (defvar *debug-stack* nil)
+(defvar *debug-trace* nil)
 (defvar *debug-unmuffle* nil)
 
 (defun %eval (code)
@@ -67,6 +68,15 @@
 (defun lispize-method-name (name)
   (subseq name 0 (1+ (position #\) name))))
 
+(defun make-exception-target-table (context)
+  (let ((exception-table (exception-table context))
+        (exception-target-table (make-hash-table)))
+    (when exception-table
+      (loop for i from 0 below (length exception-table)
+            for ete = (aref exception-table i)
+            do (setf (gethash (start-pc ete) exception-target-table) t)))
+    exception-target-table))
+
 (defun %compile-method (class-name method-index)
   (let* ((class (gethash class-name *classes*))
          (method (aref (slot-value class 'methods) (1- method-index)))
@@ -79,25 +89,43 @@
                                    :classes *classes*
                                    :exception-table exception-table
                                    :bytecode code
+                                   :stack-state-table (make-hash-table)
                                    :pc 0
                                    :is-clinit-p (string= "<clinit>" (slot-value method 'name)))))
+    (setf (svcount *context*) 0)
     (when *debug-codegen*
       (format t "; compiling ~A.~A~%" class-name (lispize-method-name (format nil "~A~A" (name method) (descriptor method))))
       (force-output))
     (if (static-p method)
         (setf (fn-name *context*) (format nil "~A.~A" (slot-value class 'name) (lispize-method-name (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor)))))
         (setf (fn-name *context*) (format nil "~A" (lispize-method-name (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor))))))
-    ;; (dump "compile-method" (list class-name method-index))
-    (let* ((ir-code-0
+    (let* ((exception-target-table (make-exception-target-table *context*))
+           (ir-code-0
              (setf (ir-code *context*)
-                   (apply #'append
-                          (loop
-                            while (< (pc *context*) length)
-                            for result = (funcall
-                                          (aref +opcodes+ (aref code (pc *context*)))
-                                          *context* code)
-                            unless (null result)
-                              collect result))))
+                   (let ((code (apply #'append
+                                      (loop
+                                        while (and (< (pc *context*) length))
+                                        for result = (progn
+                                                       (when *debug-bytecode*
+                                                         (format t "~&; [~A] ~A ~@<~A~:@>" (pc *context*) (aref +opcodes+ (aref code (pc *context*))) (stack *context*)))
+                                                       (funcall
+                                                        (aref +opcodes+ (aref code (pc *context*)))
+                                                        *context* code))
+                                        do (when (gethash (pc *context*) exception-target-table)
+                                             (push (make-stack-variable *context* (pc *context*) :REFERENCE) (stack *context*)))
+                                        do (%record-stack-state (pc *context*) *context*)
+                                        unless (null result)
+                                          collect result))))
+                     ;; Do stack analysis to merge stack variables
+                     (maphash (lambda (k v)
+                                (when (> (length v) 1)
+                                  (reduce #'merge-stacks v)))
+                              (stack-state-table *context*))
+                     code)))
+           (debug-sdfsdfd (progn
+                            (print "=======================================================================")
+                            (print (fn-name *context*))
+                            (print ir-code-0)))
            (blocks (build-basic-blocks ir-code-0))
            (lisp-code
              (list (list 'block nil
@@ -119,12 +147,18 @@
                          (list (list 'format 't "; trace: entering ~A ~A.~A~%" (if (not (static-p method)) (intern "this" :openldk) "") class-name (fn-name *context*))))
                        (if (slot-value *context* 'uses-stack-p)
                            (list (append (list 'let (if (static-p method)
-                                                        (append (list (list 'stack nil))
+                                                        (append (remove-duplicates
+                                                                 (loop for var in (stack-variables *context*)
+                                                                       collect (list (intern (format nil "s{~{~A~^,~}}" (sort (var-numbers var) #'<)) :openldk)))
+                                                                 :test #'equal)
                                                                 (loop for i from 1 upto parameter-count
                                                                       collect (list (intern (format nil "local-~A" (1- i)) :openldk) (intern (format nil "arg~A" (1- i)) :openldk)))
                                                                 (loop for i from (1+ parameter-count) upto max-locals
                                                                       collect (list (intern (format nil "local-~A" (1- i)) :openldk))))
-                                                        (append (list (list 'stack nil))
+                                                        (append (remove-duplicates
+                                                                 (loop for var in (stack-variables *context*)
+                                                                       collect (list (intern (format nil "s{~{~A~^,~}}" (sort (var-numbers var) #'<)) :openldk)))
+                                                                 :test #'equal)
                                                                 (cons (list (intern "local-0" :openldk) (intern "this" :openldk))
                                                                       (loop for i from 1 upto parameter-count
                                                                             collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" i) :openldk))))
@@ -317,6 +351,8 @@
           (setf *debug-stack* t))
         (when (find #\t LDK_DEBUG)
           (setf *debug-trace* t))
+        (when (find #\b LDK_DEBUG)
+          (setf *debug-bytecode* t))
         (when (find #\u LDK_DEBUG)
           (setf *debug-unmuffle* t)))))
 

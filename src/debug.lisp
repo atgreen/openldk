@@ -39,8 +39,9 @@
 
 (defun dump-hashtable (ht)
 	(maphash (lambda (k v)
-						 (format t "~A: ~A~%" k v))
-					 ht))
+						 (format t "~&~A: ~A~%" k v))
+					 ht)
+  t)
 
 (defun dump-classes ()
 	(dump-hashtable *classes*))
