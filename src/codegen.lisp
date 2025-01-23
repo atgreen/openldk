@@ -98,30 +98,42 @@
     expr))
 
 (defmethod codegen ((insn ir-aastore) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (list 'let (list (list 'value (gen-pop-item))
-                                                    (list 'index (gen-pop-item))
-                                                    (list 'arrayref (gen-pop-item)))
-                                         (list 'setf (list 'aref 'arrayref 'index) 'value)))))
-    (pop (stack context)) (pop (stack context)) (pop (stack context))
-    expr))
+  ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
+  (with-slots (arrayref index value) insn
+    (make-instance '<expression>
+                   :insn insn
+                   :code (list 'let (list (list 'value (code (codegen value context)))
+                                          (list 'index (code (codegen index context)))
+                                          (list 'arrayref (code (codegen arrayref context))))
+                               (list 'setf (list 'aref 'arrayref 'index) 'value)))))
+
+(defmethod codegen ((insn ir-iastore) context)
+  ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
+  (with-slots (arrayref index value) insn
+    (make-instance '<expression>
+                   :insn insn
+                   :code (list 'let (list (list 'value (code (codegen value context)))
+                                          (list 'index (code (codegen index context)))
+                                          (list 'arrayref (code (codegen arrayref context))))
+                               (list 'setf (list 'aref 'arrayref 'index) 'value)))))
 
 (defmethod codegen ((insn ir-iadd) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (gen-push-item (list 'logand (list '+ (gen-pop-item) (gen-pop-item)) #xFFFFFFFF))
-                             :expression-type :INTEGER)))
-    (pop (stack context)) (pop (stack context)) (push expr (stack context))
-    expr))
+  (with-slots (value1 value2) insn
+    (make-instance '<expression>
+                   :insn insn
+                   :code (list 'let (list (list 'value2 (code (codegen value2 context)))
+                                          (list 'value1 (code (codegen value1 context))))
+                               (list 'logand (list '+ 'value1 'value2) #xFFFFFFFF))
+                   :expression-type :INTEGER)))
 
 (defmethod codegen ((insn ir-ladd) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (gen-push-item (list 'logand (list '+ (gen-pop-item) (gen-pop-item)) #xFFFFFFFFFFFFFFFF))
-                             :expression-type :LONG)))
-    (pop (stack context)) (pop (stack context)) (push expr (stack context))
-    expr))
+  (with-slots (value1 value2) insn
+    (make-instance '<expression>
+                   :insn insn
+                   :code (list 'let (list (list 'value2 (code (codegen value2 context)))
+                                          (list 'value1 (code (codegen value1 context))))
+                               (list 'logand (list '+ 'value1 'value2) #xFFFFFFFFFFFFFFFF))
+                   :expression-type :LONG)))
 
 (defmethod codegen ((insn ir-fadd) context)
   ;; FIXME -- handle NaN cases
@@ -249,16 +261,13 @@
 
 (defmethod codegen ((insn ir-castore) context)
   ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (list 'let (list (list 'value (gen-pop-item))
-                                                    (list 'index (gen-pop-item))
-                                                    (list 'arrayref (gen-pop-item)))
-                                         (list 'setf (list 'aref 'arrayref 'index) (list 'code-char 'value)))
-                             :expression-type nil)))
-    (pop (stack context)) (pop (stack context)) (pop (stack context))
-    expr))
-
+  (with-slots (arrayref index value) insn
+    (make-instance '<expression>
+                   :insn insn
+                   :code (list 'let (list (list 'value (code (codegen value context)))
+                                          (list 'index (code (codegen index context)))
+                                          (list 'arrayref (code (codegen arrayref context))))
+                               (list 'setf (list 'aref 'arrayref 'index) (list 'code-char 'value))))))
 
 (defmethod codegen ((insn ir-checkcast) context)
   (declare (ignore context))
@@ -439,18 +448,6 @@
     (pop (stack context)) (pop (stack context)) (push expr (stack context))
     expr))
 
-(defmethod codegen ((insn ir-iastore) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (list 'let (list (list 'value (gen-pop-item))
-                                                    (list 'index (gen-pop-item))
-                                                    (list 'arrayref (gen-pop-item)))
-                                         (list 'setf (list 'aref 'arrayref 'index) 'value)))))
-    (pop (stack context))
-    (pop (stack context))
-    (pop (stack context))
-    expr))
-
 (defmethod codegen ((insn ir-ineg) context)
   ;; FIXME: handle integer overflow
   (let ((expr (make-instance '<expression>
@@ -616,6 +613,11 @@
                    :insn insn
                    :code (list 'when (list 'not (list 'eq (code (codegen value context)) 0))
                                (list 'go (intern (format nil "branch-target-~A" offset)))))))
+
+(defmethod codegen ((insn ir-condition-exception) context)
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'slot-value (intern "condition" :openldk) (list 'quote (intern "objref" :openldk)))))
 
 (defmethod codegen ((insn ir-ifnonnull) context)
   (with-slots (offset value) insn
@@ -844,24 +846,22 @@
     expr))
 
 (defmethod codegen ((insn ir-isub) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (list 'let (list (list 'value2 (gen-pop-item))
-                                                    (list 'value1 (gen-pop-item)))
-                                         (gen-push-item (list 'logand (list '- 'value1 'value2) #xFFFFFFFF)))
-                             :expression-type :INTEGER)))
-    (pop (stack context)) (pop (stack context)) (push expr (stack context))
-    expr))
+  (with-slots (value1 value2) insn
+    (make-instance '<expression>
+                   :insn insn
+                   :code (list 'let (list (list 'value2 (code (codegen value2 context)))
+                                          (list 'value1 (code (codegen value1 context))))
+                               (list 'logand (list '- 'value1 'value2) #xFFFFFFFF))
+                   :expression-type :INTEGER)))
 
 (defmethod codegen ((insn ir-lsub) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (list 'let (list (list 'value2 (gen-pop-item))
-                                                    (list 'value1 (gen-pop-item)))
-                                         (gen-push-item (list 'logand (list '- 'value1 'value2) #xFFFFFFFFFFFFFFFF)))
-                             :expression-type :LONG)))
-    (pop (stack context)) (pop (stack context)) (push expr (stack context))
-    expr))
+  (with-slots (value1 value2) insn
+    (make-instance '<expression>
+                   :insn insn
+                   :code (list 'let (list (list 'value2 (code (codegen value2 context)))
+                                          (list 'value1 (code (codegen value1 context))))
+                               (list 'logand (list '- 'value1 'value2) #xFFFFFFFFFFFFFFFF))
+                   :expression-type :LONG)))
 
 (defmethod codegen ((insn ir-call-special-method) context)
   (with-slots (class method-name args) insn

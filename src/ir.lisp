@@ -53,10 +53,13 @@
 (defclass/std ir-aaload (ir-node)
   ())
 
-(defclass/std ir-aastore (ir-node)
+(defclass/std ir-xastore (ir-node)
   ((arrayref)
    (index)
    (value)))
+
+(defclass/std ir-aastore (ir-xastore)
+  ())
 
 (defclass/std ir-aload (ir-node)
   ((index)))
@@ -87,7 +90,7 @@
 (defclass/std ir-double-literal (ir-literal)
   ())
 
-(defclass/std ir-iastore (ir-node)
+(defclass/std ir-iastore (ir-xastore)
   ())
 
 (defclass/std ir-fcmpg (ir-node)
@@ -114,7 +117,7 @@
 (defclass/std ir-iaload (ir-node)
   ())
 
-(defclass/std ir-castore (ir-node)
+(defclass/std ir-castore (ir-xastore)
   ())
 
 (defclass/std ir-class (ir-node)
@@ -127,10 +130,14 @@
 (defclass/std ir-assign (ir-node)
   ((lvalue rvalue)))
 
-(defclass/std ir-iadd (ir-node)
+(defclass/std ir-binop (ir-node)
+  ((value1)
+   (value2)))
+
+(defclass/std ir-iadd (ir-binop)
   ())
 
-(defclass/std ir-ladd (ir-node)
+(defclass/std ir-ladd (ir-binop)
   ())
 
 (defclass/std ir-iand (ir-node)
@@ -365,10 +372,10 @@
   ((fn-name)
    (value)))
 
-(defclass/std ir-isub (ir-node)
+(defclass/std ir-isub (ir-binop)
   ())
 
-(defclass/std ir-lsub (ir-node)
+(defclass/std ir-lsub (ir-binop)
   ())
 
 (defclass/std ir-throw (ir-branch)
@@ -376,3 +383,6 @@
 
 (defclass/std ir-variable (ir-node)
   ((name)))
+
+(defclass/std ir-condition-exception (ir-node)
+  ())

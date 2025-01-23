@@ -74,7 +74,7 @@
     (when exception-table
       (loop for i from 0 below (length exception-table)
             for ete = (aref exception-table i)
-            do (setf (gethash (start-pc ete) exception-target-table) t)))
+            do (setf (gethash (handler-pc ete) exception-target-table) t)))
     exception-target-table))
 
 (defun %compile-method (class-name method-index)
@@ -105,14 +105,26 @@
                    (let ((code (apply #'append
                                       (loop
                                         while (and (< (pc *context*) length))
+                                        for save-exception-var = nil
                                         for result = (progn
                                                        (when *debug-bytecode*
                                                          (format t "~&; [~A] ~A ~@<~A~:@>" (pc *context*) (aref +opcodes+ (aref code (pc *context*))) (stack *context*)))
-                                                       (funcall
-                                                        (aref +opcodes+ (aref code (pc *context*)))
-                                                        *context* code))
-                                        do (when (gethash (pc *context*) exception-target-table)
-                                             (push (make-stack-variable *context* (pc *context*) :REFERENCE) (stack *context*)))
+                                                       (let ((code (funcall
+                                                                    (aref +opcodes+ (aref code (pc *context*)))
+                                                                    *context* code)))
+                                                         (if (gethash (pc *context*) exception-target-table)
+                                                             (let ((var (make-stack-variable *context* (pc *context*) :REFERENCE)))
+                                                               (push var (stack *context*))
+                                                               (cons (make-instance 'ir-assign
+                                                                                    :address (pc *context*)
+                                                                                    :lvalue var
+                                                                                    :rvalue (make-instance 'ir-condition-exception))
+                                                                     (mapcar (lambda (insn)
+                                                                               (with-slots (address) insn
+                                                                                 (setf address (+ address 0.1)))
+                                                                               insn)
+                                                                             code)))
+                                                             code)))
                                         do (%record-stack-state (pc *context*) *context*)
                                         unless (null result)
                                           collect result))))
@@ -122,10 +134,6 @@
                                   (reduce #'merge-stacks v)))
                               (stack-state-table *context*))
                      code)))
-           (debug-sdfsdfd (progn
-                            (print "=======================================================================")
-                            (print (fn-name *context*))
-                            (print ir-code-0)))
            (blocks (build-basic-blocks ir-code-0))
            (lisp-code
              (list (list 'block nil

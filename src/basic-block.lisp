@@ -193,8 +193,8 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
         ;; Make connections between basic blocks.
         (let* ((opcode (aref +opcodes+ (aref (bytecode *context*) (floor (address (car (code block)))))))
                (targets (if (gethash opcode +bytecode-short-branch-table+)
-                            (get-short-branch-targets (address (car (code block))) (bytecode *context*))
-                            (unless (eq :ATHROW opcode)
+                            (get-short-branch-targets (floor (address (car (code block)))) (bytecode *context*))
+                            (unless (find opcode '(:ATHROW :IRETURN :LRETURN :FRETURN :DRETURN :ARETURN :RETURN))
                               (list (+ (address (car (code block))) (gethash opcode +bytecode-lengths-table+)))))))
           (dolist (target targets)
             (let ((target-block (gethash (floor target) block-by-address)))
