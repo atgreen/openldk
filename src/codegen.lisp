@@ -64,7 +64,7 @@
 (defun trace-insn (insn code)
   (if *debug-trace*
       (list 'progn
-            (list 'format t (format nil "~&; [~A]~%" (address insn)))
+            (list 'format t (format nil "~&; x[~A]~%" (address insn)))
             code)
       code))
 
