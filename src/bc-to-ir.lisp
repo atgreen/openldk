@@ -480,7 +480,7 @@
       (list (make-instance 'ir-dup-x1
                            :address pc-start)))))
 
-(define-bytecode-transpiler-TODO :GETSTATIC (context code)
+(define-bytecode-transpiler :GETSTATIC (context code)
   (with-slots (pc class is-clinit-p) context
     (let ((context-class class)
           (pc-start pc))
@@ -490,12 +490,15 @@
           (multiple-value-bind (fieldname class)
               (emit (aref constant-pool index) constant-pool)
             (incf pc)
-            (let ((code (list (make-instance 'ir-push
-                                             :address (if (and is-clinit-p (equal (ir-class-class class) context-class)) pc-start (+ pc-start 0.1))
-                                             :value (make-instance 'ir-static-member
-                                                                   :address pc-start
-                                                                   :class class
-                                                                   :member-name fieldname)))))
+            (let* ((var (make-stack-variable context pc-start nil)) ;; FIXME: fix type
+                   (code (list (make-instance 'ir-assign
+                                              :address (if (and is-clinit-p (equal (ir-class-class class) context-class)) pc-start (+ pc-start 0.1))
+                                              :lvalue var
+                                              :rvalue (make-instance 'ir-static-member
+                                                                     :address pc-start
+                                                                     :class class
+                                                                     :member-name fieldname)))))
+              (push var (stack context))
               (if (and is-clinit-p (equal (ir-class-class class) context-class))
                   code
                   (cons (make-instance 'ir-clinit
@@ -1333,12 +1336,12 @@
                              :lvalue var
                              :rvalue (make-instance 'ir-new-array :address pc-start :class nil :size size)))))))
 
-(define-bytecode-transpiler-TODO :POP (context code)
-  (declare-IGNORE (ignore code))
+(define-bytecode-transpiler :POP (context code)
+  (declare (ignore code))
   (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-pop :address pc-start)))))
+    (incf pc)
+    (pop (stack context))
+    (list (make-instance 'ir-nop :address (1- pc)))))
 
 (define-bytecode-transpiler :GETFIELD (context code)
   (with-slots (pc class) context
