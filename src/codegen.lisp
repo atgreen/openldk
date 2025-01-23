@@ -526,59 +526,32 @@
        (pop (stack context)) (pop (stack context))
        expr)))
 
-(defmethod codegen ((insn ir-if-icmpeq) context)
-  (with-slots (offset) insn
-    (let ((expr (make-instance '<expression>
-                               :insn insn
-                               :code (list 'when (list 'equal (gen-pop-item) (gen-pop-item))
-                                           (list 'go (intern (format nil "branch-target-~A" offset)))))))
-      (pop (stack context)) (pop (stack context))
-      expr)))
-
-(defmethod codegen ((insn ir-if-icmple) context)
-  (with-slots (offset) insn
-    (let ((expr (make-instance '<expression>
-                               :insn insn
-                               :code (list 'when (list '>= (gen-pop-item) (gen-pop-item))
-                                           (list 'go (intern (format nil "branch-target-~A" offset)))))))
-      (pop (stack context)) (pop (stack context))
-      expr)))
-
-(defmethod codegen ((insn ir-if-icmpge) context)
-  (with-slots (offset) insn
-    (let ((expr (make-instance '<expression>
-                               :insn insn
-                               :code (list 'when (list '<= (gen-pop-item) (gen-pop-item))
-                                           (list 'go (intern (format nil "branch-target-~A" offset)))))))
-      (pop (stack context)) (pop (stack context))
-      expr)))
-
-(defmethod codegen ((insn ir-if-icmplt) context)
-  (with-slots (offset) insn
-    (let ((expr (make-instance '<expression>
-                               :insn insn
-                               :code (list 'when (list '> (gen-pop-item) (gen-pop-item))
-                                           (list 'go (intern (format nil "branch-target-~A" offset)))))))
-      (pop (stack context)) (pop (stack context))
-      expr)))
-
-(defmethod codegen ((insn ir-if-icmpgt) context)
-  (with-slots (offset) insn
-    (let ((expr (make-instance '<expression>
-                               :insn insn
-                               :code (list 'when (list '< (gen-pop-item) (gen-pop-item))
-                                           (list 'go (intern (format nil "branch-target-~A" offset)))))))
-      (pop (stack context)) (pop (stack context))
-      expr)))
-
 (defmethod codegen ((insn ir-if-icmpne) context)
-  (with-slots (offset) insn
-    (let ((expr (make-instance '<expression>
-                               :insn insn
-                               :code (list 'when (list 'not (list 'eq (gen-pop-item) (gen-pop-item)))
-                                           (list 'go (intern (format nil "branch-target-~A" offset)))))))
-      (pop (stack context)) (pop (stack context))
-      expr)))
+  (with-slots (offset value1 value2) insn
+    (make-instance '<expression>
+                   :insn insn
+                   :code (list 'when (list 'not (list 'eq (code (codegen value1 context)) (code (codegen value2 context))))
+                               (list 'go (intern (format nil "branch-target-~A" offset)))))))
+
+(defmacro %define-if-icmp<cond>-codegen-methods (&rest opcodes)
+  `(progn
+     ,@(mapcar (lambda (opcode)
+                 (let ((ir-class (car opcode))
+                       (comparison (cadr opcode)))
+                   `(defmethod codegen ((insn ,ir-class) context)
+                      (with-slots (offset value1 value2) insn
+                        (make-instance '<expression>
+                                       :insn insn
+                                       :code (list 'when (list ',comparison (code (codegen value1 context)) (code (codegen value2 context)))
+                                                   (list 'go (intern (format nil "branch-target-~A" offset)))))))))
+               opcodes)))
+
+(%define-if-icmp<cond>-codegen-methods
+  (ir-if-icmpeq eq)
+  (ir-if-icmpge >=)
+  (ir-if-icmpgt >)
+  (ir-if-icmple <=)
+  (ir-if-icmplt <))
 
 (defmacro %define-if<cond>-codegen-methods (&rest opcodes)
   `(progn

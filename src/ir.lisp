@@ -209,6 +209,10 @@
 (defclass/std ir-iinc (ir-node)
   ((index const)))
 
+(defclass/std ir-if-xcmp<cond> (ir-branch)
+  ((value1)
+   (value2)))
+
 (defclass/std ir-if-acmpeq (ir-branch)
   ())
 
@@ -218,7 +222,7 @@
 (defclass/std ir-if-icmpge (ir-branch)
   ())
 
-(defclass/std ir-if-icmpeq (ir-branch)
+(defclass/std ir-if-icmpeq (ir-if-xcmp<cond>)
   ())
 
 (defclass/std ir-if-icmple (ir-branch)
@@ -230,7 +234,7 @@
 (defclass/std ir-if-icmpgt (ir-branch)
   ())
 
-(defclass/std ir-if-icmpne (ir-branch)
+(defclass/std ir-if-icmpne (ir-if-xcmp<cond>)
   ())
 
 (defclass/std ir-if<cond> (ir-branch)

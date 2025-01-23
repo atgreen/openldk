@@ -755,16 +755,26 @@
                                :address pc-start
                                :offset (+ pc-start offset))))))))
 
-(define-bytecode-transpiler-TODO :IF_ICMPEQ (context code)
+(defun %transpile-compare-branch (context code ir-class)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
         (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
-                                              (aref code (incf pc))))))
+                                              (aref code (incf pc)))))
+               (value2 (pop (stack context)))
+               (value1 (pop (stack context))))
           (incf pc)
-          (list (make-instance 'ir-if-icmpeq
+          (list (make-instance ir-class
                                :address pc-start
+                               :value1 value1
+                               :value2 value2
                                :offset (+ pc-start offset))))))))
+
+(define-bytecode-transpiler :IF_ICMPEQ (context code)
+  (%transpile-compare-branch context code 'ir-if-icmpeq))
+
+(define-bytecode-transpiler :IF_ICMPNE (context code)
+  (%transpile-compare-branch context code 'ir-if-icmpne))
 
 (define-bytecode-transpiler-TODO :IF_ICMPGE (context code)
   (with-slots (pc class) context
@@ -807,17 +817,6 @@
                                               (aref code (incf pc))))))
           (incf pc)
           (list (make-instance 'ir-if-icmplt
-                               :address pc-start
-                               :offset (+ pc-start offset))))))))
-
-(define-bytecode-transpiler-TODO :IF_ICMPNE (context code)
-  (with-slots (pc class) context
-    (let ((pc-start pc))
-      (with-slots (constant-pool) class
-        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
-                                              (aref code (incf pc))))))
-          (incf pc)
-          (list (make-instance 'ir-if-icmpne
                                :address pc-start
                                :offset (+ pc-start offset))))))))
 
