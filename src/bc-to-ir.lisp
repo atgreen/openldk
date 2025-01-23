@@ -949,17 +949,23 @@
   (declare (ignore code))
   (%transpile-iload-x context 3))
 
-(define-bytecode-transpiler-TODO :INSTANCEOF (context code)
+(define-bytecode-transpiler :INSTANCEOF (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
         (let* ((index (+ (* (aref code (incf pc)) 256)
                          (aref code (incf pc))))
-               (class (aref constant-pool index)))
+               (class (aref constant-pool index))
+               (var (make-stack-variable context pc-start :INTEGER)))
           (incf pc)
-          (list (make-instance 'ir-instanceof
-                               :address pc-start
-                               :class (emit class constant-pool))))))))
+          (let ((code (list (make-instance 'ir-assign
+                                           :address pc-start
+                                           :lvalue var
+                                           :rvalue (make-instance 'ir-instanceof
+                                                                  :address pc-start
+                                                                  :objref (pop (stack context))
+                                                                  :class (emit class constant-pool))))))
+            (push var (stack context))))))))
 
 (define-bytecode-transpiler-TODO :INVOKEINTERFACE (context code)
   (with-slots (pc class) context
@@ -1360,8 +1366,8 @@
                                                                     :address pc-start
                                                                     :objref (pop (stack context))
                                                                     :member-name fieldname)))))
-              (push var (stack context)))))))))
-
+              (push var (stack context))
+              code)))))))
 
 (define-bytecode-transpiler :PUTFIELD (context code)
   (with-slots (pc class) context

@@ -598,15 +598,12 @@
                                (list 'go (intern (format nil "branch-target-~A" offset)))))))
 
 (defmethod codegen ((insn ir-instanceof) context)
-  (with-slots (class) insn
-    (let ((expr (make-instance '<expression>
-                               :insn insn
-                               :code (gen-push-item
-                                      (list 'if (list 'typep (gen-pop-item)
-                                                      (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk))) 1 0))
-                               :expression-type :INTEGER)))
-      (pop (stack context)) (push expr (stack context))
-      expr)))
+  (with-slots (class objref) insn
+    (make-instance '<expression>
+                   :insn insn
+                   :code (list 'if (list 'typep (code (codegen objref context))
+                                         (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk))) 1 0)
+                   :expression-type :INTEGER)))
 
 (defun logical-shift-right-32 (integer shift)
   (logand
@@ -797,7 +794,7 @@
   (declare (ignore context))
   (let ((expr (make-instance '<expression>
                              :insn insn
-                             :code (gensym "NOP-"))))
+                             :code (list 'quote (gensym "NOP-")))))
     expr))
 
 (defmethod codegen ((insn ir-pop) context)

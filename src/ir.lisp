@@ -265,7 +265,8 @@
   ())
 
 (defclass/std ir-instanceof (ir-node)
-  ((class :with)))
+  ((class :with)
+   (objref)))
 
 (defclass/std ir-ishl (ir-node)
   ())
