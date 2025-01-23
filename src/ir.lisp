@@ -125,7 +125,7 @@
 (define-print-object/std ir-class)
 
 (defclass/std ir-array-length (ir-node)
-  ())
+  ((arrayref)))
 
 (defclass/std ir-assign (ir-node)
   ((lvalue rvalue)))

@@ -139,13 +139,18 @@
   (declare (ignore code))
   (%transpile-aload-x context 3))
 
-(define-bytecode-transpiler-TODO :ARRAYLENGTH (context code)
+(define-bytecode-transpiler :ARRAYLENGTH (context code)
   (with-slots (pc) context
-    (let ((pc-start pc))
+    (let* ((pc-start pc)
+           (var (make-stack-variable context pc-start :INTEGER)))
       (incf pc)
-      (list (make-instance 'ir-array-length
-                           :address pc-start)))))
-
+      (let ((code (list (make-instance 'ir-assign
+                                       :lvalue var
+                                       :rvalue (make-instance 'ir-array-length
+                                                              :address pc-start
+                                                              :arrayref (pop (stack context)))))))
+        (push var (stack context))
+        code))))
 
 (define-bytecode-transpiler-TODO :ASTORE (context code)
   (with-slots (pc) context

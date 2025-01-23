@@ -201,12 +201,10 @@
     expr))
 
 (defmethod codegen ((insn ir-array-length) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (gen-push-item (list 'length (gen-pop-item)))
-                             :expression-type :INTEGER)))
-    (pop (stack context)) (push expr (stack context))
-    expr))
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'length (code (codegen (slot-value insn 'arrayref) context)))
+                 :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-assign) context)
   (with-slots (lvalue rvalue) insn
