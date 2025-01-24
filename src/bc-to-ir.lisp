@@ -89,7 +89,7 @@
   (declare (ignore code))
   (with-slots (pc) context
     (let* ((pc-start pc)
-           (var (make-stack-variable context pc-start :INTEGER)))
+           (var (make-stack-variable context pc-start :REFERENCE)))
       (incf pc)
       (push var (stack context))
       (list (make-instance 'ir-assign
@@ -97,18 +97,6 @@
                            :lvalue var
                            :rvalue (make-instance 'ir-null-literal
                                                   :address pc-start))))))
-
-(define-bytecode-transpiler-TODO :ALOAD (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc)
-          (index (aref code (incf pc))))
-      (incf pc)
-      (list (make-instance 'ir-push
-                           :address pc-start
-                           :value (make-instance 'ir-local-variable
-                                                 :address pc-start
-                                                 :index index))))))
 
 (defun %transpile-aload-x (context index)
   (with-slots (pc) context
@@ -152,16 +140,18 @@
         (push var (stack context))
         code))))
 
-(define-bytecode-transpiler-TODO :ASTORE (context code)
+(define-bytecode-transpiler :ASTORE (context code)
   (with-slots (pc) context
     (let ((pc-start pc)
           (index (aref code (incf pc))))
       (incf pc)
-      (list (make-instance 'ir-store
+      (list (make-instance 'ir-assign
                            :address pc-start
-                           :target (make-instance 'ir-local-variable
+                           :lvalue (make-instance 'ir-local-variable
                                                   :address pc-start
-                                                  :index index))))))
+                                                  :index index
+                                                  :jtype :REFERENCE)
+                           :rvalue (pop (stack context)))))))
 
 (defun %transpile-astore-x (context index)
   (with-slots (pc) context
@@ -204,7 +194,7 @@
       (- value 256)
       value))
 
-(define-bytecode-transpiler-TODO :IINC (context code)
+(define-bytecode-transpiler :IINC (context code)
   (with-slots (pc) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
@@ -257,12 +247,22 @@
   (declare-IGNORE (ignore code))
   (%transpile-istore-x context 3))
 
-(define-bytecode-transpiler-TODO :CALOAD (context code)
-  (declare-IGNORE (ignore code))
+(define-bytecode-transpiler :CALOAD (context code)
+  (declare (ignore code))
   (with-slots (pc) context
-    (let ((pc-start pc))
+    (let* ((pc-start pc)
+           (var (make-stack-variable context pc-start :CHAR)))
       (incf pc)
-      (list (make-instance 'ir-caload :address pc-start)))))
+      (let ((code
+             (list (make-instance 'ir-assign
+                                  :address pc-start
+                                  :lvalue var
+                                  :rvalue (make-instance 'ir-caload
+                                                         :address pc-start
+                                                         :index (pop (stack context))
+                                                         :arrayref (pop (stack context)))))))
+        (push var (stack context))
+        code))))
 
 (define-bytecode-transpiler :ATHROW (context code)
   (declare (ignore code))
@@ -271,7 +271,7 @@
       (incf pc)
       (list (make-instance 'ir-throw :address pc-start :objref (pop (stack context)))))))
 
-(define-bytecode-transpiler-TODO :CHECKCAST (context code)
+(define-bytecode-transpiler :CHECKCAST (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
@@ -326,10 +326,13 @@
            (value1 (pop (stack context))))
       (incf pc)
       (push var (stack context))
-      (list (make-instance ir-class
-                           :value1 value1
-                           :value2 value2
-                           :address pc-start)))))
+      (list (make-instance 'ir-assign
+                           :address pc-start
+                           :lvalue var
+                           :rvalue (make-instance ir-class
+                                                  :value1 value1
+                                                  :value2 value2
+                                                  :address pc-start))))))
 
 (define-bytecode-transpiler :ISUB (context code)
   (%transpile-binop context 'ir-isub :INTEGER))
@@ -384,17 +387,6 @@
       (incf pc)
       (list (make-instance 'ir-div
                            :address pc-start)))))
-
-(define-bytecode-transpiler-TODO :DLOAD (context code)
-  (with-slots (pc) context
-    (let ((pc-start pc)
-          (index (aref code (incf pc))))
-      (incf pc)
-      (list (make-instance 'ir-push
-                           :address pc-start
-                           :value (make-instance 'ir-local-variable
-                                                 :address pc-start
-                                                 :index index))))))
 
 (define-bytecode-transpiler-TODO :DLOAD_2 (context code)
   (declare-IGNORE (ignore code))
@@ -752,17 +744,6 @@
                                :address pc-start
                                :offset (+ pc-start offset))))))))
 
-(define-bytecode-transpiler-TODO :IF_ACMPNE (context code)
-  (with-slots (pc class) context
-    (let ((pc-start pc))
-      (with-slots (constant-pool) class
-        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
-                                              (aref code (incf pc))))))
-          (incf pc)
-          (list (make-instance 'ir-if-acmpne
-                               :address pc-start
-                               :offset (+ pc-start offset))))))))
-
 (defun %transpile-compare-branch (context code ir-class)
   (with-slots (pc class) context
     (let ((pc-start pc))
@@ -777,6 +758,9 @@
                                :value1 value1
                                :value2 value2
                                :offset (+ pc-start offset))))))))
+
+(define-bytecode-transpiler :IF_ACMPNE (context code)
+  (%transpile-compare-branch context code 'ir-if-acmpne))
 
 (define-bytecode-transpiler :IF_ICMPEQ (context code)
   (%transpile-compare-branch context code 'ir-if-icmpeq))
@@ -886,30 +870,34 @@
  (:IFNULL ir-ifnull)
  (:IFNONNULL ir-ifnonnull))
 
-(define-bytecode-transpiler-TODO :ILOAD (context code)
+(defun %transpile-load (jtype context code)
   (with-slots (pc) context
-    (let ((pc-start pc)
-          (index (aref code (incf pc))))
+    (let* ((pc-start pc)
+           (index (aref code (incf pc)))
+           (var (make-stack-variable context pc-start jtype)))
       (incf pc)
-      (list (make-instance 'ir-push
+      (list (make-instance 'ir-assign
                            :address pc-start
-                           :value (make-instance 'ir-local-variable
-                                                 :address pc-start
-                                                 :index index))))))
+                           :lvalue var
+                           :rvalue (make-instance 'ir-local-variable
+                                                  :address pc-start
+                                                  :index index))))))
 
-(define-bytecode-transpiler-TODO :LLOAD (context code)
-  (with-slots (pc) context
-    (let ((pc-start pc)
-          (index (aref code (incf pc))))
-      (incf pc)
-      (list (make-instance 'ir-push
-                           :address pc-start
-                           :value (make-instance 'ir-local-variable
-                                                 :address pc-start
-                                                 :index index))))))
+(defmacro %define-load-transpilers (&rest opcodes)
+  `(progn
+     ,@(mapcar (lambda (opcode)
+                 (let ((name (car opcode))
+                       (jtype (cadr opcode)))
+                   `(define-bytecode-transpiler ,name (context code)
+                      (%transpile-load ,jtype context code))))
+               opcodes)))
 
-(define-bytecode-transpiler-TODO :FLOAD (context code)
-  (:ILOAD context code))
+(%define-load-transpilers
+ (:ALOAD :REFERENCE)
+ (:ILOAD :INTEGER)
+ (:LLOAD :LONG)
+ (:FLOAD :FLOAT)
+ (:DLOAD :DOUBLE))
 
 (defun %transpile-iload-x (context index)
   (with-slots (pc) context

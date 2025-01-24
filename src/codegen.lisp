@@ -62,7 +62,7 @@
       (list 'pop 'stack)))
 
 (defun trace-insn (insn code)
-  (if *debug-trace*
+  (if *debug-x*
       (list 'progn
             (list 'format t (format nil "~&; x[~A]~%" (address insn)))
             code)
@@ -235,15 +235,13 @@
 
 (defmethod codegen ((insn ir-caload) context)
   ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
-  (with-slots (source target) insn
-    (let ((expr (make-instance '<expression>
-                               :insn insn
-                               :code (list 'let (list (list 'index (gen-pop-item))
-                                                      (list 'arrayref (gen-pop-item)))
-                                           (gen-push-item (list 'char-code (list 'aref 'arrayref 'index))))
-                               :expression-type :CHAR)))
-      (pop (stack context)) (pop (stack context)) (push expr (stack context))
-      expr)))
+  (with-slots (index arrayref) insn
+    (make-instance '<expression>
+                   :insn insn
+                   :code (list 'let (list (list 'index (code (codegen index context)))
+                                          (list 'arrayref (code (codegen arrayref context))))
+                               (list 'char-code (list 'aref 'arrayref 'index)))
+                   :expression-type :CHAR)))
 
 (defmethod codegen ((insn ir-iaload) context)
   ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
@@ -271,20 +269,18 @@
   (declare (ignore context))
   ;; FIXME: the array test can be done at compiletime
   (with-slots (class) insn
-    (let ((expr (make-instance '<expression>
-                               :insn insn
-                               :code (list 'progn
-                                           (list 'when (gen-peek-item)
-                                                 (list 'unless (list 'or
-                                                                     (list 'typep (gen-peek-item)
-                                                                           (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))
-                                                                     (list 'and
-                                                                           (list 'arrayp (gen-peek-item))
-                                                                           (list 'eq (list 'quote '|java/util/Arrays|) (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))))
-                                                       (gen-push-item (list 'make-instance (list 'quote '|java/lang/ClassCastException|)))
-                                                       (list 'error (list 'lisp-condition (gen-peek-item))))))
-                               :expression-type nil)))
-      expr)))
+    (make-instance '<expression>
+                   :insn insn
+                   :code (list 'progn
+                               (list 'when (gen-peek-item)
+                                     (list 'unless (list 'or
+                                                         (list 'typep (gen-peek-item)
+                                                               (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))
+                                                         (list 'and
+                                                               (list 'arrayp (gen-peek-item))
+                                                               (list 'eq (list 'quote '|java/util/Arrays|) (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))))
+                                           (list 'error (list 'lisp-condition (list 'make-instance (list 'quote '|java/lang/ClassCastException|)))))))
+                   :expression-type nil)))
 
 (defmethod codegen ((insn ir-class) context)
   (declare (ignore context))
@@ -496,7 +492,8 @@
     expr))
 
 (defmethod codegen ((insn ir-iinc) context)
-   (with-slots (index const) insn
+  ;; FIXME: don't increment above width of type
+  (with-slots (index const) insn
      (let ((expr (make-instance '<expression>
                                 :insn insn
                                 :code (list 'incf (intern (format nil "local-~A" index) :openldk) const))))
@@ -513,23 +510,18 @@
        (pop (stack context)) (pop (stack context))
        expr)))
 
-(defmethod codegen ((insn ir-if-acmpne) context)
-   (with-slots (offset) insn
-     (let ((expr (make-instance '<expression>
-                                :insn insn
-                                :code (list 'let (list (list 'o1 (gen-pop-item))
-                                                       (list 'o2 (gen-pop-item)))
-                                            (list 'when (list 'not (list 'eq (list 'sxhash 'o1) (list 'sxhash 'o2)))
-                                                  (list 'go (intern (format nil "branch-target-~A" offset))))))))
-       (pop (stack context)) (pop (stack context))
-       expr)))
-
-(defmethod codegen ((insn ir-if-icmpne) context)
+(defun %codegen-ir-if-xcmpne (insn context)
   (with-slots (offset value1 value2) insn
     (make-instance '<expression>
                    :insn insn
                    :code (list 'when (list 'not (list 'eq (code (codegen value1 context)) (code (codegen value2 context))))
                                (list 'go (intern (format nil "branch-target-~A" offset)))))))
+
+(defmethod codegen ((insn ir-if-icmpne) context)
+  (%codegen-ir-if-xcmpne insn context))
+
+(defmethod codegen ((insn ir-if-acmpne) context)
+  (%codegen-ir-if-xcmpne insn context))
 
 (defmacro %define-if-icmp<cond>-codegen-methods (&rest opcodes)
   `(progn

@@ -112,7 +112,8 @@
   ())
 
 (defclass/std ir-caload (ir-node)
-  ())
+  ((index)
+   (arrayref)))
 
 (defclass/std ir-iaload (ir-node)
   ())
@@ -216,7 +217,7 @@
 (defclass/std ir-if-acmpeq (ir-branch)
   ())
 
-(defclass/std ir-if-acmpne (ir-branch)
+(defclass/std ir-if-acmpne (ir-if-xcmp<cond>)
   ())
 
 (defclass/std ir-if-icmpge (ir-branch)

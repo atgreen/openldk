@@ -50,6 +50,7 @@
 (defvar *debug-codegen* nil)
 (defvar *debug-stack* nil)
 (defvar *debug-trace* nil)
+(defvar *debug-x* nil)
 (defvar *debug-unmuffle* nil)
 
 (defun %eval (code)
@@ -361,6 +362,8 @@
           (setf *debug-trace* t))
         (when (find #\b LDK_DEBUG)
           (setf *debug-bytecode* t))
+        (when (find #\x LDK_DEBUG)
+          (setf *debug-x* t))
         (when (find #\u LDK_DEBUG)
           (setf *debug-unmuffle* t)))))
 
