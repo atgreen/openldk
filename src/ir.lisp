@@ -228,7 +228,7 @@
 (defclass/std ir-if-icmple (ir-branch)
   ())
 
-(defclass/std ir-if-icmplt (ir-branch)
+(defclass/std ir-if-icmplt (ir-if-xcmp<cond>)
   ())
 
 (defclass/std ir-if-icmpgt (ir-branch)

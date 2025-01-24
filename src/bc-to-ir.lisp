@@ -784,6 +784,9 @@
 (define-bytecode-transpiler :IF_ICMPNE (context code)
   (%transpile-compare-branch context code 'ir-if-icmpne))
 
+(define-bytecode-transpiler :IF_ICMPLT (context code)
+  (%transpile-compare-branch context code 'ir-if-icmplt))
+
 (define-bytecode-transpiler-TODO :IF_ICMPGE (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
@@ -814,17 +817,6 @@
                                               (aref code (incf pc))))))
           (incf pc)
           (list (make-instance 'ir-if-icmpgt
-                               :address pc-start
-                               :offset (+ pc-start offset))))))))
-
-(define-bytecode-transpiler-TODO :IF_ICMPLT (context code)
-  (with-slots (pc class) context
-    (let ((pc-start pc))
-      (with-slots (constant-pool) class
-        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
-                                              (aref code (incf pc))))))
-          (incf pc)
-          (list (make-instance 'ir-if-icmplt
                                :address pc-start
                                :offset (+ pc-start offset))))))))
 
