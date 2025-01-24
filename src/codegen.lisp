@@ -118,24 +118,6 @@
                                           (list 'arrayref (code (codegen arrayref context))))
                                (list 'setf (list 'aref 'arrayref 'index) 'value)))))
 
-(defmethod codegen ((insn ir-iadd) context)
-  (with-slots (value1 value2) insn
-    (make-instance '<expression>
-                   :insn insn
-                   :code (list 'let (list (list 'value2 (code (codegen value2 context)))
-                                          (list 'value1 (code (codegen value1 context))))
-                               (list 'logand (list '+ 'value1 'value2) #xFFFFFFFF))
-                   :expression-type :INTEGER)))
-
-(defmethod codegen ((insn ir-ladd) context)
-  (with-slots (value1 value2) insn
-    (make-instance '<expression>
-                   :insn insn
-                   :code (list 'let (list (list 'value2 (code (codegen value2 context)))
-                                          (list 'value1 (code (codegen value1 context))))
-                               (list 'logand (list '+ 'value1 'value2) #xFFFFFFFFFFFFFFFF))
-                   :expression-type :LONG)))
-
 (defmethod codegen ((insn ir-fadd) context)
   ;; FIXME -- handle NaN cases
   (let ((expr (make-instance '<expression>
@@ -145,13 +127,32 @@
     (pop (stack context)) (pop (stack context)) (push expr (stack context))
     expr))
 
-(defmethod codegen ((insn ir-imul) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (gen-push-item (list 'logand (list '* (gen-pop-item) (gen-pop-item)) #xFFFFFFFF))
-                             :expression-type :INTEGER)))
-    (pop (stack context)) (pop (stack context)) (push expr (stack context))
-    expr))
+(defun %codegen-binop (insn operator jtype mask context)
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'let (list (list 'value2 (code (codegen (value2 insn) context)))
+                                        (list 'value1 (code (codegen (value1 insn) context))))
+                             (list 'logand (list operator 'value1 'value2) mask))
+                 :expression-type jtype))
+
+(defmacro %define-binop-codegen-methods (&rest opcodes)
+  `(progn
+     ,@(mapcar (lambda (opcode)
+                 (let ((ir-class (car opcode))
+                       (operator (cadr opcode))
+                       (jtype (caddr opcode))
+                       (mask (cadddr opcode)))
+                   `(defmethod codegen ((insn ,ir-class) context)
+                               (%codegen-binop insn ,operator ,jtype ,mask context))))
+               opcodes)))
+
+(%define-binop-codegen-methods
+  (ir-iadd '+ :INTEGER #xFFFFFFFF)
+  (ir-ladd '+ :LONG #xFFFFFFFFFFFFFFFF)
+  (ir-isub '- :INTEGER #xFFFFFFFF)
+  (ir-lsub '- :LONG #xFFFFFFFFFFFFFFFF)
+  (ir-imul '* :INTEGER #xFFFFFFFF)
+  (ir-lmul '* :LONG #xFFFFFFFFFFFFFFFF))
 
 (defmethod codegen ((insn ir-iand) context)
   (let ((expr (make-instance '<expression>
@@ -805,24 +806,6 @@
                               :expression-type (expression-type value))))
     (push expr (stack context))
     expr))
-
-(defmethod codegen ((insn ir-isub) context)
-  (with-slots (value1 value2) insn
-    (make-instance '<expression>
-                   :insn insn
-                   :code (list 'let (list (list 'value2 (code (codegen value2 context)))
-                                          (list 'value1 (code (codegen value1 context))))
-                               (list 'logand (list '- 'value1 'value2) #xFFFFFFFF))
-                   :expression-type :INTEGER)))
-
-(defmethod codegen ((insn ir-lsub) context)
-  (with-slots (value1 value2) insn
-    (make-instance '<expression>
-                   :insn insn
-                   :code (list 'let (list (list 'value2 (code (codegen value2 context)))
-                                          (list 'value1 (code (codegen value1 context))))
-                               (list 'logand (list '- 'value1 'value2) #xFFFFFFFFFFFFFFFF))
-                   :expression-type :LONG)))
 
 (defmethod codegen ((insn ir-call-special-method) context)
   (with-slots (class method-name args) insn

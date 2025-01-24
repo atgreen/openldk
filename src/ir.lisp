@@ -131,6 +131,10 @@
 (defclass/std ir-assign (ir-node)
   ((lvalue rvalue)))
 
+(defmethod print-object ((node ir-assign) out)
+  (print-unreadable-object (node out :type t)
+    (format out "~A: ~A = ~A" (slot-value node 'address) (slot-value node 'lvalue) (slot-value node 'rvalue))))
+
 (defclass/std ir-binop (ir-node)
   ((value1)
    (value2)))
@@ -168,10 +172,13 @@
 (defclass/std ir-branch (ir-node)
   ((offset successors)))
 
-(defclass/std ir-imul (ir-node)
+(defclass/std ir-imul (ir-binop)
   ())
 
 (defclass/std ir-idiv (ir-node)
+  ())
+
+(defclass/std ir-lmul (ir-binop)
   ())
 
 (defclass/std ir-ldiv (ir-node)

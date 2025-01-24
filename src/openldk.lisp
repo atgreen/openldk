@@ -69,14 +69,14 @@
 (defun lispize-method-name (name)
   (subseq name 0 (1+ (position #\) name))))
 
-(defun make-exception-target-table (context)
+(defun make-exception-handler-table (context)
   (let ((exception-table (exception-table context))
-        (exception-target-table (make-hash-table)))
+        (exception-handler-table (make-hash-table)))
     (when exception-table
       (loop for i from 0 below (length exception-table)
             for ete = (aref exception-table i)
-            do (setf (gethash (handler-pc ete) exception-target-table) t)))
-    exception-target-table))
+            do (setf (gethash (handler-pc ete) exception-handler-table) t)))
+    exception-handler-table))
 
 (defun %compile-method (class-name method-index)
   (let* ((class (gethash class-name *classes*))
@@ -100,41 +100,44 @@
     (if (static-p method)
         (setf (fn-name *context*) (format nil "~A.~A" (slot-value class 'name) (lispize-method-name (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor)))))
         (setf (fn-name *context*) (format nil "~A" (lispize-method-name (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor))))))
-    (let* ((exception-target-table (make-exception-target-table *context*))
+    (let* ((exception-handler-table (make-exception-handler-table *context*))
            (ir-code-0
              (setf (ir-code *context*)
                    (let ((code (apply #'append
                                       (loop
                                         while (and (< (pc *context*) length))
-                                        for save-exception-var = nil
                                         for result = (progn
                                                        (when *debug-bytecode*
                                                          (format t "~&; c[~A] ~A ~@<~A~:@>" (pc *context*) (aref +opcodes+ (aref code (pc *context*))) (stack *context*)))
-                                                       (let ((code (funcall
-                                                                    (aref +opcodes+ (aref code (pc *context*)))
-                                                                    *context* code)))
-                                                         (if (gethash (pc *context*) exception-target-table)
-                                                             (let ((var (make-stack-variable *context* (pc *context*) :REFERENCE)))
+                                                       (let* ((pc-start (pc *context*)))
+                                                         (if (gethash pc-start exception-handler-table)
+                                                             (let ((var (make-stack-variable *context* pc-start :REFERENCE)))
                                                                (push var (stack *context*))
+                                                               (format t "~%===========================================~%SC: ~A~%" (stack *context*))
                                                                (cons (make-instance 'ir-assign
-                                                                                    :address (pc *context*)
+                                                                                    :address pc-start
                                                                                     :lvalue var
                                                                                     :rvalue (make-instance 'ir-condition-exception))
                                                                      (mapcar (lambda (insn)
                                                                                (with-slots (address) insn
                                                                                  (setf address (+ address 0.1)))
                                                                                insn)
-                                                                             code)))
-                                                             code)))
+                                                                             (funcall
+                                                                              (aref +opcodes+ (aref code (pc *context*)))
+                                                                              *context* code))))
+                                                           (funcall
+                                                            (aref +opcodes+ (aref code (pc *context*)))
+                                                            *context* code))))
                                         do (%record-stack-state (pc *context*) *context*)
                                         unless (null result)
-                                          collect result))))
+                                        collect result))))
                      ;; Do stack analysis to merge stack variables
                      (maphash (lambda (k v)
                                 (when (> (length v) 1)
                                   (reduce #'merge-stacks v)))
                               (stack-state-table *context*))
                      code)))
+           (sdfdfd (print ir-code-0))
            (blocks (build-basic-blocks ir-code-0))
            (lisp-code
              (list (list 'block nil

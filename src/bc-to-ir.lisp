@@ -336,16 +336,28 @@
                                                   :address pc-start))))))
 
 (define-bytecode-transpiler :ISUB (context code)
+  (declare (ignore code))
   (%transpile-binop context 'ir-isub :INTEGER))
 
 (define-bytecode-transpiler :LSUB (context code)
+  (declare (ignore code))
   (%transpile-binop context 'ir-lsub :LONG))
 
 (define-bytecode-transpiler :IADD (context code)
+  (declare (ignore code))
   (%transpile-binop context 'ir-iadd :INTEGER))
 
 (define-bytecode-transpiler :LADD (context code)
+  (declare (ignore code))
   (%transpile-binop context 'ir-ladd :LONG))
+
+(define-bytecode-transpiler :IMUL (context code)
+  (declare (ignore code))
+  (%transpile-binop context 'ir-imul :INTEGER))
+
+(define-bytecode-transpiler :LMUL (context code)
+  (declare (ignore code))
+  (%transpile-binop context 'ir-lmul :LONG))
 
 (define-bytecode-transpiler :BIPUSH (context code)
   (with-slots (pc) context
@@ -804,14 +816,6 @@
           (list (make-instance 'ir-if-icmpgt
                                :address pc-start
                                :offset (+ pc-start offset))))))))
-
-(define-bytecode-transpiler-TODO :IMUL (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-imul
-                           :address pc-start)))))
 
 (define-bytecode-transpiler-TODO :IDIV (context code)
   (declare-IGNORE (ignore code))

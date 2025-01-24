@@ -209,11 +209,14 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
       (let ((exception-table (exception-table *context*)))
         (when exception-table
 
+          (dump-hashtable block-by-address)
+
           (loop for i from 0 below (length exception-table)
                 for ete = (aref exception-table i)
                 for start-block = (gethash (start-pc ete) block-by-address)
                 for end-block = (gethash (end-pc ete) block-by-address)
                 for handler = (gethash (handler-pc ete) block-by-address)
+                do (format t "EEB: ~a ~a~%" ete (gethash (start-pc ete) block-by-address))
                 do (push end-block (exception-end-blocks start-block))
                 do (push (cons (catch-type ete) handler) (try-catch start-block)))))
 
