@@ -281,7 +281,8 @@
           (incf pc)
           (list (make-instance 'ir-checkcast
                                :address pc-start
-                               :class (emit class constant-pool))))))))
+                               :class (emit class constant-pool)
+                               :objref (car (stack context)))))))))
 
 (define-bytecode-transpiler-TODO :FADD (context code)
   (declare-IGNORE (ignore code))
@@ -876,6 +877,7 @@
            (index (aref code (incf pc)))
            (var (make-stack-variable context pc-start jtype)))
       (incf pc)
+      (push var (stack context))
       (list (make-instance 'ir-assign
                            :address pc-start
                            :lvalue var

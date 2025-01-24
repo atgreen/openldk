@@ -304,7 +304,8 @@
 (define-print-object/std ir-call-static-method)
 
 (defclass/std ir-checkcast (ir-node)
-  ((class :with)))
+  ((class :with)
+   (objref)))
 
 (defclass/std ir-clinit (ir-call)
   ((class :with)))

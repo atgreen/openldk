@@ -69,6 +69,7 @@
       code))
 
 (defun gen-peek-item ()
+  (error "PEEK")
   (list 'car 'stack))
 
 (defmethod codegen ((insn ir-literal) context)
@@ -271,13 +272,13 @@
   (with-slots (class) insn
     (make-instance '<expression>
                    :insn insn
-                   :code (list 'progn
-                               (list 'when (gen-peek-item)
+                   :code (list 'let (list (list 'objref (code (codegen (objref insn) context))))
+                               (list 'when 'objref
                                      (list 'unless (list 'or
-                                                         (list 'typep (gen-peek-item)
+                                                         (list 'typep 'objref
                                                                (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))
                                                          (list 'and
-                                                               (list 'arrayp (gen-peek-item))
+                                                               (list 'arrayp 'objref)
                                                                (list 'eq (list 'quote '|java/util/Arrays|) (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))))
                                            (list 'error (list 'lisp-condition (list 'make-instance (list 'quote '|java/lang/ClassCastException|)))))))
                    :expression-type nil)))
