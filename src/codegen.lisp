@@ -154,14 +154,6 @@
   (ir-imul '* :INTEGER #xFFFFFFFF)
   (ir-lmul '* :LONG #xFFFFFFFFFFFFFFFF))
 
-(defmethod codegen ((insn ir-iand) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (gen-push-item (list 'logand (gen-pop-item) (gen-pop-item)))
-                             :expression-type :INTEGER)))
-    (pop (stack context)) (pop (stack context)) (push expr (stack context))
-    expr))
-
 (defmethod codegen ((insn ir-land) context)
   (let ((expr (make-instance '<expression>
                              :insn insn
@@ -170,21 +162,23 @@
     (pop (stack context)) (pop (stack context)) (push expr (stack context))
     expr))
 
-(defmethod codegen ((insn ir-ior) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (gen-push-item (list 'logior (gen-pop-item) (gen-pop-item)))
-                             :expression-type :INTEGER)))
-    (pop (stack context)) (pop (stack context)) (push expr (stack context))
-    expr))
-
 (defmethod codegen ((insn ir-ixor) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (gen-push-item (list 'logxor (gen-pop-item) (gen-pop-item)))
-                             :expression-type :INTEGER)))
-    (pop (stack context)) (pop (stack context)) (push expr (stack context))
-    expr))
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'logxor (code (codegen (value1 insn) context)) (code (codegen (value2 insn) context)))
+                 :expression-type :INTEGER))
+
+(defmethod codegen ((insn ir-ior) context)
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'logior (code (codegen (value1 insn) context)) (code (codegen (value2 insn) context)))
+                 :expression-type :INTEGER))
+
+(defmethod codegen ((insn ir-iand) context)
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'logand (code (codegen (value1 insn) context)) (code (codegen (value2 insn) context)))
+                 :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-lor) context)
   (let ((expr (make-instance '<expression>
@@ -245,6 +239,16 @@
                                           (list 'arrayref (code (codegen arrayref context))))
                                (list 'char-code (list 'aref 'arrayref 'index)))
                    :expression-type :CHAR)))
+
+(defmethod codegen ((insn ir-aaload) context)
+  ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
+  (with-slots (index arrayref) insn
+    (make-instance '<expression>
+                   :insn insn
+                   :code (list 'let (list (list 'index (code (codegen index context)))
+                                          (list 'arrayref (code (codegen arrayref context))))
+                               (list 'aref 'arrayref 'index))
+                   :expression-type :REFERENCE)))
 
 (defmethod codegen ((insn ir-iaload) context)
   ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
@@ -587,14 +591,10 @@
 
 (defmethod codegen ((insn ir-iushr) context)
   ;; FIXME: this is wrong.
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (list 'let (list (list 'value2 (gen-pop-item))
-                                                    (list 'value1 (gen-pop-item)))
-                                         (gen-push-item (list 'shr 'value1 'value2 32)))
-                             :expression-type :INTEGER)))
-    (pop (stack context)) (pop (stack context)) (push expr (stack context))
-    expr))
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'shr (code (codegen (value1 insn) context)) (code (codegen (value2 insn) context)) 32)
+                 :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-lshr) context)
   ;; FIXME: this is wrong.

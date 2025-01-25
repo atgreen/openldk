@@ -54,9 +54,6 @@
 (defmethod uses-stack-p ((node ir-node))
   nil)
 
-(defclass/std ir-aaload (ir-node)
-  ())
-
 (defclass/std ir-xastore (ir-node)
   ((arrayref)
    (index)
@@ -115,9 +112,15 @@
 (defclass/std ir-long-literal (ir-literal)
   ())
 
-(defclass/std ir-caload (ir-node)
+(defclass/std ir-array-index (ir-node)
   ((index)
    (arrayref)))
+
+(defclass/std ir-caload (ir-array-index)
+  ())
+
+(defclass/std ir-aaload (ir-array-index)
+  ())
 
 (defclass/std ir-iaload (ir-node)
   ())
@@ -149,10 +152,10 @@
 (defclass/std ir-ladd (ir-binop)
   ())
 
-(defclass/std ir-iand (ir-node)
+(defclass/std ir-iand (ir-binop)
   ())
 
-(defclass/std ir-ixor (ir-node)
+(defclass/std ir-ixor (ir-binop)
   ())
 
 (defclass/std ir-lxor (ir-node)
@@ -164,7 +167,7 @@
 (defclass/std ir-land (ir-node)
   ())
 
-(defclass/std ir-ior (ir-node)
+(defclass/std ir-ior (ir-binop)
   ())
 
 (defclass/std ir-lor (ir-node)
@@ -280,7 +283,7 @@
 (defclass/std ir-ishr (ir-node)
   ())
 
-(defclass/std ir-iushr (ir-node)
+(defclass/std ir-iushr (ir-binop)
   ())
 
 (defclass/std ir-lshl (ir-node)
