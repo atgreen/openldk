@@ -47,19 +47,10 @@
     (format out "{~A : ~A}" (slot-value expr 'insn) (slot-value expr 'code))))
 
 (defun gen-push-item (item)
-  (assert (not (eq (type-of item) '<expression>)))
-  (if *debug-stack*
-      (list 'let (list (list 'item item))
-            (list 'format t "; --- push ~A to ~A~%" 'item 'stack)
-            (list 'push 'item 'stack))
-      (list 'push item 'stack)))
+  (assert t))
 
 (defun gen-pop-item ()
-  (if *debug-stack*
-      (list 'progn
-            (list 'format t "; -- pop from ~A~%" 'stack)
-            (list 'pop 'stack))
-      (list 'pop 'stack)))
+  (assert t))
 
 (defun trace-insn (insn code)
   (if *debug-x*
@@ -239,24 +230,23 @@
 
 (defmethod codegen ((insn ir-call-static-method) context)
   (with-slots (class method-name args return-type) insn
-    (let ((expr (make-instance '<expression>
-                               :insn insn
-                               :code (let* ((nargs (length args))
-                                            (call (cond
-                                                    ((eq nargs 0)
-                                                     (list (intern (format nil "~A.~A" class method-name) :openldk)))
-                                                    ((eq nargs 1)
-                                                     (list (intern (format nil "~A.~A" class method-name) :openldk) (code (codegen (car args) context))))
-                                                    (t
-                                                     (list 'apply
-                                                           (list 'function (intern (format nil "~A.~A"
-                                                                                           class
-                                                                                           method-name)
-                                                                                   :openldk))
-                                                           (list 'reverse (cons 'list (mapcar (lambda (a) (code (codegen a context))) args))))))))
-                                       call)
-                               :expression-type return-type)))
-      expr)))
+    (make-instance '<expression>
+                   :insn insn
+                   :code (let* ((nargs (length args))
+                                (call (cond
+                                        ((eq nargs 0)
+                                         (list (intern (format nil "~A.~A" class method-name) :openldk)))
+                                        ((eq nargs 1)
+                                         (list (intern (format nil "~A.~A" class method-name) :openldk) (code (codegen (car args) context))))
+                                        (t
+                                         (list 'apply
+                                               (list 'function (intern (format nil "~A.~A"
+                                                                               class
+                                                                               method-name)
+                                                                       :openldk))
+                                               (list 'reverse (cons 'list (mapcar (lambda (a) (code (codegen a context))) args))))))))
+                           call)
+                   :expression-type return-type)))
 
 (defmethod codegen ((insn ir-caload) context)
   ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
@@ -335,18 +325,16 @@
     expr))
 
 (defmethod codegen ((insn ir-irem) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (list 'handler-case
-                                         (list 'let (list (list 'value2 (gen-pop-item))
-                                                          (list 'value1 (gen-pop-item)))
-                                               (gen-push-item (list 'rem 'value1 'value2)))
-                                         (list 'division-by-zero (list 'e)
-                                               (gen-push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
-                                               (list 'error (list 'lisp-condition (gen-peek-item)))))
-                             :expression-type :INTEGER)))
-    (pop (stack context)) (pop (stack context)) (push expr (stack context))
-    expr))
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'handler-case
+                             (list 'let (list (list 'value2 (code (codegen (value2 insn) context)))
+                                              (list 'value1 (code (codegen (value1 insn) context))))
+                                   (list 'rem 'value1 'value2))
+                             (list 'division-by-zero (list 'e)
+                                   (gen-push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
+                                   (list 'error (list 'lisp-condition (list 'make-instance (list 'quote '|java/lang/ArithmeticException|))))))
+                 :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-fdiv) context)
   ;; FIXME - handle all weird conditions
@@ -605,17 +593,6 @@
                  :code (list 'shr (code (codegen (value1 insn) context)) (code (codegen (value2 insn) context)) 32)
                  :expression-type :INTEGER))
 
-(defmethod codegen ((insn ir-lshr) context)
-  ;; FIXME: this is wrong.
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (list 'let (list (list 'value2 (gen-pop-item))
-                                                    (list 'value1 (gen-pop-item)))
-                                         (gen-push-item (list 'shr 'value1 'value2 64)))
-                             :expression-type :LONG)))
-    (pop (stack context)) (pop (stack context)) (push expr (stack context))
-    expr))
-
 (defmethod codegen ((insn ir-lcmp) context)
   (make-instance '<expression>
                  :insn insn
@@ -623,11 +600,11 @@
                                         (list 'value1 (code (codegen (value1 insn) context))))
                              (list 'cond
                                    (list (list 'eq 'value1 'value2)
-                                         0
-                                         (list (list '> 'value1 'value2)
-                                               1
-                                               (list 't
-                                                     -1)))))
+                                         0)
+                                   (list (list '> 'value1 'value2)
+                                         1)
+                                   (list 't
+                                         -1)))
                  :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-lushr) context)
@@ -745,22 +722,19 @@
 
 (defmethod codegen ((insn ir-call-special-method) context)
   (with-slots (class method-name args) insn
-     (let ((expr (make-instance '<expression>
-                                :insn insn
-                                :code (let ((call (list 'destructuring-bind (cons 'method 'next)
-                                                        (list 'closer-mop:compute-applicable-methods-using-classes
-                                                              (list 'function (intern (format nil "~A" method-name) :openldk))
-                                                              ;; FIXME: This should be based on the args list
-                                                              (cons 'list
-                                                                    (cons (find-class (intern (slot-value class 'name) :openldk))
-                                                                          (loop for a in args collect t))))
-                                                        (list 'let (list (list 'fn (list 'closer-mop:method-function 'method)))
-                                                              (list 'apply 'fn
-                                                                    (list 'list (cons 'reverse (list (cons 'list (mapcar (lambda (a) (code (codegen a context))) args)))) 'next))))))
-                                        (if (eq (return-type insn) :VOID)
-                                            call
-                                            (gen-push-item call))))))
-       expr)))
+     (make-instance '<expression>
+                    :insn insn
+                    :code (let ((call (list 'destructuring-bind (cons 'method 'next)
+                                            (list 'closer-mop:compute-applicable-methods-using-classes
+                                                  (list 'function (intern (format nil "~A" method-name) :openldk))
+                                                  ;; FIXME: This should be based on the args list
+                                                  (cons 'list
+                                                        (cons (find-class (intern (slot-value class 'name) :openldk))
+                                                              (loop for a in args collect t))))
+                                            (list 'let (list (list 'fn (list 'closer-mop:method-function 'method)))
+                                                  (list 'apply 'fn
+                                                        (list 'list (cons 'reverse (list (cons 'list (mapcar (lambda (a) (code (codegen a context))) args)))) 'next))))))
+                            call))))
 
 (defmethod codegen ((insn ir-member) context)
   (with-slots (objref member-name) insn
