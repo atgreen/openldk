@@ -41,12 +41,13 @@ The `openldk` runtime will generate useful debug info if you set your
 `LDK_DEBUG` environment variable.  `LDK_DEBUG` should be set to a
 string of characters that are interpreted as below:
 
+- `b` - trace bytecode compilation
 - `c` - dump all Lisp code prior to evaluation
-- `s` - show stack push/pop events
-- `t` - trace method entries
+- `t` - trace method entries at runtime
 - `u` - unmuffle the Lisp compiler
+- `x` - trace opcode execution (use with `t`)
 
-More specifically, running `LDK_DEBUG=cstu openldk Hello` will enable
+More specifically, running `LDK_DEBUG=bctux openldk Hello` will enable
 all debug output while running `Hello`.
 
 ## Status
@@ -58,8 +59,6 @@ prematurely.
 Here's an incomplete list of what's not implemented:
 - support for class files beyond Java 8
 - bytecode verification
-- `monitorenter`/`monitorexit` for object synchronization
-- SSA and SSA-based optimizations are aspirational. The compiler currently generates code for a naive stack machine.
 
 Author and License
 -------------------
