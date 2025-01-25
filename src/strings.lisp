@@ -56,7 +56,6 @@
           istr))))
 
 (defmethod |intern()| ((str string))
-  (format t "INTERNING ~A~%" str)
   (let ((istr (gethash str interned-string-table)))
     (or istr
         (let ((istr (setf (gethash str interned-string-table) (jstring str))))
