@@ -572,11 +572,11 @@
 
 (define-bytecode-transpiler :FCONST_0 (context code)
   (declare (ignore code))
-  (%transpile-fconst-x context 0))
+  (%transpile-fconst-x context 0.0))
 
 (define-bytecode-transpiler :FCONST_1 (context code)
   (declare (ignore code))
-  (%transpile-fconst-x context 1))
+  (%transpile-fconst-x context 1.0))
 
 (define-bytecode-transpiler-TODO :L2I (context code)
   (declare-IGNORE (ignore code))
