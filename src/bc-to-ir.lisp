@@ -462,12 +462,10 @@
     (let ((pc-start pc)
           (var (make-stack-variable context pc (var-type (car (stack context))))))
       (incf pc)
-      (let ((code (list (make-instance 'ir-assign
-                                       :address pc-start
-                                       :lvalue var
-                                       :rvalue (car (stack context))))))
-        (push var (stack context))
-        code))))
+      (let* ((value (pop (stack context))))
+        (push value (stack context))
+        (push value (stack context)))
+      (list (make-instance 'ir-nop :address pc-start)))))
 
 (define-bytecode-transpiler-TODO :DUP2 (context code)
   (declare-IGNORE (ignore code))
@@ -484,14 +482,11 @@
           (var (make-stack-variable context pc (var-type (car (stack context))))))
       (incf pc)
       (let* ((value1 (pop (stack context)))
-             (code (list (make-instance 'ir-assign
-                                        :address pc-start
-                                        :lvalue var
-                                        :rvalue value1)))
              (value2 (pop (stack context))))
-        (push var (stack context))
+        (push value1 (stack context))
         (push value2 (stack context))
-        (push value1 (stack context))))))
+        (push value1 (stack context)))
+      (list (make-instance 'ir-nop :address pc-start)))))
 
 (define-bytecode-transpiler :GETSTATIC (context code)
   (with-slots (pc class is-clinit-p) context
