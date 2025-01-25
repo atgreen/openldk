@@ -1014,7 +1014,6 @@
               (if (not (eq return-type :VOID))
                   (let ((var (make-stack-variable context pc-start return-type)))
                     (push var (stack context))
-                    (format t "~&INVOKESTATIC: ~A~%" (stack context))
                     (setf call (make-instance 'ir-assign
                                               :address (if (and is-clinit-p (equal callee-class (name context-class))) pc-start (+ pc-start 0.1))
                                               :lvalue var
@@ -1219,7 +1218,6 @@
           (multiple-value-bind (fieldname)
               (emit (aref constant-pool index) constant-pool)
             (incf pc)
-            (format t "PUTFIELD ~A~%" (stack context))
             (list (make-instance 'ir-assign
                                  :address pc-start
                                  :rvalue (pop (stack context))

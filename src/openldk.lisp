@@ -136,11 +136,10 @@
                      ;; Do stack analysis to merge stack variables
                      (maphash (lambda (k v)
                                 (when (> (length v) 1)
-                                  (format t "~&MERGE-STACKS ~A: ~A~%" k v)
                                   (reduce #'merge-stacks v)))
                               (stack-state-table *context*))
                      code)))
-           ; (sdfdfd (print ir-code-0))
+           ;; (sdfdfd (print ir-code-0))
            (blocks (build-basic-blocks ir-code-0))
            (lisp-code
              (list (list 'block nil
@@ -421,7 +420,7 @@
 
 (defun main-wrapper ()
   "Main entry point into OpenLDK.  Process command line errors here."
-  (format t "DYNAMIC SPACE (GB) = ~A~%" (ceiling (sb-ext:dynamic-space-size) (* 1024 1024 1024)))
+  (format t "; DYNAMIC SPACE (GB) = ~A~%" (ceiling (sb-ext:dynamic-space-size) (* 1024 1024 1024)))
   (handler-case
       (main-command)
     (cli:wrong-number-of-args (e)

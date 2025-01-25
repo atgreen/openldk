@@ -217,7 +217,6 @@
     expr))
 
 (defmethod codegen ((insn ir-array-length) context)
-  (format t "AL: ~A~%" insn)
   (make-instance '<expression>
                  :insn insn
                  :code (list 'length (code (codegen (slot-value insn 'arrayref) context)))
