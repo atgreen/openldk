@@ -125,6 +125,7 @@
            (var (make-stack-variable context pc-start :INTEGER)))
       (incf pc)
       (let ((code (list (make-instance 'ir-assign
+                                       :address pc-start
                                        :lvalue var
                                        :rvalue (make-instance 'ir-array-length
                                                               :address pc-start
