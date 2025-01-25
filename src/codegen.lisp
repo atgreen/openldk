@@ -458,8 +458,8 @@
    (with-slots (index offset const) insn
      (let ((expr (make-instance '<expression>
                                 :insn insn
-                                :code (list 'let (list (list 'o1 (list 'sxhash (gen-pop-item)))
-                                                       (list 'o2 (list 'sxhash (gen-pop-item))))
+                                :code (list 'let (list (list 'o1 (list 'sxhash (value1 insn)))
+                                                       (list 'o2 (list 'sxhash (value2 insn))))
                                             (list 'when (list 'eq 'o1 'o2)
                                                   (list 'go (intern (format nil "branch-target-~A" offset))))))))
        (pop (stack context)) (pop (stack context))

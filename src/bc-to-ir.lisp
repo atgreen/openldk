@@ -750,17 +750,6 @@
   (declare (ignore code))
   (%transpile-iconst-x context 5))
 
-(define-bytecode-transpiler-TODO :IF_ACMPEQ (context code)
-  (with-slots (pc class) context
-    (let ((pc-start pc))
-      (with-slots (constant-pool) class
-        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
-                                              (aref code (incf pc))))))
-          (incf pc)
-          (list (make-instance 'ir-if-acmpeq
-                               :address pc-start
-                               :offset (+ pc-start offset))))))))
-
 (defun %transpile-compare-branch (context code ir-class)
   (with-slots (pc class) context
     (let ((pc-start pc))
@@ -780,6 +769,9 @@
 
 (define-bytecode-transpiler :IF_ACMPNE (context code)
   (%transpile-compare-branch context code 'ir-if-acmpne))
+
+(define-bytecode-transpiler :IF_ACMPEQ (context code)
+  (%transpile-compare-branch context code 'ir-if-acmpeq))
 
 (define-bytecode-transpiler :IF_ICMPEQ (context code)
   (%transpile-compare-branch context code 'ir-if-icmpeq))
