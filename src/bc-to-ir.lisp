@@ -372,6 +372,7 @@
   (:FSUB 'ir-fsub :FLOAT)
   (:IADD 'ir-iadd :INTEGER)
   (:IAND 'ir-iand :INTEGER)
+  (:IDIV 'ir-idiv :INTEGER)
   (:IMUL 'ir-imul :INTEGER)
   (:IOR 'ir-ior :INTEGER)
   (:ISHL 'ir-ishl :INTEGER)
@@ -380,7 +381,12 @@
   (:IUSHR 'ir-iushr :INTEGER)
   (:IXOR 'ir-ixor :INTEGER)
   (:LADD 'ir-ladd :LONG)
+  (:LAND 'ir-land :LONG)
+  (:LCMP 'ir-lcmp :INTEGER)
+  (:LDIV 'ir-idiv :LONG)
   (:LMUL 'ir-lmul :LONG)
+  (:LSHL 'ir-ishl :INTEGER)
+  (:LSHR 'ir-ishr :INTEGER)
   (:LSUB 'ir-lsub :LONG))
 
 (define-bytecode-transpiler :BIPUSH (context code)
@@ -748,22 +754,6 @@
 (define-bytecode-transpiler :IF_ICMPLE (context code)
   (%transpile-compare-branch context code 'ir-if-icmple))
 
-(define-bytecode-transpiler-TODO :IDIV (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-idiv
-                           :address pc-start)))))
-
-(define-bytecode-transpiler-TODO :LDIV (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-ldiv
-                           :address pc-start)))))
-
 (define-bytecode-transpiler-TODO :IREM (context code)
   (declare-IGNORE (ignore code))
   (with-slots (pc) context
@@ -912,7 +902,8 @@
                                                                   :address pc-start
                                                                   :objref (pop (stack context))
                                                                   :class (emit class constant-pool))))))
-            (push var (stack context))))))))
+            (push var (stack context))
+            code))))))
 
 (defun %transpile-virtual-call (context code &optional (is-interface-call? nil))
   (with-slots (pc class) context
@@ -1056,36 +1047,12 @@
 (define-bytecode-transpiler :LRETURN (context code)
   (:IRETURN context code))
 
-(define-bytecode-transpiler-TODO :LAND (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-land
-                           :address pc-start)))))
-
 (define-bytecode-transpiler-TODO :LOR (context code)
   (declare-IGNORE (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-lor
-                           :address pc-start)))))
-
-(define-bytecode-transpiler-TODO :LSHL (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-lshl
-                           :address pc-start)))))
-
-(define-bytecode-transpiler-TODO :LSHR (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-lshr
                            :address pc-start)))))
 
 (define-bytecode-transpiler :ARETURN (context code)
@@ -1096,14 +1063,6 @@
 
 (define-bytecode-transpiler :FRETURN (context code)
   (:IRETURN context code))
-
-(define-bytecode-transpiler-TODO :LCMP (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-lcmp
-                           :address pc-start)))))
 
 (define-bytecode-transpiler :LDC (context code)
   (with-slots (pc class stack) context
@@ -1247,6 +1206,7 @@
       (let ((atype (aref code (incf pc))))
         (incf pc)
         ;; FIXME: just throw away the type?
+        atype
         (push var (stack context))
         (list (make-instance 'ir-assign
                              :address pc-start

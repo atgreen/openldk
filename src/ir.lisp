@@ -158,19 +158,19 @@
 (defclass/std ir-ixor (ir-binop)
   ())
 
-(defclass/std ir-lxor (ir-node)
+(defclass/std ir-lxor (ir-binop)
   ())
 
-(defclass/std ir-ineg (ir-node)
+(defclass/std ir-ineg (ir-unop)
   ())
 
-(defclass/std ir-land (ir-node)
+(defclass/std ir-land (ir-binop)
   ())
 
 (defclass/std ir-ior (ir-binop)
   ())
 
-(defclass/std ir-lor (ir-node)
+(defclass/std ir-lor (ir-binop)
   ())
 
 (defmethod uses-stack-p (ir-add)
@@ -182,13 +182,13 @@
 (defclass/std ir-imul (ir-binop)
   ())
 
-(defclass/std ir-idiv (ir-node)
+(defclass/std ir-idiv (ir-binop)
   ())
 
 (defclass/std ir-lmul (ir-binop)
   ())
 
-(defclass/std ir-ldiv (ir-node)
+(defclass/std ir-ldiv (ir-binop)
   ())
 
 (defclass/std ir-irem (ir-node)
@@ -292,10 +292,10 @@
 (defclass/std ir-iushr (ir-binop)
   ())
 
-(defclass/std ir-lshl (ir-node)
+(defclass/std ir-lshl (ir-binop)
   ())
 
-(defclass/std ir-lshr (ir-node)
+(defclass/std ir-lshr (ir-binop)
   ())
 
 (defclass/std ir-call (ir-node)
@@ -357,7 +357,7 @@
 (defclass/std ir-new-array (ir-new)
   ((size)))
 
-(defclass/std ir-lcmp (ir-node)
+(defclass/std ir-lcmp (ir-binop)
   ())
 
 (defclass/std ir-ldc2_w (ir-node)

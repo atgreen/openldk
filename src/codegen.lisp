@@ -118,6 +118,30 @@
                                           (list 'arrayref (code (codegen arrayref context))))
                                (list 'setf (list 'aref 'arrayref 'index) 'value)))))
 
+(defmethod codegen ((insn ir-idiv) context)
+  ;; FIXME - handle all weird conditions
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'handler-case
+                             (list 'let (list (list 'value2 (code (codegen (value2 insn) context)))
+                                              (list 'value1 (code (codegen (value1 insn) context))))
+                                   (list 'floor (list '/ 'value1 'value2)))
+                             (list 'division-by-zero (list 'e)
+                                   (list 'error (list 'lisp-condition (list 'make-instance (list 'quote '|java/lang/ArithmeticException|))))))
+                 :expression-type :INTEGER))
+
+(defmethod codegen ((insn ir-ldiv) context)
+  ;; FIXME - handle all weird conditions
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'handler-case
+                             (list 'let (list (list 'value2 (code (codegen (value2 insn) context)))
+                                              (list 'value1 (code (codegen (value1 insn) context))))
+                                   (list 'floor (list '/ 'value1 'value2)))
+                             (list 'division-by-zero (list 'e)
+                                   (list 'error (list 'lisp-condition (list 'make-instance (list 'quote '|java/lang/ArithmeticException|))))))
+                 :expression-type :LONG))
+
 (defun %codegen-binop (insn operator jtype mask context)
   (make-instance '<expression>
                  :insn insn
@@ -177,6 +201,12 @@
                  :insn insn
                  :code (list 'logand (code (codegen (value1 insn) context)) (code (codegen (value2 insn) context)))
                  :expression-type :INTEGER))
+
+(defmethod codegen ((insn ir-land) context)
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'logand (code (codegen (value1 insn) context)) (code (codegen (value2 insn) context)))
+                 :expression-type :LONG))
 
 (defmethod codegen ((insn ir-lor) context)
   (let ((expr (make-instance '<expression>
@@ -329,30 +359,6 @@
                              (list 'division-by-zero (list 'e)
                                    (list 'error (list 'lisp-condition (list 'make-instance (list 'quote '|java/lang/ArithmeticException|))))))
                  :expression-type :FLOAT))
-
-(defmethod codegen ((insn ir-idiv) context)
-  ;; FIXME - handle all weird conditions
-  (make-instance '<expression>
-                 :insn insn
-                 :code (list 'handler-case
-                             (list 'let (list (list 'value2 (code (codegen (value2 insn) context)))
-                                              (list 'value1 (code (codegen (value1 insn) context))))
-                                   (list 'floor (list '/ 'value1 'value2)))
-                             (list 'division-by-zero (list 'e)
-                                   (list 'error (list 'lisp-condition (list 'make-instance (list 'quote '|java/lang/ArithmeticException|))))))
-                 :expression-type :INTEGER))
-
-(defmethod codegen ((insn ir-ldiv) context)
-  ;; FIXME - handle all weird conditions
-  (make-instance '<expression>
-                 :insn insn
-                 :code (list 'handler-case
-                             (list 'let (list (list 'value2 (code (codegen (value2 insn) context)))
-                                              (list 'value1 (code (codegen (value1 insn) context))))
-                                   (list 'floor (list '/ 'value1 'value2)))
-                             (list 'division-by-zero (list 'e)
-                                   (list 'error (list 'lisp-condition (list 'make-instance (list 'quote '|java/lang/ArithmeticException|))))))
-                 :expression-type :LONG))
 
 (defmethod codegen ((insn ir-fcmpg) context)
   (make-instance '<expression>
@@ -564,17 +570,6 @@
   (logand (ash x (- bits))
           (1- (ash 1 width))))
 
-(defmethod codegen ((insn ir-lshl) context)
-  ;; FIXME: this is wrong.
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (list 'let (list (list 'value2 (gen-pop-item))
-                                                    (list 'value1 (gen-pop-item)))
-                                         (gen-push-item (list 'shl 'value1 'value2 32)))
-                             :expression-type :INTEGER)))
-    (pop (stack context)) (pop (stack context)) (push expr (stack context))
-    expr))
-
 (defmethod codegen ((insn ir-ishr) context)
   ;; FIXME: this is wrong.
   (make-instance '<expression>
@@ -582,12 +577,26 @@
                  :code (list 'ash (code (codegen (value1 insn) context)) (list '- 0 (code (codegen (value2 insn) context))))
                  :expression-type :INTEGER))
 
+(defmethod codegen ((insn ir-lshr) context)
+  ;; FIXME: this is wrong.
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'ash (code (codegen (value1 insn) context)) (list '- 0 (code (codegen (value2 insn) context))))
+                 :expression-type :LONG))
+
 (defmethod codegen ((insn ir-ishl) context)
   ;; FIXME: this is wrong.
   (make-instance '<expression>
                  :insn insn
-                 :code (list 'ash (code (codegen (value1 insn) context)) (code (codegen (value2 insn) context)) 32)
+                 :code (list 'ash (code (codegen (value1 insn) context)) (code (codegen (value2 insn) context)))
                  :expression-type :INTEGER))
+
+(defmethod codegen ((insn ir-lshl) context)
+  ;; FIXME: this is wrong.
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'ash (code (codegen (value1 insn) context)) (code (codegen (value2 insn) context)))
+                 :expression-type :LONG))
 
 (defmethod codegen ((insn ir-iushr) context)
   ;; FIXME: this is wrong.
@@ -608,20 +617,18 @@
     expr))
 
 (defmethod codegen ((insn ir-lcmp) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (list 'let (list (list 'value2 (gen-pop-item))
-                                                    (list 'value1 (gen-pop-item)))
-                                         (list 'cond
-                                               (list (list 'eq 'value1 'value2)
-                                                     (gen-push-item 0))
-                                               (list (list '> 'value1 'value2)
-                                                     (gen-push-item 1))
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'let (list (list 'value2 (code (codegen (value2 insn) context)))
+                                        (list 'value1 (code (codegen (value1 insn) context))))
+                             (list 'cond
+                                   (list (list 'eq 'value1 'value2)
+                                         0
+                                         (list (list '> 'value1 'value2)
+                                               1
                                                (list 't
-                                                     (gen-push-item -1))))
-                             :expression-type :INTEGER)))
-    (pop (stack context)) (pop (stack context)) (push expr (stack context))
-    expr))
+                                                     -1)))))
+                 :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-lushr) context)
   (let ((expr (make-instance '<expression>
