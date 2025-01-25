@@ -402,28 +402,6 @@
                            :lvalue var
                            :rvalue (make-instance 'ir-int-literal :address pc-start :value byte))))))
 
-(define-bytecode-transpiler-TODO :DCONST_0 (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-push
-                           :address pc-start
-                           :value (make-instance 'ir-double-literal
-                                                 :address pc-start
-                                                 :value 0.0))))))
-
-(define-bytecode-transpiler-TODO :DCONST_1 (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-push
-                           :address pc-start
-                           :value (make-instance 'ir-double-literal
-                                                 :address pc-start
-                                                 :value 1.0))))))
-
 (define-bytecode-transpiler-TODO :DDIV (context code)
   (declare-IGNORE (ignore code))
   (with-slots (pc) context
@@ -597,6 +575,27 @@
   (declare (ignore code))
   (%transpile-fconst-x context 1.0))
 
+(defun %transpile-dconst-x (context value)
+  (with-slots (pc stack) context
+    (let* ((pc-start pc)
+           (var (make-stack-variable context pc-start :DOUBLE)))
+      (incf pc)
+      (push var (stack context))
+      (list (make-instance 'ir-assign
+                           :address pc-start
+                           :lvalue var
+                           :rvalue (make-instance 'ir-double-literal
+                                                  :address pc-start
+                                                  :value value))))))
+
+(define-bytecode-transpiler :DCONST_0 (context code)
+  (declare (ignore code))
+  (%transpile-fconst-x context 0.0))
+
+(define-bytecode-transpiler :DCONST_1 (context code)
+  (declare (ignore code))
+  (%transpile-fconst-x context 1.0))
+
 (define-bytecode-transpiler-TODO :L2I (context code)
   (declare-IGNORE (ignore code))
   (with-slots (pc) context
@@ -640,16 +639,6 @@
       (incf pc)
       (list (make-instance 'ir-i2c :address pc-start)))))
 
-(define-bytecode-transpiler-TODO :ICONST_M1 (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-push
-                           :address pc-start
-                           :value (make-instance 'ir-int-literal
-                                                 :address pc-start
-                                                 :value -1))))))
 (defclass/std <stack-variable> (ir-node)
   ((var-numbers)
    (var-type)))
@@ -689,6 +678,10 @@
                            :rvalue (make-instance 'ir-int-literal
                                                   :address pc-start
                                                   :value value))))))
+
+(define-bytecode-transpiler :ICONST_M1 (context code)
+  (declare (ignore code))
+  (%transpile-iconst-x context -1))
 
 (define-bytecode-transpiler :ICONST_0 (context code)
   (declare (ignore code))
