@@ -98,3 +98,4 @@ float-features, ghcr.io/ocicl/float-features@sha256:536e1bea5ec427500be32f5c7e6f
 float-features-tests, ghcr.io/ocicl/float-features@sha256:536e1bea5ec427500be32f5c7e6f627c4dfd3c7d6277ad7af5eaf298aed857e1, float-features-20240503-f10113a/float-features-tests.asd
 local-time, ghcr.io/ocicl/local-time@sha256:ed7c32afa2aadc798f4183017b6bb4ceea9e287be83da8f24b212442207ba532, local-time-20241119-bcfaeb2/local-time.asd
 cl-postgres_plus_local-time, ghcr.io/ocicl/local-time@sha256:ed7c32afa2aadc798f4183017b6bb4ceea9e287be83da8f24b212442207ba532, local-time-20241119-bcfaeb2/cl-postgres+local-time.asd
+slynk, ghcr.io/ocicl/slynk@sha256:b592df0641240584eb7242ea730fb9badcedb963da66c9d0182fdd13cebee6d0, sly-20240809-742355f7/slynk/slynk.asd
