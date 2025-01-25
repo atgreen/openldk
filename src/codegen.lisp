@@ -203,6 +203,7 @@
     expr))
 
 (defmethod codegen ((insn ir-array-length) context)
+  (format t "AL: ~A~%" insn)
   (make-instance '<expression>
                  :insn insn
                  :code (list 'length (code (codegen (slot-value insn 'arrayref) context)))
@@ -723,12 +724,11 @@
 
 (defmethod codegen ((insn ir-clinit) context)
   (with-slots (class) insn
-    (let ((expr (make-instance '<expression>
-                               :insn insn
-                               :code (let ((class (ir-class-class class)))
-                                       (list 'unless (list 'initialized-p class)
-                                             (list (intern (format nil "%clinit-~A" (slot-value class 'name)) :openldk)))))))
-      expr)))
+    (make-instance '<expression>
+                   :insn insn
+                   :code (let ((class (ir-class-class class)))
+                           (list 'unless (list 'initialized-p class)
+                                 (list (intern (format nil "%clinit-~A" (slot-value class 'name)) :openldk)))))))
 
 (defmethod codegen ((insn ir-local-variable) context)
   (with-slots (index) insn

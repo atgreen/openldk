@@ -527,7 +527,8 @@
                                            :address pc-start
                                            :offset (+ pc-start offset)))))
             (%record-stack-state (+ pc-start offset) context)
-            (setf (stack context) nil)
+            (format t "=======================>>>> ~A~%" (stack context))
+            (setf (stack context) (list (make-instance '<stack-bottom-marker>)))
             code))))))
 
 (define-bytecode-transpiler-TODO :FCMPG (context code)
@@ -697,6 +698,17 @@
   ((var-numbers)
    (var-type)))
 
+(defclass/std <stack-bottom-marker> (<stack-variable>)
+  ())
+
+(defmethod initialize-instance ((marker <stack-bottom-marker>) &key)
+  (setf (slot-value marker 'var-numbers) (list -1))
+  (setf (slot-value marker 'var-type) :VOID)
+  (setf (slot-value marker 'address) +stack-bottom-address+))
+
+(defmethod print-object ((sv <stack-bottom-marker>) out)
+  (format out "<<"))
+
 (defmethod print-object ((sv <stack-variable>) out)
   (print-unreadable-object (sv out :type t)
     (format out "s{~{~A~^,~}}[~A]" (sort (slot-value sv 'var-numbers) #'<) (slot-value sv 'var-type))))
@@ -766,11 +778,13 @@
                (value2 (pop (stack context)))
                (value1 (pop (stack context))))
           (incf pc)
-          (list (make-instance ir-class
-                               :address pc-start
-                               :value1 value1
-                               :value2 value2
-                               :offset (+ pc-start offset))))))))
+          (let ((code (list (make-instance ir-class
+                                           :address pc-start
+                                           :value1 value1
+                                           :value2 value2
+                                           :offset (+ pc-start offset)))))
+            (%record-stack-state (+ pc-start offset) context)
+            code))))))
 
 (define-bytecode-transpiler :IF_ACMPNE (context code)
   (%transpile-compare-branch context code 'ir-if-acmpne))
@@ -1087,6 +1101,7 @@
               (if (not (eq return-type :VOID))
                   (let ((var (make-stack-variable context pc-start return-type)))
                     (push var (stack context))
+                    (format t "~&INVOKESTATIC: ~A~%" (stack context))
                     (setf call (make-instance 'ir-assign
                                               :address (if (and is-clinit-p (equal callee-class (name context-class))) pc-start (+ pc-start 0.1))
                                               :lvalue var
@@ -1364,6 +1379,7 @@
           (multiple-value-bind (fieldname)
               (emit (aref constant-pool index) constant-pool)
             (incf pc)
+            (format t "PUTFIELD ~A~%" (stack context))
             (list (make-instance 'ir-assign
                                  :address pc-start
                                  :rvalue (pop (stack context))
@@ -1389,6 +1405,7 @@
                                                                     :address pc-start
                                                                     :class class
                                                                     :member-name fieldname)))))
+              (format t "zzzzzzzzzzzzzz ~A~%" (stack *context*))
               (if (and is-clinit-p (equal (ir-class-class class) context-class))
                   code
                   (cons (make-instance 'ir-clinit

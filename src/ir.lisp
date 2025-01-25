@@ -44,6 +44,10 @@
   (print-unreadable-object (node out :type t)
     (format out "~A" (slot-value node 'address))))
 
+(defmethod initialize-instance :after ((ir ir-node) &key)
+  (assert (or (typep ir '<stack-bottom-marker>)
+              (not (eq (slot-value ir 'address ) +stack-bottom-address+)))))
+
 (defmethod dot-dump-string ((node ir-node))
   (format nil "~3A: ~A" (address node) (class-name (class-of node))))
 
@@ -320,6 +324,11 @@
 (defclass/std ir-member (ir-node)
   ((objref)
    (member-name)))
+
+(defmethod initialize-instance :after ((insn ir-member) &key)
+  (with-slots (objref member-name) insn
+    (assert objref)
+    (assert member-name)))
 
 (defclass/std ir-monitorenter (ir-node)
   ((objref)))

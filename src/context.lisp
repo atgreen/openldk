@@ -54,7 +54,9 @@
     :doc "A hashtable mapping addresses to stack states")
    (stack-variables)
    (pc :std 0)
-   (stack)))
+   (stack :std (list (make-instance '<stack-bottom-marker>)))))
+
+(defparameter +stack-bottom-address+ -99)
 
 (defmethod flag-stack-usage ((context <context>))
   (setf (slot-value context 'uses-stack-p) t))

@@ -105,35 +105,39 @@
              (setf (ir-code *context*)
                    (let ((code (apply #'append
                                       (loop
-                                        while (and (< (pc *context*) length))
-                                        for result = (progn
-                                                       (when *debug-bytecode*
-                                                         (format t "~&; c[~A] ~A ~@<~A~:@>" (pc *context*) (aref +opcodes+ (aref code (pc *context*))) (stack *context*)))
-                                                       (let* ((pc-start (pc *context*)))
-                                                         (if (gethash pc-start exception-handler-table)
-                                                             (let ((var (make-stack-variable *context* pc-start :REFERENCE)))
-                                                               (push var (stack *context*))
-                                                               (format t "~%===========================================~%SC: ~A~%" (stack *context*))
-                                                               (cons (make-instance 'ir-assign
-                                                                                    :address pc-start
-                                                                                    :lvalue var
-                                                                                    :rvalue (make-instance 'ir-condition-exception))
-                                                                     (mapcar (lambda (insn)
-                                                                               (with-slots (address) insn
-                                                                                 (setf address (+ address 0.1)))
+                                       while (and (< (pc *context*) length))
+                                       for no-record-stack-state? = (find (aref +opcodes+ (aref code (pc *context*))) '(:GOTO))
+                                       for result = (progn
+                                                      (when *debug-bytecode*
+                                                        (format t "~&; c[~A] ~A ~@<~A~:@>" (pc *context*) (aref +opcodes+ (aref code (pc *context*))) (stack *context*)))
+                                                      (dump-hashtable (stack-state-table *context*))
+                                                      (let* ((pc-start (pc *context*)))
+                                                        (if (gethash pc-start exception-handler-table)
+                                                            (let ((var (make-stack-variable *context* pc-start :REFERENCE)))
+                                                              (push var (stack *context*))
+                                                              (format t "~%===========================================~%SC: ~A~%" (stack *context*))
+                                                              (cons (make-instance 'ir-assign
+                                                                                   :address pc-start
+                                                                                   :lvalue var
+                                                                                   :rvalue (make-instance 'ir-condition-exception))
+                                                                    (mapcar (lambda (insn)
+                                                                              (with-slots (address) insn
+                                                                                (setf address (+ address 0.1)))
                                                                                insn)
-                                                                             (funcall
-                                                                              (aref +opcodes+ (aref code (pc *context*)))
-                                                                              *context* code))))
-                                                           (funcall
-                                                            (aref +opcodes+ (aref code (pc *context*)))
-                                                            *context* code))))
-                                        do (%record-stack-state (pc *context*) *context*)
-                                        unless (null result)
-                                        collect result))))
+                                                                            (funcall
+                                                                             (aref +opcodes+ (aref code (pc *context*)))
+                                                                             *context* code))))
+                                                            (funcall
+                                                             (aref +opcodes+ (aref code (pc *context*)))
+                                                             *context* code))))
+                                       unless no-record-stack-state?
+                                         do (%record-stack-state (pc *context*) *context*)
+                                       unless (null result)
+                                         collect result))))
                      ;; Do stack analysis to merge stack variables
                      (maphash (lambda (k v)
                                 (when (> (length v) 1)
+                                  (format t "~&MERGE-STACKS ~A: ~A~%" k v)
                                   (reduce #'merge-stacks v)))
                               (stack-state-table *context*))
                      code)))
@@ -147,7 +151,7 @@
              (let ((parameter-count (count-parameters (slot-value method 'descriptor))))
                (append (if (static-p method)
                            (list 'defun
-                                 (intern (fn-name *context*):openldk)
+                                 (intern (fn-name *context*) :openldk)
                                  (loop for i from 1 upto parameter-count
                                        collect (intern (format nil "arg~A" (1- i)) :openldk)))
                            (list 'defmethod
