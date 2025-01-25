@@ -368,10 +368,10 @@
                  :code (list 'let (list (list 'value2 (code (codegen (value2 insn) context)))
                                         (list 'value1 (code (codegen (value1 insn) context))))
                              (list 'if (list 'or (list 'float-features:float-nan-p 'value1) (list 'float-features:float-nan-p 'value2))
-                                   1
-                                   (list 'if (list '< 'value1 'value2)
+                                   -1
+                                   (list 'if (list '> 'value1 'value2)
                                          1
-                                         (list 'if (list '> 'value1 'value2)
+                                         (list 'if (list '< 'value1 'value2)
                                                -1
                                                0))))
                  :expression-type :INTEGER))
@@ -449,14 +449,12 @@
 
 (defmethod codegen ((insn ir-if-acmpeq) context)
    (with-slots (index offset const) insn
-     (let ((expr (make-instance '<expression>
-                                :insn insn
-                                :code (list 'let (list (list 'o1 (list 'sxhash (value1 insn)))
-                                                       (list 'o2 (list 'sxhash (value2 insn))))
-                                            (list 'when (list 'eq 'o1 'o2)
-                                                  (list 'go (intern (format nil "branch-target-~A" offset))))))))
-       (pop (stack context)) (pop (stack context))
-       expr)))
+     (make-instance '<expression>
+                    :insn insn
+                    :code (list 'let (list (list 'o1 (list 'sxhash (code (codegen (value1 insn) context))))
+                                           (list 'o2 (list 'sxhash (code (codegen (value1 insn) context)))))
+                                (list 'when (list 'eq 'o1 'o2)
+                                      (list 'go (intern (format nil "branch-target-~A" offset))))))))
 
 (defun %codegen-ir-if-xcmpne (insn context)
   (with-slots (offset value1 value2) insn
