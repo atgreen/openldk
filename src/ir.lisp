@@ -200,6 +200,9 @@
 (defclass/std ir-goto (ir-branch)
   ())
 
+(defclass/std ir-unop (ir-node)
+  ((value)))
+
 (defclass/std ir-l2f (ir-node)
   ())
 
@@ -212,7 +215,7 @@
 (defclass/std ir-i2c (ir-node)
   ())
 
-(defclass/std ir-i2f (ir-node)
+(defclass/std ir-i2f (ir-unop)
   ())
 
 (defclass/std ir-iinc (ir-node)
@@ -277,10 +280,10 @@
   ((class :with)
    (objref)))
 
-(defclass/std ir-ishl (ir-node)
+(defclass/std ir-ishl (ir-binop)
   ())
 
-(defclass/std ir-ishr (ir-node)
+(defclass/std ir-ishr (ir-binop)
   ())
 
 (defclass/std ir-iushr (ir-binop)
@@ -366,10 +369,10 @@
 (defclass/std ir-fdiv (ir-node)
   ())
 
-(defclass/std ir-fmul (ir-node)
+(defclass/std ir-dmul (ir-binop)
   ())
 
-(defclass/std ir-mul (ir-node)
+(defclass/std ir-fmul (ir-binop)
   ())
 
 (defclass/std ir-pop (ir-node)

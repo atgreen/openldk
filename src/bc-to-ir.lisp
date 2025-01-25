@@ -304,7 +304,35 @@
 (define-bytecode-transpiler-TODO :DADD (context code)
   (:FADD context code))
 
-(defun %transpile-binop (context ir-class op-type)
+(defun %transpile-unop (context ir-class op-type)
+  (with-slots (pc) context
+    (let* ((pc-start pc)
+           (var (make-stack-variable context pc-start op-type))
+           (value (pop (stack context))))
+      (incf pc)
+      (push var (stack context))
+      (list (make-instance 'ir-assign
+                           :address pc-start
+                           :lvalue var
+                           :rvalue (make-instance ir-class
+                                                  :value value
+                                                  :address pc-start))))))
+
+(defmacro %define-unop-transpilers (&rest opcodes)
+  `(progn
+     ,@(mapcar (lambda (opcode)
+                 (let ((name (car opcode))
+                       (ir-class (cadr opcode))
+                       (jtype (caddr opcode)))
+                   `(define-bytecode-transpiler ,name (context code)
+                      (declare (ignore code))
+                      (%transpile-unop context ,ir-class ,jtype))))
+               opcodes)))
+
+(%define-unop-transpilers
+  (:I2F 'ir-i2f :FLOAT))
+
+ (defun %transpile-binop (context ir-class op-type)
   (with-slots (pc) context
     (let* ((pc-start pc)
            (var (make-stack-variable context pc-start op-type))
@@ -339,9 +367,13 @@
   (:LADD 'ir-ladd :LONG)
   (:LMUL 'ir-lmul :LONG)
   (:IUSHR 'ir-iushr :INTEGER)
+  (:ISHL 'ir-ishl :INTEGER)
+  (:ISHR 'ir-ishr :INTEGER)
   (:IOR 'ir-ior :INTEGER)
   (:IAND 'ir-iand :INTEGER)
-  (:IXOR 'ir-ixor :INTEGER))
+  (:IXOR 'ir-ixor :INTEGER)
+  (:DMUL 'ir-dmul :DOUBLE)
+  (:FMUL 'ir-fmul :FLOAT))
 
 (define-bytecode-transpiler :BIPUSH (context code)
   (with-slots (pc) context
@@ -395,14 +427,6 @@
                            :value (make-instance 'ir-local-variable
                                                  :address pc-start
                                                  :index 2))))))
-
-(define-bytecode-transpiler-TODO :DMUL (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-mul
-                           :address pc-start)))))
 
 (define-bytecode-transpiler-TODO :LSTORE (context code)
   (with-slots (pc) context
@@ -519,7 +543,6 @@
                                            :address pc-start
                                            :offset (+ pc-start offset)))))
             (%record-stack-state (+ pc-start offset) context)
-            (format t "=======================>>>> ~A~%" (stack context))
             (setf (stack context) (list (make-instance '<stack-bottom-marker>)))
             code))))))
 
@@ -638,14 +661,6 @@
       (list (make-instance 'ir-fdiv
                            :address pc-start)))))
 
-(define-bytecode-transpiler-TODO :FMUL (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-mul
-                           :address pc-start)))))
-
 (define-bytecode-transpiler-TODO :INEG (context code)
   (declare-IGNORE (ignore code))
   (with-slots (pc) context
@@ -659,13 +674,6 @@
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-i2c :address pc-start)))))
-
-(define-bytecode-transpiler-TODO :I2F (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-i2f :address pc-start)))))
 
 (define-bytecode-transpiler-TODO :I2L (context code)
   (declare-IGNORE (ignore code))
@@ -1068,22 +1076,6 @@
 
 (define-bytecode-transpiler :LRETURN (context code)
   (:IRETURN context code))
-
-(define-bytecode-transpiler-TODO :ISHL (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-ishl
-                           :address pc-start)))))
-
-(define-bytecode-transpiler-TODO :ISHR (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-ishr
-                           :address pc-start)))))
 
 (define-bytecode-transpiler-TODO :LAND (context code)
   (declare-IGNORE (ignore code))

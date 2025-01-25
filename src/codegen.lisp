@@ -132,7 +132,9 @@
                  :insn insn
                  :code (list 'let (list (list 'value2 (code (codegen (value2 insn) context)))
                                         (list 'value1 (code (codegen (value1 insn) context))))
-                             (list 'logand (list operator 'value1 'value2) mask))
+                             (if mask
+                                 (list 'logand (list operator 'value1 'value2) mask))
+                                 (list operator 'value1 'value2))
                  :expression-type jtype))
 
 (defmacro %define-binop-codegen-methods (&rest opcodes)
@@ -152,7 +154,9 @@
   (ir-isub '- :INTEGER #xFFFFFFFF)
   (ir-lsub '- :LONG #xFFFFFFFFFFFFFFFF)
   (ir-imul '* :INTEGER #xFFFFFFFF)
-  (ir-lmul '* :LONG #xFFFFFFFFFFFFFFFF))
+  (ir-lmul '* :LONG #xFFFFFFFFFFFFFFFF)
+  (ir-dmul '* :DOUBLE nil)
+  (ir-fmul '* :FLOAT nil))
 
 (defmethod codegen ((insn ir-land) context)
   (let ((expr (make-instance '<expression>
@@ -439,12 +443,10 @@
     expr))
 
 (defmethod codegen ((insn ir-i2f) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (gen-push-item (list 'float (gen-pop-item)))
-                             :expression-type :FLOAT)))
-    (pop (stack context)) (push expr (stack context))
-    expr))
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'float (code (codegen (value insn) context)))
+                 :expression-type :FLOAT))
 
 (defmethod codegen ((insn ir-iinc) context)
   ;; FIXME: don't increment above width of type
@@ -567,17 +569,6 @@
   (logand (ash x (- bits))
           (1- (ash 1 width))))
 
-(defmethod codegen ((insn ir-ishl) context)
-  ;; FIXME: this is wrong.
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (list 'let (list (list 'value2 (gen-pop-item))
-                                                    (list 'value1 (gen-pop-item)))
-                                         (gen-push-item (list 'ash 'value1 'value2)))
-                             :expression-type :INTEGER)))
-    (pop (stack context)) (pop (stack context)) (push expr (stack context))
-    expr))
-
 (defmethod codegen ((insn ir-lshl) context)
   ;; FIXME: this is wrong.
   (let ((expr (make-instance '<expression>
@@ -588,6 +579,20 @@
                              :expression-type :INTEGER)))
     (pop (stack context)) (pop (stack context)) (push expr (stack context))
     expr))
+
+(defmethod codegen ((insn ir-ishr) context)
+  ;; FIXME: this is wrong.
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'ash (code (codegen (value1 insn) context)) (list '- 0 (code (codegen (value2 insn) context))))
+                 :expression-type :INTEGER))
+
+(defmethod codegen ((insn ir-ishl) context)
+  ;; FIXME: this is wrong.
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'ash (code (codegen (value1 insn) context)) (code (codegen (value2 insn) context)) 32)
+                 :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-iushr) context)
   ;; FIXME: this is wrong.
@@ -604,17 +609,6 @@
                                                     (list 'value1 (gen-pop-item)))
                                          (gen-push-item (list 'shr 'value1 'value2 64)))
                              :expression-type :LONG)))
-    (pop (stack context)) (pop (stack context)) (push expr (stack context))
-    expr))
-
-(defmethod codegen ((insn ir-ishr) context)
-  ;; FIXME: this is wrong.
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (list 'let (list (list 'value2 (gen-pop-item))
-                                                    (list 'value1 (gen-pop-item)))
-                                         (gen-push-item (list 'ash 'value1 (list '- 0 'value2))))
-                             :expression-type :INTEGER)))
     (pop (stack context)) (pop (stack context)) (push expr (stack context))
     expr))
 
@@ -704,14 +698,6 @@
   (let ((expr (make-instance '<expression>
                              :insn insn
                              :code (list 'monitor-exit (code (codegen (slot-value insn 'objref) context))))))
-    expr))
-
-(defmethod codegen ((insn ir-mul) context)
-  ;; FIXME: track type
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (gen-push-item (list '* (gen-pop-item) (gen-pop-item))))))
-    (pop (stack context)) (pop (stack context)) (push expr (stack context))
     expr))
 
 (defmethod codegen ((insn ir-new) context)
@@ -811,7 +797,6 @@
   (make-condition (gethash (class-of e) *condition-table*) :objref e))
 
 (defmethod codegen ((insn ir-throw) context)
-  (declare (ignore context))
   (let ((expr (make-instance '<expression>
                              :insn insn
                              :code (list 'let (list (list 'c (list 'lisp-condition (code (codegen (slot-value insn 'objref) context)))))
