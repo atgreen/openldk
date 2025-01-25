@@ -951,7 +951,7 @@
                                                                   :class (emit class constant-pool))))))
             (push var (stack context))))))))
 
-(define-bytecode-transpiler-TODO :INVOKEINTERFACE (context code)
+(defun %transpile-virtual-call (context code &optional (is-interface-call? nil))
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
@@ -959,31 +959,9 @@
                          (aref code (incf pc))))
                (method-reference (aref constant-pool index)))
           (incf pc)
-          (incf pc)
-          (incf pc)
-          (let* ((descriptor
-                   (slot-value (aref constant-pool
-                                     (slot-value
-                                      (aref constant-pool
-                                            (slot-value method-reference
-                                                        'method-descriptor-index))
-                                      'type-descriptor-index))
-                               'value))
-                 (parameter-count (1+ (count-parameters descriptor))))
-            (list (make-instance 'ir-call-virtual-method
-                                 :address pc-start
-                                 :return-type (get-return-type (emit method-reference constant-pool))
-                                 :method-name (lispize-method-name (emit method-reference constant-pool))
-                                 :args (pop-args parameter-count context)))))))))
-
-(define-bytecode-transpiler :INVOKEVIRTUAL (context code)
-  (with-slots (pc class) context
-    (let ((pc-start pc))
-      (with-slots (constant-pool) class
-        (let* ((index (+ (* (aref code (incf pc)) 256)
-                         (aref code (incf pc))))
-               (method-reference (aref constant-pool index)))
-          (incf pc)
+          (when is-interface-call?
+            (incf pc)
+            (incf pc))
           (let* ((descriptor
                    (slot-value (aref constant-pool
                                      (slot-value
@@ -996,7 +974,7 @@
             (list (let* ((return-type (get-return-type (emit method-reference constant-pool)))
                          (call (make-instance 'ir-call-virtual-method
                                               :address pc-start
-                                              :return-type return-type
+                                              :return-type (get-return-type (emit method-reference constant-pool))
                                               :method-name (lispize-method-name (emit method-reference constant-pool))
                                               :args (pop-args parameter-count context))))
                     (if (eq return-type :VOID)
@@ -1008,6 +986,11 @@
                                          :lvalue var
                                          :rvalue call)))))))))))
 
+(define-bytecode-transpiler :INVOKEINTERFACE (context code)
+  (%transpile-virtual-call context code t))
+
+(define-bytecode-transpiler :INVOKEVIRTUAL (context code)
+  (%transpile-virtual-call context code))
 
 (define-bytecode-transpiler :INVOKESPECIAL (context code)
   (with-slots (pc class) context
@@ -1107,7 +1090,7 @@
                            :address pc-start
                            :value (pop (stack context)))))))
 
-(define-bytecode-transpiler-TODO :LRETURN (context code)
+(define-bytecode-transpiler :LRETURN (context code)
   (:IRETURN context code))
 
 (define-bytecode-transpiler-TODO :ISHL (context code)

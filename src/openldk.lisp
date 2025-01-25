@@ -110,12 +110,11 @@
                                        for result = (progn
                                                       (when *debug-bytecode*
                                                         (format t "~&; c[~A] ~A ~@<~A~:@>" (pc *context*) (aref +opcodes+ (aref code (pc *context*))) (stack *context*)))
-                                                      (dump-hashtable (stack-state-table *context*))
+                                                      ; (dump-hashtable (stack-state-table *context*))
                                                       (let* ((pc-start (pc *context*)))
                                                         (if (gethash pc-start exception-handler-table)
                                                             (let ((var (make-stack-variable *context* pc-start :REFERENCE)))
                                                               (push var (stack *context*))
-                                                              (format t "~%===========================================~%SC: ~A~%" (stack *context*))
                                                               (cons (make-instance 'ir-assign
                                                                                    :address pc-start
                                                                                    :lvalue var
@@ -141,7 +140,7 @@
                                   (reduce #'merge-stacks v)))
                               (stack-state-table *context*))
                      code)))
-           (sdfdfd (print ir-code-0))
+           ; (sdfdfd (print ir-code-0))
            (blocks (build-basic-blocks ir-code-0))
            (lisp-code
              (list (list 'block nil
