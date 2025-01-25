@@ -218,6 +218,9 @@
 (defclass/std ir-i2f (ir-unop)
   ())
 
+(defclass/std ir-i2l (ir-unop)
+  ())
+
 (defclass/std ir-iinc (ir-node)
   ((index const)))
 

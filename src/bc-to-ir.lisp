@@ -334,6 +334,7 @@
 
 (%define-unop-transpilers
  (:I2F 'ir-i2f :FLOAT)
+ (:I2L 'ir-i2l :LONG)
  (:F2I 'ir-f2i :INTEGER))
 
  (defun %transpile-binop (context ir-class op-type)
@@ -542,20 +543,31 @@
     (let* ((pc-start pc)
            (var (make-stack-variable context pc-start :INTEGER)))
       (incf pc)
-      (let ((code (list (make-instance 'ir-fcmpg
-                                       :value1 (pop (stack context))
-                                       :value2 (pop (stack context))
-                                       :address pc-start))))
+      (let ((code (list (make-instance 'ir-assign
+                                       :address pc-start
+                                       :lvalue var
+                                       :rvalue (make-instance 'ir-fcmpg
+                                                              :value2 (pop (stack context))
+                                                              :value1 (pop (stack context))
+                                                              :address pc-start)))))
         (push var (stack context))
         code))))
 
-(define-bytecode-transpiler-TODO :FCMPL (context code)
-  (declare-IGNORE (ignore code))
+(define-bytecode-transpiler :FCMPL (context code)
+  (declare (ignore code))
   (with-slots (pc) context
-    (let ((pc-start pc))
+    (let* ((pc-start pc)
+           (var (make-stack-variable context pc-start :INTEGER)))
       (incf pc)
-      (list (make-instance 'ir-fcmpl
-                           :address pc-start)))))
+      (let ((code (list (make-instance 'ir-assign
+                                       :address pc-start
+                                       :lvalue var
+                                       :rvalue (make-instance 'ir-fcmpl
+                                                              :value2 (pop (stack context))
+                                                              :value1 (pop (stack context))
+                                                              :address pc-start)))))
+        (push var (stack context))
+        code))))
 
 (defun %transpile-fconst-x (context value)
   (with-slots (pc stack) context
@@ -620,15 +632,6 @@
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-i2c :address pc-start)))))
-
-(define-bytecode-transpiler-TODO :I2L (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-push
-                           :address pc-start
-                           :value (make-instance 'ir-pop :address pc-start))))))
 
 (define-bytecode-transpiler-TODO :ICONST_M1 (context code)
   (declare-IGNORE (ignore code))

@@ -369,20 +369,18 @@
                  :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-fcmpl) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (list 'let (list (list 'value2 (gen-pop-item))
-                                                    (list 'value1 (gen-pop-item)))
-                                         (list 'if (list 'or (list 'float-features:float-nan-p 'value1) (list 'float-features:float-nan-p 'value2))
-                                               (gen-push-item -1)
-                                               (list 'if (list '> 'value1 'value2)
-                                                     (gen-push-item 1)
-                                                     (list 'if (list '< 'value1 'value2)
-                                                           (gen-push-item -1)
-                                                           (gen-push-item 0)))))
-                             :expression-type :INTEGER)))
-    (pop (stack context)) (pop (stack context)) (push expr (stack context))
-    expr))
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'let (list (list 'value2 (code (codegen (value2 insn) context)))
+                                        (list 'value1 (code (codegen (value1 insn) context))))
+                             (list 'if (list 'or (list 'float-features:float-nan-p 'value1) (list 'float-features:float-nan-p 'value2))
+                                   1
+                                   (list 'if (list '< 'value1 'value2)
+                                         1
+                                         (list 'if (list '> 'value1 'value2)
+                                               -1
+                                               0))))
+                 :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-ineg) context)
   ;; FIXME: handle integer overflow
@@ -430,6 +428,12 @@
                  :insn insn
                  :code (list 'float (code (codegen (value insn) context)))
                  :expression-type :FLOAT))
+
+(defmethod codegen ((insn ir-i2l) context)
+  (make-instance '<expression>
+                 :insn insn
+                 :code (code (codegen (value insn) context))
+                 :expression-type :LONG))
 
 (defmethod codegen ((insn ir-f2i) context)
   (make-instance '<expression>
