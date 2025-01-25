@@ -118,15 +118,6 @@
                                           (list 'arrayref (code (codegen arrayref context))))
                                (list 'setf (list 'aref 'arrayref 'index) 'value)))))
 
-(defmethod codegen ((insn ir-fadd) context)
-  ;; FIXME -- handle NaN cases
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (gen-push-item (list '+ (gen-pop-item) (gen-pop-item)))
-                             :expression-type :FLOAT)))
-    (pop (stack context)) (pop (stack context)) (push expr (stack context))
-    expr))
-
 (defun %codegen-binop (insn operator jtype mask context)
   (make-instance '<expression>
                  :insn insn
@@ -149,14 +140,17 @@
                opcodes)))
 
 (%define-binop-codegen-methods
-  (ir-iadd '+ :INTEGER #xFFFFFFFF)
-  (ir-ladd '+ :LONG #xFFFFFFFFFFFFFFFF)
-  (ir-isub '- :INTEGER #xFFFFFFFF)
-  (ir-lsub '- :LONG #xFFFFFFFFFFFFFFFF)
-  (ir-imul '* :INTEGER #xFFFFFFFF)
-  (ir-lmul '* :LONG #xFFFFFFFFFFFFFFFF)
   (ir-dmul '* :DOUBLE nil)
-  (ir-fmul '* :FLOAT nil))
+  (ir-fadd '+ :FLOAT nil)
+  (ir-fdiv '/ :FLOAT nil)
+  (ir-fmul '* :FLOAT nil)
+  (ir-fsub '- :FLOAT nil)
+  (ir-iadd '+ :INTEGER #xFFFFFFFF)
+  (ir-imul '* :INTEGER #xFFFFFFFF)
+  (ir-isub '- :INTEGER #xFFFFFFFF)
+  (ir-ladd '+ :LONG #xFFFFFFFFFFFFFFFF)
+  (ir-lmul '* :LONG #xFFFFFFFFFFFFFFFF)
+  (ir-lsub '- :LONG #xFFFFFFFFFFFFFFFF))
 
 (defmethod codegen ((insn ir-land) context)
   (let ((expr (make-instance '<expression>
@@ -326,48 +320,39 @@
 
 (defmethod codegen ((insn ir-fdiv) context)
   ;; FIXME - handle all weird conditions
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                              :code (list 'handler-case
-                                         (list 'let (list (list 'value2 (gen-pop-item))
-                                                          (list 'value1 (gen-pop-item)))
-                                              (gen-push-item (list '/ 'value1 'value2)))
-                                         (list 'division-by-zero (list 'e)
-                                               (gen-push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
-                                               (list 'error (list 'lisp-condition (gen-peek-item)))))
-                             :expression-type :FLOAT)))
-    (pop (stack context)) (pop (stack context)) (push expr (stack context))
-    expr))
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'handler-case
+                             (list 'let (list (list 'value2 (code (codegen (value2 insn) context)))
+                                              (list 'value1 (code (codegen (value1 insn) context))))
+                                   (list '/ 'value1 'value2))
+                             (list 'division-by-zero (list 'e)
+                                   (list 'error (list 'lisp-condition (list 'make-instance (list 'quote '|java/lang/ArithmeticException|))))))
+                 :expression-type :FLOAT))
 
 (defmethod codegen ((insn ir-idiv) context)
   ;; FIXME - handle all weird conditions
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (list 'handler-case
-                                         (list 'let (list (list 'value2 (gen-pop-item))
-                                                          (list 'value1 (gen-pop-item)))
-                                               (gen-push-item (list 'floor (list '/ 'value1 'value2))))
-                                         (list 'division-by-zero (list 'e)
-                                               (gen-push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
-                                               (list 'error (list 'lisp-condition (gen-peek-item)))))
-                             :expression-type :INTEGER)))
-    (pop (stack context)) (pop (stack context)) (push expr (stack context))
-    expr))
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'handler-case
+                             (list 'let (list (list 'value2 (code (codegen (value2 insn) context)))
+                                              (list 'value1 (code (codegen (value1 insn) context))))
+                                   (list 'floor (list '/ 'value1 'value2)))
+                             (list 'division-by-zero (list 'e)
+                                   (list 'error (list 'lisp-condition (list 'make-instance (list 'quote '|java/lang/ArithmeticException|))))))
+                 :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-ldiv) context)
   ;; FIXME - handle all weird conditions
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (list 'handler-case
-                                         (list 'let (list (list 'value2 (gen-pop-item))
-                                                          (list 'value1 (gen-pop-item)))
-                                               (gen-push-item (list 'floor (list '/ 'value1 'value2))))
-                                         (list 'division-by-zero (list 'e)
-                                               (gen-push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
-                                               (list 'error (list 'lisp-condition (gen-peek-item)))))
-                             :expression-type :LONG)))
-    (pop (stack context)) (pop (stack context)) (push expr (stack context))
-    expr))
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'handler-case
+                             (list 'let (list (list 'value2 (code (codegen (value2 insn) context)))
+                                              (list 'value1 (code (codegen (value1 insn) context))))
+                                   (list 'floor (list '/ 'value1 'value2)))
+                             (list 'division-by-zero (list 'e)
+                                   (list 'error (list 'lisp-condition (list 'make-instance (list 'quote '|java/lang/ArithmeticException|))))))
+                 :expression-type :LONG))
 
 (defmethod codegen ((insn ir-fcmpg) context)
   (make-instance '<expression>

@@ -307,17 +307,6 @@
                                :class (emit class constant-pool)
                                :objref (car (stack context)))))))))
 
-(define-bytecode-transpiler-TODO :FADD (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-fadd
-                           :address pc-start)))))
-
-(define-bytecode-transpiler-TODO :DADD (context code)
-  (:FADD context code))
-
 (defun %transpile-unop (context ir-class op-type)
   (with-slots (pc) context
     (let* ((pc-start pc)
@@ -375,20 +364,23 @@
                opcodes)))
 
 (%define-binop-transpilers
-  (:ISUB 'ir-isub :INTEGER)
+  (:DMUL 'ir-dmul :DOUBLE)
+  (:FADD 'ir-fadd :FLOAT)
+  (:FDIV 'ir-fdiv :FLOAT)
+  (:FMUL 'ir-fmul :FLOAT)
+  (:FSUB 'ir-fsub :FLOAT)
   (:IADD 'ir-iadd :INTEGER)
+  (:IAND 'ir-iand :INTEGER)
   (:IMUL 'ir-imul :INTEGER)
-  (:LSUB 'ir-lsub :LONG)
-  (:LADD 'ir-ladd :LONG)
-  (:LMUL 'ir-lmul :LONG)
-  (:IUSHR 'ir-iushr :INTEGER)
+  (:IOR 'ir-ior :INTEGER)
   (:ISHL 'ir-ishl :INTEGER)
   (:ISHR 'ir-ishr :INTEGER)
-  (:IOR 'ir-ior :INTEGER)
-  (:IAND 'ir-iand :INTEGER)
+  (:ISUB 'ir-isub :INTEGER)
+  (:IUSHR 'ir-iushr :INTEGER)
   (:IXOR 'ir-ixor :INTEGER)
-  (:DMUL 'ir-dmul :DOUBLE)
-  (:FMUL 'ir-fmul :FLOAT))
+  (:LADD 'ir-ladd :LONG)
+  (:LMUL 'ir-lmul :LONG)
+  (:LSUB 'ir-lsub :LONG))
 
 (define-bytecode-transpiler :BIPUSH (context code)
   (with-slots (pc) context
@@ -565,27 +557,26 @@
       (list (make-instance 'ir-fcmpl
                            :address pc-start)))))
 
-(define-bytecode-transpiler-TODO :FCONST_0 (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
+(defun %transpile-fconst-x (context value)
+  (with-slots (pc stack) context
+    (let* ((pc-start pc)
+           (var (make-stack-variable context pc-start :FLOAT)))
       (incf pc)
-      (list (make-instance 'ir-push
+      (push var (stack context))
+      (list (make-instance 'ir-assign
                            :address pc-start
-                           :value (make-instance 'ir-float-literal
-                                                 :address pc-start
-                                                 :value 0.0))))))
+                           :lvalue var
+                           :rvalue (make-instance 'ir-float-literal
+                                                  :address pc-start
+                                                  :value value))))))
 
-(define-bytecode-transpiler-TODO :FCONST_1 (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-push
-                           :address pc-start
-                           :value (make-instance 'ir-float-literal
-                                                 :address pc-start
-                                                 :value 1.0))))))
+(define-bytecode-transpiler :FCONST_0 (context code)
+  (declare (ignore code))
+  (%transpile-fconst-x context 0))
+
+(define-bytecode-transpiler :FCONST_1 (context code)
+  (declare (ignore code))
+  (%transpile-fconst-x context 1))
 
 (define-bytecode-transpiler-TODO :FLOAD_0 (context code)
   (declare-IGNORE (ignore code))
@@ -648,14 +639,6 @@
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-nop)))))
-
-(define-bytecode-transpiler-TODO :FDIV (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-fdiv
-                           :address pc-start)))))
 
 (define-bytecode-transpiler-TODO :INEG (context code)
   (declare-IGNORE (ignore code))
@@ -1327,7 +1310,6 @@
                                                                     :address pc-start
                                                                     :class class
                                                                     :member-name fieldname)))))
-              (format t "zzzzzzzzzzzzzz ~A~%" (stack *context*))
               (if (and is-clinit-p (equal (ir-class-class class) context-class))
                   code
                   (cons (make-instance 'ir-clinit

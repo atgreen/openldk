@@ -363,10 +363,19 @@
 (defclass/std ir-lushr (ir-node)
   ())
 
-(defclass/std ir-fadd (ir-node)
+(defclass/std ir-fadd (ir-binop)
   ())
 
-(defclass/std ir-fdiv (ir-node)
+(defclass/std ir-fsub (ir-binop)
+  ())
+
+(defclass/std ir-dadd (ir-binop)
+  ())
+
+(defclass/std ir-dsub (ir-binop)
+  ())
+
+(defclass/std ir-fdiv (ir-binop)
   ())
 
 (defclass/std ir-dmul (ir-binop)
