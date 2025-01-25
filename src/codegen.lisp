@@ -815,22 +815,26 @@
     (if (not (slot-value basic-block 'code-emitted-p))
         (progn
           (push basic-block (slot-value *context* 'blocks))
-          (let ((lisp-code
-                  (cons (intern (format nil "branch-target-~A" (address (car (slot-value basic-block 'code)))))
-                        (loop for insn in (slot-value basic-block 'code)
-                              for expr = (codegen insn *context*)
-                              collect (trace-insn insn (code expr))))))
+          (let* ((stop-emitting-blocks? nil)
+                 (lisp-code
+                   (cons (intern (format nil "branch-target-~A" (address (car (slot-value basic-block 'code)))))
+                         (loop for insn in (slot-value basic-block 'code)
+                               for expr = (codegen insn *context*)
+                               when (typep insn 'ir-stop-marker)
+                                 do (setf stop-emitting-blocks? t)
+                               collect (trace-insn insn (code expr))))))
             (setf (slot-value basic-block 'code-emitted-p) t)
             (pop (slot-value *context* 'blocks))
-            ;; sort by address
-            (let ((successor-list (sort (fset:convert 'list (successors basic-block)) (lambda (a b) (< (address a) (address b))))))
-              (if (eq 1 (length successor-list))
-                  (if (slot-value (car successor-list) 'code-emitted-p)
-                      (when (and (<= (address (car successor-list)) (+ (address (car (last (code basic-block)))) 4)))
-                        (setf lisp-code (append lisp-code (list (list 'go (intern (format nil "branch-target-~A" (address (car successor-list)))))))))))
-              (dolist (successor successor-list)
-                (when successor
-                  (setf lisp-code (append lisp-code (codegen-block successor (or stop-block (try-exit-block basic-block))))))))
+            (unless stop-emitting-blocks?
+              ;; sort by address
+              (let ((successor-list (sort (fset:convert 'list (successors basic-block)) (lambda (a b) (< (address a) (address b))))))
+                (if (eq 1 (length successor-list))
+                    (if (slot-value (car successor-list) 'code-emitted-p)
+                        (when (and (<= (address (car successor-list)) (+ (address (car (last (code basic-block)))) 4)))
+                          (setf lisp-code (append lisp-code (list (list 'go (intern (format nil "branch-target-~A" (address (car successor-list)))))))))))
+                (dolist (successor successor-list)
+                  (when successor
+                    (setf lisp-code (append lisp-code (codegen-block successor (or stop-block (try-exit-block basic-block)))))))))
 
             ;; Emit handlers for finally handlers. FIXME: in build-basic-blocks, sort try-catch list by end of range
             (when (find-if (lambda (p) (null (car p))) (try-catch basic-block))

@@ -68,6 +68,9 @@
 (defclass/std ir-nop (ir-node)
   ())
 
+(defclass/std ir-stop-marker (ir-nop)
+  ())
+
 (defclass/std ir-literal (ir-node)
   ((value)
    (type :with)))
