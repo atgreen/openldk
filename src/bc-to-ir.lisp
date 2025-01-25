@@ -199,7 +199,7 @@
                                :index index
                                :const const)))))))
 
-(define-bytecode-transpiler :ISTORE (context code)
+(defun %transpile-xstore (context code jtype)
   (with-slots (pc) context
     (let ((pc-start pc)
           (index (aref code (incf pc)))
@@ -209,8 +209,21 @@
                            :address pc-start
                            :lvalue (make-instance 'ir-local-variable
                                                   :address pc-start
-                                                  :index index)
+                                                  :index index
+                                                  :jtype jtype)
                            :rvalue var)))))
+
+(define-bytecode-transpiler :ISTORE (context code)
+  (%transpile-xstore context code :INTEGER))
+
+(define-bytecode-transpiler :FSTORE (context code)
+  (%transpile-xstore context code :FLOAT))
+
+(define-bytecode-transpiler :LSTORE (context code)
+  (%transpile-xstore context code :LONG))
+
+(define-bytecode-transpiler :DSTORE (context code)
+  (%transpile-xstore context code :DOUBLE))
 
 (defun %transpile-istore-x (context index)
   (with-slots (pc) context
@@ -331,7 +344,8 @@
                opcodes)))
 
 (%define-unop-transpilers
-  (:I2F 'ir-i2f :FLOAT))
+ (:I2F 'ir-i2f :FLOAT)
+ (:F2I 'ir-f2i :INTEGER))
 
  (defun %transpile-binop (context ir-class op-type)
   (with-slots (pc) context
@@ -428,23 +442,6 @@
                            :value (make-instance 'ir-local-variable
                                                  :address pc-start
                                                  :index 2))))))
-
-(define-bytecode-transpiler-TODO :LSTORE (context code)
-  (with-slots (pc) context
-    (let ((pc-start pc)
-          (index (aref code (incf pc))))
-      (incf pc)
-      (list (make-instance 'ir-store
-                           :address pc-start
-                           :target (make-instance 'ir-long-local-variable
-                                                  :address pc-start
-                                                  :index index))))))
-
-(define-bytecode-transpiler-TODO :DSTORE (context code)
-  (:LSTORE context code))
-
-(define-bytecode-transpiler-TODO :FSTORE (context code)
-  (:DSTORE context code))
 
 (define-bytecode-transpiler-TODO :DSTORE_2 (context code)
   (declare-IGNORE (ignore code))
@@ -547,13 +544,18 @@
             (setf (stack context) (list (make-instance '<stack-bottom-marker>)))
             code))))))
 
-(define-bytecode-transpiler-TODO :FCMPG (context code)
-  (declare-IGNORE (ignore code))
+(define-bytecode-transpiler :FCMPG (context code)
+  (declare (ignore code))
   (with-slots (pc) context
-    (let ((pc-start pc))
+    (let* ((pc-start pc)
+           (var (make-stack-variable context pc-start :INTEGER)))
       (incf pc)
-      (list (make-instance 'ir-fcmpg
-                           :address pc-start)))))
+      (let ((code (list (make-instance 'ir-fcmpg
+                                       :value1 (pop (stack context))
+                                       :value2 (pop (stack context))
+                                       :address pc-start))))
+        (push var (stack context))
+        code))))
 
 (define-bytecode-transpiler-TODO :FCMPL (context code)
   (declare-IGNORE (ignore code))
@@ -632,13 +634,6 @@
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-l2f :address pc-start)))))
-
-(define-bytecode-transpiler-TODO :F2I (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-f2i :address pc-start)))))
 
 (define-bytecode-transpiler-TODO :D2L (context code)
   (declare-IGNORE (ignore code))

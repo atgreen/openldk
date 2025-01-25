@@ -94,10 +94,10 @@
 (defclass/std ir-iastore (ir-xastore)
   ())
 
-(defclass/std ir-fcmpg (ir-node)
+(defclass/std ir-fcmpg (ir-binop)
   ())
 
-(defclass/std ir-fcmpl (ir-node)
+(defclass/std ir-fcmpl (ir-binop)
   ())
 
 (defclass/std ir-float-literal (ir-literal)
@@ -203,16 +203,16 @@
 (defclass/std ir-unop (ir-node)
   ((value)))
 
-(defclass/std ir-l2f (ir-node)
+(defclass/std ir-l2f (ir-unop)
   ())
 
-(defclass/std ir-f2i (ir-node)
+(defclass/std ir-f2i (ir-unop)
   ())
 
-(defclass/std ir-d2l (ir-node)
+(defclass/std ir-d2l (ir-unop)
   ())
 
-(defclass/std ir-i2c (ir-node)
+(defclass/std ir-i2c (ir-unop)
   ())
 
 (defclass/std ir-i2f (ir-unop)
