@@ -48,7 +48,7 @@
 (defvar *dump-dir* nil)
 (defvar *debug-bytecode* nil)
 (defvar *debug-codegen* nil)
-(defvar *debug-stack* nil)
+(defvar *debug-slynk* nil)
 (defvar *debug-trace* nil)
 (defvar *debug-x* nil)
 (defvar *debug-unmuffle* nil)
@@ -108,6 +108,9 @@
                                        while (and (< (pc *context*) length))
                                        for no-record-stack-state? = (find (aref +opcodes+ (aref code (pc *context*))) '(:GOTO))
                                        for result = (progn
+                                                      (let ((stk (gethash (pc *context*) (stack-state-table *context*))))
+                                                        (when stk
+                                                          (setf (stack *context*) (car stk))))
                                                       (when *debug-bytecode*
                                                         (format t "~&; c[~A] ~A ~@<~A~:@>" (pc *context*) (aref +opcodes+ (aref code (pc *context*))) (stack *context*)))
                                                       ; (dump-hashtable (stack-state-table *context*))
@@ -362,7 +365,7 @@
         (when (find #\c LDK_DEBUG)
           (setf *debug-codegen* t))
         (when (find #\s LDK_DEBUG)
-          (setf *debug-stack* t))
+          (setf *debug-slynk* t))
         (when (find #\t LDK_DEBUG)
           (setf *debug-trace* t))
         (when (find #\b LDK_DEBUG)
@@ -371,6 +374,9 @@
           (setf *debug-x* t))
         (when (find #\u LDK_DEBUG)
           (setf *debug-unmuffle* t)))))
+
+  (when *debug-slynk*
+    (slynk:create-server :port 2025))
 
   (setf *dump-dir* dump-dir)
 
