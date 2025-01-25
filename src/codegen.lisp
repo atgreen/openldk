@@ -156,6 +156,7 @@
 
 (%define-binop-codegen-methods
   (ir-dmul '* :DOUBLE nil)
+  (ir-dadd '+ :DOUBLE nil)
   (ir-fadd '+ :FLOAT nil)
   (ir-fdiv '/ :FLOAT nil)
   (ir-fmul '* :FLOAT nil)
@@ -393,31 +394,25 @@
     (pop (stack context)) (push expr (stack context))
     expr))
 
-(defmethod codegen ((insn ir-l2f) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (gen-push-item (list 'float (gen-pop-item)))
-                             :expression-type :FLOAT)))
-    (pop (stack context)) (push expr (stack context))
-    expr))
+(defmethod codegen ((insn ir-i2f) context)
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'float (code (codegen (value insn) context)))
+                 :expression-type :FLOAT))
 
-(defmethod codegen ((insn ir-f2i) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (gen-push-item (list 'floor (gen-pop-item)))
-                             :expression-type :INTEGER)))
-    (pop (stack context)) (push expr (stack context))
-    expr))
+(defmethod codegen ((insn ir-f2d) context)
+  (make-instance '<expression>
+                 :insn insn
+                 :code (code (codegen (value insn) context))
+                 :expression-type :DOUBLE))
 
 (defmethod codegen ((insn ir-d2l) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (gen-push-item (list 'floor (gen-pop-item)))
-                             :expression-type :LONG)))
-    (pop (stack context)) (push expr (stack context))
-    expr))
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'floor (code (codegen (value insn) context)))
+                 :expression-type :DOUBLE))
 
-(defmethod codegen ((insn ir-i2f) context)
+(defmethod codegen ((insn ir-l2f) context)
   (make-instance '<expression>
                  :insn insn
                  :code (list 'float (code (codegen (value insn) context)))
@@ -428,6 +423,14 @@
                  :insn insn
                  :code (code (codegen (value insn) context))
                  :expression-type :LONG))
+
+(defmethod codegen ((insn ir-l2i) context)
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'logand
+                             (code (codegen (value insn) context))
+                             #xFFFFFFFF)
+                 :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-f2i) context)
   (make-instance '<expression>

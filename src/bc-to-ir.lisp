@@ -333,9 +333,13 @@
                opcodes)))
 
 (%define-unop-transpilers
+ (:D2L 'ir-d2l :LONG)
+ (:F2D 'ir-f2d :DOUBLE)
+ (:F2I 'ir-f2i :INTEGER)
  (:I2F 'ir-i2f :FLOAT)
  (:I2L 'ir-i2l :LONG)
- (:F2I 'ir-f2i :INTEGER))
+ (:L2F 'ir-l2f :FLOAT)
+ (:L2I 'ir-l2i :INTEGER))
 
  (defun %transpile-binop (context ir-class op-type)
   (with-slots (pc) context
@@ -366,6 +370,7 @@
 
 (%define-binop-transpilers
   (:DMUL 'ir-dmul :DOUBLE)
+  (:DADD 'ir-dadd :DOUBLE)
   (:FADD 'ir-fadd :FLOAT)
   (:FDIV 'ir-fdiv :FLOAT)
   (:FMUL 'ir-fmul :FLOAT)
@@ -595,35 +600,6 @@
 (define-bytecode-transpiler :DCONST_1 (context code)
   (declare (ignore code))
   (%transpile-fconst-x context 1.0))
-
-(define-bytecode-transpiler-TODO :L2I (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      ;; Do nothing.
-      (list (make-instance 'ir-nop :address pc-start)))))
-
-(define-bytecode-transpiler-TODO :L2F (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-l2f :address pc-start)))))
-
-(define-bytecode-transpiler-TODO :D2L (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-d2l :address pc-start)))))
-
-(define-bytecode-transpiler-TODO :F2D (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-nop)))))
 
 (define-bytecode-transpiler-TODO :INEG (context code)
   (declare-IGNORE (ignore code))
