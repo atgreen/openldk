@@ -191,13 +191,7 @@
 (defclass/std ir-irem (ir-node)
   ())
 
-(defclass/std ir-dup (ir-node)
-  ())
-
 (defclass/std ir-dup2 (ir-node)
-  ())
-
-(defclass/std ir-dup-x1 (ir-node)
   ())
 
 (defclass/std ir-goto (ir-branch)
@@ -225,25 +219,25 @@
   ((value1)
    (value2)))
 
-(defclass/std ir-if-acmpeq (ir-branch)
+(defclass/std ir-if-acmpeq (ir-if-xcmp<cond>)
   ())
 
 (defclass/std ir-if-acmpne (ir-if-xcmp<cond>)
   ())
 
-(defclass/std ir-if-icmpge (ir-branch)
+(defclass/std ir-if-icmpge (ir-if-xcmp<cond>)
   ())
 
 (defclass/std ir-if-icmpeq (ir-if-xcmp<cond>)
   ())
 
-(defclass/std ir-if-icmple (ir-branch)
+(defclass/std ir-if-icmple (ir-if-xcmp<cond>)
   ())
 
 (defclass/std ir-if-icmplt (ir-if-xcmp<cond>)
   ())
 
-(defclass/std ir-if-icmpgt (ir-branch)
+(defclass/std ir-if-icmpgt (ir-if-xcmp<cond>)
   ())
 
 (defclass/std ir-if-icmpne (ir-if-xcmp<cond>)

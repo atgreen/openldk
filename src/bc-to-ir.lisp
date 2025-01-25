@@ -477,13 +477,21 @@
       (list (make-instance 'ir-dup2
                            :address pc-start)))))
 
-(define-bytecode-transpiler-TODO :DUP_X1 (context code)
-  (declare-IGNORE (ignore code))
+(define-bytecode-transpiler :DUP_X1 (context code)
+  (declare (ignore code))
   (with-slots (pc) context
-    (let ((pc-start pc))
+    (let ((pc-start pc)
+          (var (make-stack-variable context pc (var-type (car (stack context))))))
       (incf pc)
-      (list (make-instance 'ir-dup-x1
-                           :address pc-start)))))
+      (let* ((value1 (pop (stack context)))
+             (code (list (make-instance 'ir-assign
+                                        :address pc-start
+                                        :lvalue var
+                                        :rvalue value1)))
+             (value2 (pop (stack context))))
+        (push var (stack context))
+        (push value2 (stack context))
+        (push value1 (stack context))))))
 
 (define-bytecode-transpiler :GETSTATIC (context code)
   (with-slots (pc class is-clinit-p) context
@@ -798,38 +806,14 @@
 (define-bytecode-transpiler :IF_ICMPLT (context code)
   (%transpile-compare-branch context code 'ir-if-icmplt))
 
-(define-bytecode-transpiler-TODO :IF_ICMPGE (context code)
-  (with-slots (pc class) context
-    (let ((pc-start pc))
-      (with-slots (constant-pool) class
-        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
-                                              (aref code (incf pc))))))
-          (incf pc)
-          (list (make-instance 'ir-if-icmpge
-                               :address pc-start
-                               :offset (+ pc-start offset))))))))
+(define-bytecode-transpiler :IF_ICMPGT (context code)
+  (%transpile-compare-branch context code 'ir-if-icmpgt))
 
-(define-bytecode-transpiler-TODO :IF_ICMPLE (context code)
-  (with-slots (pc class) context
-    (let ((pc-start pc))
-      (with-slots (constant-pool) class
-        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
-                                              (aref code (incf pc))))))
-          (incf pc)
-          (list (make-instance 'ir-if-icmple
-                               :address pc-start
-                               :offset (+ pc-start offset))))))))
+(define-bytecode-transpiler :IF_ICMPGE (context code)
+  (%transpile-compare-branch context code 'ir-if-icmpge))
 
-(define-bytecode-transpiler-TODO :IF_ICMPGT (context code)
-  (with-slots (pc class) context
-    (let ((pc-start pc))
-      (with-slots (constant-pool) class
-        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
-                                              (aref code (incf pc))))))
-          (incf pc)
-          (list (make-instance 'ir-if-icmpgt
-                               :address pc-start
-                               :offset (+ pc-start offset))))))))
+(define-bytecode-transpiler :IF_ICMPLE (context code)
+  (%transpile-compare-branch context code 'ir-if-icmple))
 
 (define-bytecode-transpiler-TODO :IDIV (context code)
   (declare-IGNORE (ignore code))
