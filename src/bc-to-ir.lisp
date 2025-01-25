@@ -879,19 +879,19 @@
 
 (define-bytecode-transpiler :FLOAD_0 (context code)
   (declare (ignore code))
-  (%transpile-fload-x context 0.0))
+  (%transpile-fload-x context 0))
 
 (define-bytecode-transpiler :FLOAD_1 (context code)
   (declare (ignore code))
-  (%transpile-fload-x context 1.0))
+  (%transpile-fload-x context 1))
 
 (define-bytecode-transpiler :FLOAD_2 (context code)
   (declare (ignore code))
-  (%transpile-fload-x context 2.0))
+  (%transpile-fload-x context 2))
 
 (define-bytecode-transpiler :FLOAD_3 (context code)
   (declare (ignore code))
-  (%transpile-fload-x context 3.0))
+  (%transpile-fload-x context 3))
 
 (define-bytecode-transpiler :INSTANCEOF (context code)
   (with-slots (pc class) context
