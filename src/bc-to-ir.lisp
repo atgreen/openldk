@@ -459,27 +459,32 @@
 (define-bytecode-transpiler :DUP (context code)
   (declare (ignore code))
   (with-slots (pc) context
-    (let ((pc-start pc)
-          (var (make-stack-variable context pc (var-type (car (stack context))))))
+    (let ((pc-start pc))
       (incf pc)
       (let* ((value (pop (stack context))))
         (push value (stack context))
         (push value (stack context)))
       (list (make-instance 'ir-nop :address pc-start)))))
 
-(define-bytecode-transpiler-TODO :DUP2 (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-dup2
-                           :address pc-start)))))
+(define-bytecode-transpiler :DUP2 (context code)
+  (declare (ignore code))
+  (if (find (var-type (car (stack context))) '(:DOUBLE :LONG))
+      (:DUP context code)
+      (with-slots (pc) context
+        (let ((pc-start pc))
+          (incf pc)
+          (let* ((value1 (pop (stack context)))
+                 (value2 (pop (stack context))))
+            (push value2 (stack context))
+            (push value1 (stack context))
+            (push value2 (stack context))
+            (push value1 (stack context)))
+          (list (make-instance 'ir-nop :address pc-start))))))
 
 (define-bytecode-transpiler :DUP_X1 (context code)
   (declare (ignore code))
   (with-slots (pc) context
-    (let ((pc-start pc)
-          (var (make-stack-variable context pc (var-type (car (stack context))))))
+    (let ((pc-start pc))
       (incf pc)
       (let* ((value1 (pop (stack context)))
              (value2 (pop (stack context))))
@@ -1205,27 +1210,26 @@
 (define-bytecode-transpiler-TODO :LDC2_W (context code)
   (:LDC_W context code))
 
-(define-bytecode-transpiler-TODO :LCONST_0 (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
+(defun %transpile-lconst-x (context value)
+  (with-slots (pc stack) context
+    (let* ((pc-start pc)
+           (var (make-stack-variable context pc-start :LONG)))
       (incf pc)
-      (list (make-instance 'ir-push
+      (push var (stack context))
+      (list (make-instance 'ir-assign
                            :address pc-start
-                           :value (make-instance 'ir-long-literal
-                                                 :address pc-start
-                                                 :value 0))))))
+                           :lvalue var
+                           :rvalue (make-instance 'ir-long-literal
+                                                  :address pc-start
+                                                  :value value))))))
 
-(define-bytecode-transpiler-TODO :LCONST_1 (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-push
-                           :address pc-start
-                           :value (make-instance 'ir-long-literal
-                                                 :address pc-start
-                                                 :value 1))))))
+(define-bytecode-transpiler :LCONST_0 (context code)
+  (declare (ignore code))
+  (%transpile-iconst-x context 0))
+
+(define-bytecode-transpiler :LCONST_1 (context code)
+  (declare (ignore code))
+  (%transpile-iconst-x context 1))
 
 (define-bytecode-transpiler-TODO :LLOAD_0 (context code)
   (declare-IGNORE (ignore code))

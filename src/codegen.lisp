@@ -361,31 +361,6 @@
     (pop (stack context)) (pop (stack context)) (push expr (stack context))
     expr))
 
-(defmethod codegen ((insn ir-dup2) context)
-  (let ((tos-type (expression-type (car (stack context)))))
-    (if (or (eq tos-type :LONG) (eq tos-type :DOUBLE))
-        (let ((expr (make-instance '<expression>
-                                   :insn insn
-                                   :code (gen-push-item (gen-peek-item))
-                                   :expression-type (expression-type (car (stack context))))))
-          (push expr (stack context))
-          expr)
-        (let ((expr (make-instance '<expression>
-                                   :insn insn
-                                   :code (list 'let (list (list 'value1 (gen-pop-item))
-                                                          (list 'value2 (gen-pop-item)))
-                                               (gen-push-item 'value2)
-                                               (gen-push-item 'value1)
-                                               (gen-push-item 'value2)
-                                               (gen-push-item 'value1)))))
-          (let ((expr1 (pop (stack context)))
-                (expr2 (pop (stack context))))
-            (push expr2 (stack context))
-            (push expr1 (stack context))
-            (push expr2 (stack context))
-            (push expr1 (stack context)))
-          expr))))
-
 (defmethod codegen ((insn ir-fcmpg) context)
   (let ((expr (make-instance '<expression>
                              :insn insn
