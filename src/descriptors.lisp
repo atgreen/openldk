@@ -98,42 +98,46 @@
 
 (defun gen-parameter-hints (mdescriptor)
   "Parse the Java method descriptor and return a list representing
- parameter types.  Longs are #\J.  Doubles are #\D.  Everything else
- is T."
+ parameter types. Longs are #\J. Doubles are #\D. Everything else is T."
   (let ((param-hints nil)
         (index 0)
         (descriptor (subseq mdescriptor (1+ (position #\( mdescriptor)) (position #\) mdescriptor))))
     (loop
-      until (>= index (length descriptor))
-      when (< index (length descriptor))
-        do (let ((ch (char descriptor index)))
-             (cond
-               ;; For simple types
-               ((char= ch #\J) (push #\L param-hints) (incf index))
-               ((char= ch #\D) (push #\D param-hints) (incf index))
+      while (< index (length descriptor))
+      do (let ((ch (char descriptor index)))
+           (cond
+             ;; Simple types
+             ((char= ch #\J) (push #\J param-hints) (incf index))
+             ((char= ch #\D) (push #\D param-hints) (incf index))
 
-               ;; For object types
-               ((char= ch #\L)
-                (let ((obj-end (position #\; descriptor :start index)))
-                  (push t param-hints)
-                  (setf index (1+ obj-end))))
+             ;; Object types
+             ((char= ch #\L)
+              (let ((obj-end (position #\; descriptor :start index)))
+                (if obj-end
+                    (progn (push t param-hints)
+                           (setf index (1+ obj-end)))
+                    (error "Malformed descriptor: Missing ';' in object type."))))
 
-               ;; For array types
-               ((char= ch #\[)
-                (incf index)
-                (loop until (or (eq index (length descriptor))
-                                (not (member (char descriptor index) '(#\I #\J #\S #\B #\C #\D #\F #\Z #\[))))
-                      do (incf index))
-                (when (and (< index (length descriptor))
-                           (char= (char descriptor index) #\L))
-                  (setf index (position #\; descriptor :start index)))
-                (push t param-hints)
-                (incf index))
+             ;; Array types
+             ((char= ch #\[)
+              (loop until (not (char= (char descriptor index) #\[)) do (incf index))
+              (let ((ch (char descriptor index)))
+                (cond
+                  ((char= ch #\L)
+                   (let ((obj-end (position #\; descriptor :start index)))
+                     (if obj-end
+                         (progn (push t param-hints)
+                                (setf index (1+ obj-end)))
+                         (error "Malformed descriptor: Missing ';' in object type."))))
+                  (t
+                   (push t param-hints)
+                   (incf index)))))
 
-               (t
-                (push t param-hints)
-                (incf index)))))
-    (nreverse param-hints))) ; Reverse the list before returning it, since we used push
+             ;; Default case
+             (t
+              (push t param-hints)
+              (incf index)))))
+    (nreverse param-hints)))
 
 (defun parse-parameter-types (descriptor)
   "Parse the Java method descriptor and return a list of parameter types as strings."
