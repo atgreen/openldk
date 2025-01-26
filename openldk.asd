@@ -35,6 +35,7 @@
 ;;; library, but you are not obligated to do so.  If you do not wish
 ;;; to do so, delete this exception statement from your version.
 
+(declaim (optimize (speed 0) (space 0) (debug 3)))
 (sb-ext:restrict-compiler-policy 'debug 3)
 
 (asdf:defsystem #:openldk

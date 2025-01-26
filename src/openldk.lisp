@@ -81,6 +81,7 @@
 (defun %compile-method (class-name method-index)
   (let* ((class (gethash class-name *classes*))
          (method (aref (slot-value class 'methods) (1- method-index)))
+         (parameter-hints (gen-parameter-hints (descriptor method)))
          (exception-table (slot-value (gethash "Code" (slot-value method 'attributes)) 'exceptions))
          (code (slot-value (gethash "Code" (slot-value method 'attributes)) 'code))
          (max-locals (slot-value (gethash "Code" (slot-value method 'attributes)) 'max-locals))
@@ -162,27 +163,29 @@
                                              collect (intern (format nil "arg~A" i) :openldk)))))
                        (when *debug-trace*
                          (list (list 'format 't "~&; trace: entering ~A ~A.~A~%" (if (not (static-p method)) (intern "this" :openldk) "") class-name (fn-name *context*))))
-                       (if (slot-value *context* 'uses-stack-p)
-                           (list (append (list 'let (if (static-p method)
-                                                        (append (remove-duplicates
-                                                                 (loop for var in (stack-variables *context*)
-                                                                       collect (list (intern (format nil "s{~{~A~^,~}}" (sort (var-numbers var) #'<)) :openldk)))
-                                                                 :test #'equal)
-                                                                (loop for i from 1 upto parameter-count
-                                                                      collect (list (intern (format nil "local-~A" (1- i)) :openldk) (intern (format nil "arg~A" (1- i)) :openldk)))
-                                                                (loop for i from (1+ parameter-count) upto max-locals
-                                                                      collect (list (intern (format nil "local-~A" (1- i)) :openldk))))
-                                                        (append (remove-duplicates
-                                                                 (loop for var in (stack-variables *context*)
-                                                                       collect (list (intern (format nil "s{~{~A~^,~}}" (sort (var-numbers var) #'<)) :openldk)))
-                                                                 :test #'equal)
-                                                                (cons (list (intern "local-0" :openldk) (intern "this" :openldk))
-                                                                      (loop for i from 1 upto parameter-count
-                                                                            collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" i) :openldk))))
-                                                                (loop for i from (+ 2 parameter-count) upto max-locals
-                                                                      collect (list (intern (format nil "local-~A" (1- i)) :openldk))))))
-                                         traced-lisp-code))
-                           traced-lisp-code)))))
+                       (let ((i 0)
+                             (pc -1))
+                         (list (append (list 'let (if (static-p method)
+                                                      (append (remove-duplicates
+                                                               (loop for var in (stack-variables *context*)
+                                                                     collect (list (intern (format nil "s{~{~A~^,~}}" (sort (var-numbers var) #'<)) :openldk)))
+                                                               :test #'equal)
+                                                              (loop for ph in parameter-hints
+                                                                    collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" (incf pc)) :openldk))
+                                                                    do (if (eq ph t) (incf i) (incf i 2)))
+                                                              (loop for pc from (- parameter-count 2) upto max-locals
+                                                                    collect (list (intern (format nil "local-~A" (1- (incf i))) :openldk))))
+                                                      (append (remove-duplicates
+                                                               (loop for var in (stack-variables *context*)
+                                                                     collect (list (intern (format nil "s{~{~A~^,~}}" (sort (var-numbers var) #'<)) :openldk)))
+                                                               :test #'equal)
+                                                              (append (list (list (intern "local-0" :openldk) (intern "this" :openldk)))
+                                                                      (loop for ph in parameter-hints
+                                                                            collect (list (intern (format nil "local-~A" (1+ i)) :openldk) (intern (format nil "arg~A" (1+ (incf pc))) :openldk))
+                                                                            do (if (eq ph t) (incf i) (incf i 2)))
+                                                                      (loop for x from parameter-count upto (1+ max-locals)
+                                                                            collect (list (intern (format nil "local-~A" (incf i)) :openldk)))))))
+                                       traced-lisp-code)))))))
       (%eval definition-code))))
 
 (defun %clinit (class)

@@ -492,7 +492,7 @@
           (multiple-value-bind (fieldname class)
               (emit (aref constant-pool index) constant-pool)
             (incf pc)
-            (let* ((var (make-stack-variable context pc-start nil)) ;; FIXME: fix type
+            (let* ((var (make-stack-variable context pc-start (get-stack-type-from-descriptor (emit-type (aref constant-pool index) constant-pool))))
                    (code (list (make-instance 'ir-assign
                                               :address (if (and is-clinit-p (equal (ir-class-class class) context-class)) pc-start (+ pc-start 0.1))
                                               :lvalue var
@@ -623,7 +623,7 @@
   ())
 
 (defmethod initialize-instance ((marker <stack-bottom-marker>) &key)
-  (setf (slot-value marker 'var-numbers) (list -1))
+  (setf (slot-value marker 'var-numbers) (list +stack-bottom-address+))
   (setf (slot-value marker 'var-type) :VOID)
   (setf (slot-value marker 'address) +stack-bottom-address+))
 
@@ -1057,25 +1057,24 @@
 
 (define-bytecode-transpiler :LDC (context code)
   (with-slots (pc class stack) context
-    (let* ((pc-start pc)
-           (var (make-stack-variable context pc-start :INTEGER))) ;; FIXME - real type!
-      (push var (stack context))
+    (let* ((pc-start pc))
       (with-slots (constant-pool) class
-        (let ((index (aref code (incf pc))))
+        (let* ((index (aref code (incf pc)))
+               (var (make-stack-variable context pc-start (get-stack-jtype (aref constant-pool index)))))
           (incf pc)
+          (push var (stack context))
           (list (make-instance 'ir-assign
                                :address pc-start
                                :lvalue var
                                :rvalue (emit (aref constant-pool index) constant-pool))))))))
 
-
 (define-bytecode-transpiler :LDC_W (context code)
   (with-slots (pc class) context
-    (let* ((pc-start pc)
-           (var (make-stack-variable context pc-start :INTEGER))) ;; FIXME : Type
+    (let* ((pc-start pc))
       (with-slots (constant-pool) class
-				(let ((index (+ (* (aref code (incf pc)) 256)
-												(aref code (incf pc)))))
+				(let* ((index (+ (* (aref code (incf pc)) 256)
+                         (aref code (incf pc))))
+               (var (make-stack-variable context pc-start (get-stack-jtype (aref constant-pool index)))))
           (incf pc)
           (let ((code (list (make-instance 'ir-assign
                                            :address pc-start
@@ -1195,8 +1194,8 @@
       (with-slots (constant-pool) class
         (let* ((index (+ (* (aref code (incf pc)) 256)
                          (aref code (incf pc))))
-               (var (make-stack-variable context pc-start :INTEGER))) ;; FIXME: get correct type
-          (multiple-value-bind (fieldname)
+               (var (make-stack-variable context pc-start (get-stack-type-from-descriptor (emit-type (aref constant-pool index) constant-pool)))))
+          (multiple-value-bind (fieldname fieldclass)
               (emit (aref constant-pool index) constant-pool)
             (incf pc)
             (let ((code (list (make-instance 'ir-assign

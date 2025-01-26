@@ -54,6 +54,26 @@
                (t nil)))
     count))
 
+(defun get-stack-type-from-descriptor (descriptor)
+  (cond
+    ((string= descriptor "I")
+     :INTEGER)
+    ((string= descriptor "J")
+     :LONG)
+    ((string= descriptor "F")
+     :FLOAT)
+    ((string= descriptor "D")
+     :DOUBLE)
+    ((string= descriptor "S")
+     :INTEGER)
+    ((string= descriptor "B")
+     :INTEGER)
+    ((string= descriptor "C")
+     :INTEGER)
+    ((string= descriptor "Z")
+     :INTEGER)
+    (t :REFERENCE)))
+
 (defun get-return-type (name)
   (let ((return-type-descriptor
           (subseq name (1+ (position #\) name)))))
@@ -107,7 +127,7 @@
                   (incf index))
 
                  (t
-                  (push ch param-hints)
+                  (push t param-hints)
                   (incf index)))))
     (nreverse param-hints))) ; Reverse the list before returning it, since we used push
 

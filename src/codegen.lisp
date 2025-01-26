@@ -86,7 +86,7 @@
                                                     (list 'arrayref (gen-pop-item)))
                                          (gen-push-item (list 'aref 'arrayref 'index)))
                              :expression-type :REFERENCE)))
-    (pop (stack context)) (pop (stack context)) (push expr (stack context))
+    (error (stack context)) (error (stack context)) (push expr (stack context))
     expr))
 
 (defmethod codegen ((insn ir-aastore) context)
@@ -139,8 +139,8 @@
                  :code (list 'let (list (list 'value2 (code (codegen (value2 insn) context)))
                                         (list 'value1 (code (codegen (value1 insn) context))))
                              (if mask
-                                 (list 'logand (list operator 'value1 'value2) mask))
-                                 (list operator 'value1 'value2))
+                                 (list 'logand (list operator 'value1 'value2) mask)
+                                 (list operator 'value1 'value2)))
                  :expression-type jtype))
 
 (defmacro %define-binop-codegen-methods (&rest opcodes)
@@ -173,7 +173,7 @@
                              :insn insn
                              :code (gen-push-item (list 'logand (gen-pop-item) (gen-pop-item)))
                              :expression-type :LONG)))
-    (pop (stack context)) (pop (stack context)) (push expr (stack context))
+    (error (stack context)) (error (stack context)) (push expr (stack context))
     expr))
 
 (defmethod codegen ((insn ir-ixor) context)
@@ -205,7 +205,7 @@
                              :insn insn
                              :code (gen-push-item (list 'logior (gen-pop-item) (gen-pop-item)))
                              :expression-type :LONG)))
-    (pop (stack context)) (pop (stack context)) (push expr (stack context))
+    (error (stack context)) (error (stack context)) (push expr (stack context))
     expr))
 
 (defmethod codegen ((insn ir-lxor) context)
@@ -213,7 +213,7 @@
                              :insn insn
                              :code (gen-push-item (list 'logxor (gen-pop-item) (gen-pop-item)))
                              :expression-type :LONG)))
-    (pop (stack context)) (pop (stack context)) (push expr (stack context))
+    (error (stack context)) (error (stack context)) (push expr (stack context))
     expr))
 
 (defmethod codegen ((insn ir-array-length) context)
@@ -277,7 +277,7 @@
                                                       (list 'arrayref (gen-pop-item)))
                                            (gen-push-item (list 'aref 'arrayref 'index)))
                                :expression-type :INTEGER)))
-      (pop (stack context)) (pop (stack context)) (push expr (stack context))
+      (error (stack context)) (error (stack context)) (push expr (stack context))
       expr)))
 
 (defmethod codegen ((insn ir-castore) context)
@@ -382,7 +382,7 @@
                              :insn insn
                              :code (gen-push-item (list '- (gen-pop-item)))
                              :expression-type :INTEGER)))
-    (pop (stack context)) (push expr (stack context))
+    (error (stack context)) (push expr (stack context))
     expr))
 
 (defmethod codegen ((insn ir-i2c) context)
@@ -390,7 +390,7 @@
                              :insn insn
                              :code (gen-push-item (list 'code-char (gen-pop-item)))
                              :expression-type :CHAR)))
-    (pop (stack context)) (push expr (stack context))
+    (error (stack context)) (push expr (stack context))
     expr))
 
 (defmethod codegen ((insn ir-i2f) context)
@@ -614,7 +614,7 @@
                                                     (list 'value1 (gen-pop-item)))
                                          (gen-push-item (list 'ash 'value1 (list \- 'value2))))
                              :expression-type :LONG)))
-    (pop (stack context)) (pop (stack context)) (push expr (stack context))
+    (error (stack context)) (error (stack context)) (push expr (stack context))
     expr))
 
 (defmethod codegen ((insn ir-goto) context)
@@ -708,7 +708,7 @@
   (let ((expr (make-instance '<expression>
                              :insn insn
                              :code (gen-pop-item))))
-    (pop (stack context))
+    (error (stack context))
     expr))
 
 (defmethod codegen ((insn ir-push) context)
@@ -763,7 +763,7 @@
                              :insn insn
                              :code (with-slots (target) insn
                                      (list 'setf (code (codegen target context)) (gen-pop-item))))))
-    (pop (stack context))
+    (error (stack context))
     expr))
 
 (define-condition java-lang-throwable (error)

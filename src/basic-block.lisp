@@ -68,6 +68,10 @@
    (exception-table-entries)
    (catch-handlers)))
 
+(defmethod print-object ((bb <basic-block>) out)
+  (print-unreadable-object (bb out :type t)
+    (format out "[~A:~A]" (address (car (code bb))) (address (car (last (code bb)))))))
+
 (defmethod dump-dot (b done-table stream)
   (format stream "~A [label=\"wth? ~A\"];~%" b b))
 
@@ -118,14 +122,15 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
          (merged (loop
                   with result = nil
                   for entry in sorted-entries
-                  do (if (and result
-                              (= (1- (slot-value entry 'start-pc)) (slot-value (car result) 'end-pc))
-                              (= (slot-value entry 'handler-pc) (slot-value (car result) 'handler-pc))
-                              (equal (slot-value entry 'catch-type) (slot-value (car result) 'catch-type)))
-                         ;; Merge the current entry into the last merged one
-                         (setf (slot-value (car result) 'end-pc) (slot-value entry 'end-pc))
-                         ;; Otherwise, add the current entry as a new merged entry
-                         (push entry result))
+                  unless (eq (slot-value entry 'start-pc) (slot-value entry 'handler-pc)) ;; Ignore self-serving ranges
+                    do (if (and result
+                                (= (1- (slot-value entry 'start-pc)) (slot-value (car result) 'end-pc))
+                                (= (slot-value entry 'handler-pc) (slot-value (car result) 'handler-pc))
+                                (equal (slot-value entry 'catch-type) (slot-value (car result) 'catch-type)))
+                           ;; Merge the current entry into the last merged one
+                           (setf (slot-value (car result) 'end-pc) (slot-value entry 'end-pc))
+                           ;; Otherwise, add the current entry as a new merged entry
+                           (push entry result))
                   finally (return (reverse result)))))
     ;; Convert the result back to an array
     (make-array (length merged) :initial-contents merged)))

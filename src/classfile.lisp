@@ -60,7 +60,7 @@
 
 (defclass/std constant-field-reference ()
   ((class-index
-		type-descriptor-index)))
+		name-and-type-descriptor-index)))
 
 (defclass/std constant-method-reference ()
   ((class-index
@@ -77,27 +77,49 @@
   (make-instance 'ir-string-literal
                  :value (format nil "~A" (emit (aref cp (slot-value v 'index)) cp))))
 
+(defmethod get-stack-jtype ((v constant-string-reference))
+  :REFERENCE)
+
 (defmethod emit ((v constant-float) cp)
   (make-instance 'ir-float-literal :value (slot-value v 'value)))
+
+(defmethod get-stack-jtype ((v constant-float))
+  :FLOAT)
 
 (defmethod emit ((v constant-double) cp)
   (make-instance 'ir-double-literal :value (slot-value v 'value)))
 
+(defmethod get-stack-jtype ((v constant-double))
+  :FLOAT)
+
 (defmethod emit ((v constant-int) cp)
   (make-instance 'ir-int-literal :value (slot-value v 'value)))
+
+(defmethod get-stack-jtype ((v constant-int))
+  :INTEGER)
 
 (defmethod emit ((v constant-long) cp)
   (make-instance 'ir-int-literal :value (slot-value v 'value)))
 
+(defmethod get-stack-jtype ((v constant-long))
+  :LONG)
+
 (defmethod emit ((v constant-field-reference) cp)
   (let ((class (emit (aref cp (slot-value v 'class-index)) cp)))
-    (values (emit-name (aref cp (slot-value v 'type-descriptor-index)) cp) class)))
+    (values (emit-name (aref cp (slot-value v 'name-and-type-descriptor-index)) cp) class)))
+
+(defmethod emit-type ((v constant-field-reference) cp)
+  (let ((class (emit (aref cp (slot-value v 'class-index)) cp)))
+    (values (emit-type (aref cp (slot-value v 'name-and-type-descriptor-index)) cp) class)))
 
 (defmethod emit ((v constant-class-reference) cp)
   (let ((classname (emit (aref cp (slot-value v 'index)) cp)))
     (if (eq (aref classname 0) #\[)
         (setf classname "java/util/Arrays"))
     (make-instance 'ir-class :class (classload classname))))
+
+(defmethod get-stack-jtype ((v constant-class-reference))
+  :REFERENCE)
 
 (defmethod emit-name ((v constant-class-reference) cp)
   (emit (aref cp (slot-value v 'index)) cp))
@@ -109,6 +131,9 @@
 
 (defmethod emit-name ((v constant-name-and-type-descriptor) cp)
   (format nil "~A" (emit (aref cp (slot-value v 'name-index)) cp)))
+
+(defmethod emit-type ((v constant-name-and-type-descriptor) cp)
+  (format nil "~A" (emit (aref cp (slot-value v 'type-descriptor-index)) cp)))
 
 #|
 (defmethod emit ((v constant-method-reference) cp)
@@ -320,7 +345,7 @@ stream."
                                 (9
                                  (make-instance 'constant-field-reference
                                                 :class-index (read-u2)
-                                                :type-descriptor-index (read-u2)))
+                                                :name-and-type-descriptor-index (read-u2)))
                                 (10
                                  (let ((class-index (read-u2))
                                        (method-descriptor-index (read-u2)))
