@@ -372,3 +372,7 @@ boolean compareAndSwapObject(Object obj, long fieldId, Object expectedValue, Obj
     ((vectorp obj)
      (aref obj (ash l -2)))
     (t (error "Unrecognized object type in getObjectVolatile: " obj))))
+
+(defun |java/security/AccessController.getStackAccessControlContext()| ()
+  ;; FIXME -- implement
+  nil)
