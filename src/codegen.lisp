@@ -256,6 +256,16 @@
                                (list 'char-code (list 'aref 'arrayref 'index)))
                    :expression-type :CHAR)))
 
+(defmethod codegen ((insn ir-iaload) context)
+  ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
+  (with-slots (index arrayref) insn
+    (make-instance '<expression>
+                   :insn insn
+                   :code (list 'let (list (list 'index (code (codegen index context)))
+                                          (list 'arrayref (code (codegen arrayref context))))
+                               (list 'aref 'arrayref 'index))
+                   :expression-type :INTEGER)))
+
 (defmethod codegen ((insn ir-aaload) context)
   ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
   (with-slots (index arrayref) insn
@@ -265,18 +275,6 @@
                                           (list 'arrayref (code (codegen arrayref context))))
                                (list 'aref 'arrayref 'index))
                    :expression-type :REFERENCE)))
-
-(defmethod codegen ((insn ir-iaload) context)
-  ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
-  (with-slots (source target) insn
-    (let ((expr (make-instance '<expression>
-                               :insn insn
-                               :code (list 'let (list (list 'index (gen-pop-item))
-                                                      (list 'arrayref (gen-pop-item)))
-                                           (gen-push-item (list 'aref 'arrayref 'index)))
-                               :expression-type :INTEGER)))
-      (error (stack context)) (error (stack context)) (push expr (stack context))
-      expr)))
 
 (defmethod codegen ((insn ir-castore) context)
   ;;; FIXME: throw nullpointerexception and invalid array index exception if needed

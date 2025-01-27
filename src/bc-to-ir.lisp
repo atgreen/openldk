@@ -187,13 +187,6 @@
   (declare (ignore code))
   (%transpile-astore-x context 3))
 
-(define-bytecode-transpiler-TODO :IALOAD (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-iaload :address pc-start)))))
-
 (defun %unsigned-to-signed-byte (value)
   "Convert an unsigned byte (0-255) to a signed byte (-128 to 127)."
   (if (> value 127)
@@ -281,6 +274,24 @@
                                   :address pc-start
                                   :lvalue var
                                   :rvalue (make-instance 'ir-caload
+                                                         :address pc-start
+                                                         :index (pop (stack context))
+                                                         :arrayref (pop (stack context)))))))
+        (push var (stack context))
+        code))))
+
+(define-bytecode-transpiler :IALOAD (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let* ((pc-start pc)
+           (var (make-stack-variable context pc-start :CHAR)))
+      (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
+      (let ((code
+             (list (make-instance 'ir-assign
+                                  :address pc-start
+                                  :lvalue var
+                                  :rvalue (make-instance 'ir-iaload
                                                          :address pc-start
                                                          :index (pop (stack context))
                                                          :arrayref (pop (stack context)))))))

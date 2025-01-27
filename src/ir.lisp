@@ -125,7 +125,7 @@
 (defclass/std ir-aaload (ir-array-index)
   ())
 
-(defclass/std ir-iaload (ir-node)
+(defclass/std ir-iaload (ir-array-index)
   ())
 
 (defclass/std ir-castore (ir-xastore)
