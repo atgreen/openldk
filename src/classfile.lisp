@@ -182,6 +182,9 @@
 (defun static-p (method)
   (not (eq 0 (logand #x8 (slot-value method 'access-flags)))))
 
+(defun abstract-p (method)
+  (not (eq 0 (logand #x400 (slot-value method 'access-flags)))))
+
 (defun bridge-p (method)
   (not (eq 0 (logand #x40 (access-flags method)))))
 

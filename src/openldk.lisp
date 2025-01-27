@@ -68,6 +68,11 @@
 
 (defun lispize-method-name (name)
   (subseq name 0 (1+ (position #\) name))))
+#|
+"Collapse text in a string starting with #\\L and ending with #\\; into just #\\L."
+  (cl-ppcre:regex-replace-all "(L[^;]*;)"
+                              "L"))
+|#
 
 (defun make-exception-handler-table (context)
   (let ((exception-table (exception-table context))
@@ -80,113 +85,115 @@
 
 (defun %compile-method (class-name method-index)
   (let* ((class (gethash class-name *classes*))
-         (method (aref (slot-value class 'methods) (1- method-index)))
-         (parameter-hints (gen-parameter-hints (descriptor method)))
-         (exception-table (slot-value (gethash "Code" (slot-value method 'attributes)) 'exceptions))
-         (code (slot-value (gethash "Code" (slot-value method 'attributes)) 'code))
-         (max-locals (slot-value (gethash "Code" (slot-value method 'attributes)) 'max-locals))
-         (length (length code))
-         (*context* (make-instance '<context>
-                                   :class class
-                                   :classes *classes*
-                                   :exception-table exception-table
-                                   :bytecode code
-                                   :stack-state-table (make-hash-table)
-                                   :pc 0
-                                   :is-clinit-p (string= "<clinit>" (slot-value method 'name)))))
-    (setf (svcount *context*) 0)
-    (when *debug-codegen*
-      (format t "; compiling ~A.~A~%" class-name (lispize-method-name (format nil "~A~A" (name method) (descriptor method))))
-      (force-output))
-    (if (static-p method)
-        (setf (fn-name *context*) (format nil "~A.~A" (slot-value class 'name) (lispize-method-name (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor)))))
-        (setf (fn-name *context*) (format nil "~A" (lispize-method-name (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor))))))
-    (let* ((exception-handler-table (make-exception-handler-table *context*))
-           (ir-code-0
-             (setf (ir-code *context*)
-                   (let ((code (apply #'append
-                                      (loop
-                                       while (and (< (pc *context*) length))
-                                       for no-record-stack-state? = (find (aref +opcodes+ (aref code (pc *context*))) '(:GOTO))
-                                       for result = (progn
-                                                      (let ((stk (gethash (pc *context*) (stack-state-table *context*))))
-                                                        (when stk
-                                                          (setf (stack *context*) (car stk))))
-                                                      (when *debug-bytecode*
-                                                        (format t "~&; c[~A] ~A ~@<~A~:@>" (pc *context*) (aref +opcodes+ (aref code (pc *context*))) (stack *context*)))
-                                                      ; (dump-hashtable (stack-state-table *context*))
-                                                      (let* ((pc-start (pc *context*)))
-                                                        (if (gethash pc-start exception-handler-table)
-                                                            (let ((var (make-stack-variable *context* pc-start :REFERENCE)))
-                                                              (push var (stack *context*))
-                                                              (cons (make-instance 'ir-assign
-                                                                                   :address pc-start
-                                                                                   :lvalue var
-                                                                                   :rvalue (make-instance 'ir-condition-exception))
-                                                                    (mapcar (lambda (insn)
-                                                                              (with-slots (address) insn
-                                                                                (setf address (+ address 0.1)))
-                                                                               insn)
-                                                                            (funcall
-                                                                             (aref +opcodes+ (aref code (pc *context*)))
-                                                                             *context* code))))
-                                                            (funcall
-                                                             (aref +opcodes+ (aref code (pc *context*)))
-                                                             *context* code))))
-                                       unless no-record-stack-state?
-                                         do (%record-stack-state (pc *context*) *context*)
-                                       unless (null result)
-                                         collect result))))
-                     ;; Do stack analysis to merge stack variables
-                     (maphash (lambda (k v)
-                                (when (> (length v) 1)
-                                  (reduce #'merge-stacks v)))
-                              (stack-state-table *context*))
-                     code)))
-           ;; (sdfdfd (print ir-code-0))
-           (blocks (build-basic-blocks ir-code-0))
-           (lisp-code
-             (list (list 'block nil
-                         (cons 'tagbody (loop for bloc in blocks append (codegen-block bloc))))))
-           (traced-lisp-code (if *debug-trace* (list (list 'unwind-protect (car lisp-code) (list 'format 't "~&; trace: leaving  ~A.~A~%" class-name (fn-name *context*)))) lisp-code))
-           (definition-code
-             (let ((parameter-count (count-parameters (slot-value method 'descriptor))))
-               (append (if (static-p method)
-                           (list 'defun
-                                 (intern (fn-name *context*) :openldk)
-                                 (loop for i from 1 upto parameter-count
-                                       collect (intern (format nil "arg~A" (1- i)) :openldk)))
-                           (list 'defmethod
-                                 (intern (fn-name *context*) :openldk)
-                                 (cons (list (intern "this" :openldk) (intern (slot-value class 'name) :openldk))
-                                       (loop for i from 1 upto parameter-count
-                                             collect (intern (format nil "arg~A" i) :openldk)))))
-                       (when *debug-trace*
-                         (list (list 'format 't "~&; trace: entering ~A ~A.~A~%" (if (not (static-p method)) (intern "this" :openldk) "") class-name (fn-name *context*))))
-                       (let ((i 0)
-                             (pc -1))
-                         (list (append (list 'let (if (static-p method)
-                                                      (append (remove-duplicates
-                                                               (loop for var in (stack-variables *context*)
-                                                                     collect (list (intern (format nil "s{~{~A~^,~}}" (sort (var-numbers var) #'<)) :openldk)))
-                                                               :test #'equal)
-                                                              (loop for ph in parameter-hints
-                                                                    collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" (incf pc)) :openldk))
-                                                                    do (if (eq ph t) (incf i) (incf i 2)))
-                                                              (loop for pc from (- parameter-count 2) upto max-locals
-                                                                    collect (list (intern (format nil "local-~A" (1- (incf i))) :openldk))))
-                                                      (append (remove-duplicates
-                                                               (loop for var in (stack-variables *context*)
-                                                                     collect (list (intern (format nil "s{~{~A~^,~}}" (sort (var-numbers var) #'<)) :openldk)))
-                                                               :test #'equal)
-                                                              (append (list (list (intern "local-0" :openldk) (intern "this" :openldk)))
-                                                                      (loop for ph in parameter-hints
-                                                                            collect (list (intern (format nil "local-~A" (1+ i)) :openldk) (intern (format nil "arg~A" (1+ (incf pc))) :openldk))
-                                                                            do (if (eq ph t) (incf i) (incf i 2)))
-                                                                      (loop for x from parameter-count upto (1+ max-locals)
-                                                                            collect (list (intern (format nil "local-~A" (incf i)) :openldk)))))))
-                                       traced-lisp-code)))))))
-      (%eval definition-code))))
+         (method (aref (slot-value class 'methods) (1- method-index))))
+    (when (gethash "Code" (slot-value method 'attributes)) ; otherwise it is abstract
+      (let* ((parameter-hints (gen-parameter-hints (descriptor method)))
+             (exception-table (slot-value (gethash "Code" (slot-value method 'attributes)) 'exceptions))
+             (code (slot-value (gethash "Code" (slot-value method 'attributes)) 'code))
+             (max-locals (slot-value (gethash "Code" (slot-value method 'attributes)) 'max-locals))
+             (length (length code))
+             (*context* (make-instance '<context>
+                                       :class class
+                                       :classes *classes*
+                                       :exception-table exception-table
+                                       :bytecode code
+                                       :stack-state-table (make-hash-table)
+                                       :pc 0
+                                       :is-clinit-p (string= "<clinit>" (slot-value method 'name)))))
+        (setf (svcount *context*) 0)
+        (when *debug-codegen*
+          (format t "; compiling ~A.~A~%" class-name (lispize-method-name (format nil "~A~A" (name method) (descriptor method))))
+          (force-output))
+        (if (static-p method)
+            (setf (fn-name *context*) (format nil "~A.~A" (slot-value class 'name) (lispize-method-name (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor)))))
+            (setf (fn-name *context*) (format nil "~A" (lispize-method-name (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor))))))
+        (let* ((exception-handler-table (make-exception-handler-table *context*))
+               (ir-code-0
+                 (setf (ir-code *context*)
+                       (let ((code (apply #'append
+                                          (loop
+                                            while (and (< (pc *context*) length))
+                                            for no-record-stack-state? = (find (aref +opcodes+ (aref code (pc *context*))) '(:GOTO))
+                                            for result = (progn
+                                                           (let ((stk (gethash (pc *context*) (stack-state-table *context*))))
+                                                             (when stk
+                                                               (setf (stack *context*) (car stk))))
+                                                           (when *debug-bytecode*
+                                                             (format t "~&; c[~A] ~A ~@<~A~:@>" (pc *context*) (aref +opcodes+ (aref code (pc *context*))) (stack *context*)))
+                                        ; (dump-hashtable (stack-state-table *context*))
+                                                           (let* ((pc-start (pc *context*)))
+                                                             (if (gethash pc-start exception-handler-table)
+                                                                 (let ((var (make-stack-variable *context* pc-start :REFERENCE)))
+                                                                   (push var (stack *context*))
+                                                                   (cons (make-instance 'ir-assign
+                                                                                        :address pc-start
+                                                                                        :lvalue var
+                                                                                        :rvalue (make-instance 'ir-condition-exception))
+                                                                         (mapcar (lambda (insn)
+                                                                                   (with-slots (address) insn
+                                                                                     (setf address (+ address 0.1)))
+                                                                                   insn)
+                                                                                 (funcall
+                                                                                  (aref +opcodes+ (aref code (pc *context*)))
+                                                                                  *context* code))))
+                                                                 (funcall
+                                                                  (aref +opcodes+ (aref code (pc *context*)))
+                                                                  *context* code))))
+                                            unless no-record-stack-state?
+                                              do (%record-stack-state (pc *context*) *context*)
+                                            unless (null result)
+                                              collect result))))
+                         ;; Do stack analysis to merge stack variables
+                         (maphash (lambda (k v)
+                                    (when (> (length v) 1)
+                                      (reduce #'merge-stacks v)))
+                                  (stack-state-table *context*))
+                         code)))
+               ;; (sdfdfd (print ir-code-0))
+               (blocks (build-basic-blocks ir-code-0))
+               (lisp-code
+                 (list (list 'block nil
+                             (cons 'tagbody (loop for bloc in blocks append (codegen-block bloc))))))
+               (traced-lisp-code (if *debug-trace* (list (list 'unwind-protect (car lisp-code) (list 'format 't "~&; trace: leaving  ~A.~A~%" class-name (fn-name *context*)))) lisp-code))
+               (definition-code
+                 (let ((parameter-count (count-parameters (slot-value method 'descriptor))))
+                   (append (if (static-p method)
+                               (list 'defun
+                                     (intern (fn-name *context*) :openldk)
+                                     (loop for i from 1 upto parameter-count
+                                           collect (intern (format nil "arg~A" (1- i)) :openldk)))
+                               (list 'defmethod
+                                     (intern (fn-name *context*) :openldk)
+                                     (cons (list (intern "this" :openldk) (intern (slot-value class 'name) :openldk))
+                                           (loop for i from 1 upto parameter-count
+                                                 collect (intern (format nil "arg~A" i) :openldk)))))
+                           (when *debug-trace*
+                             (list (list 'format 't "~&; trace: entering ~A ~A.~A~%" (if (not (static-p method)) (intern "this" :openldk) "") class-name (fn-name *context*))))
+                           (let ((i 0)
+                                 (pc -1))
+                             (list (format nil "bridge=~A" (bridge-p method))
+                                   (append (list 'let (if (static-p method)
+                                                          (append (remove-duplicates
+                                                                   (loop for var in (stack-variables *context*)
+                                                                         collect (list (intern (format nil "s{~{~A~^,~}}" (sort (var-numbers var) #'<)) :openldk)))
+                                                                   :test #'equal)
+                                                                  (loop for ph in parameter-hints
+                                                                        collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" (incf pc)) :openldk))
+                                                                        do (if (eq ph t) (incf i) (incf i 2)))
+                                                                  (loop for pc from (- parameter-count 2) upto max-locals
+                                                                        collect (list (intern (format nil "local-~A" (1- (incf i))) :openldk))))
+                                                          (append (remove-duplicates
+                                                                   (loop for var in (stack-variables *context*)
+                                                                         collect (list (intern (format nil "s{~{~A~^,~}}" (sort (var-numbers var) #'<)) :openldk)))
+                                                                   :test #'equal)
+                                                                  (append (list (list (intern "local-0" :openldk) (intern "this" :openldk)))
+                                                                          (loop for ph in parameter-hints
+                                                                                collect (list (intern (format nil "local-~A" (1+ i)) :openldk) (intern (format nil "arg~A" (1+ (incf pc))) :openldk))
+                                                                                do (if (eq ph t) (incf i) (incf i 2)))
+                                                                          (loop for x from parameter-count upto (1+ max-locals)
+                                                                                collect (list (intern (format nil "local-~A" (incf i)) :openldk)))))))
+                                           traced-lisp-code)))))))
+          (%eval definition-code))))))
 
 (defun %clinit (class)
   (let ((class (gethash (name class) *classes*)))
@@ -255,31 +262,35 @@
                            (list
                             'make-instance (list 'quote (intern name :openldk)))))))
         (methods-code
-          (let ((method-index 0))
+          (let ((method-index 0)
+                (done-method-table (make-hash-table :test #'equal)))
             (with-slots (name super methods) class
               (remove nil (map 'list
                                (lambda (m)
-                                 (if (or (bridge-p m) (native-p m))
+                                 (if (or (native-p m) (null (gethash "Code" (attributes m)))
+                                         (and (bridge-p m) (gethash (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) done-method-table)))
                                      (progn
                                        (incf method-index)
                                        nil)
-                                     (if (static-p m)
-                                         (list 'defun (intern (format nil "~A.~A" (slot-value class 'name) (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor)))) :openldk)
-                                               (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
-                                                     collect (intern (format nil "arg~A" i) :openldk))
-                                               (list '%compile-method (slot-value class 'name) (incf method-index))
-                                               (cons (intern (format nil "~A.~A" (slot-value class 'name) (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor)))) :openldk)
-                                                     (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
-                                                           collect (intern (format nil "arg~A" i) :openldk))))
-                                         (list 'defmethod (intern (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) :openldk)
-                                               (cons (list (intern "this" :openldk) (intern (slot-value (slot-value m 'class) 'name) :openldk))
-                                                     (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
-                                                           collect (intern (format nil "arg~A" i) :openldk)))
-                                               (list '%compile-method (slot-value class 'name) (incf method-index))
-                                               (cons (intern (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) :openldk)
-                                                     (cons (intern "this" :openldk)
-                                                           (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
-                                                                 collect (intern (format nil "arg~A" i) :openldk))))))))
+                                     (progn
+                                       (setf (gethash (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) done-method-table) t)
+                                       (if (static-p m)
+                                           (list 'defun (intern (format nil "~A.~A" (slot-value class 'name) (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor)))) :openldk)
+                                                 (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
+                                                       collect (intern (format nil "arg~A" i) :openldk))
+                                                 (list '%compile-method (slot-value class 'name) (incf method-index))
+                                                 (cons (intern (format nil "~A.~A" (slot-value class 'name) (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor)))) :openldk)
+                                                       (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
+                                                             collect (intern (format nil "arg~A" i) :openldk))))
+                                           (list 'defmethod (intern (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) :openldk)
+                                                 (cons (list (intern "this" :openldk) (intern (slot-value (slot-value m 'class) 'name) :openldk))
+                                                       (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
+                                                             collect (intern (format nil "arg~A" i) :openldk)))
+                                                 (list '%compile-method (slot-value class 'name) (incf method-index))
+                                                 (cons (intern (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) :openldk)
+                                                       (cons (intern "this" :openldk)
+                                                             (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
+                                                                   collect (intern (format nil "arg~A" i) :openldk)))))))))
                                methods))))))
     (append defclass-code methods-code)))
 

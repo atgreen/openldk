@@ -74,9 +74,7 @@
   (declare (ignore context))
   (make-instance '<expression>
                  :insn insn
-                 :code (let ((s (make-instance '|java/lang/String|)))
-                         (setf (slot-value s '|value|) (slot-value insn 'value))
-                         s)
+                 :code (ijstring (slot-value insn 'value))
                  :expression-type :REFERENCE))
 
 (defmethod codegen ((insn ir-aaload) context)

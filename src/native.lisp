@@ -306,7 +306,6 @@
 
   ;; Get the ldk-class for THIS
   (let ((ldk-class (gethash (slot-value (slot-value this '|name|) '|value|) *classes*)))
-    (format t "GDF0: ~A ~A~%" (slot-value (slot-value this '|name|) '|value|) ldk-class)
     (labels ((get-fields (ldk-class)
                (when ldk-class
                  (append (loop for field across (fields ldk-class)
@@ -334,12 +333,12 @@ boolean compareAndSwapObject(Object obj, long fieldId, Object expectedValue, Obj
 
 (defmethod |compareAndSwapObject(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)| ((unsafe |sun/misc/Unsafe|) obj field-id expected-value new-value)
   ;; FIXME
+  ; (format t "~&~A.compareAndSwapObject(~A, ~A, ~A, ~A)~%" unsafe obj field-id expected-value new-value)
   (cond
     ((vectorp obj)
      (if (equal (aref obj field-id) expected-value)
          (progn
            (setf (aref obj field-id) new-value)
-           (print "ASWAPPED!")
            1)
          0))
     (t
@@ -348,7 +347,6 @@ boolean compareAndSwapObject(Object obj, long fieldId, Object expectedValue, Obj
        (if (equal (slot-value obj key) expected-value)
            (progn
              (setf (slot-value obj key) new-value)
-             (print "SWAPPED!")
              1)
            0)))))
 
@@ -359,7 +357,6 @@ boolean compareAndSwapObject(Object obj, long fieldId, Object expectedValue, Obj
     (if (equal (slot-value obj key) expected-value)
         (progn
           (setf (slot-value obj key) new-value)
-          (print "SWAPPED!")
           1)
         0)))
 
@@ -370,7 +367,12 @@ boolean compareAndSwapObject(Object obj, long fieldId, Object expectedValue, Obj
   ;; FIXME
   (cond
     ((vectorp obj)
+     ; (format t "~A.getObjectVolatile(~A, ~A) = ~A~%" unsafe obj l (aref obj l))
+     (aref obj l))
+#|
+     (format t "~A.getObjectVolatile(~A, ~A) = ~A~%" unsafe obj l (aref obj (ash l -2)))
      (aref obj (ash l -2)))
+|#
     (t (error "Unrecognized object type in getObjectVolatile: " obj))))
 
 (defun |java/security/AccessController.getStackAccessControlContext()| ()
