@@ -421,6 +421,13 @@
                  :code (code (codegen (value insn) context))
                  :expression-type :LONG))
 
+(defmethod codegen ((insn ir-i2c) context)
+  ;; FIXME - char width, also maybe use :INTEGER?
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'logand (code (codegen (value insn) context)) #xFFFF)
+                 :expression-type :CHAR))
+
 (defmethod codegen ((insn ir-l2i) context)
   (make-instance '<expression>
                  :insn insn

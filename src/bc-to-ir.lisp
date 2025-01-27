@@ -337,6 +337,7 @@
  (:F2D 'ir-f2d :DOUBLE)
  (:F2I 'ir-f2i :INTEGER)
  (:I2F 'ir-i2f :FLOAT)
+ (:I2C 'ir-i2c :CHAR)
  (:I2L 'ir-i2l :LONG)
  (:L2F 'ir-l2f :FLOAT)
  (:L2I 'ir-l2i :INTEGER))
@@ -607,13 +608,6 @@
     (let ((pc-start pc))
       (incf pc)
       (list (make-instance 'ir-ineg :address pc-start)))))
-
-(define-bytecode-transpiler-TODO :I2C (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (list (make-instance 'ir-i2c :address pc-start)))))
 
 (defclass/std <stack-variable> (ir-node)
   ((var-numbers)
