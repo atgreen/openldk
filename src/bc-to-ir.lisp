@@ -1362,6 +1362,7 @@
                                        jump-offsets)))
 
             (let ((code (list (make-instance 'ir-tableswitch
+                                             :index (pop (stack context))
                                              :address pc-start
                                              :default-offset (+ pc-start default-offset)
                                              :low low
@@ -1371,6 +1372,9 @@
               (dolist (offset jump-offsets)
                 (push offset (aref (next-insn-list context) pc-start)))
               (push (+ pc-start default-offset) (aref (next-insn-list context) pc-start))
+              ;; FIXME: why is this required??????????
+              (incf pc)
+              ; (format t "~&TABLESWITCH TARGETS = ~A~%" (aref (next-insn-list context) pc-start))
 
               ;; Record stack state for each jump destination
               (dolist (offset (cons (+ pc-start default-offset) jump-offsets))

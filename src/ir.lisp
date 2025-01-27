@@ -432,7 +432,8 @@
   ())
 
 (defclass/std ir-tableswitch (ir-node)
-  ((default-offset)
+  ((index)
+   (default-offset)
    (low)
    (high)
    (jump-offsets)))

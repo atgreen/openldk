@@ -639,8 +639,9 @@
           (default-target (list 'go (intern (format nil "branch-target-~A" default-offset)))))
       (make-instance '<expression>
                      :insn insn
-                     :code (list 'case (pop (stack context))
-                                 (append cases `(:default ,default-target)))))))
+                     :code (append (list 'case (code (codegen (index insn) context)))
+                                   cases
+                                   (list `(:otherwise ,default-target)))))))
 
 (defmethod codegen ((insn ir-call-virtual-method) context)
   (with-slots (method-name args) insn
