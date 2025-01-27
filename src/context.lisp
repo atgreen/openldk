@@ -46,6 +46,9 @@
    (insn-size
     :doc "An array of numbers indicating the size of corresponding
  instruction in BYTECODE")
+   (next-insn-list
+    :doc "An array of lists of possible next instruction offsets for
+ the corresponding instruction in BYTECODE.")
    (exception-table)
 	 (block-address-table
 		:doc "A hashtable mapping addresses to blocks")

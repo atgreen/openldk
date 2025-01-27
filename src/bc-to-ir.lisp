@@ -66,6 +66,7 @@
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (list (make-instance ir-class
                            :address pc-start
                            :value (pop (stack context))
@@ -90,6 +91,7 @@
     (let* ((pc-start pc)
            (var (make-stack-variable context pc-start :REFERENCE)))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (push var (stack context))
       (list (make-instance 'ir-assign
                            :address pc-start
@@ -102,6 +104,7 @@
     (let* ((pc-start pc)
            (var (make-stack-variable context pc-start :REFERENCE)))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (push var (stack context))
       (list (make-instance 'ir-assign
                            :address pc-start
@@ -131,6 +134,7 @@
     (let* ((pc-start pc)
            (var (make-stack-variable context pc-start :INTEGER)))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (let ((code (list (make-instance 'ir-assign
                                        :address pc-start
                                        :lvalue var
@@ -145,6 +149,7 @@
     (let ((pc-start pc)
           (index (aref code (incf pc))))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (list (make-instance 'ir-assign
                            :address pc-start
                            :lvalue (make-instance 'ir-local-variable
@@ -157,6 +162,7 @@
   (with-slots (pc) context
     (let* ((pc-start pc))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (list (make-instance 'ir-assign
                            :address pc-start
                            :lvalue (make-instance 'ir-local-variable
@@ -201,6 +207,7 @@
         (let* ((index (aref code (incf pc)))
                (const (%unsigned-to-signed-byte (aref code (incf pc)))))
           (incf pc)
+          (push pc (aref (next-insn-list context) pc-start))
           (list (make-instance 'ir-iinc
                                :address pc-start
                                :index index
@@ -212,6 +219,7 @@
           (index (aref code (incf pc)))
           (var (pop (stack context))))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (list (make-instance 'ir-assign
                            :address pc-start
                            :lvalue (make-instance 'ir-local-variable
@@ -237,6 +245,7 @@
     (let* ((pc-start pc)
            (var (pop (stack context))))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (list (make-instance 'ir-assign
                            :address pc-start
                            :lvalue (make-instance 'ir-local-variable
@@ -245,19 +254,19 @@
                            :rvalue var)))))
 
 (define-bytecode-transpiler :ISTORE_0 (context code)
-  (declare-IGNORE (ignore code))
+  (declare (ignore code))
   (%transpile-istore-x context 0))
 
 (define-bytecode-transpiler :ISTORE_1 (context code)
-  (declare-IGNORE (ignore code))
+  (declare (ignore code))
   (%transpile-istore-x context 1))
 
 (define-bytecode-transpiler :ISTORE_2 (context code)
-  (declare-IGNORE (ignore code))
+  (declare (ignore code))
   (%transpile-istore-x context 2))
 
 (define-bytecode-transpiler :ISTORE_3 (context code)
-  (declare-IGNORE (ignore code))
+  (declare (ignore code))
   (%transpile-istore-x context 3))
 
 (define-bytecode-transpiler :CALOAD (context code)
@@ -266,6 +275,7 @@
     (let* ((pc-start pc)
            (var (make-stack-variable context pc-start :CHAR)))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (let ((code
              (list (make-instance 'ir-assign
                                   :address pc-start
@@ -283,6 +293,7 @@
     (let* ((pc-start pc)
            (var (make-stack-variable context pc-start :REFERENCE)))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (let ((code
              (list (make-instance 'ir-assign
                                   :address pc-start
@@ -309,6 +320,7 @@
                          (aref code (incf pc))))
                (class (aref constant-pool index)))
           (incf pc)
+          (push pc (aref (next-insn-list context) pc-start))
           (list (make-instance 'ir-checkcast
                                :address pc-start
                                :class (emit class constant-pool)
@@ -320,6 +332,7 @@
            (var (make-stack-variable context pc-start op-type))
            (value (pop (stack context))))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (push var (stack context))
       (list (make-instance 'ir-assign
                            :address pc-start
@@ -356,6 +369,7 @@
            (value2 (pop (stack context)))
            (value1 (pop (stack context))))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (push var (stack context))
       (list (make-instance 'ir-assign
                            :address pc-start
@@ -409,6 +423,7 @@
            (var (make-stack-variable context pc-start :INTEGER))
            (byte (aref code (incf pc))))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (push var (stack context))
       (list (make-instance 'ir-assign
                            :address pc-start
@@ -420,6 +435,7 @@
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (list (make-instance 'ir-div
                            :address pc-start)))))
 
@@ -428,6 +444,7 @@
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (list (make-instance 'ir-push
                            :address pc-start
                            :value (make-instance 'ir-local-variable
@@ -439,6 +456,7 @@
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (list (make-instance 'ir-store
                            :address pc-start
                            :target (make-instance 'ir-local-variable
@@ -450,6 +468,7 @@
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (list (make-instance 'ir-dsub
                            :address pc-start)))))
 
@@ -458,6 +477,7 @@
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (let* ((value (pop (stack context))))
         (push value (stack context))
         (push value (stack context)))
@@ -470,6 +490,7 @@
       (with-slots (pc) context
         (let ((pc-start pc))
           (incf pc)
+          (push pc (aref (next-insn-list context) pc-start))
           (let* ((value1 (pop (stack context)))
                  (value2 (pop (stack context))))
             (push value2 (stack context))
@@ -483,6 +504,7 @@
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (let* ((value1 (pop (stack context)))
              (value2 (pop (stack context))))
         (push value1 (stack context))
@@ -500,6 +522,7 @@
           (multiple-value-bind (fieldname class)
               (emit (aref constant-pool index) constant-pool)
             (incf pc)
+            (push pc (aref (next-insn-list context) pc-start))
             (let* ((var (make-stack-variable context pc-start (get-stack-type-from-descriptor (emit-type (aref constant-pool index) constant-pool))))
                    (code (list (make-instance 'ir-assign
                                               :address (if (and is-clinit-p (equal (ir-class-class class) context-class)) pc-start (+ pc-start 0.1))
@@ -528,6 +551,7 @@
         (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
                                               (aref code (incf pc))))))
           (incf pc)
+          (push (+ pc-start offset) (aref (next-insn-list context) pc-start))
           (let ((code (list (make-instance 'ir-goto
                                            :address pc-start
                                            :offset (+ pc-start offset)))))
@@ -541,6 +565,7 @@
     (let* ((pc-start pc)
            (var (make-stack-variable context pc-start :INTEGER)))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (let ((code (list (make-instance 'ir-assign
                                        :address pc-start
                                        :lvalue var
@@ -557,6 +582,7 @@
     (let* ((pc-start pc)
            (var (make-stack-variable context pc-start :INTEGER)))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (let ((code (list (make-instance 'ir-assign
                                        :address pc-start
                                        :lvalue var
@@ -572,6 +598,7 @@
     (let* ((pc-start pc)
            (var (make-stack-variable context pc-start :FLOAT)))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (push var (stack context))
       (list (make-instance 'ir-assign
                            :address pc-start
@@ -593,6 +620,7 @@
     (let* ((pc-start pc)
            (var (make-stack-variable context pc-start :DOUBLE)))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (push var (stack context))
       (list (make-instance 'ir-assign
                            :address pc-start
@@ -614,6 +642,7 @@
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (list (make-instance 'ir-ineg :address pc-start)))))
 
 (defclass/std <stack-variable> (ir-node)
@@ -648,6 +677,7 @@
     (let* ((pc-start pc)
            (var (make-stack-variable context pc-start :INTEGER)))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (push var (stack context))
       (list (make-instance 'ir-assign
                            :address pc-start
@@ -693,6 +723,8 @@
                (value2 (pop (stack context)))
                (value1 (pop (stack context))))
           (incf pc)
+          (push pc (aref (next-insn-list context) pc-start))
+          (push (+ pc-start offset) (aref (next-insn-list context) pc-start))
           (let ((code (list (make-instance ir-class
                                            :address pc-start
                                            :value1 value1
@@ -741,6 +773,8 @@
                                              (+ (* (aref code (incf pc)) 256)
                                                 (aref code (incf pc))))))
                               (incf pc)
+                              (push pc (aref (next-insn-list context) pc-start))
+                              (push (+ pc-start offset) (aref (next-insn-list context) pc-start))
                               (let ((code (list (make-instance ',ir-class
                                                                :address pc-start
                                                                :offset (+ pc-start offset)
@@ -765,6 +799,7 @@
            (index (aref code (incf pc)))
            (var (make-stack-variable context pc-start jtype)))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (push var (stack context))
       (list (make-instance 'ir-assign
                            :address pc-start
@@ -794,6 +829,7 @@
     (let* ((pc-start pc)
            (var (make-stack-variable context pc-start :INTEGER)))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (push var (stack context))
       (list (make-instance 'ir-assign
                            :address pc-start
@@ -824,6 +860,7 @@
     (let* ((pc-start pc)
            (var (make-stack-variable context pc-start :LONG)))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (push var (stack context))
       (list (make-instance 'ir-assign
                            :address pc-start
@@ -854,6 +891,7 @@
     (let* ((pc-start pc)
            (var (make-stack-variable context pc-start :FLOAT)))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (push var (stack context))
       (list (make-instance 'ir-assign
                            :address pc-start
@@ -888,6 +926,7 @@
                (class (aref constant-pool index))
                (var (make-stack-variable context pc-start :INTEGER)))
           (incf pc)
+          (push pc (aref (next-insn-list context) pc-start))
           (let ((code (list (make-instance 'ir-assign
                                            :address pc-start
                                            :lvalue var
@@ -909,6 +948,7 @@
           (when is-interface-call?
             (incf pc)
             (incf pc))
+          (push pc (aref (next-insn-list context) pc-start))
           (let* ((descriptor
                    (slot-value (aref constant-pool
                                      (slot-value
@@ -947,6 +987,7 @@
                          (aref code (incf pc))))
                (method-reference (aref constant-pool index)))
           (incf pc)
+          (push pc (aref (next-insn-list context) pc-start))
           (let* ((class
                    (slot-value (emit (aref constant-pool
                                            (slot-value method-reference
@@ -987,6 +1028,7 @@
                          (aref code (incf pc))))
                (method-reference (aref constant-pool index)))
           (incf pc)
+          (push pc (aref (next-insn-list context) pc-start))
           (let* ((descriptor
                    (slot-value (aref constant-pool
                                      (slot-value
@@ -1044,6 +1086,7 @@
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (list (make-instance 'ir-lor
                            :address pc-start)))))
 
@@ -1063,6 +1106,7 @@
         (let* ((index (aref code (incf pc)))
                (var (make-stack-variable context pc-start (get-stack-jtype (aref constant-pool index)))))
           (incf pc)
+          (push pc (aref (next-insn-list context) pc-start))
           (push var (stack context))
           (list (make-instance 'ir-assign
                                :address pc-start
@@ -1077,6 +1121,7 @@
                          (aref code (incf pc))))
                (var (make-stack-variable context pc-start (get-stack-jtype (aref constant-pool index)))))
           (incf pc)
+          (push pc (aref (next-insn-list context) pc-start))
           (let ((code (list (make-instance 'ir-assign
                                            :address pc-start
                                            :lvalue var
@@ -1092,6 +1137,7 @@
     (let* ((pc-start pc)
            (var (make-stack-variable context pc-start :LONG)))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (push var (stack context))
       (list (make-instance 'ir-assign
                            :address pc-start
@@ -1113,6 +1159,7 @@
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (list (make-instance 'ir-lushr
                            :address pc-start)))))
 
@@ -1121,6 +1168,7 @@
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (list (make-instance 'ir-monitorenter :address pc-start :objref (pop (stack context)))))))
 
 (define-bytecode-transpiler :MONITOREXIT (context code)
@@ -1128,6 +1176,7 @@
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (list (make-instance 'ir-monitorexit :address pc-start :objref (pop (stack context)))))))
 
 (define-bytecode-transpiler :NEW (context code)
@@ -1139,6 +1188,7 @@
                (class (emit (aref constant-pool index) constant-pool))
                (var (make-stack-variable context pc-start :REFERENCE)))
           (incf pc)
+          (push pc (aref (next-insn-list context) pc-start))
           (push var (stack context))
           (list (make-instance 'ir-assign
                                :address pc-start
@@ -1149,6 +1199,7 @@
   (with-slots (pc class) context
     (let ((pc-start pc))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (list (make-instance 'ir-nop :address pc-start)))))
 
 (define-bytecode-transpiler :ANEWARRAY (context code)
@@ -1161,6 +1212,7 @@
                (var (make-stack-variable context pc-start :ARRAY))
                (size (pop (stack context))))
           (incf pc)
+          (push pc (aref (next-insn-list context) pc-start))
           (push var (stack context))
           (list (make-instance 'ir-assign
                                :address pc-start
@@ -1174,6 +1226,7 @@
            (size (pop (stack context))))
       (let ((atype (aref code (incf pc))))
         (incf pc)
+        (push pc (aref (next-insn-list context) pc-start))
         ;; FIXME: just throw away the type?
         atype
         (push var (stack context))
@@ -1186,6 +1239,7 @@
   (declare (ignore code))
   (with-slots (pc) context
     (incf pc)
+    (push pc (aref (next-insn-list context) (1- pc)))
     (pop (stack context))
     (list (make-instance 'ir-nop :address (1- pc)))))
 
@@ -1199,6 +1253,7 @@
           (multiple-value-bind (fieldname fieldclass)
               (emit (aref constant-pool index) constant-pool)
             (incf pc)
+            (push pc (aref (next-insn-list context) pc-start))
             (let ((code (list (make-instance 'ir-assign
                                              :address pc-start
                                              :lvalue var
@@ -1218,6 +1273,7 @@
           (multiple-value-bind (fieldname)
               (emit (aref constant-pool index) constant-pool)
             (incf pc)
+            (push pc (aref (next-insn-list context) pc-start))
             (list (make-instance 'ir-assign
                                  :address pc-start
                                  :rvalue (pop (stack context))
@@ -1236,6 +1292,7 @@
           (multiple-value-bind (fieldname class)
               (emit (aref constant-pool index) constant-pool)
             (incf pc)
+            (push pc (aref (next-insn-list context) pc-start))
             (let ((code (list (make-instance 'ir-assign
                                              :address (if (and is-clinit-p (equal (ir-class-class class) context-class)) pc-start (+ pc-start 0.1))
                                              :rvalue (pop (stack context))
@@ -1265,6 +1322,7 @@
            (short (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
                                          (* (aref code (incf pc)))))))
       (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
       (push var (stack context))
       (list (make-instance 'ir-assign
                            :address pc-start
@@ -1299,20 +1357,27 @@
                                                                   (* (aref code (incf pc)) 256)
                                                                   (aref code (incf pc)))))))
           ;; Generate intermediate representation
-          (let ((code (list (make-instance 'ir-tableswitch
-                                           :address pc-start
-                                           :default-offset (+ pc-start default-offset)
-                                           :low low
-                                           :high high
-                                           :jump-offsets (mapcar (lambda (offset)
-                                                                   (+ pc-start offset))
-                                                                 jump-offsets)))))
-            ;; Record stack state for each jump destination
-            (dolist (offset (cons default-offset jump-offsets))
-              (%record-stack-state (+ pc-start offset) context))
-            ;; Reset the stack for the next instruction
-            (setf (stack context) (list (make-instance '<stack-bottom-marker>)))
-            code))))))
+          (let ((jump-offsets (mapcar (lambda (offset)
+                                         (+ pc-start offset))
+                                       jump-offsets)))
+
+            (let ((code (list (make-instance 'ir-tableswitch
+                                             :address pc-start
+                                             :default-offset (+ pc-start default-offset)
+                                             :low low
+                                             :high high
+                                             :jump-offsets jump-offsets))))
+
+              (dolist (offset jump-offsets)
+                (push offset (aref (next-insn-list context) pc-start)))
+              (push (+ pc-start default-offset) (aref (next-insn-list context) pc-start))
+
+              ;; Record stack state for each jump destination
+              (dolist (offset (cons (+ pc-start default-offset) jump-offsets))
+                (%record-stack-state offset context))
+              ;; Reset the stack for the next instruction
+              (setf (stack context) (list (make-instance '<stack-bottom-marker>)))
+              code)))))))
 
 (defun merge-stack-variables (stack-var1 stack-var2)
   "Merge the var-numbers of two stack-variable objects."

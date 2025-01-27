@@ -102,17 +102,6 @@
   (let ((throwables (gethash opcode *instruction-exceptions*)))
     (find throwable throwables :test #'string=)))
 
-(defun get-short-branch-targets (pc code)
-  "The opcode at PC in CODE is a branch instruction.  Return a list of
-addresses for possible next instructions.  The length of the list will
-be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
-  (let ((start_pc pc)
-        (offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
-                                       (aref code (incf pc))))))
-    (if (gethash (aref +opcodes+ (aref code start_pc)) +bytecode-conditional-branch-table+)
-        (list (+ start_pc offset) (1+ pc))
-        (list (+ start_pc offset)))))
-
 (defun merge-exception-entries (entries)
   "Merge exception table entries in an array where end-pc of one is start-pc-1 of another,
    and handler-pc and catch-type are the same. Return a new array with merged entries."
@@ -167,8 +156,10 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
       (loop
         while (< pc (length code))
         do (let* ((opcode (aref +opcodes+ (aref code pc)))
-                  (targets (if (gethash opcode +bytecode-short-branch-table+)
-                               (get-short-branch-targets pc code))))
+                  (targets (let ((next-insn-list (aref (next-insn-list *context*) pc)))
+                             (if (or (eq opcode :GOTO) (> (length next-insn-list) 1))
+                                 next-insn-list
+                                 nil))))
              (incf pc (aref (insn-size *context*) pc))
              (dolist (target targets)
                (setf (gethash target block-starts) t)))))
@@ -197,10 +188,7 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
       (dolist (block blocks)
         ;; Make connections between basic blocks.
         (let* ((opcode (aref +opcodes+ (aref (bytecode *context*) (floor (address (car (code block)))))))
-               (targets (if (gethash opcode +bytecode-short-branch-table+)
-                            (get-short-branch-targets (floor (address (car (code block)))) (bytecode *context*))
-                            (unless (find opcode '(:ATHROW :IRETURN :LRETURN :FRETURN :DRETURN :ARETURN :RETURN))
-                              (list (+ (address (car (code block))) (aref (insn-size *context*) (floor (address (car (code block)))))))))))
+               (targets (aref (next-insn-list *context*) (floor (address (car (code block)))))))
           (dolist (target targets)
             (let ((target-block (gethash (floor target) block-by-address)))
               (when target-block

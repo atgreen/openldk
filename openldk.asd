@@ -53,7 +53,6 @@
 							 (:file "src/opcodes")
 							 (:file "src/ir")
 							 (:file "src/bc-to-ir")
-							 (:file "src/bytecode-branches")
 							 (:file "src/classpath")
 							 (:file "src/basic-block")
 							 (:file "src/codegen")

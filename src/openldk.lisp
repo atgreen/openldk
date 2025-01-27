@@ -98,6 +98,7 @@
                                        :exception-table exception-table
                                        :bytecode code
                                        :insn-size (make-array (length code) :element-type 'fixnum :initial-element -1)
+                                       :next-insn-list (make-array (length code) :initial-element nil)
                                        :stack-state-table (make-hash-table)
                                        :pc 0
                                        :is-clinit-p (string= "<clinit>" (slot-value method 'name)))))
