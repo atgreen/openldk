@@ -45,8 +45,15 @@
      (error "TODO")))
 
 (defmacro define-bytecode-transpiler (name args &body body)
-  `(defun ,name ,args
-     ,@body))
+  (let ((start-pc (gensym))
+        (has-declare (eq (car (car body)) 'declare)))
+    `(defun ,name ,args
+       ,(when has-declare (car body))
+       (let* ((,start-pc (pc context))
+              (code (progn ,@(if has-declare (cdr body) body))))
+         ;; Save the size of this instruction in the INSN-SIZE array.
+         (setf (aref (insn-size context) ,start-pc) (- (pc context) ,start-pc))
+         code))))
 
 (defmacro declare-IGNORE (x)
   (declare (ignore x)))
@@ -1263,6 +1270,49 @@
                            :address pc-start
                            :lvalue var
                            :rvalue (make-instance 'ir-int-literal :address pc-start :value short))))))
+
+(define-bytecode-transpiler :TABLESWITCH (context code)
+  (with-slots (pc class) context
+    (let ((pc-start pc))
+      (with-slots (constant-pool) class
+        ;; Align PC to the next 4-byte boundary
+        (let* ((padding (mod pc 4)))
+          (incf pc (1- (- 4 padding))))
+
+        ;; Read default offset, low value, and high value
+        (let* ((default-offset (unsigned-to-signed (+ (* (aref code (incf pc)) 16777216)
+                                                      (* (aref code (incf pc)) 65536)
+                                                      (* (aref code (incf pc)) 256)
+                                                      (aref code (incf pc)))))
+               (low (unsigned-to-signed (+ (* (aref code (incf pc)) 16777216)
+                                           (* (aref code (incf pc)) 65536)
+                                           (* (aref code (incf pc)) 256)
+                                           (aref code (incf pc)))))
+               (high (unsigned-to-signed (+ (* (aref code (incf pc)) 16777216)
+                                            (* (aref code (incf pc)) 65536)
+                                            (* (aref code (incf pc)) 256)
+                                            (aref code (incf pc)))))
+               (num-cases (1+ (- high low)))
+               (jump-offsets (loop repeat num-cases
+                                   collect (unsigned-to-signed (+ (* (aref code (incf pc)) 16777216)
+                                                                  (* (aref code (incf pc)) 65536)
+                                                                  (* (aref code (incf pc)) 256)
+                                                                  (aref code (incf pc)))))))
+          ;; Generate intermediate representation
+          (let ((code (list (make-instance 'ir-tableswitch
+                                           :address pc-start
+                                           :default-offset (+ pc-start default-offset)
+                                           :low low
+                                           :high high
+                                           :jump-offsets (mapcar (lambda (offset)
+                                                                   (+ pc-start offset))
+                                                                 jump-offsets)))))
+            ;; Record stack state for each jump destination
+            (dolist (offset (cons default-offset jump-offsets))
+              (%record-stack-state (+ pc-start offset) context))
+            ;; Reset the stack for the next instruction
+            (setf (stack context) (list (make-instance '<stack-bottom-marker>)))
+            code))))))
 
 (defun merge-stack-variables (stack-var1 stack-var2)
   "Merge the var-numbers of two stack-variable objects."

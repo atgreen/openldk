@@ -430,3 +430,9 @@
 
 (defclass/std ir-condition-exception (ir-node)
   ())
+
+(defclass/std ir-tableswitch (ir-node)
+  ((default-offset)
+   (low)
+   (high)
+   (jump-offsets)))

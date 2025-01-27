@@ -43,6 +43,9 @@
    (uses-stack-p :std t)
    (classes)
    (bytecode)
+   (insn-size
+    :doc "An array of numbers indicating the size of corresponding
+ instruction in BYTECODE")
    (exception-table)
 	 (block-address-table
 		:doc "A hashtable mapping addresses to blocks")

@@ -630,6 +630,18 @@
                                :code (list 'go (intern (format nil "branch-target-~A" offset))))))
       expr)))
 
+(defmethod codegen ((insn ir-tableswitch) context)
+  (declare (ignore context))
+  (with-slots (default-offset low high jump-offsets) insn
+    (let ((cases (loop for index from low to high
+                       for offset in jump-offsets
+                       collect (list index (list 'go (intern (format nil "branch-target-~A" offset))))))
+          (default-target (list 'go (intern (format nil "branch-target-~A" default-offset)))))
+      (make-instance '<expression>
+                     :insn insn
+                     :code (list 'case (pop (stack context))
+                                 (append cases `(:default ,default-target)))))))
+
 (defmethod codegen ((insn ir-call-virtual-method) context)
   (with-slots (method-name args) insn
     (make-instance '<expression>

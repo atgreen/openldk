@@ -169,7 +169,7 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
         do (let* ((opcode (aref +opcodes+ (aref code pc)))
                   (targets (if (gethash opcode +bytecode-short-branch-table+)
                                (get-short-branch-targets pc code))))
-             (incf pc (gethash opcode +bytecode-lengths-table+))
+             (incf pc (aref (insn-size *context*) pc))
              (dolist (target targets)
                (setf (gethash target block-starts) t)))))
 
