@@ -202,9 +202,6 @@
 (defmacro read-u2 ()
   `(bitio:read-integer bitio :num-bytes 2 :byte-endian :be :unsignedp t))
 
-(defmacro read-u2 ()
-  `(bitio:read-integer bitio :num-bytes 2 :byte-endian :be :unsignedp t))
-
 (defmacro read-u4 ()
   `(bitio:read-integer bitio :num-bytes 4 :byte-endian :be :unsignedp t))
 
@@ -296,6 +293,22 @@ stream."
            (read-buffer attributes-length)))))
     attributes))
 
+(defun modified-utf8-to-utf8 (data)
+  "Convert a vector of bytes from Modified UTF-8 to standard UTF-8."
+  (let ((result (make-array 0 :element-type 'unsigned-byte :adjustable t :fill-pointer 0)))
+    (loop for i from 0 below (length data)
+          do (let ((byte (aref data i)))
+               (if (and (= byte #xC0)
+                        (< (1+ i) (length data))
+                        (= (aref data (1+ i)) #x80))
+                   (progn
+                     ;; Replace the Modified UTF-8 null sequence (0xC0 0x80) with 0x00
+                     (vector-push-extend 0 result)
+                     (incf i)) ;; Skip the next byte (0x80)
+                   ;; Otherwise, copy the byte as is
+                   (vector-push-extend byte result))))
+    result))
+
 (defun read-classfile (fin)
   (let ((class (make-instance '<class>)))
     (with-slots (methods fields super interfaces) class
@@ -318,11 +331,10 @@ stream."
                               (ccase tag
                                 (1
                                  (let* ((size (read-u2))
-                                        (string
-                                          (flexi-streams:octets-to-string (read-buffer size)
-                                                                          :external-format :utf-8)))
+                                        (octets (read-buffer size)))
                                    (make-instance 'ir-string-literal
-                                                  :value string)))
+                                                  :value (flexi-streams:octets-to-string (modified-utf8-to-utf8 octets)
+                                                                                         :external-format :utf-8))))
                                 (3
                                  (make-instance 'constant-int
                                                 :value (read-u4)))
