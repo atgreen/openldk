@@ -200,7 +200,7 @@ be 1 in the case of unconditional branches (GOTO), and 2 otherwise."
                (targets (if (gethash opcode +bytecode-short-branch-table+)
                             (get-short-branch-targets (floor (address (car (code block)))) (bytecode *context*))
                             (unless (find opcode '(:ATHROW :IRETURN :LRETURN :FRETURN :DRETURN :ARETURN :RETURN))
-                              (list (+ (address (car (code block))) (gethash opcode +bytecode-lengths-table+)))))))
+                              (list (+ (address (car (code block))) (aref (insn-size *context*) (floor (address (car (code block)))))))))))
           (dolist (target targets)
             (let ((target-block (gethash (floor target) block-by-address)))
               (when target-block

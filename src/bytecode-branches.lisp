@@ -108,15 +108,3 @@
     (dolist (o '(:IF_ACMPEQ :IF_ACMPNE :IF_ICMPLE :IF_ICMPLT :IF_ICMPGT :IF_ICMPEQ :IF_ICMPGE :IF_ICMPNE :IFEQ :IFGE :IFLE :IFLT :IFGT :IFNE :IFNONNULL :IFNULL))
       (setf (gethash o cbtable) t))
     cbtable))
-
-(defparameter +bytecode-lengths-table+
-  (let ((bltable (make-hash-table)))
-    (dolist (o +bytecode-1-byte+)
-      (setf (gethash o bltable) 1))
-    (dolist (o +bytecode-2-byte+)
-      (setf (gethash o bltable) 2))
-    (dolist (o +bytecode-3-byte+)
-      (setf (gethash o bltable) 3))
-    (dolist (o +bytecode-5-byte+)
-      (setf (gethash o bltable) 5))
-    bltable))
