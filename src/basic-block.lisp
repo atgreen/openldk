@@ -65,11 +65,11 @@ The dominance set is represented as an `fset:set` of <basic-block> objects.")
     :doc "True if this block's code has already been emitted.")
    (try-catch
     :doc "A list of conses of handler type and handler block.")
-	 (finally
-	  :doc "A list of finally blocks for each try-finally starting here.")
-	 (marks)
-	 (try-exit-block
-		:doc "The block at which try/catch handlers exit if this is a try block.")
+   (finally
+    :doc "A list of finally blocks for each try-finally starting here.")
+   (marks)
+   (try-exit-block
+    :doc "The block at which try/catch handlers exit if this is a try block.")
    (exception-end-blocks)
    (exception-table-entries)
    (catch-handlers)))
@@ -270,50 +270,50 @@ The dominance set is represented as an `fset:set` of <basic-block> objects.")
                 do (push end-block (exception-end-blocks start-block))
                 do (push (cons (catch-type ete) handler) (try-catch start-block)))))
 
-			;; Let's eliminate the exit goto for try and handler blocks
-			(labels ((depth-first-mark (mark-block child-block matching-set)
-								 "Return the address of the block that is where all successor blocks merge."
-								 (unless (fset:contains? (marks child-block) mark-block)
-									 (setf (marks child-block) (fset:with (marks child-block) mark-block))
-									 (if (fset:equal? (marks child-block) matching-set)
-											 ;; At this point CHILD-BLOCK is the block where the try-block and the
-											 ;; handlers all merge.  Return the address of that block.
-											 (address child-block)
-											 (progn
-												 (fset:do-set (b (successors child-block))
-													 (let ((address (depth-first-mark mark-block b matching-set)))
-														 (if address (return-from depth-first-mark address))))
-												 (dolist (b (mapcar (lambda (tc) (cdr tc))
-																						(try-catch child-block)))
-													 (let ((address (depth-first-mark mark-block b matching-set)))
-														 (if address (return-from depth-first-mark address))))))))
-							 (remove-goto (block target-address seen-table)
-								 "Remove a trailing GOTO to TARGET-ADDRESS at the end of BLOCK and successors until we reach TARGET-ADDRESS."
-								 (unless (gethash block seen-table)
-									 (setf (gethash block seen-table) t)
-									 (let ((last-insn (car (last (code block)))))
-										 (when (and (eq (type-of last-insn) 'ir-goto)
-																(eq target-address (slot-value last-insn 'offset)))
-											 ;; Replace the goto with a nop
-											 (setf (code block) (append (butlast (code block)) (list (make-instance 'ir-stop-marker :address (address last-insn)))))))
-									 (fset:do-set (b (successors block))
-										 (remove-goto b target-address seen-table))
-									 (dolist (b (mapcar (lambda (tc) (cdr tc)) (try-catch block)))
-										 (remove-goto b target-address seen-table)))))
-				(loop for block in blocks
-							when (try-catch block)
-								;; Colour every successor
-								do (progn (loop for block in blocks
-																do (setf (marks block) (fset:empty-set)))
-													(let ((successors (fset:union (successors block)
-																												(fset:convert 'fset:set (mapcar (lambda (tc) (cdr tc)) (try-catch block))))))
-														(loop for child-block in (fset:convert 'list successors)
-																	for merge-address = (depth-first-mark child-block child-block successors)
-																	when merge-address
-																		do (progn
-																				 (setf (try-exit-block block) (gethash merge-address block-by-address))
-																				 (remove-goto block merge-address (make-hash-table))))))))
-			(setf (block-address-table *context*) block-by-address)
+      ;; Let's eliminate the exit goto for try and handler blocks
+      (labels ((depth-first-mark (mark-block child-block matching-set)
+                 "Return the address of the block that is where all successor blocks merge."
+                 (unless (fset:contains? (marks child-block) mark-block)
+                   (setf (marks child-block) (fset:with (marks child-block) mark-block))
+                   (if (fset:equal? (marks child-block) matching-set)
+                       ;; At this point CHILD-BLOCK is the block where the try-block and the
+                       ;; handlers all merge.  Return the address of that block.
+                       (address child-block)
+                       (progn
+                         (fset:do-set (b (successors child-block))
+                           (let ((address (depth-first-mark mark-block b matching-set)))
+                             (if address (return-from depth-first-mark address))))
+                         (dolist (b (mapcar (lambda (tc) (cdr tc))
+                                            (try-catch child-block)))
+                           (let ((address (depth-first-mark mark-block b matching-set)))
+                             (if address (return-from depth-first-mark address))))))))
+               (remove-goto (block target-address seen-table)
+                 "Remove a trailing GOTO to TARGET-ADDRESS at the end of BLOCK and successors until we reach TARGET-ADDRESS."
+                 (unless (gethash block seen-table)
+                   (setf (gethash block seen-table) t)
+                   (let ((last-insn (car (last (code block)))))
+                     (when (and (eq (type-of last-insn) 'ir-goto)
+                                (eq target-address (slot-value last-insn 'offset)))
+                       ;; Replace the goto with a nop
+                       (setf (code block) (append (butlast (code block)) (list (make-instance 'ir-stop-marker :address (address last-insn)))))))
+                   (fset:do-set (b (successors block))
+                     (remove-goto b target-address seen-table))
+                   (dolist (b (mapcar (lambda (tc) (cdr tc)) (try-catch block)))
+                     (remove-goto b target-address seen-table)))))
+        (loop for block in blocks
+              when (try-catch block)
+                ;; Colour every successor
+                do (progn (loop for block in blocks
+                                do (setf (marks block) (fset:empty-set)))
+                          (let ((successors (fset:union (successors block)
+                                                        (fset:convert 'fset:set (mapcar (lambda (tc) (cdr tc)) (try-catch block))))))
+                            (loop for child-block in (fset:convert 'list successors)
+                                  for merge-address = (depth-first-mark child-block child-block successors)
+                                  when merge-address
+                                    do (progn
+                                         (setf (try-exit-block block) (gethash merge-address block-by-address))
+                                         (remove-goto block merge-address (make-hash-table))))))))
+      (setf (block-address-table *context*) block-by-address)
 
       (compute-dominance blocks (gethash 0 block-by-address))
 
