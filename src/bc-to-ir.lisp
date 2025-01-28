@@ -233,6 +233,36 @@
 (define-bytecode-transpiler :DSTORE (context code)
   (%transpile-xstore context code :DOUBLE))
 
+(defun %transpile-lstore-x (context index)
+  (with-slots (pc) context
+    (let* ((pc-start pc)
+           (var (pop (stack context))))
+      (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
+      (list (make-instance 'ir-assign
+                           :address pc-start
+                           :lvalue (make-instance 'ir-local-variable
+                                                  :address pc-start
+                                                  :index index
+                                                  :jtype :LONG)
+                           :rvalue var)))))
+
+(define-bytecode-transpiler :LSTORE_0 (context code)
+  (declare (ignore code))
+  (%transpile-lstore-x context 0))
+
+(define-bytecode-transpiler :LSTORE_1 (context code)
+  (declare (ignore code))
+  (%transpile-lstore-x context 1))
+
+(define-bytecode-transpiler :LSTORE_2 (context code)
+  (declare (ignore code))
+  (%transpile-lstore-x context 2))
+
+(define-bytecode-transpiler :LSTORE_3 (context code)
+  (declare (ignore code))
+  (%transpile-lstore-x context 3))
+
 (defun %transpile-istore-x (context index)
   (with-slots (pc) context
     (let* ((pc-start pc)
@@ -243,7 +273,8 @@
                            :address pc-start
                            :lvalue (make-instance 'ir-local-variable
                                                   :address pc-start
-                                                  :index index)
+                                                  :index index
+                                                  :jtype :INTEGER)
                            :rvalue var)))))
 
 (define-bytecode-transpiler :ISTORE_0 (context code)

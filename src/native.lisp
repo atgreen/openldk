@@ -84,20 +84,21 @@
     (nreverse result)))
 
 (defmethod |sun/reflect/Reflection.getCallerClass()| ()
-  ;; FIXME: this only works for static methods at the moment
   ;; FIXME: we don't need the whole backtrace
-  (let* ((caller-string (format nil "~A" (fourth (%remove-adjacent-repeats (sb-debug:list-backtrace))))))
-    ;; (cstring (subseq caller-string 1 (position #\. caller-string))))
-    (java-class
-     (gethash
-      (let ((dot-position (position #\. caller-string)))
-        (cond
-          ((str:starts-with? "(%clinit-" caller-string)
-           (subseq caller-string 9 (1- (length caller-string))))
-          (dot-position
-           (subseq caller-string 1 dot-position))
-          (t (error (format nil "ERROR in sun/reflect/Reflection.getCallerClass(): don't recognize ~S" caller-string)))))
-      *classes*))))
+  (let ((klass
+          (let* ((caller-list (fourth (%remove-adjacent-repeats (sb-debug:list-backtrace))))
+                 (caller-string (format nil "~A" caller-list)))
+            ;; (cstring (subseq caller-string 1 (position #\. caller-string))))
+            (let ((dot-position (position #\. caller-string)))
+              (cond
+                ((str:starts-with? "(%clinit-" caller-string)
+                 (java-class (gethash (subseq caller-string 9 (1- (length caller-string))) *classes*)))
+                ((str:starts-with? "((METHOD " caller-string)
+                 (|getClass()| (cadr caller-list)))
+                (dot-position
+                 (java-class (gethash (subseq caller-string 1 dot-position) *classes*)))
+                (t (error (format nil "ERROR in sun/reflect/Reflection.getCallerClass(): don't recognize ~S" caller-string))))))))
+    klass))
 
 (defmethod |getClass()| (object)
   ;;; FIXME - throw nullpointerexception
@@ -310,7 +311,7 @@
                (when ldk-class
                  (append (loop for field across (fields ldk-class)
                                collect (let ((f (make-instance '|java/lang/reflect/Field|)))
-                                         (|<init>(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;IILjava/lang/String;[B)| f this (ijstring (name field)) nil nil nil nil nil)
+                                         (|<init>(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;IILjava/lang/String;[B)| f this (ijstring (name field)) nil (access-flags field) nil nil nil)
                                          f))
                          (get-fields (gethash (super ldk-class) *classes*))))))
       (coerce (get-fields ldk-class) 'vector))))
@@ -318,18 +319,6 @@
 (defun |sun/misc/VM.initialize()| ()
   ;; FIXME
   )
-
-#|
-boolean compareAndSwapObject(Object obj, long fieldId, Object expectedValue, Object newValue) {
-    synchronized (globalExchangeLock) {
-        if (obj.fieldArray.get(fieldId) == expectedValue) {
-            obj.fieldArray.set(fieldId, newValue);
-            return true;
-        }
-    }
-    return false;
-}
-|#
 
 (defmethod |compareAndSwapObject(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)| ((unsafe |sun/misc/Unsafe|) obj field-id expected-value new-value)
   ;; FIXME
@@ -378,3 +367,68 @@ boolean compareAndSwapObject(Object obj, long fieldId, Object expectedValue, Obj
 (defun |java/security/AccessController.getStackAccessControlContext()| ()
   ;; FIXME -- implement
   nil)
+
+(defun |java/lang/System.initProperties(Ljava/util/Properties;)| (props)
+  (dolist (prop '(("java.specification.version" . "8.0")
+                  ("java.specification.name" . "Java Platform API Specification")
+                  ("java.specification.vendor" . "Oracle Corporation")
+                  ("java.version" . "8.0")
+                  ("java.vendor" . "OpenLDK")
+                  ("java.vendor.url" . "https://github.com/atgreen/openldk")
+                  ("java.vendor.url.bug" . "https://github.com/atgreen/openldk/issues")
+                  ("java.class.version" . "52.0")
+                  ("os.name" . "Linux")
+                  ("os.version" . "FIXME")
+                  ("os.arch" . "FIXME")
+                  ("file.separator" . "/")
+                  ("path.separator" . ":")
+                  ("line.separator" . (format nil "~%"))))
+    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring (car prop)) (ijstring (cdr prop))))
+  props)
+
+#|
+Need to add:
+
+file.encoding
+file.encoding.pkg
+java.awt.printerjob
+java.io.tmpdir
+sun.arch.data.model
+sun.awt.graphicsenv
+sun.cpu.endian
+sun.cpu.isalist
+sun.desktop
+sun.io.unicode.encoding
+sun.java2d.fontpath
+sun.jnu.encoding
+sun.os.patch.level
+sun.stderr.encoding
+sun.stdout.encoding
+user.country
+user.dir
+user.home
+user.language
+user.name
+user.script
+user.timezone
+user.variant
+
+|#
+
+(defun |java/io/FileDescriptor.initIDs()| ()
+  )
+
+(defun |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedExceptionAction;)| (action)
+  (let ((result (|run()| action)))
+    result))
+
+(defmethod |isAssignableFrom(Ljava/lang/Class;)| ((this |java/lang/Class|) other)
+  (let ((this-class (find-class (intern (name (gethash (slot-value (slot-value this '|name|) '|value|) *classes*)) :openldk)))
+        (other-class (find-class (intern (name (gethash (slot-value (slot-value other '|name|) '|value|) *classes*)) :openldk))))
+    (closer-mop:subclassp this-class other-class)))
+
+(defun |java/lang/System.setIn0(Ljava/io/InputStream;)| (in-stream)
+  (setf (slot-value |+static-java/lang/System+| '|in|) in-stream))
+
+(defun |java/lang/System.setOut0(Ljava/io/PrintStream;)| (print-stream)
+  (setf (slot-value |+static-java/lang/System+| '|out|) print-stream))

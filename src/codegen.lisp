@@ -131,25 +131,52 @@
                                    (list 'error (list 'lisp-condition (list 'make-instance (list 'quote '|java/lang/ArithmeticException|))))))
                  :expression-type :LONG))
 
-(defun %codegen-binop (insn operator jtype mask context)
+(defun %codegen-binop (insn operator jtype context)
   (make-instance '<expression>
                  :insn insn
                  :code (list 'let (list (list 'value2 (code (codegen (value2 insn) context)))
                                         (list 'value1 (code (codegen (value1 insn) context))))
-                             (if mask
-                                 (list 'logand (list operator 'value1 'value2) mask)
-                                 (list operator 'value1 'value2)))
+                             (list operator 'value1 'value2))
                  :expression-type jtype))
+
+(defun %codegen-integer-binop (insn operator context)
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'let* (list (list 'value2 (code (codegen (value2 insn) context)))
+                                         (list 'value1 (code (codegen (value1 insn) context)))
+                                         (list 'result (list 'logand (list operator 'value1 'value2) #xFFFFFFFF)))
+                             (list 'if (list '> 'result 2147483647)
+                                   (list '- 'result 4294967296)
+                                   'result))
+                 :expression-type :INTEGER))
+
+(defun %codegen-long-binop (insn operator context)
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'let* (list (list 'value2 (code (codegen (value2 insn) context)))
+                                         (list 'value1 (code (codegen (value1 insn) context)))
+                                         (list 'result (list 'logand (list operator 'value1 'value2) #xFFFFFFFFFFFFFFFF)))
+                             (list 'if (list '> 'result 9223372036854775807)
+                                   (list '- 'result 18446744073709551616)
+                                   'result))
+                 :expression-type :LONG))
 
 (defmacro %define-binop-codegen-methods (&rest opcodes)
   `(progn
      ,@(mapcar (lambda (opcode)
                  (let ((ir-class (car opcode))
                        (operator (cadr opcode))
-                       (jtype (caddr opcode))
-                       (mask (cadddr opcode)))
-                   `(defmethod codegen ((insn ,ir-class) context)
-                               (%codegen-binop insn ,operator ,jtype ,mask context))))
+                       (jtype (caddr opcode)))
+                   (cond
+                     ((eq jtype :INTEGER)
+                      `(defmethod codegen ((insn ,ir-class) context)
+                         (%codegen-integer-binop insn ,operator context)))
+                     ((eq jtype :LONG)
+                      `(defmethod codegen ((insn ,ir-class) context)
+                         (%codegen-long-binop insn ,operator context)))
+                     (t
+                      `(defmethod codegen ((insn ,ir-class) context)
+                         (%codegen-binop insn ,operator ,jtype context))))))
                opcodes)))
 
 (%define-binop-codegen-methods
@@ -708,7 +735,9 @@
 (defmethod codegen ((insn ir-new-array) context)
   (let ((expr (make-instance '<expression>
                              :insn insn
-                             :code (list 'make-array (code (codegen (size insn) context)) :initial-element nil)
+                             :code (list 'progn
+                                         (list 'assert (list '< (code (codegen (size insn) context)) 10000))
+                                         (list 'make-array (code (codegen (size insn) context)) :initial-element nil))
                              :expression-type :ARRAY)))
     ;; We don't push this. bc-2-ir pushes this.
     expr))
@@ -825,6 +854,60 @@
     expr))
 
 (defmethod codegen-block ((basic-block <basic-block>) &optional (stop-block nil))
+  "Generate Lisp code for a basic block, handling exception scopes and control flow."
+  (unless (equal basic-block stop-block)
+    (unless (slot-value basic-block 'code-emitted-p)
+      (push basic-block (slot-value *context* 'blocks))
+      (let* ((stop-emitting-blocks? nil)
+             (lisp-code
+               (cons (intern (format nil "branch-target-~A" (address (car (slot-value basic-block 'code)))))
+                     (loop for insn in (slot-value basic-block 'code)
+                           for expr = (codegen insn *context*)
+                           when (typep insn 'ir-stop-marker)
+                             do (setf stop-emitting-blocks? t)
+                           collect (trace-insn insn (code expr))))))
+        (setf (slot-value basic-block 'code-emitted-p) t)
+        (pop (slot-value *context* 'blocks))
+
+        ;; Emit code for successors if not stopping
+        (unless stop-emitting-blocks?
+          (let ((successor-list (sort (fset:convert 'list (successors basic-block))
+                                      (lambda (a b) (< (address a) (address b))))))
+            (dolist (successor successor-list)
+              (when successor
+                (setf lisp-code (append lisp-code (codegen-block successor (or stop-block (try-exit-block basic-block)))))))))
+
+        ;; Handle exception handlers (try-catch)
+        (let ((try-catch-handlers (try-catch basic-block)))
+          (when try-catch-handlers
+            ;; Wrap the block's code in HANDLER-CASE
+            (setf lisp-code
+                  `(HANDLER-CASE
+                       (TAGBODY ,@lisp-code)
+                     ,@(loop for (exception-type . handler-block) in try-catch-handlers
+                             collect `(,(intern (format nil "condition-~A" exception-type) :openldk)
+                                       (,(intern "condition" :openldk))
+                                       (TAGBODY ,@(codegen-block handler-block (try-exit-block basic-block))))))))
+
+        ;; Handle finally blocks
+        (let ((finally-blocks (finally basic-block)))
+          (when finally-blocks
+            ;; Wrap the block's code in UNWIND-PROTECT
+            (setf lisp-code
+                  `(UNWIND-PROTECT
+                       (TAGBODY ,@lisp-code)
+                     ,@(loop for finally-block in finally-blocks
+                             collect `(TAGBODY ,@(codegen-block finally-block)))))))
+
+        ;; Emit code for the try-exit-block if it exists
+        (when (and (try-exit-block basic-block)
+                   (not (equal (try-exit-block basic-block) stop-block)))
+          (setf lisp-code (append lisp-code (codegen-block (try-exit-block basic-block) stop-block))))
+
+        lisp-code)))))
+
+#|
+(defmethod codegen-block ((basic-block <basic-block>) &optional (stop-block nil))
   (unless (equal basic-block stop-block)
     (if (not (slot-value basic-block 'code-emitted-p))
         (progn
@@ -879,3 +962,4 @@
 
             lisp-code))
         nil)))
+|#

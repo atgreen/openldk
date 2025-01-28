@@ -430,6 +430,8 @@
     (|<init>()| props)
     (setf (slot-value |+static-java/lang/System+| '|props|) props))
 
+  (|java/lang/System.initializeSystemClass()|)
+
   (let* ((class (classload mainclass))
          (argv (make-array (length args))))
     (assert (or class (error "Can't load ~A" mainclass)))

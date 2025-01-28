@@ -53,7 +53,10 @@
     :std (fset:empty-set)
     :doc "Set of outgoing blocks.")
    (dominates
-    :doc "Set of blocks that this block dominates in CFG.")
+    :doc "Set of blocks that this block dominates in the control flow graph (CFG).
+          A block B dominates a block N if every path from the entry block to N
+          must pass through B. This relationship includes self-dominance, as a block
+          always dominates itself.")
    (stop)
    (code-emitted-p
     :doc "True if this block's code has already been emitted.")
@@ -70,7 +73,7 @@
 
 (defmethod print-object ((bb <basic-block>) out)
   (print-unreadable-object (bb out :type t)
-    (format out "[~A:~A]" (address (car (code bb))) (address (car (last (code bb)))))))
+    (format out "id=~A [~A:~A]" (id bb) (address (car (code bb))) (address (car (last (code bb)))))))
 
 (defmethod dump-dot (b done-table stream)
   (format stream "~A [label=\"wth? ~A\"];~%" b b))
@@ -80,6 +83,9 @@
     (setf (gethash (id bloc) done-table) t)
     (format stream "~A [label=" (id bloc))
     (format stream "<<TABLE BORDER=\"0\" CELLBORDER=\"0\" CELLSPACING=\"0\">")
+    (format stream "<TR><TD ALIGN=\"LEFT\">\"~A DOMINATES: ~{~A ~}\"</TD></TR>~%"
+            (id bloc)
+            (sort (mapcar (lambda (b) (id b)) (fset:convert 'list (dominates bloc))) #'>))
     (dolist (i (code bloc))
       (format stream "<TR><TD ALIGN=\"LEFT\">\"~A\"</TD></TR>~%" (dot-dump-string i)))
     (format stream "</TABLE>>];~%")
@@ -165,6 +171,58 @@
                (setf (gethash target block-starts) t)))))
 
     block-starts))
+
+(defun propagate-try-blocks (blocks)
+  "Propagate try blocks to associated catch handler blocks."
+  (dolist (block blocks)
+    (let ((try-catch (slot-value block 'try-catch)))
+      (dolist (handler-pair try-catch)
+        (let ((handler-block (cdr handler-pair)))
+          ;; Add the current block to the handler block's predecessors
+          (setf (slot-value handler-block 'predecessors)
+                (fset:union (slot-value handler-block 'predecessors)
+                            (fset:set block))))))))
+
+(defun compute-dominance (blocks entry-block)
+  "Compute the dominance sets for each block in the CFG, considering try-catch handlers.
+   BLOCKS is a list of all <basic-block> objects.
+   ENTRY-BLOCK is the entry block of the CFG."
+
+  ;; Update the PREDECESSORS set with catch handlers.
+  (propagate-try-blocks blocks)
+
+  ;; Initialize dominance sets.
+  (dolist (block blocks)
+    (if (eq block entry-block)
+        (setf (slot-value block 'dominates) (fset:set entry-block))
+        (setf (slot-value block 'dominates) (fset:convert 'fset:set blocks))))
+
+  ;; Iterate to refine the dominance sets.
+  (let ((changed t)
+        (iteration 0))
+    (loop while changed
+          do (setf changed nil)
+             (setf iteration (1+ iteration))
+             (dolist (block blocks)
+               (unless (eq block entry-block)
+                 ;; Compute predecessors including try-catch handlers
+                 (let* ((predecessors (slot-value block 'predecessors))
+                        (catch-handlers (fset:convert 'fset:set (mapcar #'cdr (slot-value block 'try-catch))))
+                        (all-predecessors (fset:union predecessors catch-handlers)))
+                   ;; Compute new dominance set
+                   (let* ((new-dominance-set
+                            (if (fset:empty? all-predecessors)
+                                (fset:empty-set)
+                                (reduce #'fset:intersection
+                                        (mapcar (lambda (pred)
+                                                  (slot-value pred 'dominates))
+                                                (fset:convert 'list all-predecessors)))))
+                          (updated-dominance-set (fset:union new-dominance-set
+                                                             (fset:set block)))) ;; Add the block itself
+                     ;; Check if the dominance set has changed
+                     (unless (fset:equal? updated-dominance-set (slot-value block 'dominates))
+                       (setf (slot-value block 'dominates) updated-dominance-set)
+                       (setf changed t)))))))))
 
 (defun build-basic-blocks (ir-code)
   "Build <BASIC-BLOCK> objects from IR-CODE. Return the entry block."
@@ -253,5 +311,8 @@
 																				 (setf (try-exit-block block) (gethash merge-address block-by-address))
 																				 (remove-goto block merge-address (make-hash-table))))))))
 			(setf (block-address-table *context*) block-by-address)
+
+      (compute-dominance blocks (gethash 0 block-by-address))
+
       (dump-method-dot blocks)
       blocks)))

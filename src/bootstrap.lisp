@@ -103,12 +103,20 @@
     (|condition-java/lang/Exception|)
   ((objref)))
 
-(defclass |java/lang/ClassCastException| (|java/lang/Exception|)
+(defclass |java/lang/ClassCastException| (|java/lang/RuntimeException|)
   ())
 
-(define-condition |condition-java/lang/ClassCastException|
+(define-condition |condition-java/lang/RuntimeException|
     (|condition-java/lang/Exception|)
   ((objref)))
+
+(define-condition |condition-java/lang/ClassCastException|
+    (|condition-java/lang/RuntimeException|)
+  ())
+
+(define-condition |condition-java/security/PrivilegedActionException|
+    (|condition-java/lang/RuntimeException|)
+  ())
 
 (defmethod lisp-condition ((throwable |java/lang/ArithmeticException|))
   (make-condition '|condition-java/lang/ArithmeticException|))
