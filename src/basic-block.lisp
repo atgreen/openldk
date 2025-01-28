@@ -116,17 +116,17 @@ The dominance set is represented as an `fset:set` of <basic-block> objects.")
    and handler-pc and catch-type are the same. Return a new array with merged entries."
   (let* ((sorted-entries (sort (coerce entries 'list)
                                #'<
-                               :key (lambda (entry) (slot-value entry 'start-pc))))
+                               :key (lambda (entry) (start-pc entry))))
          (merged (loop
                   with result = nil
                   for entry in sorted-entries
-                  unless (eq (slot-value entry 'start-pc) (slot-value entry 'handler-pc)) ;; Ignore self-serving ranges
+                  unless (eq (start-pc entry) (handler-pc entry)) ;; Ignore self-serving ranges
                     do (if (and result
-                                (= (1- (slot-value entry 'start-pc)) (slot-value (car result) 'end-pc))
-                                (= (slot-value entry 'handler-pc) (slot-value (car result) 'handler-pc))
-                                (equal (slot-value entry 'catch-type) (slot-value (car result) 'catch-type)))
+                                (= (1- (start-pc entry)) (slot-value (car result) 'end-pc))
+                                (= (handler-pc entry) (handler-pc (car result)))
+                                (equal (catch-type entry) (catch-type (car result))))
                            ;; Merge the current entry into the last merged one
-                           (setf (slot-value (car result) 'end-pc) (slot-value entry 'end-pc))
+                           (setf (end-pc (car result)) (end-pc entry))
                            ;; Otherwise, add the current entry as a new merged entry
                            (push entry result))
                   finally (return (reverse result)))))
