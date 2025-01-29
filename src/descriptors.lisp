@@ -176,6 +176,43 @@
                  (t (incf index)))))
     (nreverse param-list))) ; Reverse the list before returning it, since we used push
 
+(defun %get-parameter-types (descriptor)
+  "Parse the Java method descriptor and return a list of parameter types as strings."
+  (let ((param-list nil)
+        (index 0)
+        (descriptor (subseq descriptor (position #\( descriptor) (position #\) descriptor))))
+    (loop while (< index (length descriptor))
+          do (let ((ch (char descriptor index)))
+               (cond
+                 ;; For simple types
+                 ((char= ch #\I) (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/Integer")) param-list))
+                 ((char= ch #\J) (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/Long")) param-list))
+                 ((char= ch #\S) (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/String")) param-list))
+                 ((char= ch #\B) (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/Byte")) param-list))
+                 ((char= ch #\C) (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/Character")) param-list))
+                 ((char= ch #\D) (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/Double")) param-list))
+                 ((char= ch #\F) (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/Float")) param-list))
+                 ((char= ch #\Z) (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/Boolean")) param-list))
+
+                 ;; For object types
+                 ((char= ch #\L)
+                  (let ((obj-end (position #\; descriptor :start index)))
+                    (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring (subseq descriptor (1+ index) obj-end))) param-list)
+                    (setf index (1+ obj-end))))
+
+                 ;; For array types
+                 ((char= ch #\[)
+                  (incf index)
+                  (loop until (not (member (char descriptor index) '(#\I #\J #\S #\B #\C #\D #\F #\Z #\[)))
+                        do (incf index))
+                  (when (char= (char descriptor index) #\L)
+                    (setf index (position #\; descriptor :start index)))
+                  (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/Array")) param-list)
+                  (incf index))
+
+                 (t (incf index)))))
+    (coerce (nreverse param-list) 'vector))) ; Reverse the list before returning it, since we used push
+
 (defun translate-type (type-char)
   (case type-char
     (#\I "int")
