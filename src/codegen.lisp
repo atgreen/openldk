@@ -853,11 +853,12 @@
                              :code (intern (format nil "s{~{~A~^,~}}" (sort (slot-value insn 'var-numbers) #'<)) :openldk))))
     expr))
 
-(defmethod codegen-block ((basic-block <basic-block>) &optional (stop-block nil))
+(defmethod codegen-block ((basic-block <basic-block>) dominator-block)
   "Generate Lisp code for a basic block, handling exception scopes and control flow."
-  (unless (equal basic-block stop-block)
+  (when (fset:contains? (dominators basic-block) dominator-block)
     (unless (slot-value basic-block 'code-emitted-p)
       (push basic-block (slot-value *context* 'blocks))
+
       (let* ((stop-emitting-blocks? nil)
              (lisp-code
                (cons (intern (format nil "branch-target-~A" (address (car (slot-value basic-block 'code)))))
@@ -874,92 +875,54 @@
           (let ((successor-list (sort (fset:convert 'list (successors basic-block))
                                       (lambda (a b) (< (address a) (address b))))))
             (dolist (successor successor-list)
-              (when successor
-                (setf lisp-code (append lisp-code (codegen-block successor (or stop-block (try-exit-block basic-block)))))))))
+              (when (and successor (not (slot-value successor 'code-emitted-p)))
+                (if (fset:contains? (dominators successor) basic-block)
+                    (progn
+                      (setf lisp-code (nconc lisp-code (codegen-block successor dominator-block))))
+                    (progn
+                      (unless (typep (car (last (code basic-block))) 'ir-goto)
+                        (setf lisp-code (nconc lisp-code (list (list 'go (intern (format nil "branch-target-~A" (address (car (code successor))))))))))))))))
 
         ;; Handle exception handlers (try-catch)
         (let ((try-catch-handlers (try-catch basic-block)))
           (when try-catch-handlers
             ;; Wrap the block's code in HANDLER-CASE
-            (setf lisp-code
-                  `(HANDLER-CASE
-                       (TAGBODY ,@lisp-code)
-                     ,@(loop for (exception-type . handler-block) in try-catch-handlers
-                             collect `(,(intern (format nil "condition-~A" exception-type) :openldk)
-                                       (,(intern "condition" :openldk))
-                                       (TAGBODY ,@(codegen-block handler-block (try-exit-block basic-block))))))))
+            ;; Pull any branch target out of the HANDLER-CASE first.
+            (if (typep (car lisp-code) 'ir-branch-target)
+                (let ((bt (car lisp-code))
+                      (lisp-code (cdr lisp-code)))
+                  (list
+                   `(,bt
+                     (HANDLER-CASE
+                         (TAGBODY ,@lisp-code)
+                       ,@(loop for (exception-type . handler-block) in try-catch-handlers
+                               collect `(,(intern (format nil "condition-~A" (or exception-type
+                                                                                 "java/lang/Throwable")) :openldk)
+                                         (,(intern "condition" :openldk))
+                                         (TAGBODY ,@(codegen-block handler-block basic-block))))))))
+                (list
+                 `(HANDLER-CASE
+                      (TAGBODY ,@lisp-code)
+                    ,@(loop for (exception-type . handler-block) in try-catch-handlers
+                            collect `(,(intern (format nil "condition-~A" (or exception-type
+                                                                              "java/lang/Throwable")) :openldk)
+                                      (,(intern "condition" :openldk))
+                                      (TAGBODY ,@(codegen-block handler-block basic-block)))))))))
 
         ;; Handle finally blocks
         (let ((finally-blocks (finally basic-block)))
           (when finally-blocks
             ;; Wrap the block's code in UNWIND-PROTECT
             (setf lisp-code
-                  `(UNWIND-PROTECT
-                       (TAGBODY ,@lisp-code)
-                     ,@(loop for finally-block in finally-blocks
-                             collect `(TAGBODY ,@(codegen-block finally-block)))))))
+                  (list
+                   `(UNWIND-PROTECT
+                         (TAGBODY ,@lisp-code)
+                      ,@(loop for finally-block in finally-blocks
+                              collect `(TAGBODY ,@(codegen-block finally-block basic-block))))))))
 
         ;; Emit code for the try-exit-block if it exists
         (when (and (try-exit-block basic-block)
-                   (not (equal (try-exit-block basic-block) stop-block)))
-          (setf lisp-code (append lisp-code (codegen-block (try-exit-block basic-block) stop-block))))
+                   (not (slot-value (try-exit-block basic-block) 'code-emitted-p)))
+          (setf lisp-code (nconc lisp-code (codegen-block (try-exit-block basic-block) dominator-block))))
 
-        lisp-code)))))
-
-#|
-(defmethod codegen-block ((basic-block <basic-block>) &optional (stop-block nil))
-  (unless (equal basic-block stop-block)
-    (if (not (slot-value basic-block 'code-emitted-p))
-        (progn
-          (push basic-block (slot-value *context* 'blocks))
-          (let* ((stop-emitting-blocks? nil)
-                 (lisp-code
-                   (cons (intern (format nil "branch-target-~A" (address (car (slot-value basic-block 'code)))))
-                         (loop for insn in (slot-value basic-block 'code)
-                               for expr = (codegen insn *context*)
-                               when (typep insn 'ir-stop-marker)
-                                 do (setf stop-emitting-blocks? t)
-                               collect (trace-insn insn (code expr))))))
-            (setf (slot-value basic-block 'code-emitted-p) t)
-            (pop (slot-value *context* 'blocks))
-            (unless stop-emitting-blocks?
-              ;; sort by address
-              (let ((successor-list (sort (fset:convert 'list (successors basic-block)) (lambda (a b) (< (address a) (address b))))))
-                (if (eq 1 (length successor-list))
-                    (if (slot-value (car successor-list) 'code-emitted-p)
-                        (when (and (<= (address (car successor-list)) (+ (address (car (last (code basic-block)))) 4)))
-                          (setf lisp-code (append lisp-code (list (list 'go (intern (format nil "branch-target-~A" (address (car successor-list)))))))))))
-                (dolist (successor successor-list)
-                  (when successor
-                    (setf lisp-code (append lisp-code (codegen-block successor (or stop-block (try-exit-block basic-block)))))))))
-
-            ;; Emit handlers for finally handlers. FIXME: in build-basic-blocks, sort try-catch list by end of range
-            (when (find-if (lambda (p) (null (car p))) (try-catch basic-block))
-              ;; This is a TRY-CATCH block.  Wrap this in HANDLER-CASE.
-              (loop for tc in (reverse (try-catch basic-block))
-                    unless (car tc)
-                      do (setf lisp-code (append (list (list 'handler-case
-                                                             (cons 'tagbody lisp-code)
-                                                             (list 'condition (list (intern "condition" :openldk))
-                                                                   (cons 'tagbody
-                                                                         (codegen-block (cdr tc) (try-exit-block basic-block))))))
-                                                 (when (try-exit-block basic-block)
-                                                   (codegen-block (try-exit-block basic-block)))))))
-
-            ;; Emit handler if there's a non-finally try-catch associated with this block.
-            (when (find-if (lambda (p) (car p)) (try-catch basic-block))
-              ;; This is a TRY-CATCH block.  Wrap this in HANDLER-CASE.
-              (setf lisp-code (append (list (append (list 'handler-case)
-                                                    (list (append (list 'tagbody) lisp-code))
-                                                    (loop for tc in (try-catch basic-block)
-                                                          when (car tc)
-                                                            collect (append (list (intern (format nil "condition-~A" (car tc)) :openldk)
-                                                                                  (list (intern "condition" :openldk)))
-                                                                            (list (cons 'tagbody
-                                                                                        (codegen-block (cdr tc) (try-exit-block basic-block))))))))
-                                      (when (try-exit-block basic-block)
-                                        (codegen-block (try-exit-block basic-block))))))
-
-            lisp-code))
-        nil)))
-|#
+        lisp-code))))
