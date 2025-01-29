@@ -176,6 +176,9 @@
 
 (define-print-object/std <method>)
 
+(defun interface-p (class)
+  (not (eq 0 (logand #x200 (slot-value class 'access-flags)))))
+
 (defun native-p (method)
   (not (eq 0 (logand #x100 (slot-value method 'access-flags)))))
 
