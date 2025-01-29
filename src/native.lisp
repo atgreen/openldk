@@ -306,6 +306,7 @@
         0)))
 
 (defmethod |getDeclaredConstructors0(Z)| ((this |java/lang/Class|) arg)
+  ;; FIXME
   (unwind-protect
        (progn
          (when *debug-trace*
@@ -316,8 +317,9 @@
          ;; Get the ldk-class for THIS
          (let ((ldk-class (gethash (slot-value (slot-value this '|name|) '|value|) *classes*)))
            (coerce (append (loop for method across (methods ldk-class)
-                                 collect (let ((c (make-instance '|java/lang/reflect/Constructor|)))
-                                           (|<init>(Ljava/lang/Class;[Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B)| c this (make-array 0) (make-array 0) (access-flags method) 0 (ijstring (descriptor method)) (make-array 0) (make-array 0)))))
+                                 when (str:starts-with? "<init>" (name method))
+                                   collect (let ((c (make-instance '|java/lang/reflect/Constructor|)))
+                                             (|<init>(Ljava/lang/Class;[Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B)| c this (make-array 0) (make-array 0) (access-flags method) 0 (ijstring (descriptor method)) (make-array 0) (make-array 0)))))
                    'vector)))
     (when *debug-trace*
       (format t "~&; trace: leaving  java/lang/Class.getDeclaredConstructors0(Z)~%"))))
