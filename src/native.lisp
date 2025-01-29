@@ -477,3 +477,25 @@ user.variant
 
 (defmethod |clone()| ((array vector))
   (copy-seq array))
+
+(defun |sun/reflect/Reflection.getClassAccessFlags(Ljava/lang/Class;)| (class)
+  (let ((ldk-class (gethash (slot-value (slot-value class '|name|) '|value|) *classes*)))
+    (access-flags ldk-class)))
+
+(defmethod |getModifiers()| ((class |java/lang/Class|))
+  (let ((ldk-class (gethash (slot-value (slot-value class '|name|) '|value|) *classes*)))
+    (access-flags ldk-class)))
+
+(defmethod |getSuperclass()| ((class |java/lang/Class|))
+  (let ((ldk-class (gethash (slot-value (slot-value class '|name|) '|value|) *classes*)))
+    (gethash (super ldk-class) *java-classes*)))
+
+(defun |sun/reflect/NativeConstructorAccessorImpl.newInstance0(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)|
+    (constructor params)
+  (let ((class-name (slot-value (slot-value constructor '|clazz|) '|name|)))
+    (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| class-name nil nil nil)
+    (let ((obj (make-instance (intern (slot-value class-name '|value|) :openldk))))
+      (if (string= "()V" (slot-value (slot-value constructor '|signature|) '|value|))
+          (|<init>()| obj)
+          (error "unimplemented"))
+      obj)))
