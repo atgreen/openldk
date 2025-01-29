@@ -443,3 +443,8 @@
    (low)
    (high)
    (jump-offsets)))
+
+(defclass/std ir-lookupswitch (ir-node)
+  ((index)
+   (default-offset)
+   (match-offset-pairs)))

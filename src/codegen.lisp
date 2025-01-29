@@ -688,6 +688,18 @@
                                    cases
                                    (list `(:otherwise ,default-target)))))))
 
+(defmethod codegen ((insn ir-lookupswitch) context)
+  (declare (ignore context))
+  (with-slots (default-offset match-offset-pairs) insn
+    (let ((cases (loop for (match . offset) in match-offset-pairs
+                       collect (list match (list 'go (intern (format nil "branch-target-~A" offset))))))
+          (default-target (list 'go (intern (format nil "branch-target-~A" default-offset)))))
+      (make-instance '<expression>
+                     :insn insn
+                     :code (append (list 'case (code (codegen (index insn) context)))
+                                   cases
+                                   (list `(:otherwise ,default-target)))))))
+
 (defmethod codegen ((insn ir-call-virtual-method) context)
   (with-slots (method-name args) insn
     (make-instance '<expression>

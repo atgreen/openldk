@@ -1447,6 +1447,58 @@
               (setf (stack context) (list (make-instance '<stack-bottom-marker>)))
               code)))))))
 
+(define-bytecode-transpiler :LOOKUPSWITCH (context code)
+  (with-slots (pc class) context
+    (let ((pc-start pc))
+      (with-slots (constant-pool) class
+        ;; Align PC to the next 4-byte boundary
+        (let* ((padding (mod pc 4)))
+          (incf pc (1- (- 4 padding))))
+
+        ;; Read default offset, low value, and high value
+        (let* ((default-offset (unsigned-to-signed (+ (* (aref code (incf pc)) 16777216)
+                                                      (* (aref code (incf pc)) 65536)
+                                                      (* (aref code (incf pc)) 256)
+                                                      (aref code (incf pc)))))
+               (npairs (+ (* (aref code (incf pc)) 16777216)
+                          (* (aref code (incf pc)) 65536)
+                          (* (aref code (incf pc)) 256)
+                          (aref code (incf pc))))
+               (match-offset-pairs
+                 (loop repeat npairs
+                       collect (cons
+                                (unsigned-to-signed (+ (* (aref code (incf pc)) 16777216)
+                                                       (* (aref code (incf pc)) 65536)
+                                                       (* (aref code (incf pc)) 256)
+                                                       (aref code (incf pc))))
+                                (+ pc-start
+                                   (unsigned-to-signed (+ (* (aref code (incf pc)) 16777216)
+                                                          (* (aref code (incf pc)) 65536)
+                                                          (* (aref code (incf pc)) 256)
+                                                          (aref code (incf pc)))))))))
+
+          (let ((code (list (make-instance 'ir-lookupswitch
+                                           :index (pop (stack context))
+                                           :address pc-start
+                                           :default-offset (+ pc-start default-offset)
+                                           :match-offset-pairs match-offset-pairs))))
+
+            (dolist (match-offset match-offset-pairs)
+              (push (cdr match-offset) (aref (next-insn-list context) pc-start)))
+            (push (+ pc-start default-offset) (aref (next-insn-list context) pc-start))
+            ;; FIXME: why is this required??????????
+            (incf pc)
+
+              ;; Record stack state for each jump destination
+            (dolist (offset (cons (+ pc-start default-offset) (mapcar
+                                                               (lambda (match-offset)
+                                                                 (cdr match-offset))
+                                                               match-offset-pairs)))
+              (%record-stack-state offset context))
+            ;; Reset the stack for the next instruction
+            (setf (stack context) (list (make-instance '<stack-bottom-marker>)))
+            code))))))
+
 (defun merge-stack-variables (stack-var1 stack-var2)
   "Merge the var-numbers of two stack-variable objects."
   (let ((unums (union (slot-value stack-var1 'var-numbers)
