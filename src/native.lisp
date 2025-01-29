@@ -415,6 +415,8 @@
                   ("file.separator" . "/")
                   ("file.encoding" . "UTF-8")
                   ("path.separator" . ":")
+                  ;; FIXME
+                  ("java.library.path" . "/usr/lib/jvm/java-21-openjdk-21.0.5.0.11-1.fc40.x86_64/lib/")
                   ("line.separator" . (format nil "~%"))))
     (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring (car prop)) (ijstring (cdr prop))))
   props)
@@ -462,6 +464,9 @@ user.variant
 (defun |java/lang/System.setIn0(Ljava/io/InputStream;)| (in-stream)
   (setf (slot-value |+static-java/lang/System+| '|in|) in-stream))
 
+(defun |java/lang/System.setErr0(Ljava/io/PrintStream;)| (print-stream)
+  (setf (slot-value |+static-java/lang/System+| '|err|) print-stream))
+
 (defun |java/lang/System.setOut0(Ljava/io/PrintStream;)| (print-stream)
   (setf (slot-value |+static-java/lang/System+| '|out|) print-stream))
 
@@ -499,3 +504,27 @@ user.variant
           (|<init>()| obj)
           (error "unimplemented"))
       obj)))
+
+(defvar %unsafe-memory-table (make-hash-table))
+
+(defmethod |allocateMemory(J)| ((unsafe |sun/misc/Unsafe|) size)
+  (let* ((mem (sb-alien:make-alien sb-alien:char size))
+         (ptr (sb-sys:sap-int (sb-alien:alien-sap mem))))
+    (setf (gethash ptr %unsafe-memory-table) mem)
+    ptr))
+
+(defmethod |putLong(JJ)| ((unsafe |sun/misc/Unsafe|) address value)
+  (setf (sb-sys:sap-ref-64 (sb-sys:int-sap address) 0) value))
+
+(defmethod |getByte(J)| ((unsafe |sun/misc/Unsafe|) address)
+  (sb-sys:sap-ref-8 (sb-sys:int-sap address) 0))
+
+(defmethod |freeMemory(J)| ((unsafe |sun/misc/Unsafe|) address)
+  (sb-alien:free-alien (gethash address %unsafe-memory-table)))
+
+(defun |java/lang/System.mapLibraryName(Ljava/lang/String;)| (library-name)
+  (jstring (format nil "lib~A.so" (coerce (slot-value library-name '|value|) 'string))))
+
+(defun |java/lang/ClassLoader.findBuiltinLib(Ljava/lang/String;)| (library-name)
+  (format t "FIND-BUILTIN-LIB ~A~%" library-name)
+  nil)
