@@ -185,19 +185,19 @@
           do (let ((ch (char descriptor index)))
                (cond
                  ;; For simple types
-                 ((char= ch #\I) (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/Integer")) param-list))
-                 ((char= ch #\J) (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/Long")) param-list))
-                 ((char= ch #\S) (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/String")) param-list))
-                 ((char= ch #\B) (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/Byte")) param-list))
-                 ((char= ch #\C) (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/Character")) param-list))
-                 ((char= ch #\D) (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/Double")) param-list))
-                 ((char= ch #\F) (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/Float")) param-list))
-                 ((char= ch #\Z) (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/Boolean")) param-list))
+                 ((char= ch #\I) (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/Integer") nil nil nil) param-list) (incf index))
+                 ((char= ch #\J) (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/Long") nil nil nil) param-list) (incf index))
+                 ((char= ch #\S) (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/String") nil nil nil) param-list) (incf index))
+                 ((char= ch #\B) (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/Byte") nil nil nil) param-list) (incf index))
+                 ((char= ch #\C) (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/Character") nil nil nil) param-list) (incf index))
+                 ((char= ch #\D) (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/Double") nil nil nil) param-list) (incf index))
+                 ((char= ch #\F) (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/Float") nil nil nil) param-list) (incf index))
+                 ((char= ch #\Z) (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/Boolean") nil nil nil) param-list) (incf index))
 
                  ;; For object types
                  ((char= ch #\L)
                   (let ((obj-end (position #\; descriptor :start index)))
-                    (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring (subseq descriptor (1+ index) obj-end))) param-list)
+                    (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring (subseq descriptor (1+ index) obj-end)) nil nil nil) param-list)
                     (setf index (1+ obj-end))))
 
                  ;; For array types
@@ -207,7 +207,7 @@
                         do (incf index))
                   (when (char= (char descriptor index) #\L)
                     (setf index (position #\; descriptor :start index)))
-                  (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/Array")) param-list)
+                  (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/Array") nil nil nil) param-list)
                   (incf index))
 
                  (t (incf index)))))

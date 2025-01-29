@@ -317,9 +317,11 @@
          ;; Get the ldk-class for THIS
          (let ((ldk-class (gethash (slot-value (slot-value this '|name|) '|value|) *classes*)))
            (coerce (append (loop for method across (methods ldk-class)
+                                 do (format t "~&GDC: ~A~%" (%get-parameter-types (descriptor method)))
                                  when (str:starts-with? "<init>" (name method))
                                    collect (let ((c (make-instance '|java/lang/reflect/Constructor|)))
-                                             (|<init>(Ljava/lang/Class;[Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B)| c this (%get-parameter-types (descriptor method)) (make-array 0) (access-flags method) 0 (ijstring (descriptor method)) (make-array 0) (make-array 0)))))
+                                             (|<init>(Ljava/lang/Class;[Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B)| c this (%get-parameter-types (descriptor method)) (make-array 0) (access-flags method) 0 (ijstring (descriptor method)) (make-array 0) (make-array 0))
+                                             c)))
                    'vector)))
     (when *debug-trace*
       (format t "~&; trace: leaving  java/lang/Class.getDeclaredConstructors0(Z)~%"))))
@@ -472,3 +474,6 @@ user.variant
      (let* ((field (gethash param-long field-offset-table))
             (key (intern (slot-value (slot-value field '|name|) '|value|) :openldk)))
        (slot-value param-object key)))))
+
+(defmethod |clone()| ((array vector))
+  (copy-seq array))
