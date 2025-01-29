@@ -85,6 +85,10 @@
   (declare (ignore code))
   (%transpile-xastore context 'ir-iastore))
 
+(define-bytecode-transpiler :BASTORE (context code)
+  (declare (ignore code))
+  (%transpile-xastore context 'ir-bastore))
+
 (define-bytecode-transpiler :ACONST_NULL (context code)
   (declare (ignore code))
   (with-slots (pc) context
@@ -323,6 +327,24 @@
                                   :address pc-start
                                   :lvalue var
                                   :rvalue (make-instance 'ir-iaload
+                                                         :address pc-start
+                                                         :index (pop (stack context))
+                                                         :arrayref (pop (stack context)))))))
+        (push var (stack context))
+        code))))
+
+(define-bytecode-transpiler :BALOAD (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let* ((pc-start pc)
+           (var (make-stack-variable context pc-start :BYTE)))
+      (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
+      (let ((code
+             (list (make-instance 'ir-assign
+                                  :address pc-start
+                                  :lvalue var
+                                  :rvalue (make-instance 'ir-baload
                                                          :address pc-start
                                                          :index (pop (stack context))
                                                          :arrayref (pop (stack context)))))))

@@ -97,6 +97,9 @@
 (defclass/std ir-iastore (ir-xastore)
   ())
 
+(defclass/std ir-bastore (ir-xastore)
+  ())
+
 (defclass/std ir-fcmpg (ir-binop)
   ())
 
@@ -126,6 +129,9 @@
   ())
 
 (defclass/std ir-iaload (ir-array-index)
+  ())
+
+(defclass/std ir-baload (ir-array-index)
   ())
 
 (defclass/std ir-castore (ir-xastore)

@@ -107,6 +107,16 @@
                                           (list 'arrayref (code (codegen arrayref context))))
                                (list 'setf (list 'aref 'arrayref 'index) 'value)))))
 
+(defmethod codegen ((insn ir-bastore) context)
+  ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
+  (with-slots (arrayref index value) insn
+    (make-instance '<expression>
+                   :insn insn
+                   :code (list 'let (list (list 'value (code (codegen value context)))
+                                          (list 'index (code (codegen index context)))
+                                          (list 'arrayref (code (codegen arrayref context))))
+                               (list 'setf (list 'aref 'arrayref 'index) 'value)))))
+
 (defmethod codegen ((insn ir-idiv) context)
   ;; FIXME - handle all weird conditions
   (make-instance '<expression>
@@ -292,6 +302,16 @@
                                           (list 'arrayref (code (codegen arrayref context))))
                                (list 'aref 'arrayref 'index))
                    :expression-type :INTEGER)))
+
+(defmethod codegen ((insn ir-baload) context)
+  ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
+  (with-slots (index arrayref) insn
+    (make-instance '<expression>
+                   :insn insn
+                   :code (list 'let (list (list 'index (code (codegen index context)))
+                                          (list 'arrayref (code (codegen arrayref context))))
+                               (list 'aref 'arrayref 'index))
+                   :expression-type :BYTE)))
 
 (defmethod codegen ((insn ir-aaload) context)
   ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
