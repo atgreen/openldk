@@ -103,7 +103,7 @@
 (defmethod |getClass()| (object)
   ;;; FIXME - throw nullpointerexception
 	(when *debug-trace*
-		(format t "tracing: java/lang/Object.getClass(~A): ~A~%" object (java-class (gethash (format nil "~A" (type-of object)) *classes*))))
+		(format t "; trace: java/lang/Object.getClass(~A): ~A~%" object (java-class (gethash (format nil "~A" (type-of object)) *classes*))))
 	(java-class (gethash (format nil "~A" (type-of object)) *classes*)))
 
 (defmethod |java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (name initialize loader caller)
