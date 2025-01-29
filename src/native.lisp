@@ -111,7 +111,7 @@
        (progn
          (when *debug-trace*
            (format t "; trace: entering java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)~%"))
-         (let ((lname (substitute #\/ #\. (slot-value name '|value|))))
+         (let ((lname (substitute #\/ #\. (coerce (slot-value name '|value|) 'string))))
            (or (and (gethash lname *classes*)
                     (java-class (gethash lname *classes*)))
                (progn (let ((klass (classload lname)))
@@ -299,22 +299,50 @@
         0
         1)))
 
-(defmethod |getDeclaredFields0(Z)| ((this |java/lang/Class|) arg)
-  ;; FIXME
-  ;; Load java/lang/reflect/Field if it hasn't been yet.
-  (unless (gethash "java/lang/reflect/Field" *classes*)
-    (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/reflect/Field") nil nil nil))
-
-  ;; Get the ldk-class for THIS
+(defmethod |isInterface()| ((this |java/lang/Class|))
   (let ((ldk-class (gethash (slot-value (slot-value this '|name|) '|value|) *classes*)))
-    (labels ((get-fields (ldk-class)
-               (when ldk-class
-                 (append (loop for field across (fields ldk-class)
-                               collect (let ((f (make-instance '|java/lang/reflect/Field|)))
-                                         (|<init>(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;IILjava/lang/String;[B)| f this (ijstring (name field)) nil (access-flags field) nil nil nil)
-                                         f))
-                         (get-fields (gethash (super ldk-class) *classes*))))))
-      (coerce (get-fields ldk-class) 'vector))))
+    (if (interface-p ldk-class)
+        1
+        0)))
+
+(defmethod |getDeclaredConstructors0(Z)| ((this |java/lang/Class|) arg)
+  (unwind-protect
+       (progn
+         (when *debug-trace*
+           (format t "~&; trace: entering java/lang/Class.getDeclaredConstructors0(Z)~%"))
+         (unless (gethash "java/lang/reflect/Constructor" *classes*)
+           (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/reflect/Constructor") nil nil nil))
+
+         ;; Get the ldk-class for THIS
+         (let ((ldk-class (gethash (slot-value (slot-value this '|name|) '|value|) *classes*)))
+           (coerce (append (loop for method across (methods ldk-class)
+                                 collect (let ((c (make-instance '|java/lang/reflect/Constructor|)))
+                                           (|<init>(Ljava/lang/Class;[Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B)| c this (make-array 0) (make-array 0) (access-flags method) 0 (ijstring (descriptor method)) (make-array 0) (make-array 0)))))
+                   'vector)))
+    (when *debug-trace*
+      (format t "~&; trace: leaving  java/lang/Class.getDeclaredConstructors0(Z)~%"))))
+
+
+(defmethod |getDeclaredFields0(Z)| ((this |java/lang/Class|) arg)
+  (unwind-protect
+       (progn
+         (when *debug-trace*
+           (format t "~&; trace: entering java/lang/Class.getDeclaredFields0(Z)~%"))
+         (unless (gethash "java/lang/reflect/Field" *classes*)
+           (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/reflect/Field") nil nil nil))
+
+         ;; Get the ldk-class for THIS
+         (let ((ldk-class (gethash (slot-value (slot-value this '|name|) '|value|) *classes*)))
+           (labels ((get-fields (ldk-class)
+                      (when ldk-class
+                        (append (loop for field across (fields ldk-class)
+                                      collect (let ((f (make-instance '|java/lang/reflect/Field|)))
+                                                (|<init>(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;IILjava/lang/String;[B)| f this (ijstring (name field)) nil (access-flags field) nil nil nil)
+                                                f))
+                                (get-fields (gethash (super ldk-class) *classes*))))))
+             (coerce (get-fields ldk-class) 'vector))))
+    (when *debug-trace*
+      (format t "~&; trace: leaving  java/lang/Class.getDeclaredFields0(Z)~%"))))
 
 (defun |sun/misc/VM.initialize()| ()
   ;; FIXME
@@ -381,6 +409,7 @@
                   ("os.version" . "FIXME")
                   ("os.arch" . "FIXME")
                   ("file.separator" . "/")
+                  ("file.encoding" . "UTF-8")
                   ("path.separator" . ":")
                   ("line.separator" . (format nil "~%"))))
     (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring (car prop)) (ijstring (cdr prop))))
@@ -389,7 +418,6 @@
 #|
 Need to add:
 
-file.encoding
 file.encoding.pkg
 java.awt.printerjob
 java.io.tmpdir
@@ -432,3 +460,13 @@ user.variant
 
 (defun |java/lang/System.setOut0(Ljava/io/PrintStream;)| (print-stream)
   (setf (slot-value |+static-java/lang/System+| '|out|) print-stream))
+
+(defmethod |getIntVolatile(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) param-object param-long)
+  (format t "~&GETINTVOLATILE ~A ~A~%" param-object param-long)
+  (cond
+    ((vectorp param-object)
+     (aref param-object param-long))
+    (t
+     (let* ((field (gethash param-long field-offset-table))
+            (key (intern (slot-value (slot-value field '|name|) '|value|) :openldk)))
+       (slot-value param-object key)))))
