@@ -340,7 +340,7 @@ stream."
                                                                                          :external-format :utf-8))))
                                 (3
                                  (make-instance 'constant-int
-                                                :value (read-u4)))
+                                                :value (unsigned-to-signed-integer (read-u4))))
                                 (4
                                  (make-instance 'constant-float
                                                 :value (float-features:bits-single-float (read-u4))))

@@ -406,41 +406,46 @@
   (%clinit (classload "java/lang/Object"))
   (%clinit (classload "java/lang/String"))
   (%clinit (classload "java/lang/Class"))
+  (%clinit (classload "java/lang/ClassLoader"))
 
-  ;; Preload some important classes.
-  (dolist (c '("java/lang/Boolean"
-               "java/lang/Character"
-               "java/lang/Byte"
-               "java/lang/Short"
-               "java/lang/Integer"
-               "java/lang/Long"
-               "java/lang/Float"
-               "java/lang/Double"
-               "java/lang/Void"
-               "java/lang/ClassLoader"
-               "java/security/PrivilegedAction"
-               "java/lang/System"
-               "java/lang/ThreadGroup"
-               "java/lang/Thread"
-               "java/lang/ref/SoftReference"
-               "java/util/Properties"))
-    (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil nil nil))
+  (let ((boot-class-loader (make-instance '|java/lang/ClassLoader|)))
 
-  (let ((props (make-instance '|java/util/Properties|)))
-    (|<init>()| props)
-    (setf (slot-value |+static-java/lang/System+| '|props|) props))
+    ;; Preload some important classes.
+    (dolist (c '("java/lang/Boolean"
+                 "java/lang/Character"
+                 "java/lang/Byte"
+                 "java/lang/Short"
+                 "java/lang/Integer"
+                 "java/lang/Long"
+                 "java/lang/Float"
+                 "java/lang/Double"
+                 "java/lang/Void"
+                 "java/lang/ClassLoader"
+                 "java/security/PrivilegedAction"
+                 "java/lang/System"
+                 "java/lang/ThreadGroup"
+                 "java/lang/Thread"
+                 "java/lang/ref/SoftReference"
+                 "java/util/Properties"))
+      (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil))
 
-  (|java/lang/System.initializeSystemClass()|)
+    (let ((props (make-instance '|java/util/Properties|)))
+      (|<init>()| props)
+      (setf (slot-value |+static-java/lang/System+| '|props|) props))
 
-  (let* ((class (classload mainclass))
-         (argv (make-array (length args))))
-    (assert (or class (error "Can't load ~A" mainclass)))
-    (dotimes (i (length args))
-      (let ((arg (make-instance '|java/lang/String|)))
-        (setf (slot-value arg '|value|) (nth i args))
-        (setf (aref argv i) arg)))
-    (%clinit class)
-    (%eval (list (intern (format nil "~A.main([Ljava/lang/String;)" (slot-value class 'name)) :openldk) argv))))
+    (|java/lang/System.initializeSystemClass()|)
+
+    (|<init>()| boot-class-loader)
+
+    (let* ((class (classload mainclass))
+           (argv (make-array (length args))))
+      (assert (or class (error "Can't load ~A" mainclass)))
+      (dotimes (i (length args))
+        (let ((arg (make-instance '|java/lang/String|)))
+          (setf (slot-value arg '|value|) (nth i args))
+          (setf (aref argv i) arg)))
+      (%clinit class)
+      (%eval (list (intern (format nil "~A.main([Ljava/lang/String;)" (slot-value class 'name)) :openldk) argv)))))
 
 (defun main-wrapper ()
   "Main entry point into OpenLDK.  Process command line errors here."

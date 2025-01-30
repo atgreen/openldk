@@ -60,6 +60,8 @@ entry block of the control flow graph (CFG) to `B` must pass through `A`.
 This slot stores the set of all such blocks `A` that dominate the current block.
 
 The dominance set is represented as an `fset:set` of <basic-block> objects.")
+   (fall-through-address
+    :doc "The address that follows naturally in the absence of a goto/branch/return/throw.")
    (stop)
    (code-emitted-p
     :doc "True if this block's code has already been emitted.")
@@ -245,12 +247,20 @@ The dominance set is represented as an `fset:set` of <basic-block> objects.")
                                            do (push insn (code block))
                                            do (setf (gethash address block-by-address) block)
                                            do (setf ir-code (cdr ir-code))
-                                           until (and (car ir-code) (gethash (address (car ir-code)) block-starts)))
+                                           until (if (and (car ir-code) (gethash (address (car ir-code)) block-starts))
+                                                     (progn
+                                                       ; (format t "~&Checking for ~A in ~A~%" (address (car ir-code)) (aref (next-insn-list *context*) (floor address)))
+                                                       (when (find (address (car ir-code)) (aref (next-insn-list *context*) (floor address)))
+                                                         ; (format t "Setting fall-through-address to ~A~%" (address (car ir-code)))
+                                                         (setf (fall-through-address block) (address (car ir-code))))
+                                                       t)
+                                                     nil))
                                      block))))
       (dolist (block blocks)
         ;; Make connections between basic blocks.
         (let* ((opcode (aref +opcodes+ (aref (bytecode *context*) (floor (address (car (code block)))))))
                (targets (aref (next-insn-list *context*) (floor (address (car (code block)))))))
+          (setf (fall-through-address block) (gethash (fall-through-address block) block-by-address))
           (dolist (target targets)
             (let ((target-block (gethash (floor target) block-by-address)))
               (when target-block

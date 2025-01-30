@@ -80,6 +80,12 @@
 (defclass |sun/misc/Unsafe| (|java/lang/Object|)
   ())
 
+(defclass |java/io/InputStream| (|java/lang/Object|)
+  ())
+
+(defclass |java/io/FileInputStream| (|java/io/InputStream|)
+  ())
+
 (defclass |java/lang/Thread| (|java/lang/Object|)
   ())
 

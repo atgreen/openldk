@@ -375,6 +375,7 @@
   ;; FIXME
   (let* ((field (gethash field-id field-offset-table))
          (key (intern (slot-value (slot-value field '|name|) '|value|) :openldk)))
+    (format t "~&CASI: ~A ~A ~A~%" (slot-value obj key) expected-value new-value)
     (if (equal (slot-value obj key) expected-value)
         (progn
           (setf (slot-value obj key) new-value)
@@ -409,6 +410,8 @@
                   ("java.vendor.url" . "https://github.com/atgreen/openldk")
                   ("java.vendor.url.bug" . "https://github.com/atgreen/openldk/issues")
                   ("java.class.version" . "52.0")
+                  ;; FIXME
+                  ("java.home" . "/home/green/git/openldk")
                   ("os.name" . "Linux")
                   ("os.version" . "FIXME")
                   ("os.arch" . "FIXME")
@@ -523,8 +526,69 @@ user.variant
   (sb-alien:free-alien (gethash address %unsafe-memory-table)))
 
 (defun |java/lang/System.mapLibraryName(Ljava/lang/String;)| (library-name)
-  (jstring (format nil "lib~A.so" (coerce (slot-value library-name '|value|) 'string))))
+  #+LINUX (jstring (format nil "lib~A.so" (coerce (slot-value library-name '|value|) 'string)))
+  #-LINUX (error "unimplemented"))
 
 (defun |java/lang/ClassLoader.findBuiltinLib(Ljava/lang/String;)| (library-name)
-  (format t "FIND-BUILTIN-LIB ~A~%" library-name)
+  ;; FIXME
+  library-name)
+
+(defmethod |load(Ljava/lang/String;Z)| ((loader t) library-name is-builtin)
+  (format t "FIXME: ~A loading ~A~%" loader library-name)
+  (setf (slot-value loader '|loaded|) 1)
+  )
+
+(defmethod |sun/misc/Signal.findSignal(Ljava/lang/String;)| (signal-name)
+  (let ((sname (coerce (slot-value signal-name '|value|) 'string)))
+    (cond
+      ((string= sname "HUP") 1)
+      ((string= sname "INT") 2)
+      ((string= sname "KILL") 9)
+      ((string= sname "TERM") 15)
+      (t (error "unimplemented")))))
+
+(defun |sun/misc/Signal.handle0(IJ)| (sig native-h)
+  ;; FIXME
+  1)
+
+(defmethod |notifyAll()| ((objref |java/lang/Object|))
+  ;; FIXME
+  )
+
+(defun |sun/misc/URLClassPath.getLookupCacheURLs(Ljava/lang/ClassLoader;)| (class-loader)
+  ;; FIXME
   nil)
+
+(defmethod |open0(Ljava/lang/String;)| ((fis |java/io/FileInputStream|) filename)
+  (handler-case
+      (setf (slot-value fis '|fd|) (open (coerce (slot-value filename '|value|) 'string)
+                                         :element-type '(unsigned-byte 8)
+                                         :direction :input))
+    (error (e)
+      (print e)
+      (error e))))
+
+(defmethod |readBytes([BII)| ((fis |java/io/FileInputStream|) byte-array offset length)
+  (let ((in-stream (slot-value fis '|fd|))
+        (bytes-read 0))
+    (format t "~&READ BYTES ~A~%" length)
+    (loop for i from offset below (+ offset length)
+          for byte = (read-byte in-stream nil nil) ; Read a byte, return NIL on EOF
+          while byte
+          do (setf (aref byte-array i) byte)
+             (incf bytes-read))  ; Count bytes read
+    (format t "~&   read ~A~%" bytes-read)
+    bytes-read))
+
+(defmethod |available0()| ((fis |java/io/FileInputStream|))
+  ;; FIXME - may throw exception
+  (let* ((in-stream (slot-value fis '|fd|))
+         (remaining (- (file-length in-stream) (file-position in-stream))))
+    (format t "~&AVAILABLE = ~A~%" remaining)
+    remaining))
+
+(defmethod |isInstance(Ljava/lang/Object;)| ((this |java/lang/Class|) objref)
+  (if (typep objref (intern (coerce (slot-value (slot-value this '|name|) '|value|) 'string) :openldk)) 1 0))
+
+(defmethod |closeAll(Ljava/io/Closeable;)| ((stream stream) closeable)
+  (close stream))
