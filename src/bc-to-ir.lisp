@@ -444,7 +444,8 @@
  (:I2C 'ir-i2c :CHAR)
  (:I2L 'ir-i2l :LONG)
  (:L2F 'ir-l2f :FLOAT)
- (:L2I 'ir-l2i :INTEGER))
+ (:L2I 'ir-l2i :INTEGER)
+ (:LNEG 'ir-lneg :LONG))
 
  (defun %transpile-binop (context ir-class op-type)
   (with-slots (pc) context

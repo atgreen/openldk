@@ -472,6 +472,12 @@
                  :code (list 'float (code (codegen (value insn) context)))
                  :expression-type :FLOAT))
 
+(defmethod codegen ((insn ir-lneg) context)
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list '- (code (codegen (value insn) context)))
+                 :expression-type :LONG))
+
 (defmethod codegen ((insn ir-i2l) context)
   (make-instance '<expression>
                  :insn insn
@@ -486,11 +492,18 @@
                  :expression-type :BYTE))
 
 (defmethod codegen ((insn ir-i2s) context)
-  ;; FIXME - char width, also maybe use :INTEGER?
+  ;; FIXME - maybe use :INTEGER?
   (make-instance '<expression>
                  :insn insn
                  :code (list 'unsigned-to-signed-short (list 'logand (code (codegen (value insn) context)) #xFFFF))
                  :expression-type :SHORT))
+
+(defmethod codegen ((insn ir-l2i) context)
+  ;; FIXME - review this
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'unsigned-to-signed-integer (list 'logand (code (codegen (value insn) context)) #xFFFFFFFF))
+                 :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-i2c) context)
   ;; FIXME - char width, also maybe use :INTEGER?
@@ -498,14 +511,6 @@
                  :insn insn
                  :code (list 'logand (code (codegen (value insn) context)) #xFFFF)
                  :expression-type :CHAR))
-
-(defmethod codegen ((insn ir-l2i) context)
-  (make-instance '<expression>
-                 :insn insn
-                 :code (list 'logand
-                             (code (codegen (value insn) context))
-                             #xFFFFFFFF)
-                 :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-f2i) context)
   (make-instance '<expression>
