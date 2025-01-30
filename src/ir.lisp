@@ -131,6 +131,9 @@
 (defclass/std ir-iaload (ir-array-index)
   ())
 
+(defclass/std ir-laload (ir-array-index)
+  ())
+
 (defclass/std ir-baload (ir-array-index)
   ())
 
@@ -387,7 +390,7 @@
 (defclass/std ir-ldc2_w (ir-node)
   ())
 
-(defclass/std ir-lushr (ir-node)
+(defclass/std ir-lushr (ir-binop)
   ())
 
 (defclass/std ir-fadd (ir-binop)

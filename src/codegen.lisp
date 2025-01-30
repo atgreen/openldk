@@ -303,6 +303,16 @@
                                (list 'aref 'arrayref 'index))
                    :expression-type :INTEGER)))
 
+(defmethod codegen ((insn ir-laload) context)
+  ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
+  (with-slots (index arrayref) insn
+    (make-instance '<expression>
+                   :insn insn
+                   :code (list 'let (list (list 'index (code (codegen index context)))
+                                          (list 'arrayref (code (codegen arrayref context))))
+                               (list 'aref 'arrayref 'index))
+                   :expression-type :LONG)))
+
 (defmethod codegen ((insn ir-baload) context)
   ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
   (with-slots (index arrayref) insn
@@ -659,6 +669,13 @@
                  :code (list 'shr (code (codegen (value1 insn) context)) (code (codegen (value2 insn) context)) 32)
                  :expression-type :INTEGER))
 
+(defmethod codegen ((insn ir-lushr) context)
+  ;; FIXME: this is wrong.
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'shr (code (codegen (value1 insn) context)) (code (codegen (value2 insn) context)) 64)
+                 :expression-type :LONG))
+
 (defmethod codegen ((insn ir-lcmp) context)
   (make-instance '<expression>
                  :insn insn
@@ -672,16 +689,6 @@
                                    (list 't
                                          -1)))
                  :expression-type :INTEGER))
-
-(defmethod codegen ((insn ir-lushr) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (list 'let (list (list 'value2 (gen-pop-item))
-                                                    (list 'value1 (gen-pop-item)))
-                                         (gen-push-item (list 'ash 'value1 (list \- 'value2))))
-                             :expression-type :LONG)))
-    (error (stack context)) (error (stack context)) (push expr (stack context))
-    expr))
 
 (defmethod codegen ((insn ir-goto) context)
   (declare (ignore context))

@@ -319,7 +319,7 @@
   (declare (ignore code))
   (with-slots (pc) context
     (let* ((pc-start pc)
-           (var (make-stack-variable context pc-start :CHAR)))
+           (var (make-stack-variable context pc-start :INTEGER)))
       (incf pc)
       (push pc (aref (next-insn-list context) pc-start))
       (let ((code
@@ -327,6 +327,24 @@
                                   :address pc-start
                                   :lvalue var
                                   :rvalue (make-instance 'ir-iaload
+                                                         :address pc-start
+                                                         :index (pop (stack context))
+                                                         :arrayref (pop (stack context)))))))
+        (push var (stack context))
+        code))))
+
+(define-bytecode-transpiler :LALOAD (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let* ((pc-start pc)
+           (var (make-stack-variable context pc-start :LONG)))
+      (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
+      (let ((code
+             (list (make-instance 'ir-assign
+                                  :address pc-start
+                                  :lvalue var
+                                  :rvalue (make-instance 'ir-laload
                                                          :address pc-start
                                                          :index (pop (stack context))
                                                          :arrayref (pop (stack context)))))))
@@ -422,7 +440,7 @@
  (:F2I 'ir-f2i :INTEGER)
  (:I2F 'ir-i2f :FLOAT)
  (:I2B 'ir-i2b :BYTE)
- (:I2S 'ir-i2s :BYTE)
+ (:I2S 'ir-i2s :SHORT)
  (:I2C 'ir-i2c :CHAR)
  (:I2L 'ir-i2l :LONG)
  (:L2F 'ir-l2f :FLOAT)
@@ -477,12 +495,13 @@
   (:LADD 'ir-ladd :LONG)
   (:LAND 'ir-land :LONG)
   (:LCMP 'ir-lcmp :INTEGER)
-  (:LDIV 'ir-idiv :LONG)
+  (:LDIV 'ir-ldiv :LONG)
   (:LMUL 'ir-lmul :LONG)
   (:LREM 'ir-lrem :LONG)
-  (:LSHL 'ir-ishl :INTEGER)
-  (:LSHR 'ir-ishr :INTEGER)
-  (:LSUB 'ir-lsub :LONG))
+  (:LSHL 'ir-lshl :LONG)
+  (:LSHR 'ir-lshr :LONG)
+  (:LSUB 'ir-lsub :LONG)
+  (:LUSHR 'ir-lushr :LONG))
 
 (define-bytecode-transpiler :BIPUSH (context code)
   (with-slots (pc) context
@@ -1230,15 +1249,6 @@
 (define-bytecode-transpiler :LCONST_1 (context code)
   (declare (ignore code))
   (%transpile-iconst-x context 1))
-
-(define-bytecode-transpiler-TODO :LUSHR (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (push pc (aref (next-insn-list context) pc-start))
-      (list (make-instance 'ir-lushr
-                           :address pc-start)))))
 
 (define-bytecode-transpiler :MONITORENTER (context code)
   (declare (ignore code))
