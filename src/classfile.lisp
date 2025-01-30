@@ -348,7 +348,7 @@ stream."
                                  (progn
                                    (setf skip t)
                                    (make-instance 'constant-long
-                                                  :value (read-u8))))
+                                                  :value (unsigned-to-signed-long (read-u8)))))
                                 (6
                                  (progn
                                    (setf skip t)
