@@ -53,7 +53,6 @@
   nil)
 
 (defun |java/lang/Class.getSecurityManager()| ()
-  (print "java/lang/Class.getSecurityManager()")
   (classload "java/lang/SecurityManager")
   (eval (list 'make-instance (list 'quote '|java/lang/SecurityManager|))))
 
