@@ -40,6 +40,16 @@
 (defclass/std |java/lang/Object| ()
   ())
 
+(defmethod |clone()| ((|this| |java/lang/Object|))
+  "Default implementation of clone for CLONEABLE objects."
+  (assert (typep |this| '|java/lang/Cloneable|))
+  (let ((copy (allocate-instance (class-of |this|))))
+    (dolist (slot (mapcar #'sb-mop:slot-definition-name
+                          (sb-mop:class-slots (class-of |this|))))
+      (when (slot-boundp |this| slot)
+        (setf (slot-value copy slot) (slot-value |this| slot))))
+    copy))
+
 (defclass |java/lang/String| (|java/lang/Object|)
   ((|value| :initform NIL :allocation :instance)
    (|hash| :initform NIL :allocation :instance)
