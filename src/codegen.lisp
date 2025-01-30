@@ -375,9 +375,19 @@
                                               (list 'value1 (code (codegen (value1 insn) context))))
                                    (list 'rem 'value1 'value2))
                              (list 'division-by-zero (list 'e)
-                                   (gen-push-item (list 'make-instance (list 'quote '|java/lang/ArithmeticException|)))
                                    (list 'error (list 'lisp-condition (list 'make-instance (list 'quote '|java/lang/ArithmeticException|))))))
                  :expression-type :INTEGER))
+
+(defmethod codegen ((insn ir-lrem) context)
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'handler-case
+                             (list 'let (list (list 'value2 (code (codegen (value2 insn) context)))
+                                              (list 'value1 (code (codegen (value1 insn) context))))
+                                   (list 'rem 'value1 'value2))
+                             (list 'division-by-zero (list 'e)
+                                   (list 'error (list 'lisp-condition (list 'make-instance (list 'quote '|java/lang/ArithmeticException|))))))
+                 :expression-type :LONG))
 
 (defmethod codegen ((insn ir-fdiv) context)
   ;; FIXME - handle all weird conditions

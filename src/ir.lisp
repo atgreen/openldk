@@ -203,6 +203,9 @@
 (defclass/std ir-irem (ir-binop)
   ())
 
+(defclass/std ir-lrem (ir-binop)
+  ())
+
 (defclass/std ir-dup2 (ir-node)
   ())
 

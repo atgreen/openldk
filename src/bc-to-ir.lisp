@@ -421,6 +421,8 @@
  (:F2D 'ir-f2d :DOUBLE)
  (:F2I 'ir-f2i :INTEGER)
  (:I2F 'ir-i2f :FLOAT)
+ (:I2B 'ir-i2b :BYTE)
+ (:I2S 'ir-i2s :BYTE)
  (:I2C 'ir-i2c :CHAR)
  (:I2L 'ir-i2l :LONG)
  (:L2F 'ir-l2f :FLOAT)
@@ -477,6 +479,7 @@
   (:LCMP 'ir-lcmp :INTEGER)
   (:LDIV 'ir-idiv :LONG)
   (:LMUL 'ir-lmul :LONG)
+  (:LREM 'ir-lrem :LONG)
   (:LSHL 'ir-ishl :INTEGER)
   (:LSHR 'ir-ishr :INTEGER)
   (:LSUB 'ir-lsub :LONG))
@@ -603,16 +606,26 @@
                                        :class class)
                         code)))))))))
 
-(defun unsigned-to-signed (unsigned-value)
+(defun unsigned-to-signed-integer (unsigned-value)
   (if (>= unsigned-value 32768)
       (- unsigned-value 65536)
+      unsigned-value))
+
+(defun unsigned-to-signed-short (unsigned-value)
+  (if (>= unsigned-value 16384)
+      (- unsigned-value 32768)
+      unsigned-value))
+
+(defun unsigned-to-signed-byte (unsigned-value)
+  (if (> unsigned-value 127)  ; 128-255 should be negative
+      (- unsigned-value 256)
       unsigned-value))
 
 (define-bytecode-transpiler :GOTO (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
-        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
+        (let* ((offset (unsigned-to-signed-integer (+ (* (aref code (incf pc)) 256)
                                               (aref code (incf pc))))))
           (incf pc)
           (push (+ pc-start offset) (aref (next-insn-list context) pc-start))
@@ -782,7 +795,7 @@
   (with-slots (pc class) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
-        (let* ((offset (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
+        (let* ((offset (unsigned-to-signed-integer (+ (* (aref code (incf pc)) 256)
                                               (aref code (incf pc)))))
                (value2 (pop (stack context)))
                (value1 (pop (stack context))))
@@ -833,7 +846,7 @@
                       (with-slots (pc class) context
                         (let ((pc-start pc))
                           (with-slots (constant-pool) class
-                            (let* ((offset (unsigned-to-signed
+                            (let* ((offset (unsigned-to-signed-integer
                                              (+ (* (aref code (incf pc)) 256)
                                                 (aref code (incf pc))))))
                               (incf pc)
@@ -1383,7 +1396,7 @@
   (with-slots (pc) context
     (let* ((pc-start pc)
            (var (make-stack-variable context pc-start :INTEGER))
-           (short (unsigned-to-signed (+ (* (aref code (incf pc)) 256)
+           (short (unsigned-to-signed-integer (+ (* (aref code (incf pc)) 256)
                                          (* (aref code (incf pc)))))))
       (incf pc)
       (push pc (aref (next-insn-list context) pc-start))
@@ -1402,21 +1415,21 @@
           (incf pc (1- (- 4 padding))))
 
         ;; Read default offset, low value, and high value
-        (let* ((default-offset (unsigned-to-signed (+ (* (aref code (incf pc)) 16777216)
+        (let* ((default-offset (unsigned-to-signed-integer (+ (* (aref code (incf pc)) 16777216)
                                                       (* (aref code (incf pc)) 65536)
                                                       (* (aref code (incf pc)) 256)
                                                       (aref code (incf pc)))))
-               (low (unsigned-to-signed (+ (* (aref code (incf pc)) 16777216)
+               (low (unsigned-to-signed-integer (+ (* (aref code (incf pc)) 16777216)
                                            (* (aref code (incf pc)) 65536)
                                            (* (aref code (incf pc)) 256)
                                            (aref code (incf pc)))))
-               (high (unsigned-to-signed (+ (* (aref code (incf pc)) 16777216)
+               (high (unsigned-to-signed-integer (+ (* (aref code (incf pc)) 16777216)
                                             (* (aref code (incf pc)) 65536)
                                             (* (aref code (incf pc)) 256)
                                             (aref code (incf pc)))))
                (num-cases (1+ (- high low)))
                (jump-offsets (loop repeat num-cases
-                                   collect (unsigned-to-signed (+ (* (aref code (incf pc)) 16777216)
+                                   collect (unsigned-to-signed-integer (+ (* (aref code (incf pc)) 16777216)
                                                                   (* (aref code (incf pc)) 65536)
                                                                   (* (aref code (incf pc)) 256)
                                                                   (aref code (incf pc)))))))
@@ -1456,7 +1469,7 @@
           (incf pc (1- (- 4 padding))))
 
         ;; Read default offset, low value, and high value
-        (let* ((default-offset (unsigned-to-signed (+ (* (aref code (incf pc)) 16777216)
+        (let* ((default-offset (unsigned-to-signed-integer (+ (* (aref code (incf pc)) 16777216)
                                                       (* (aref code (incf pc)) 65536)
                                                       (* (aref code (incf pc)) 256)
                                                       (aref code (incf pc)))))
@@ -1467,15 +1480,15 @@
                (match-offset-pairs
                  (loop repeat npairs
                        collect (cons
-                                (unsigned-to-signed (+ (* (aref code (incf pc)) 16777216)
+                                (unsigned-to-signed-integer (+ (* (aref code (incf pc)) 16777216)
                                                        (* (aref code (incf pc)) 65536)
                                                        (* (aref code (incf pc)) 256)
                                                        (aref code (incf pc))))
                                 (+ pc-start
-                                   (unsigned-to-signed (+ (* (aref code (incf pc)) 16777216)
-                                                          (* (aref code (incf pc)) 65536)
-                                                          (* (aref code (incf pc)) 256)
-                                                          (aref code (incf pc)))))))))
+                                   (unsigned-to-signed-integer (+ (* (aref code (incf pc)) 16777216)
+                                                                  (* (aref code (incf pc)) 65536)
+                                                                  (* (aref code (incf pc)) 256)
+                                                                  (aref code (incf pc)))))))))
 
           (let ((code (list (make-instance 'ir-lookupswitch
                                            :index (pop (stack context))
