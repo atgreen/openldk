@@ -29,6 +29,18 @@ my Fedora Linux system that looks like:
 $ export LDK_CLASSPATH=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.432.b06-3.fc40.x86_64/jre/lib/rt.jar
 ```
 
+## How it Works
+
+The `openldk` reads class and jar files, and translates them into lisp
+code, which sbcl's compiler then turns into machine code for
+execution.
+
+Java classes and objects are mapped to CLOS classes and object.  The
+exception hierarchy is mirrored by Common Lisp condition hierarchy.
+CLOS provides everything we need to support reflection.  SBCL's
+backtrace capabilities allow us check calling classes to support
+Java's security model.
+
 ## Hacking
 
 ### Testing
@@ -44,6 +56,7 @@ string of characters that are interpreted as below:
 - `b` - trace bytecode compilation
 - `c` - dump all Lisp code prior to evaluation
 - `t` - trace method entries at runtime
+- `s` - start a slynk server at startup (port 2025)
 - `u` - unmuffle the Lisp compiler
 - `x` - trace opcode execution (use with `t`)
 
