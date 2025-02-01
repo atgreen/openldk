@@ -69,6 +69,8 @@ The dominance set is represented as an `fset:set` of <basic-block> objects.")
     :doc "A list of conses of handler type and handler block.")
    (finally
     :doc "A list of finally blocks for each try-finally starting here.")
+   (end-of-handler?
+    :doc "T is this is the last block of a try handler, NIL otherwise.")
    (marks)
    (try-exit-block
     :doc "The block at which try/catch handlers exit if this is a try block.")
@@ -249,9 +251,7 @@ The dominance set is represented as an `fset:set` of <basic-block> objects.")
                                            do (setf ir-code (cdr ir-code))
                                            until (if (and (car ir-code) (gethash (address (car ir-code)) block-starts))
                                                      (progn
-                                                       ; (format t "~&Checking for ~A in ~A~%" (address (car ir-code)) (aref (next-insn-list *context*) (floor address)))
                                                        (when (find (address (car ir-code)) (aref (next-insn-list *context*) (floor address)))
-                                                         ; (format t "Setting fall-through-address to ~A~%" (address (car ir-code)))
                                                          (setf (fall-through-address block) (address (car ir-code))))
                                                        t)
                                                      nil))
@@ -285,18 +285,20 @@ The dominance set is represented as an `fset:set` of <basic-block> objects.")
       (compute-dominance blocks (gethash 0 block-by-address))
 
       ;; Let's eliminate the exit goto for try and handler blocks using dominator sets.
-      (labels ((find-merge-point (block)
-                 "Find the nearest common dominator of all successors of the block and its handlers."
-                 (let* ((successors (fset:union (successors block)
-                                                (fset:convert 'fset:set (mapcar #'cdr (try-catch block)))))
-                        (dominator-sets (mapcar (lambda (b) (slot-value b 'dominators))
-                                                (fset:convert 'list successors))))
-                   ;; Find the intersection of all dominator sets.
-                   (let ((common-dominators (reduce #'fset:intersection dominator-sets)))
-                     ;; Select the last block in the intersection (nearest common dominator).
-                     (fset:reduce (lambda (a b)
-                                    (if (> (address a) (address b)) a b))
-                                  common-dominators))))
+      (labels ((find-merge-point (block dominator seen-table)
+                 "Find a successor to BLOCK not dominated by DOMINATOR."
+                 (if (not (gethash block seen-table))
+                     (progn
+                       (setf (gethash block seen-table) t)
+                       (if (fset:member? dominator (dominators block))
+                           (loop for successor in (fset:convert 'list (successors block))
+                                 for merge-point = (find-merge-point successor dominator seen-table)
+                                 when merge-point
+                                   do (progn
+                                        (setf (end-of-handler? block) t)
+                                        (return-from find-merge-point merge-point)))
+                           block))
+                     nil))
                (remove-goto (block target-address seen-table)
                  "Remove a trailing GOTO to TARGET-ADDRESS at the end of BLOCK and successors until we reach TARGET-ADDRESS."
                  (unless (gethash block seen-table)
@@ -310,14 +312,14 @@ The dominance set is represented as an `fset:set` of <basic-block> objects.")
                      (remove-goto b target-address seen-table))
                    (dolist (b (mapcar (lambda (tc) (cdr tc)) (try-catch block)))
                      (remove-goto b target-address seen-table)))))
-        (loop for block in blocks
-              when (try-catch block)
-                do (let ((merge-point (find-merge-point block)))
-                     (when merge-point
-                       (setf (try-exit-block block) merge-point)
-                       (remove-goto block (address merge-point) (make-hash-table))))))
+        (dolist (block blocks)
+          (dolist (handler-type-block (try-catch block))
+            (let ((merge-point (find-merge-point (cdr handler-type-block) (cdr handler-type-block) (make-hash-table :test #'equal))))
+              (when merge-point
+                (setf (try-exit-block block) merge-point)
+                (remove-goto block (address merge-point) (make-hash-table))))))
 
-      (setf (block-address-table *context*) block-by-address)
+        (setf (block-address-table *context*) block-by-address)
 
-      (dump-method-dot blocks)
-      blocks)))
+        (dump-method-dot blocks)
+        blocks))))

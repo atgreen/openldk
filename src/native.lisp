@@ -56,6 +56,7 @@
   (classload "java/lang/SecurityManager")
   (eval (list 'make-instance (list 'quote '|java/lang/SecurityManager|))))
 
+#|
 (defmethod |println(Ljava/lang/String;)| (stream string)
   (format t "~A~%" (slot-value string '|value|)))
 
@@ -67,6 +68,7 @@
 
 (defmethod |println(Ljava/lang/Object;)| (stream (object (eql nil)))
   (format t "null~%"))
+|#
 
 (defmethod |fillInStackTrace(I)| ((|this| |java/lang/Throwable|) dummy)
   (let ((bt (trivial-backtrace:print-backtrace nil :output nil)))
@@ -316,7 +318,6 @@
          ;; Get the ldk-class for THIS
          (let ((ldk-class (gethash (slot-value (slot-value this '|name|) '|value|) *classes*)))
            (coerce (append (loop for method across (methods ldk-class)
-                                 do (format t "~&GDC: ~A~%" (%get-parameter-types (descriptor method)))
                                  when (str:starts-with? "<init>" (name method))
                                    collect (let ((c (make-instance '|java/lang/reflect/Constructor|)))
                                              (|<init>(Ljava/lang/Class;[Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B)| c this (%get-parameter-types (descriptor method)) (make-array 0) (access-flags method) 0 (ijstring (descriptor method)) (make-array 0) (make-array 0))
@@ -353,7 +354,6 @@
 
 (defmethod |compareAndSwapObject(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)| ((unsafe |sun/misc/Unsafe|) obj field-id expected-value new-value)
   ;; FIXME
-  ; (format t "~&~A.compareAndSwapObject(~A, ~A, ~A, ~A)~%" unsafe obj field-id expected-value new-value)
   (cond
     ((vectorp obj)
      (if (equal (aref obj field-id) expected-value)
@@ -374,7 +374,6 @@
   ;; FIXME
   (let* ((field (gethash field-id field-offset-table))
          (key (intern (slot-value (slot-value field '|name|) '|value|) :openldk)))
-    (format t "~&CASI: ~A ~A ~A~%" (slot-value obj key) expected-value new-value)
     (if (equal (slot-value obj key) expected-value)
         (progn
           (setf (slot-value obj key) new-value)
@@ -388,12 +387,7 @@
   ;; FIXME
   (cond
     ((vectorp obj)
-     ; (format t "~A.getObjectVolatile(~A, ~A) = ~A~%" unsafe obj l (aref obj l))
      (aref obj l))
-#|
-     (format t "~A.getObjectVolatile(~A, ~A) = ~A~%" unsafe obj l (aref obj (ash l -2)))
-     (aref obj (ash l -2)))
-|#
     (t (error "Unrecognized object type in getObjectVolatile: " obj))))
 
 (defun |java/security/AccessController.getStackAccessControlContext()| ()
@@ -401,7 +395,7 @@
   nil)
 
 (defun |java/lang/System.initProperties(Ljava/util/Properties;)| (props)
-  (dolist (prop '(("java.specification.version" . "8.0")
+  (dolist (prop `(("java.specification.version" . "8.0")
                   ("java.specification.name" . "Java Platform API Specification")
                   ("java.specification.vendor" . "Oracle Corporation")
                   ("java.version" . "8.0")
@@ -419,7 +413,7 @@
                   ("path.separator" . ":")
                   ;; FIXME
                   ("java.library.path" . "/usr/lib/jvm/java-21-openjdk-21.0.5.0.11-1.fc40.x86_64/lib/")
-                  ("line.separator" . (format nil "~%"))))
+                  ("line.separator" . ,(format nil "~%"))))
     (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring (car prop)) (ijstring (cdr prop))))
   props)
 
@@ -473,7 +467,6 @@ user.variant
   (setf (slot-value |+static-java/lang/System+| '|out|) print-stream))
 
 (defmethod |getIntVolatile(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) param-object param-long)
-  (format t "~&GETINTVOLATILE ~A ~A~%" param-object param-long)
   (cond
     ((vectorp param-object)
      (aref param-object param-long))
@@ -570,20 +563,17 @@ user.variant
 (defmethod |readBytes([BII)| ((fis |java/io/FileInputStream|) byte-array offset length)
   (let ((in-stream (slot-value fis '|fd|))
         (bytes-read 0))
-    (format t "~&READ BYTES ~A~%" length)
     (loop for i from offset below (+ offset length)
           for byte = (read-byte in-stream nil nil) ; Read a byte, return NIL on EOF
           while byte
           do (setf (aref byte-array i) byte)
              (incf bytes-read))  ; Count bytes read
-    (format t "~&   read ~A~%" bytes-read)
     bytes-read))
 
 (defmethod |available0()| ((fis |java/io/FileInputStream|))
   ;; FIXME - may throw exception
   (let* ((in-stream (slot-value fis '|fd|))
          (remaining (- (file-length in-stream) (file-position in-stream))))
-    (format t "~&AVAILABLE = ~A~%" remaining)
     remaining))
 
 (defmethod |isInstance(Ljava/lang/Object;)| ((this |java/lang/Class|) objref)
@@ -591,3 +581,13 @@ user.variant
 
 (defmethod |closeAll(Ljava/io/Closeable;)| ((stream stream) closeable)
   (close stream))
+
+(defmethod |writeBytes([BIIZ)| ((fos |java/io/FileOutputStream|) byte-array offset length append?)
+  (declare (ignore append?))
+  (let* ((file-descriptor (slot-value fos '|fd|))
+         (fd (slot-value file-descriptor '|fd|)))
+    (cond
+      ((eq fd 1)
+       (write-sequence byte-array *standard-output* :start offset :end (+ offset length)))
+      (t
+       (assert "unimplemented")))))

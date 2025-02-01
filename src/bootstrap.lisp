@@ -96,6 +96,12 @@
 (defclass |java/io/FileInputStream| (|java/io/InputStream|)
   ())
 
+(defclass |java/io/OutputStream| (|java/lang/Object|)
+  ())
+
+(defclass |java/io/FileOutputStream| (|java/io/OutputStream|)
+  ())
+
 (defclass |java/lang/Thread| (|java/lang/Object|)
   ())
 
@@ -106,27 +112,44 @@
   (error (format nil "Missing lisp-condition implementation for ~A." throwable)))
 
 (define-condition |condition-java/lang/Throwable| (error)
-  ((objref)))
+  ((|objref|)))
 
 (define-condition |condition-java/lang/Exception|
     (|condition-java/lang/Throwable|)
-  ((objref)))
+  ())
+
+(defclass |java/lang/Throwable| (|java/lang/Object|)
+  ())
+
+(defclass |java/lang/Exception| (|java/lang/Throwable|)
+  ())
 
 (defclass |java/lang/ArithmeticException| (|java/lang/Exception|)
   ())
 
+(define-condition |condition-java/io/InterruptedIOException| (|condition-java/lang/Throwable|)
+  ())
+
 (define-condition |condition-java/lang/ArithmeticException|
     (|condition-java/lang/Exception|)
-  ((objref)))
+  ())
 
 (defclass |java/lang/ClassCastException| (|java/lang/RuntimeException|)
   ())
 
 (define-condition |condition-java/lang/RuntimeException|
     (|condition-java/lang/Exception|)
-  ((objref)))
+  ())
 
 (define-condition |condition-java/lang/ClassCastException|
+    (|condition-java/lang/RuntimeException|)
+  ())
+
+(define-condition |condition-java/lang/reflect/InvocationTargetException|
+    (|condition-java/lang/RuntimeException|)
+  ())
+
+(define-condition |condition-java/lang/ClassNotFoundException|
     (|condition-java/lang/RuntimeException|)
   ())
 
@@ -135,7 +158,9 @@
   ())
 
 (defmethod lisp-condition ((throwable |java/lang/ArithmeticException|))
-  (make-condition '|condition-java/lang/ArithmeticException|))
+  (let ((c (make-condition '|condition-java/lang/ArithmeticException|)))
+    (setf (slot-value c '|objref|) throwable)
+    c))
 
 (define-condition |condition-java/lang/ReflectiveOperationException|
 		(|condition-java/lang/Exception|)
