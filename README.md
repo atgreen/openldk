@@ -80,7 +80,7 @@ public class demo
    (OPENLDK::|demo.main([Ljava/lang/String;)| OPENLDK::|arg1|)))
 ```
 
-Note that the methods are all stubs that invoke the compiler and them
+Note that the methods are all stubs that invoke the compiler and then
 themselves.  This is how we support incremental JIT compilation.
 
 When the `add` method is called, the compiler will read `add`'s
