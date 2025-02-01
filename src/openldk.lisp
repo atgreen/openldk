@@ -159,7 +159,7 @@
                (blocks (build-basic-blocks ir-code-0))
                (lisp-code
                  (list (list 'block nil
-                             (cons 'tagbody (loop for bloc in blocks append (codegen-block bloc (car blocks)))))))
+                             (cons 'tagbody (codegen-block (car blocks) nil (car blocks))))))
                (traced-lisp-code (if *debug-trace* (list (list 'unwind-protect (car lisp-code) (list 'format 't "~&; trace: leaving  ~A.~A~%" class-name (fn-name *context*)))) lisp-code))
                (definition-code
                  (let ((parameter-count (count-parameters (slot-value method 'descriptor))))
@@ -455,7 +455,6 @@
 
 (defun main-wrapper ()
   "Main entry point into OpenLDK.  Process command line errors here."
-  (format t "; DYNAMIC SPACE (GB) = ~A~%" (ceiling (sb-ext:dynamic-space-size) (* 1024 1024 1024)))
   (handler-case
       (main-command)
     (cli:wrong-number-of-args (e)

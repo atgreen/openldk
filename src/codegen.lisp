@@ -913,12 +913,11 @@
                              :code (intern (format nil "s{~{~A~^,~}}" (sort (slot-value insn 'var-numbers) #'<)) :openldk))))
     expr))
 
-(defmethod codegen-block ((basic-block <basic-block>) dominator-block)
+(defmethod codegen-block ((basic-block <basic-block>) handler-start dominator-block)
   "Generate Lisp code for a basic block, handling exception scopes and control flow."
-  (when (fset:contains? (dominators basic-block) dominator-block)
-    (unless (slot-value basic-block 'code-emitted-p)
-      (push basic-block (slot-value *context* 'blocks))
 
+  (when (or handler-start (fset:contains? (dominators basic-block) dominator-block))
+    (unless (find basic-block (car (slot-value *context* 'code-emitted-scopes)))
       (let* ((stop-emitting-blocks? nil)
              (lisp-code
                (cons (intern (format nil "branch-target-~A" (address (car (slot-value basic-block 'code)))))
@@ -927,7 +926,7 @@
                            when (typep insn 'ir-stop-marker)
                              do (setf stop-emitting-blocks? t)
                            collect (trace-insn insn (code expr))))))
-        (setf (slot-value basic-block 'code-emitted-p) t)
+        (push basic-block (car (slot-value *context* 'code-emitted-scopes)))
         (pop (slot-value *context* 'blocks))
 
         (unless (end-of-handler? basic-block)
@@ -935,19 +934,19 @@
           ;; Emit code for successors if not stopping
           (unless stop-emitting-blocks?
             (when (fall-through-address basic-block)
-                                        ; (format t "~&FALL-THROUGH-ADDRESS = ~A~%" (fall-through-address basic-block))
               (setf lisp-code
                     (nconc lisp-code
-                           (if (code-emitted-p (fall-through-address basic-block))
+                           (if (find (fall-through-address basic-block) (car (slot-value *context* 'code-emitted-scopes)))
                                (list (list 'go (intern (format nil "branch-target-~A" (address (car (code (fall-through-address basic-block))))))))
                                (codegen-block
                                 (fall-through-address basic-block)
+                                nil
                                 (if (try-catch basic-block) basic-block dominator-block))))))
 
             (let ((successor-list (sort (fset:convert 'list (successors basic-block))
                                         (lambda (a b) (< (address a) (address b))))))
               (dolist (successor successor-list)
-                    (setf lisp-code (nconc lisp-code (codegen-block successor (if (try-catch basic-block) basic-block dominator-block))))))))
+                    (setf lisp-code (nconc lisp-code (codegen-block successor nil (if (try-catch basic-block) basic-block dominator-block))))))))
 
 
         ;; Handle exception handlers (try-catch)
@@ -963,33 +962,29 @@
                             (HANDLER-CASE
                                 (TAGBODY ,@lisp-code)
                               ,@(loop for (exception-type . handler-block) in try-catch-handlers
-                                      collect `(,(intern (format nil "condition-~A" (or exception-type
-                                                                                        "java/lang/Throwable")) :openldk)
-                                                (,(intern "condition" :openldk))
-                                                (TAGBODY ,@(codegen-block handler-block basic-block)))))))
-                        (list
-                         `(HANDLER-CASE
-                              (TAGBODY ,@lisp-code)
-                            ,@(loop for (exception-type . handler-block) in try-catch-handlers
-                                    collect `(,(intern (format nil "condition-~A" (or exception-type
-                                                                                      "java/lang/Throwable")) :openldk)
-                                              (,(intern "condition" :openldk))
-                                              (TAGBODY ,@(codegen-block handler-block basic-block))))))))))
+                                      collect (progn
+                                                (push (list) (slot-value *context* 'code-emitted-scopes))
+                                                (unwind-protect
+                                                     `(,(intern (format nil "condition-~A" (or exception-type
+                                                                                               "java/lang/Throwable")) :openldk)
+                                                       (,(intern "condition" :openldk))
+                                                       (TAGBODY ,@(codegen-block handler-block t basic-block)))
+                                                  (pop (slot-value *context* 'code-emitted-scopes))))))))
+                        `(HANDLER-CASE
+                             (TAGBODY ,@lisp-code)
+                           ,@(loop for (exception-type . handler-block) in try-catch-handlers
+                                   collect (progn
+                                             (push (list) (slot-value *context* 'code-emitted-scopes))
+                                             (unwind-protect
+                                                  `(,(intern (format nil "condition-~A" (or exception-type
+                                                                                            "java/lang/Throwable")) :openldk)
+                                                    (,(intern "condition" :openldk))
+                                                    (TAGBODY ,@(codegen-block handler-block t basic-block)))
+                                               (pop (slot-value *context* 'code-emitted-scopes))))))))))
 
-          ;; Handle finally blocks
-          (let ((finally-blocks (finally basic-block)))
-            (when finally-blocks
-              ;; Wrap the block's code in UNWIND-PROTECT
-              (setf lisp-code
-                    (list
-                     `(UNWIND-PROTECT
-                           (TAGBODY ,@lisp-code)
-                        ,@(loop for finally-block in finally-blocks
-                                collect `(TAGBODY ,@(codegen-block finally-block basic-block))))))))
+        ;; Emit code for the try-exit-block if it exists
+        (when (and (try-exit-block basic-block)
+                   (not (slot-value (try-exit-block basic-block) 'code-emitted-p)))
+          (setf lisp-code (nconc lisp-code (codegen-block (try-exit-block basic-block) nil dominator-block))))
 
-          ;; Emit code for the try-exit-block if it exists
-          (when (and (try-exit-block basic-block)
-                     (not (slot-value (try-exit-block basic-block) 'code-emitted-p)))
-            (setf lisp-code (nconc lisp-code (codegen-block (try-exit-block basic-block) dominator-block))))
-
-          lisp-code))))
+        lisp-code))))

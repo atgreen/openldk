@@ -526,7 +526,8 @@ user.variant
   library-name)
 
 (defmethod |load(Ljava/lang/String;Z)| ((loader t) library-name is-builtin)
-  (format t "FIXME: ~A loading ~A~%" loader library-name)
+  (when *debug-trace*
+    (format t "FIXME: ~A loading ~A~%" loader library-name))
   (setf (slot-value loader '|loaded|) 1)
   )
 

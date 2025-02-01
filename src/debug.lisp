@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2023, 2024  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; This file is part of OpenLDK.
 
@@ -38,9 +38,10 @@
 (in-package :openldk)
 
 (defun dump-hashtable (ht)
-	(maphash (lambda (k v)
-						 (format t "~&~A: ~A~%" k v))
-					 ht)
+  (when ht
+    (maphash (lambda (k v)
+               (format t "~&~A: ~A~%" k v))
+             ht))
   t)
 
 (defun dump-classes ()

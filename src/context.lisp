@@ -55,6 +55,7 @@
    (fn-name)
    (blocks)
    (ir-code)
+   (code-emitted-scopes :std (list (list)))
    (svcount :std 0)
    (stack-state-table
     :doc "A hashtable mapping addresses to stack states")

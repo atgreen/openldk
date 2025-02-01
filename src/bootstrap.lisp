@@ -145,8 +145,12 @@
     (|condition-java/lang/RuntimeException|)
   ())
 
+(define-condition |condition-java/lang/ReflectiveOperationException|
+    (|condition-java/lang/Exception|)
+  ())
+
 (define-condition |condition-java/lang/reflect/InvocationTargetException|
-    (|condition-java/lang/RuntimeException|)
+    (|condition-java/lang/ReflectiveOperationException|)
   ())
 
 (define-condition |condition-java/lang/ClassNotFoundException|
@@ -161,10 +165,6 @@
   (let ((c (make-condition '|condition-java/lang/ArithmeticException|)))
     (setf (slot-value c '|objref|) throwable)
     c))
-
-(define-condition |condition-java/lang/ReflectiveOperationException|
-		(|condition-java/lang/Exception|)
-	((objref)))
 
 (define-condition |condition-java/lang/IllegalAccessException|
 		(|condition-java/lang/ReflectiveOperationException|)

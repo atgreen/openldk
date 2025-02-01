@@ -214,16 +214,14 @@ The dominance set is represented as an `fset:set` of <basic-block> objects.")
              (dolist (block blocks)
                (unless (eq block entry-block)
                  ;; Compute predecessors including try-catch handlers
-                 (let* ((predecessors (slot-value block 'predecessors))
-                        (catch-handlers (fset:convert 'fset:set (mapcar #'cdr (slot-value block 'try-catch))))
-                        (all-predecessors (fset:union predecessors catch-handlers)))
+                 (let ((predecessors (slot-value block 'predecessors)))
                    ;; Compute new dominance set
-                   (unless (fset:empty? all-predecessors)
+                   (unless (fset:empty? predecessors)
                      (let* ((new-dominance-set
                               (reduce #'fset:intersection
                                       (mapcar (lambda (pred)
                                                 (slot-value pred 'dominators))
-                                              (fset:convert 'list all-predecessors))))
+                                              (fset:convert 'list predecessors))))
                             (updated-dominance-set (fset:union new-dominance-set
                                                                (fset:set block)))) ;; Add the block itself
                        ;; Check if the dominance set has changed
