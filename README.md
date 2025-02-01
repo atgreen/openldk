@@ -1,9 +1,5 @@
 # OpenLDK
 
-> [!WARNING]
-> This does not work and may never work.  Please don't tell anyone
-> about this.  I just prefer to tinker in public.
-
 OpenLDK is a JIT compiler and runtime for Java written in Common Lisp.
 It works by incrementally translating Java bytecode into Lisp, and
 then compiling that into native machine code for execution.  Java
@@ -31,15 +27,92 @@ $ export LDK_CLASSPATH=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.432.b06-3.fc40.x86_
 
 ## How it Works
 
-The `openldk` reads class and jar files, and translates them into lisp
+`openldk` reads class and jar files, and translates them into lisp
 code, which sbcl's compiler then turns into machine code for
 execution.
 
 Java classes and objects are mapped to CLOS classes and object.  The
-exception hierarchy is mirrored by Common Lisp condition hierarchy.
-CLOS provides everything we need to support reflection.  SBCL's
+exception hierarchy is mirrored by a Common Lisp condition hierarchy.
+CLOS provides everything we need to support reflection, and SBCL's
 backtrace capabilities allow us check calling classes to support
 Java's security model.
+
+The first time we read a class definition, we generate a CLOS
+definition, with stubs for methods.
+
+For example...
+
+```
+public class demo
+{
+    public static int add (int x, int y)
+    {
+        return x + y;
+    }
+
+    public static int x;
+    public static int y;
+
+    public static void main (String[] args)
+    {
+        System.out.println ("Hello, World");
+        System.out.println (add (x, y));
+    }
+}
+```
+
+...becomes...
+
+```
+(PROGN
+ (DEFCLASS OPENLDK::|demo| (OPENLDK::|java/lang/Object|)
+           ((OPENLDK::|x| :INITFORM 0 :ALLOCATION :CLASS)
+            (OPENLDK::|y| :INITFORM 0 :ALLOCATION :CLASS)))
+ (DEFPARAMETER OPENLDK::|+static-demo+| (MAKE-INSTANCE 'OPENLDK::|demo|))
+ (DEFMETHOD OPENLDK::|<init>()| ((OPENLDK::|this| OPENLDK::|demo|))
+   (OPENLDK::%COMPILE-METHOD "demo" 1)
+   (OPENLDK::|<init>()| OPENLDK::|this|))
+ (DEFUN OPENLDK::|demo.add(II)| (OPENLDK::|arg1| OPENLDK::|arg2|)
+   (OPENLDK::%COMPILE-METHOD "demo" 2)
+   (OPENLDK::|demo.add(II)| OPENLDK::|arg1| OPENLDK::|arg2|))
+ (DEFUN OPENLDK::|demo.main([Ljava/lang/String;)| (OPENLDK::|arg1|)
+   (OPENLDK::%COMPILE-METHOD "demo" 3)
+   (OPENLDK::|demo.main([Ljava/lang/String;)| OPENLDK::|arg1|)))
+```
+
+Note that the methods are all stubs that invoke the compiler and them
+themselves.  This is how we support incremental JIT compilation.
+
+When the `add` method is called, the compiler will read `add`'s
+bytecode and generate the following:
+
+```
+(DEFUN OPENLDK::|demo.add(II)| (OPENLDK::|arg0| OPENLDK::|arg1|)
+  "bridge=NIL"
+  (LET ((OPENLDK::|s{3}|)
+        (OPENLDK::|s{2}|)
+        (OPENLDK::|s{1}|)
+        (OPENLDK::|local-0| OPENLDK::|arg0|)
+        (OPENLDK::|local-1| OPENLDK::|arg1|)
+        (OPENLDK::|local-2|)
+        (OPENLDK::|local-3|)
+        (OPENLDK::|local-4|))
+    (BLOCK NIL
+      (TAGBODY
+       |branch-target-0|
+        (SETF OPENLDK::|s{1}| OPENLDK::|local-0|)
+        (SETF OPENLDK::|s{2}| OPENLDK::|local-1|)
+        (SETF OPENLDK::|s{3}|
+                (LET* ((OPENLDK::VALUE2 OPENLDK::|s{2}|)
+                       (OPENLDK::VALUE1 OPENLDK::|s{1}|)
+                       (OPENLDK::RESULT
+                        (LOGAND (+ OPENLDK::VALUE1 OPENLDK::VALUE2)
+                                4294967295)))
+                  (IF (> OPENLDK::RESULT 2147483647)
+                      (- OPENLDK::RESULT 4294967296)
+                      OPENLDK::RESULT)))
+        (RETURN-FROM OPENLDK::|demo.add(II)| OPENLDK::|s{3}|)))))
+```
 
 ## Hacking
 
