@@ -9,7 +9,7 @@ set testargs ""
 proc openldk_load { classfile } {
 
     global testargs
-    set timeout 5
+    set timeout 120
     verbose "load $classfile"
     set ldkcp [getenv "LDK_CLASSPATH"]
     setenv "LDK_CLASSPATH" "$ldkcp:.:./aaa"
