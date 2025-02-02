@@ -39,6 +39,9 @@
 
 (defvar interned-string-table (make-hash-table :test #'equal))
 
+(defun lstring (string)
+  (coerce (slot-value string '|value|) 'string))
+
 (defun jstring (value)
   (let ((s (make-instance '|java/lang/String|)))
     (setf (slot-value s '|value|) value)

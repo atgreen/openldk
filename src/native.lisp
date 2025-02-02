@@ -56,20 +56,6 @@
   (classload "java/lang/SecurityManager")
   (eval (list 'make-instance (list 'quote '|java/lang/SecurityManager|))))
 
-#|
-(defmethod |println(Ljava/lang/String;)| (stream string)
-  (format t "~A~%" (slot-value string '|value|)))
-
-(defmethod |println(I)| (stream number)
-  (format t "~A~%" number))
-
-(defmethod |println(Ljava/lang/Object;)| (stream object)
-  (format t "~A~%" object))
-
-(defmethod |println(Ljava/lang/Object;)| (stream (object (eql nil)))
-  (format t "null~%"))
-|#
-
 (defmethod |fillInStackTrace(I)| ((|this| |java/lang/Throwable|) dummy)
   (let ((bt (trivial-backtrace:print-backtrace nil :output nil)))
     (print bt)))
@@ -596,4 +582,15 @@ user.variant
 
 (defmethod |getEnclosingMethod0()| ((this |java/lang/Class|))
   ;; FIXME
-  (error "not implemented"))
+  nil)
+
+(defmethod |getDeclaringClass0()| ((this |java/lang/Class|))
+  ;; FIXME
+  nil)
+
+(defmethod |getBooleanAttributes0(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
+  (format t "~&FILE-ATTRIBUTES: ~A~%" (lstring (slot-value file '|path|)))
+  (handler-case
+      (org.shirakumo.file-attributes:attributes (lstring (slot-value file '|path|)))
+    (sb-int:simple-file-error (e)
+      0)))
