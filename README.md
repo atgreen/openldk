@@ -138,12 +138,22 @@ all debug output while running `Hello`.
 
 ## Status
 
-It still doesn't work.  You are looking at a work in progress that may
-never be completed.  I don't want to see this on hackernews or reddit
-prematurely.
+Very basic programs work.  This includes the whole runtime startup
+process, covering class loading, reflection, exceptions, file IO, and
+more.
+
+Not much more than that works yet.  You are looking at a work in
+progress that may never be completed.
+
+The code is not optimized.  Even with heavy optimization, OpenLDK's
+performance will not be competitive to modern Java implementations.
+It is not meant to be competitive.  OpenLDK is meant to fill the gap
+for when you want to code in Common Lisp, but you need that one Java
+library.
 
 Here's an incomplete list of what's not implemented:
 - support for class files beyond Java 8
+- a handful of instructions
 - bytecode verification
 
 Author and License
