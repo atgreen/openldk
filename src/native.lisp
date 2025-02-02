@@ -104,8 +104,10 @@
 (defmethod |getClass()| (object)
   ;;; FIXME - throw nullpointerexception
 	(when *debug-trace*
-		(format t "; trace: java/lang/Object.getClass(~A): ~A~%" object (java-class (gethash (format nil "~A" (type-of object)) *classes*))))
-	(java-class (gethash (format nil "~A" (type-of object)) *classes*)))
+		(format t "; trace: java/lang/Object.getClass(~A)" object))
+  (cond
+    ((arrayp object) (java-class (gethash "java/util/Arrays" *classes*)))
+    (t (java-class (gethash (format nil "~A" (type-of object)) *classes*)))))
 
 (defmethod |java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (name initialize loader caller)
   (unwind-protect
@@ -263,8 +265,7 @@
 ;  (make-instance '%array-base-offset :array array))
 
 (defmethod |arrayIndexScale(Ljava/lang/Class;)| ((unsafe |sun/misc/Unsafe|) array)
-  ;; Always use 2, which is 2x what we really need.
-  2)
+  1)
 
 (defmethod |addressSize()| ((unsafe |sun/misc/Unsafe|))
   ;; FIXME
@@ -592,3 +593,7 @@ user.variant
        (write-sequence byte-array *standard-output* :start offset :end (+ offset length)))
       (t
        (assert "unimplemented")))))
+
+(defmethod |getEnclosingMethod0()| ((this |java/lang/Class|))
+  ;; FIXME
+  (error "not implemented"))
