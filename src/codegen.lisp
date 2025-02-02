@@ -669,14 +669,14 @@
   ;; FIXME: this is wrong.
   (make-instance '<expression>
                  :insn insn
-                 :code (list 'shr (code (codegen (value1 insn) context)) (code (codegen (value2 insn) context)) 32)
+                 :code (list 'shr (code (codegen (value1 insn) context)) 32 (code (codegen (value2 insn) context)))
                  :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-lushr) context)
   ;; FIXME: this is wrong.
   (make-instance '<expression>
                  :insn insn
-                 :code (list 'shr (code (codegen (value1 insn) context)) (code (codegen (value2 insn) context)) 64)
+                 :code (list 'shr (code (codegen (value1 insn) context)) 64 (code (codegen (value2 insn) context)))
                  :expression-type :LONG))
 
 (defmethod codegen ((insn ir-lcmp) context)
