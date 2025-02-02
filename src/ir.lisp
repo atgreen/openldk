@@ -173,9 +173,6 @@
 (defclass/std ir-lxor (ir-binop)
   ())
 
-(defclass/std ir-ineg (ir-unop)
-  ())
-
 (defclass/std ir-land (ir-binop)
   ())
 
@@ -388,7 +385,8 @@
   ((class :with)))
 
 (defclass/std ir-new-array (ir-new)
-  ((size)))
+  ((size)
+   (atype)))
 
 (defclass/std ir-lcmp (ir-binop)
   ())

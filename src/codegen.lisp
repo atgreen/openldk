@@ -153,11 +153,12 @@
   (make-instance '<expression>
                  :insn insn
                  :code (list 'let* (list (list 'value2 (code (codegen (value2 insn) context)))
-                                         (list 'value1 (code (codegen (value1 insn) context)))
-                                         (list 'result (list 'logand (list operator 'value1 'value2) #xFFFFFFFF)))
-                             (list 'if (list '> 'result 2147483647)
-                                   (list '- 'result 4294967296)
-                                   'result))
+                                         (list 'value1 (code (codegen (value1 insn) context))))
+                             (list 'declare (list 'type (list 'signed-byte 32) 'value1 'value2))
+                             (list 'let (list (list 'result (list 'logand (list operator 'value1 'value2) #xFFFFFFFF)))
+                                   (list 'if (list '> 'result 2147483647)
+                                         (list '- 'result 4294967296)
+                                         'result)))
                  :expression-type :INTEGER))
 
 (defun %codegen-long-binop (insn operator context)
@@ -439,15 +440,6 @@
                                                0))))
                  :expression-type :INTEGER))
 
-(defmethod codegen ((insn ir-ineg) context)
-  ;; FIXME: handle integer overflow
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (gen-push-item (list '- (gen-pop-item)))
-                             :expression-type :INTEGER)))
-    (error (stack context)) (push expr (stack context))
-    expr))
-
 (defmethod codegen ((insn ir-i2f) context)
   (make-instance '<expression>
                  :insn insn
@@ -477,6 +469,12 @@
                  :insn insn
                  :code (list '- (code (codegen (value insn) context)))
                  :expression-type :LONG))
+
+(defmethod codegen ((insn ir-ineg) context)
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list '- (code (codegen (value insn) context)))
+                 :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-i2l) context)
   (make-instance '<expression>
@@ -793,14 +791,24 @@
         expr))))
 
 (defmethod codegen ((insn ir-new-array) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (list 'progn
-                                         (list 'assert (list '< (code (codegen (size insn) context)) 10000))
-                                         (list 'make-array (code (codegen (size insn) context)) :initial-element nil))
-                             :expression-type :ARRAY)))
-    ;; We don't push this. bc-2-ir pushes this.
-    expr))
+  (let ((init-element
+          (case (atype insn)
+            ;; Determine the initial element based on the array type
+            (4 0)        ; Integer
+            (5 #\0)      ; Character
+            (6 0.0)      ; Single-precision float
+            (7 0.0d0)    ; Double-precision float
+            ((8 9 10 11) 0) ; Other integer types (assuming default to 0)
+            (t nil))))   ; Default to nil for unknown types
+    (make-instance '<expression>
+                   :insn insn
+                   :code `(progn
+                            ;; FIXME: Ensure the array size is within a reasonable limit
+                            (assert (< ,(code (codegen (size insn) context)) 10000))
+                            ;; Create the array with the determined initial element
+                            (make-array ,(code (codegen (size insn) context))
+                                        :initial-element ,init-element))
+                   :expression-type :ARRAY)))
 
 (defmethod codegen ((insn ir-nop) context)
   (declare (ignore context))

@@ -157,6 +157,14 @@
     (|condition-java/lang/RuntimeException|)
   ())
 
+(define-condition |condition-java/nio/BufferOverflowException|
+    (|condition-java/lang/RuntimeException|)
+  ())
+
+(define-condition |condition-java/nio/BufferUnderflowException|
+    (|condition-java/lang/RuntimeException|)
+  ())
+
 (define-condition |condition-java/security/PrivilegedActionException|
     (|condition-java/lang/RuntimeException|)
   ())

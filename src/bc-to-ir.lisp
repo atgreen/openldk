@@ -37,13 +37,6 @@
 
 (in-package :openldk)
 
-(defmacro define-bytecode-transpiler-TODO (name args &body body)
-  (declare (ignore args))
-  (declare (ignore body))
-  `(defun ,name ()
-     (format t "TODO transpiling ~A~%" ,name)
-     (error "TODO")))
-
 (defmacro define-bytecode-transpiler (name args &body body)
   (let ((start-pc (gensym))
         (has-declare (eq (car (car body)) 'declare)))
@@ -443,6 +436,7 @@
  (:I2S 'ir-i2s :SHORT)
  (:I2C 'ir-i2c :CHAR)
  (:I2L 'ir-i2l :LONG)
+ (:INEG 'ir-ineg :INTEGER)
  (:L2F 'ir-l2f :FLOAT)
  (:L2I 'ir-l2i :INTEGER)
  (:LNEG 'ir-lneg :LONG))
@@ -516,48 +510,6 @@
                            :address pc-start
                            :lvalue var
                            :rvalue (make-instance 'ir-int-literal :address pc-start :value byte))))))
-
-(define-bytecode-transpiler-TODO :DDIV (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (push pc (aref (next-insn-list context) pc-start))
-      (list (make-instance 'ir-div
-                           :address pc-start)))))
-
-(define-bytecode-transpiler-TODO :DLOAD_2 (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (push pc (aref (next-insn-list context) pc-start))
-      (list (make-instance 'ir-push
-                           :address pc-start
-                           :value (make-instance 'ir-local-variable
-                                                 :address pc-start
-                                                 :index 2))))))
-
-(define-bytecode-transpiler-TODO :DSTORE_2 (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (push pc (aref (next-insn-list context) pc-start))
-      (list (make-instance 'ir-store
-                           :address pc-start
-                           :target (make-instance 'ir-local-variable
-                                                  :address pc-start
-                                                  :index 2))))))
-
-(define-bytecode-transpiler-TODO :DSUB (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (push pc (aref (next-insn-list context) pc-start))
-      (list (make-instance 'ir-dsub
-                           :address pc-start)))))
 
 (define-bytecode-transpiler :DUP (context code)
   (declare (ignore code))
@@ -756,14 +708,6 @@
 (define-bytecode-transpiler :DCONST_1 (context code)
   (declare (ignore code))
   (%transpile-fconst-x context 1.0))
-
-(define-bytecode-transpiler-TODO :INEG (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (push pc (aref (next-insn-list context) pc-start))
-      (list (make-instance 'ir-ineg :address pc-start)))))
 
 (defclass/std <stack-variable> (ir-node)
   ((var-numbers)
@@ -1201,15 +1145,6 @@
 (define-bytecode-transpiler :LRETURN (context code)
   (:IRETURN context code))
 
-(define-bytecode-transpiler-TODO :LOR (context code)
-  (declare-IGNORE (ignore code))
-  (with-slots (pc) context
-    (let ((pc-start pc))
-      (incf pc)
-      (push pc (aref (next-insn-list context) pc-start))
-      (list (make-instance 'ir-lor
-                           :address pc-start)))))
-
 (define-bytecode-transpiler :ARETURN (context code)
   (:IRETURN context code))
 
@@ -1306,13 +1241,6 @@
                                :lvalue var
                                :rvalue (make-instance 'ir-new :address pc-start :class class))))))))
 
-(define-bytecode-transpiler-TODO :NOP (context code)
-  (with-slots (pc class) context
-    (let ((pc-start pc))
-      (incf pc)
-      (push pc (aref (next-insn-list context) pc-start))
-      (list (make-instance 'ir-nop :address pc-start)))))
-
 (define-bytecode-transpiler :ANEWARRAY (context code)
   (with-slots (pc class) context
     (let ((pc-start pc))
@@ -1344,7 +1272,7 @@
         (list (make-instance 'ir-assign
                              :address pc-start
                              :lvalue var
-                             :rvalue (make-instance 'ir-new-array :address pc-start :class nil :size size)))))))
+                             :rvalue (make-instance 'ir-new-array :address pc-start :class nil :atype atype :size size)))))))
 
 (define-bytecode-transpiler :POP (context code)
   (declare (ignore code))
