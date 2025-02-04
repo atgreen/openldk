@@ -246,7 +246,7 @@
 (defun read-attributes (bitio constant-pool class count)
   "Read COUNT attributes from a classfile for CLASS using the BITIO
 stream."
-  (let ((attributes (make-hash-table)))
+  (let ((attributes (make-hash-table :test 'equal)))
     (dotimes (i count)
       (let* ((name-index (read-u2))
              (name (slot-value (aref constant-pool name-index) 'value))
