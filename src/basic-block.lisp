@@ -161,6 +161,7 @@ The dominance set is represented as an `fset:set` of <basic-block> objects.")
               for ete = (aref exception-table i)
               do (setf (gethash (start-pc ete) block-starts) t)
               do (setf (gethash (end-pc ete) block-starts) t)
+              do (setf (gethash (end-pc ete) (try-end-table *context*)) t)
               do (setf (gethash (handler-pc ete) block-starts) t))))
 
     ;; Handle all jump and branch targets
@@ -314,10 +315,11 @@ The dominance set is represented as an `fset:set` of <basic-block> objects.")
           (dolist (handler-type-block (try-catch block))
             (let ((merge-point (find-merge-point (cdr handler-type-block) (cdr handler-type-block) (make-hash-table :test #'equal))))
               (when merge-point
-                (setf (try-exit-block block) merge-point)
-                (remove-goto block (address merge-point) (make-hash-table))))))
+                (setf (try-exit-block block) merge-point))))))
+                ; (remove-goto block (address merge-point) (make-hash-table))))))
 
-        (setf (block-address-table *context*) block-by-address)
 
-        (dump-method-dot blocks)
-        blocks))))
+      (setf (block-address-table *context*) block-by-address)
+
+      (dump-method-dot blocks)
+      blocks)))

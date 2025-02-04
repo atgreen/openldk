@@ -55,10 +55,12 @@
    (fn-name)
    (blocks)
    (ir-code)
-   (code-emitted-scopes :std (list (list)))
    (svcount :std 0)
    (stack-state-table
     :doc "A hashtable mapping addresses to stack states")
+   (try-end-table
+    :std (make-hash-table)
+    :doc "A tabled keyed on addresses, where if the value is T, then this is the end of a TRY region.")
    (stack-variables)
    (pc :std 0)
    (stack :std (list (make-instance '<stack-bottom-marker>)))))

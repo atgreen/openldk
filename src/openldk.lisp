@@ -72,11 +72,8 @@
 
 (defun lispize-method-name (name)
   (subseq name 0 (1+ (position #\) name))))
-#|
-"Collapse text in a string starting with #\\L and ending with #\\; into just #\\L."
-  (cl-ppcre:regex-replace-all "(L[^;]*;)"
-                              "L"))
-|#
+
+(defvar *call-nesting-level* 0)
 
 (defun make-exception-handler-table (context)
   (let ((exception-table (exception-table context))
@@ -126,7 +123,6 @@
                                                                (setf (stack *context*) (car stk))))
                                                            (when *debug-bytecode*
                                                              (format t "~&; c[~A] ~A ~@<~A~:@>" (pc *context*) (aref +opcodes+ (aref code (pc *context*))) (stack *context*)))
-                                        ; (dump-hashtable (stack-state-table *context*))
                                                            (let* ((pc-start (pc *context*)))
                                                              (if (gethash pc-start exception-handler-table)
                                                                  (let ((var (make-stack-variable *context* pc-start :REFERENCE)))
@@ -158,49 +154,62 @@
                ;; (sdfdfd (print ir-code-0))
                (blocks (build-basic-blocks ir-code-0))
                (lisp-code
-                 (list (list 'block nil
-                             (cons 'tagbody (codegen-block (car blocks) nil (car blocks))))))
-               (traced-lisp-code (if *debug-trace* (list (list 'unwind-protect (car lisp-code) (list 'format 't "~&; trace: leaving  ~A.~A~%" class-name (fn-name *context*)))) lisp-code))
+                (list (list 'block nil
+                            (append (list 'tagbody)
+                                    (mapcan (lambda (x) (if (listp x) x (list x)))
+                                            (loop for block in blocks
+                                                  for code = (codegen-block block nil block)
+                                                  when code
+                                                    collect (progn
+                                                              code)))))))
+               (traced-lisp-code (if *debug-trace* (list (list 'unwind-protect (car lisp-code) (list 'format 't "~&; ~V@Atrace: leaving  ~A.~A~%"
+                                                                                                     (list 'incf '*call-nesting-level* -2) " "
+                                                                                                     class-name (fn-name *context*)))) lisp-code))
                (definition-code
                  (let ((parameter-count (count-parameters (slot-value method 'descriptor))))
-                   (append (if (static-p method)
-                               (list 'defun
-                                     (intern (fn-name *context*) :openldk)
-                                     (loop for i from 1 upto parameter-count
-                                           collect (intern (format nil "arg~A" (1- i)) :openldk)))
-                               (list 'defmethod
-                                     (intern (fn-name *context*) :openldk)
-                                     (cons (list (intern "this" :openldk) (intern (slot-value class 'name) :openldk))
-                                           (loop for i from 1 upto parameter-count
-                                                 collect (intern (format nil "arg~A" i) :openldk)))))
-                           (when *debug-trace*
-                             (list (list 'format 't "~&; trace: entering ~A ~A.~A~%" (if (not (static-p method)) (intern "this" :openldk) "") class-name (fn-name *context*))))
-                           (when (not (static-p method))
-                             (list (list 'setf '*force-this-to-be-used* (intern "this" :openldk))))
-                           (let ((i 0)
-                                 (pc -1))
-                             (list (format nil "bridge=~A" (bridge-p method))
-                                   (append (list 'let (if (static-p method)
-                                                          (append (remove-duplicates
-                                                                   (loop for var in (stack-variables *context*)
-                                                                         collect (list (intern (format nil "s{~{~A~^,~}}" (sort (var-numbers var) #'<)) :openldk)))
-                                                                   :test #'equal)
-                                                                  (loop for ph in parameter-hints
-                                                                        collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" (incf pc)) :openldk))
-                                                                        do (if (eq ph t) (incf i) (incf i 2)))
-                                                                  (loop for pc from (- parameter-count 2) upto max-locals
-                                                                        collect (list (intern (format nil "local-~A" (1- (incf i))) :openldk))))
-                                                          (append (remove-duplicates
-                                                                   (loop for var in (stack-variables *context*)
-                                                                         collect (list (intern (format nil "s{~{~A~^,~}}" (sort (var-numbers var) #'<)) :openldk)))
-                                                                   :test #'equal)
-                                                                  (append (list (list (intern "local-0" :openldk) (intern "this" :openldk)))
-                                                                          (loop for ph in parameter-hints
-                                                                                collect (list (intern (format nil "local-~A" (1+ i)) :openldk) (intern (format nil "arg~A" (1+ (incf pc))) :openldk))
-                                                                                do (if (eq ph t) (incf i) (incf i 2)))
-                                                                          (loop for x from parameter-count upto (1+ max-locals)
-                                                                                collect (list (intern (format nil "local-~A" (incf i)) :openldk)))))))
-                                           traced-lisp-code)))))))
+                   (let ((args (if (static-p method)
+                                   (loop for i from 1 upto parameter-count
+                                         collect (intern (format nil "arg~A" (1- i)) :openldk))
+                                   (loop for i from 1 upto parameter-count
+                                         collect (intern (format nil "arg~A" i) :openldk)))))
+                     (append (if (static-p method)
+                                 (list 'defun (intern (fn-name *context*) :openldk) args)
+                                 (list 'defmethod
+                                       (intern (fn-name *context*) :openldk)
+                                       (cons (list (intern "this" :openldk) (intern (slot-value class 'name) :openldk))
+                                             args)))
+                             (when *debug-trace*
+                               (list (list 'format 't "~&; ~V@Atrace: entering ~A ~A.~A(~{~A~^ ~})~%"
+                                           (list 'incf '*call-nesting-level* 2) " "
+                                           (if (not (static-p method)) (intern "this" :openldk) "") class-name (fn-name *context*) (cons 'list args))))
+                             (when (not (static-p method))
+                               (list (list 'setf '*force-this-to-be-used* (intern "this" :openldk))))
+                             (let ((i 0)
+                                   (pc -1))
+                               (list (format nil "bridge=~A" (bridge-p method))
+                                     (append (list 'let (if (static-p method)
+                                                            (append (list (list '|condition-cache|))
+                                                                    (remove-duplicates
+                                                                     (loop for var in (stack-variables *context*)
+                                                                           collect (list (intern (format nil "s{~{~A~^,~}}" (sort (var-numbers var) #'<)) :openldk)))
+                                                                     :test #'equal)
+                                                                    (loop for ph in parameter-hints
+                                                                          collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" (incf pc)) :openldk))
+                                                                          do (if (eq ph t) (incf i) (incf i 2)))
+                                                                    (loop for pc from (- parameter-count 2) upto max-locals
+                                                                          collect (list (intern (format nil "local-~A" (1- (incf i))) :openldk))))
+                                                            (append (list (list '|condition-cache|))
+                                                                    (remove-duplicates
+                                                                     (loop for var in (stack-variables *context*)
+                                                                           collect (list (intern (format nil "s{~{~A~^,~}}" (sort (var-numbers var) #'<)) :openldk)))
+                                                                     :test #'equal)
+                                                                    (append (list (list (intern "local-0" :openldk) (intern "this" :openldk)))
+                                                                            (loop for ph in parameter-hints
+                                                                                  collect (list (intern (format nil "local-~A" (1+ i)) :openldk) (intern (format nil "arg~A" (1+ (incf pc))) :openldk))
+                                                                                  do (if (eq ph t) (incf i) (incf i 2)))
+                                                                            (loop for x from parameter-count upto (1+ max-locals)
+                                                                                  collect (list (intern (format nil "local-~A" (incf i)) :openldk)))))))
+                                             traced-lisp-code))))))))
           (%eval definition-code))))))
 
 (defun %clinit (class)
@@ -358,6 +367,7 @@
                      class)
                 (close classfile-stream))
               (format t "ERROR: Can't find ~A on classpath~%" classname))))))
+
 
 @cli:command
 (defun main (mainclass &optional (args (list)) &key dump-dir classpath)
