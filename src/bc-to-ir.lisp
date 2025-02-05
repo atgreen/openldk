@@ -290,6 +290,36 @@
   (declare (ignore code))
   (%transpile-istore-x context 3))
 
+(defun %transpile-dstore-x (context index)
+  (with-slots (pc) context
+    (let* ((pc-start pc)
+           (var (pop (stack context))))
+      (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
+      (list (make-instance 'ir-assign
+                           :address pc-start
+                           :lvalue (make-instance 'ir-local-variable
+                                                  :address pc-start
+                                                  :index index
+                                                  :jtype :DOUBLE)
+                           :rvalue var)))))
+
+(define-bytecode-transpiler :DSTORE_0 (context code)
+  (declare (ignore code))
+  (%transpile-dstore-x context 0))
+
+(define-bytecode-transpiler :DSTORE_1 (context code)
+  (declare (ignore code))
+  (%transpile-dstore-x context 1))
+
+(define-bytecode-transpiler :DSTORE_2 (context code)
+  (declare (ignore code))
+  (%transpile-dstore-x context 2))
+
+(define-bytecode-transpiler :DSTORE_3 (context code)
+  (declare (ignore code))
+  (%transpile-dstore-x context 3))
+
 (define-bytecode-transpiler :CALOAD (context code)
   (declare (ignore code))
   (with-slots (pc) context
@@ -1038,6 +1068,37 @@
 (define-bytecode-transpiler :FLOAD_3 (context code)
   (declare (ignore code))
   (%transpile-fload-x context 3))
+
+(defun %transpile-dload-x (context index)
+  (with-slots (pc) context
+    (let* ((pc-start pc)
+           (var (make-stack-variable context pc-start :DOUBLE)))
+      (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
+      (push var (stack context))
+      (list (make-instance 'ir-assign
+                           :address pc-start
+                           :lvalue var
+                           :rvalue (make-instance 'ir-local-variable
+                                                  :address pc-start
+                                                  :index index))))))
+
+
+(define-bytecode-transpiler :DLOAD_0 (context code)
+  (declare (ignore code))
+  (%transpile-dload-x context 0))
+
+(define-bytecode-transpiler :DLOAD_1 (context code)
+  (declare (ignore code))
+  (%transpile-dload-x context 1))
+
+(define-bytecode-transpiler :DLOAD_2 (context code)
+  (declare (ignore code))
+  (%transpile-dload-x context 2))
+
+(define-bytecode-transpiler :DLOAD_3 (context code)
+  (declare (ignore code))
+  (%transpile-dload-x context 3))
 
 (define-bytecode-transpiler :INSTANCEOF (context code)
   (with-slots (pc class) context

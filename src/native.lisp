@@ -118,6 +118,10 @@
 	(dotimes (i len)
 		(setf (aref dest_arr (+ destPos i)) (aref source_arr (+ sourcePos i)))))
 
+(defmethod |run()| (arg)
+  (declare (ignore arg))
+  (error "internal error"))
+
 (defmethod |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedAction;)| (action)
   (|run()| action))
 
@@ -207,6 +211,11 @@
 
 ;;; The current |java/lang/Thread| object.
 (defvar *current-thread* nil)
+
+(defmethod |add(Ljava/lang/Thread;)| (thread-group thread)
+  (declare (ignore thread-group))
+  (declare (ignore thread))
+  (error "internal error"))
 
 (defmethod |java/lang/Thread.currentThread()| ()
   (or *current-thread*
@@ -434,6 +443,10 @@ user.variant
 
 (defun |java/io/FileDescriptor.initIDs()| ()
   )
+
+(defmethod |run()| (arg)
+  (declare (ignore arg))
+  (error "internal error"))
 
 (defun |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedExceptionAction;)| (action)
   (let ((result (|run()| action)))
