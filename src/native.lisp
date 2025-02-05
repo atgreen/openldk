@@ -594,3 +594,8 @@ user.variant
       (org.shirakumo.file-attributes:attributes (lstring (slot-value file '|path|)))
     (sb-int:simple-file-error (e)
       0)))
+
+(defun |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedAction;Ljava/security/AccessControlContext;)| (action context)
+  ;; FIXME
+  (let ((result (|run()| action)))
+    result))

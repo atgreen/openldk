@@ -309,6 +309,7 @@
                                                              (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
                                                                    collect (intern (format nil "arg~A" i) :openldk)))))))))
                                methods))))))
+
     (append defclass-code methods-code)))
 
 (defun classload (classname)
@@ -418,6 +419,33 @@
                           (make-instance 'jar-classpath-entry :jarfile cpe)
                           (make-instance 'dir-classpath-entry :dir cpe))))
 
+  (let* ((class (classload mainclass))
+         (argv (make-array (length args))))
+    (assert (or class (error "Can't load ~A" mainclass)))
+    (dotimes (i (length args))
+      (let ((arg (make-instance '|java/lang/String|)))
+        (setf (slot-value arg '|value|) (nth i args))
+        (setf (aref argv i) arg)))
+    (%clinit class)
+    (%eval (list (intern (format nil "~A.main([Ljava/lang/String;)" (slot-value class 'name)) :openldk) argv))))
+
+(defun main-wrapper ()
+  "Main entry point into OpenLDK.  Process command line errors here."
+  (handler-case
+      (main-command)
+    (cli:wrong-number-of-args (e)
+      (format t "~A~%" e))))
+
+(defun make-image ()
+
+  (setf classpath (uiop:getenv "LDK_CLASSPATH"))
+
+  (setf *classpath*
+        (loop for cpe in (split-sequence:split-sequence (uiop:inter-directory-separator) classpath)
+              collect (if (str:ends-with? ".jar" cpe)
+                          (make-instance 'jar-classpath-entry :jarfile cpe)
+                          (make-instance 'dir-classpath-entry :dir cpe))))
+
   ;; We need to hand load these before Class.forName0 will work.
   (%clinit (classload "java/lang/Object"))
   (%clinit (classload "java/lang/String"))
@@ -453,19 +481,4 @@
 
     (|<init>()| boot-class-loader)
 
-    (let* ((class (classload mainclass))
-           (argv (make-array (length args))))
-      (assert (or class (error "Can't load ~A" mainclass)))
-      (dotimes (i (length args))
-        (let ((arg (make-instance '|java/lang/String|)))
-          (setf (slot-value arg '|value|) (nth i args))
-          (setf (aref argv i) arg)))
-      (%clinit class)
-      (%eval (list (intern (format nil "~A.main([Ljava/lang/String;)" (slot-value class 'name)) :openldk) argv)))))
-
-(defun main-wrapper ()
-  "Main entry point into OpenLDK.  Process command line errors here."
-  (handler-case
-      (main-command)
-    (cli:wrong-number-of-args (e)
-      (format t "~A~%" e))))
+    (sb-ext:save-lisp-and-die "openldk" :executable t :save-runtime-options t :toplevel #'main-wrapper)))
