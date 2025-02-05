@@ -45,9 +45,9 @@ $ export LDK_CLASSPATH=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.432.b06-3.fc40.x86_
 code, which sbcl's compiler then turns into machine code for
 execution.
 
-Java classes and objects are mapped to CLOS classes and object.  The
-exception hierarchy is mirrored by a Common Lisp condition hierarchy.
-CLOS provides everything we need to support reflection, and SBCL's
+Java classes and objects are mapped to CLOS classes.  The exception
+hierarchy is mirrored by a Common Lisp condition hierarchy.  CLOS
+provides everything we need to support reflection, and SBCL's
 backtrace capabilities allow us check calling classes to support
 Java's security model.
 
