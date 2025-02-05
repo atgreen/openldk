@@ -78,54 +78,50 @@ public class demo
 ...becomes...
 
 ```
-(PROGN
- (DEFCLASS OPENLDK::|demo| (OPENLDK::|java/lang/Object|)
-           ((OPENLDK::|x| :INITFORM 0 :ALLOCATION :CLASS)
-            (OPENLDK::|y| :INITFORM 0 :ALLOCATION :CLASS)))
- (DEFPARAMETER OPENLDK::|+static-demo+| (MAKE-INSTANCE 'OPENLDK::|demo|))
- (DEFMETHOD OPENLDK::|<init>()| ((OPENLDK::|this| OPENLDK::|demo|))
-   (OPENLDK::%COMPILE-METHOD "demo" 1)
-   (OPENLDK::|<init>()| OPENLDK::|this|))
- (DEFUN OPENLDK::|demo.add(II)| (OPENLDK::|arg1| OPENLDK::|arg2|)
-   (OPENLDK::%COMPILE-METHOD "demo" 2)
-   (OPENLDK::|demo.add(II)| OPENLDK::|arg1| OPENLDK::|arg2|))
- (DEFUN OPENLDK::|demo.main([Ljava/lang/String;)| (OPENLDK::|arg1|)
-   (OPENLDK::%COMPILE-METHOD "demo" 3)
-   (OPENLDK::|demo.main([Ljava/lang/String;)| OPENLDK::|arg1|)))
+(progn
+ (defclass openldk::|demo| (openldk::|java/lang/Object|)
+    ((openldk::|x| :initform 0 :allocation :class)
+     (openldk::|y| :initform 0 :allocation :class)))
+ (defparameter openldk::|+static-demo+| (make-instance 'openldk::|demo|))
+ (defmethod openldk::|<init>()| ((openldk::|this| openldk::|demo|))
+   (openldk::%compile-method "demo" 1)
+   (openldk::|<init>()| openldk::|this|))
+ (defun openldk::|demo.add(ii)| (openldk::|arg1| openldk::|arg2|)
+   (openldk::%compile-method "demo" 2)
+   (openldk::|demo.add(ii)| openldk::|arg1| openldk::|arg2|))
+ (defun openldk::|demo.main([ljava/lang/String;)| (openldk::|arg1|)
+   (openldk::%compile-method "demo" 3)
+   (openldk::|demo.main([ljava/lang/string;)| openldk::|arg1|)))))
 ```
 
 Note that the methods are all stubs that invoke the compiler and then
 themselves.  This is how we support incremental JIT compilation.
 
 When the `add` method is called, the compiler will read `add`'s
-bytecode and generate the following:
+bytecode and generates something like the following:
 
 ```
-(DEFUN OPENLDK::|demo.add(II)| (OPENLDK::|arg0| OPENLDK::|arg1|)
-  "bridge=NIL"
-  (LET ((OPENLDK::|s{3}|)
-        (OPENLDK::|s{2}|)
-        (OPENLDK::|s{1}|)
-        (OPENLDK::|local-0| OPENLDK::|arg0|)
-        (OPENLDK::|local-1| OPENLDK::|arg1|)
-        (OPENLDK::|local-2|)
-        (OPENLDK::|local-3|)
-        (OPENLDK::|local-4|))
-    (BLOCK NIL
-      (TAGBODY
+(defun openldk::|demo.add(ii)| (openldk::|arg0| openldk::|arg1|)
+  (let ((openldk::|s{3}|)
+        (openldk::|s{2}|)
+        (openldk::|s{1}|)
+        (openldk::|local-0| openldk::|arg0|)
+        (openldk::|local-1| openldk::|arg1|))
+    (block nil
+      (tagbody
        |branch-target-0|
-        (SETF OPENLDK::|s{1}| OPENLDK::|local-0|)
-        (SETF OPENLDK::|s{2}| OPENLDK::|local-1|)
-        (SETF OPENLDK::|s{3}|
-                (LET* ((OPENLDK::VALUE2 OPENLDK::|s{2}|)
-                       (OPENLDK::VALUE1 OPENLDK::|s{1}|)
-                       (OPENLDK::RESULT
-                        (LOGAND (+ OPENLDK::VALUE1 OPENLDK::VALUE2)
-                                4294967295)))
-                  (IF (> OPENLDK::RESULT 2147483647)
-                      (- OPENLDK::RESULT 4294967296)
-                      OPENLDK::RESULT)))
-        (RETURN-FROM OPENLDK::|demo.add(II)| OPENLDK::|s{3}|)))))
+        (setf openldk::|s{1}| openldk::|local-0|)
+        (setf openldk::|s{2}| openldk::|local-1|)
+        (setf openldk::|s{3}|
+          (let* ((openldk::value2 openldk::|s{2}|)
+                 (openldk::value1 openldk::|s{1}|)
+                 (openldk::result
+                   (logand (+ openldk::value1 openldk::value2)
+                           4294967295)))
+            (if (> openldk::result 2147483647)
+                (- openldk::result 4294967296)
+                openldk::result)))
+        (return-from openldk::|demo.add(ii)| openldk::|s{3}|)))))
 ```
 
 ## Hacking
