@@ -359,16 +359,17 @@
                                 (subtypep (find-class internal-classname) (find-class '|java/lang/Throwable|)))
                        (let ((condition-symbol (intern (format nil "condition-~A" classname) :openldk)))
                          (setf (gethash (find-class (intern classname :openldk)) *condition-table*) condition-symbol)
-                         (let ((ccode (list 'define-condition condition-symbol
-                                            (list (intern (format nil "condition-~A" (slot-value super 'name)) :openldk)) (list))))
+                         (let ((ccode `(define-condition ,condition-symbol ( ,(intern (format nil "condition-~A" (slot-value super 'name)) :openldk))
+                                         ())))
                            (%eval ccode))
-                         (let ((ccode (list 'defmethod 'lisp-condition (list (list 'throwable (intern (format nil "~A" classname) :openldk)))
-                                            (list 'make-condition (list 'quote (intern (format nil "condition-~A" classname) :openldk))))))
+                         (let ((ccode `(defmethod lisp-condition ((throwable ,(intern (format nil "~A" classname) :openldk)))
+                                         (let ((c (make-condition (quote ,(intern (format nil "condition-~A" classname) :openldk)))))
+                                           (setf (slot-value c '|objref|) throwable)
+                                           c))))
                            (%eval ccode))))
                      class)
                 (close classfile-stream))
               (format t "ERROR: Can't find ~A on classpath~%" classname))))))
-
 
 @cli:command
 (defun main (mainclass &optional (args (list)) &key dump-dir classpath)
@@ -470,7 +471,9 @@
                  "java/lang/ThreadGroup"
                  "java/lang/Thread"
                  "java/lang/ref/SoftReference"
-                 "java/util/Properties"))
+                 "java/util/Properties"
+                 "java/io/UnsupportedEncodingException"
+                 "java/lang/ArrayIndexOutOfBoundsException"))
       (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil))
 
     (let ((props (make-instance '|java/util/Properties|)))

@@ -92,30 +92,37 @@
   (with-slots (arrayref index value) insn
     (make-instance '<expression>
                    :insn insn
-                   :code (list 'let (list (list 'value (code (codegen value context)))
-                                          (list 'index (code (codegen index context)))
-                                          (list 'arrayref (code (codegen arrayref context))))
-                               (list 'setf (list 'aref 'arrayref 'index) 'value)))))
+                   :code `(handler-case
+                              (let ((value ,(code (codegen value context)))
+                                    (index ,(code (codegen index context)))
+                                    (arrayref ,(code (codegen arrayref context))))
+                                (setf (aref arrayref index) value))
+                            (sb-int:invalid-array-index-error (e)
+                              (error (lisp-condition (make-instance '|java/lang/ArrayIndexOutOfBoundsException|))))))))
 
 (defmethod codegen ((insn ir-iastore) context)
-  ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
   (with-slots (arrayref index value) insn
     (make-instance '<expression>
                    :insn insn
-                   :code (list 'let (list (list 'value (code (codegen value context)))
-                                          (list 'index (code (codegen index context)))
-                                          (list 'arrayref (code (codegen arrayref context))))
-                               (list 'setf (list 'aref 'arrayref 'index) 'value)))))
+                   :code `(handler-case
+                              (let ((value ,(code (codegen value context)))
+                                    (index ,(code (codegen index context)))
+                                    (arrayref ,(code (codegen arrayref context))))
+                                (setf (aref arrayref index) value))
+                            (sb-int:invalid-array-index-error (e)
+                              (error (lisp-condition (make-instance '|java/lang/ArrayIndexOutOfBoundsException|))))))))
 
 (defmethod codegen ((insn ir-bastore) context)
-  ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
   (with-slots (arrayref index value) insn
     (make-instance '<expression>
                    :insn insn
-                   :code (list 'let (list (list 'value (code (codegen value context)))
-                                          (list 'index (code (codegen index context)))
-                                          (list 'arrayref (code (codegen arrayref context))))
-                               (list 'setf (list 'aref 'arrayref 'index) 'value)))))
+                   :code `(handler-case
+                              (let ((value ,(code (codegen value context)))
+                                    (index ,(code (codegen index context)))
+                                    (arrayref ,(code (codegen arrayref context))))
+                                (setf (aref arrayref index) value))
+                            (sb-int:invalid-array-index-error (e)
+                              (error (lisp-condition (make-instance '|java/lang/ArrayIndexOutOfBoundsException|))))))))
 
 (defmethod codegen ((insn ir-idiv) context)
   ;; FIXME - handle all weird conditions
