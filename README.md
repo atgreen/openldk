@@ -1,14 +1,28 @@
 # OpenLDK
+## A Java JIT Compiler and Runtime in Common Lisp
 
-OpenLDK is a JIT compiler and runtime for Java written in Common Lisp.
-It works by incrementally translating Java bytecode into Lisp, and
-then compiling that into native machine code for execution.  Java
-classes are mapped to CLOS classes, opening the door for easy
-integration between Java and Common Lisp code.
+OpenLDK is a Just-In-Time (JIT) compiler and runtime environment for
+Java, implemented entirely in Common Lisp. It bridges the gap between
+Java and Common Lisp by incrementally translating Java bytecode into
+Lisp, which is then compiled into native machine code for
+execution. This unique approach allows Java classes to be seamlessly
+mapped to Common Lisp Object System (CLOS) classes, enabling
+effortless integration between Java and Common Lisp codebases.
 
-OpenLDK makes use of OpenJDK's core runtime libraries.  This is made
-possible by the GNU Classpath Exception to the GPL, under which
-OpenJDK code is distributed.
+## Key Features
+
+- **Java Bytecode to Lisp Translation**: OpenLDK translates Java bytecode into Common Lisp, making it possible to execute Java code within a Lisp environment.
+- **Native Machine Code Compilation**: The translated Lisp code is compiled into native machine code, ensuring efficient execution.
+- **CLOS Integration**: Java classes are mapped to CLOS classes, allowing for smooth interoperability between Java and Common Lisp.
+- **OpenJDK Runtime Libraries**: OpenLDK leverages OpenJDK's core runtime libraries, made possible by the GNU Classpath Exception to the GPL.
+
+## Use Cases
+
+OpenLDK is not designed to be a high-performance Java
+runtime. Instead, it's for when you want to use SBCL, but need that
+one Java library. It provides a practical solution for integrating
+Java libraries into a Lisp-based workflow without the need for an
+out-of-process Java runtime environment.
 
 ## Requirements
 
