@@ -103,18 +103,6 @@ The dominance set is represented as an `fset:set` of <basic-block> objects.")
     (loop for tc in (try-catch bloc)
           do (format stream "~A -> ~A [label=~S]~%" (id bloc) (id (cdr tc)) (format nil "~A" (car tc))))))
 
-(defvar *instruction-exceptions* (make-hash-table))
-
-(defmacro define-instruction-exceptions (opcode exceptions)
-  `(setf (gethash ,opcode *instruction-exceptions*) ,exceptions))
-
-(define-instruction-exceptions :IDIV
-    '("java/lang/ArithmeticException" "java/lang/Exception" "java/lang/Throwable"))
-
-(defun opcode-throws-p (opcode throwable)
-  (let ((throwables (gethash opcode *instruction-exceptions*)))
-    (find throwable throwables :test #'string=)))
-
 (defun merge-exception-entries (entries)
   "Merge exception table entries in an array where end-pc of one is start-pc-1 of another,
    and handler-pc and catch-type are the same. Return a new array with merged entries."
