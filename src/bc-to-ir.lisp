@@ -431,6 +431,7 @@
  (:D2L 'ir-d2l :LONG)
  (:F2D 'ir-f2d :DOUBLE)
  (:F2I 'ir-f2i :INTEGER)
+ (:I2D 'ir-i2d :DOUBLE)
  (:I2F 'ir-i2f :FLOAT)
  (:I2B 'ir-i2b :BYTE)
  (:I2S 'ir-i2s :SHORT)
