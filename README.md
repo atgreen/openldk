@@ -119,6 +119,14 @@ bytecode and generate the following:
 ### Testing
 
 Run `make check` to run through the dejagnu-based testsuite.
+As of Feb 4 2025, the results look like this
+```
+		=== openldk Summary ===
+
+# of expected passes		721
+# of unexpected failures	355
+# of unresolved testcases	9
+```
 
 ### Debugging
 
