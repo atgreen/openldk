@@ -82,6 +82,10 @@
   (declare (ignore code))
   (%transpile-xastore context 'ir-bastore))
 
+(define-bytecode-transpiler :DASTORE (context code)
+  (declare (ignore code))
+  (%transpile-xastore context 'ir-dastore))
+
 (define-bytecode-transpiler :ACONST_NULL (context code)
   (declare (ignore code))
   (with-slots (pc) context
@@ -753,6 +757,23 @@
         (push var (stack context))
         code))))
 
+(define-bytecode-transpiler :DCMPL (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let* ((pc-start pc)
+           (var (make-stack-variable context pc-start :INTEGER)))
+      (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
+      (let ((code (list (make-instance 'ir-assign
+                                       :address pc-start
+                                       :lvalue var
+                                       :rvalue (make-instance 'ir-dcmpl
+                                                              :value2 (pop (stack context))
+                                                              :value1 (pop (stack context))
+                                                              :address pc-start)))))
+        (push var (stack context))
+        code))))
+
 (defun %transpile-fconst-x (context value)
   (with-slots (pc stack) context
     (let* ((pc-start pc)
@@ -1376,6 +1397,29 @@
                                :address pc-start
                                :lvalue var
                                :rvalue (make-instance 'ir-new-array :address pc-start :class class :size size))))))))
+
+(define-bytecode-transpiler :MULTIANEWARRAY (context code)
+  (with-slots (pc class) context
+    (let ((pc-start pc))
+      (with-slots (constant-pool) class
+        (let* ((index (+ (* (aref code (incf pc)) 256)
+                         (aref code (incf pc))))
+               (dimensions (aref code (incf pc))) ; Number of dimensions
+               (class (emit (aref constant-pool index) constant-pool))
+               (sizes (loop repeat dimensions
+                            collect (pop (stack context))))) ; Pop sizes for each dimension
+          (incf pc)
+          (push pc (aref (next-insn-list context) pc-start))
+          (let ((var (make-stack-variable context pc-start :ARRAY)))
+            (push var (stack context))
+          (list (make-instance 'ir-assign
+                               :address pc-start
+                               :lvalue var
+                               :rvalue (make-instance 'ir-multi-new-array
+                                                      :address pc-start
+                                                      :class class
+                                                      :dimensions dimensions
+                                                      :sizes sizes)))))))))
 
 (define-bytecode-transpiler :NEWARRAY (context code)
   (with-slots (pc class) context

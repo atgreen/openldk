@@ -410,7 +410,8 @@
           (setf *debug-unmuffle* t)))))
 
   (when *debug-slynk*
-    (slynk:create-server :port 2025))
+    (slynk:create-server :port 2025)
+    (sleep 5))
 
   (setf *dump-dir* dump-dir)
 
@@ -473,6 +474,7 @@
                  "java/lang/ref/SoftReference"
                  "java/util/Properties"
                  "java/io/UnsupportedEncodingException"
+                 "java/lang/ArithmeticException"
                  "java/lang/ArrayIndexOutOfBoundsException"
                  "java/lang/ExceptionInInitializerError"
                  "java/lang/InterruptedException"

@@ -100,10 +100,16 @@
 (defclass/std ir-bastore (ir-xastore)
   ())
 
+(defclass/std ir-dastore (ir-xastore)
+  ())
+
 (defclass/std ir-fcmpg (ir-binop)
   ())
 
 (defclass/std ir-fcmpl (ir-binop)
+  ())
+
+(defclass/std ir-dcmpl (ir-binop)
   ())
 
 (defclass/std ir-float-literal (ir-literal)
@@ -389,6 +395,11 @@
 
 (defclass/std ir-new-array (ir-new)
   ((size)
+   (atype)))
+
+(defclass/std ir-multi-new-array (ir-new)
+  ((dimensions)
+   (sizes)
    (atype)))
 
 (defclass/std ir-lcmp (ir-binop)

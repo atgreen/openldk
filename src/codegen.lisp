@@ -88,7 +88,9 @@
                                     (arrayref ,(code (codegen arrayref context))))
                                 (setf (aref arrayref index) value))
                             (sb-int:invalid-array-index-error (e)
-                              (error (lisp-condition (make-instance '|java/lang/ArrayIndexOutOfBoundsException|))))))))
+                              (error (lisp-condition (make-instance '|java/lang/ArrayIndexOutOfBoundsException|))))
+                            (error (e)
+                              (error (lisp-condition (make-instance '|java/lang/NullPointerException|))))))))
 
 (defmethod codegen ((insn ir-iastore) context)
   (with-slots (arrayref index value) insn
@@ -100,7 +102,9 @@
                                     (arrayref ,(code (codegen arrayref context))))
                                 (setf (aref arrayref index) value))
                             (sb-int:invalid-array-index-error (e)
-                              (error (lisp-condition (make-instance '|java/lang/ArrayIndexOutOfBoundsException|))))))))
+                              (error (lisp-condition (make-instance '|java/lang/ArrayIndexOutOfBoundsException|))))
+                            (error (e)
+                              (error (lisp-condition (make-instance '|java/lang/NullPointerException|))))))))
 
 (defmethod codegen ((insn ir-bastore) context)
   (with-slots (arrayref index value) insn
@@ -112,7 +116,23 @@
                                     (arrayref ,(code (codegen arrayref context))))
                                 (setf (aref arrayref index) value))
                             (sb-int:invalid-array-index-error (e)
-                              (error (lisp-condition (make-instance '|java/lang/ArrayIndexOutOfBoundsException|))))))))
+                              (error (lisp-condition (make-instance '|java/lang/ArrayIndexOutOfBoundsException|))))
+                            (error (e)
+                              (error (lisp-condition (make-instance '|java/lang/NullPointerException|))))))))
+
+(defmethod codegen ((insn ir-dastore) context)
+  (with-slots (arrayref index value) insn
+    (make-instance '<expression>
+                   :insn insn
+                   :code `(handler-case
+                              (let ((value ,(code (codegen value context)))
+                                    (index ,(code (codegen index context)))
+                                    (arrayref ,(code (codegen arrayref context))))
+                                (setf (aref arrayref index) value))
+                            (sb-int:invalid-array-index-error (e)
+                              (error (lisp-condition (make-instance '|java/lang/ArrayIndexOutOfBoundsException|))))
+                            (error (e)
+                              (error (lisp-condition (make-instance '|java/lang/NullPointerException|))))))))
 
 (defmethod codegen ((insn ir-idiv) context)
   ;; FIXME - handle all weird conditions
@@ -252,7 +272,10 @@
 (defmethod codegen ((insn ir-array-length) context)
   (make-instance '<expression>
                  :insn insn
-                 :code (list 'length (code (codegen (slot-value insn 'arrayref) context)))
+                 :code `(let ((arrayref ,(code (codegen (slot-value insn 'arrayref) context))))
+                          (if arrayref
+                              (length arrayref)
+                              (error (lisp-condition (make-instance '|java/lang/NullPointerException|)))))
                  :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-assign) context)
@@ -282,7 +305,6 @@
                    :expression-type return-type)))
 
 (defmethod codegen ((insn ir-caload) context)
-  ;;; FIXME: throw nullpointerexception exception if needed
   (with-slots (index arrayref) insn
     (make-instance '<expression>
                    :insn insn
@@ -291,11 +313,12 @@
                                     (arrayref ,(code (codegen arrayref context))))
                                 (char-code (aref arrayref index)))
                             (sb-int:invalid-array-index-error (e)
-                              (error (lisp-condition (make-instance '|java/lang/ArrayIndexOutOfBoundsException|)))))
+                              (error (lisp-condition (make-instance '|java/lang/ArrayIndexOutOfBoundsException|))))
+                            (error (e)
+                              (error (lisp-condition (make-instance '|java/lang/NullPointerException|)))))
                    :expression-type :CHAR)))
 
 (defmethod codegen ((insn ir-iaload) context)
-  ;;; FIXME: throw nullpointerexception exception if needed
   (with-slots (index arrayref) insn
     (make-instance '<expression>
                    :insn insn
@@ -304,11 +327,12 @@
                                     (arrayref ,(code (codegen arrayref context))))
                                 (aref arrayref index))
                             (sb-int:invalid-array-index-error (e)
-                              (error (lisp-condition (make-instance '|java/lang/ArrayIndexOutOfBoundsException|)))))
+                              (error (lisp-condition (make-instance '|java/lang/ArrayIndexOutOfBoundsException|))))
+                            (error (e)
+                              (error (lisp-condition (make-instance '|java/lang/NullPointerException|)))))
                    :expression-type :INTEGER)))
 
 (defmethod codegen ((insn ir-laload) context)
-  ;;; FIXME: throw nullpointerexception if needed
   (with-slots (index arrayref) insn
     (make-instance '<expression>
                    :insn insn
@@ -317,11 +341,12 @@
                                     (arrayref ,(code (codegen arrayref context))))
                                 (aref arrayref index))
                             (sb-int:invalid-array-index-error (e)
-                              (error (lisp-condition (make-instance '|java/lang/ArrayIndexOutOfBoundsException|)))))
+                              (error (lisp-condition (make-instance '|java/lang/ArrayIndexOutOfBoundsException|))))
+                            (error (e)
+                              (error (lisp-condition (make-instance '|java/lang/NullPointerException|)))))
                    :expression-type :LONG)))
 
 (defmethod codegen ((insn ir-baload) context)
-  ;;; FIXME: throw nullpointerexception if needed
   (with-slots (index arrayref) insn
     (make-instance '<expression>
                    :insn insn
@@ -330,11 +355,12 @@
                                     (arrayref ,(code (codegen arrayref context))))
                                 (aref arrayref index))
                             (sb-int:invalid-array-index-error (e)
-                              (error (lisp-condition (make-instance '|java/lang/ArrayIndexOutOfBoundsException|)))))
+                              (error (lisp-condition (make-instance '|java/lang/ArrayIndexOutOfBoundsException|))))
+                            (error (e)
+                              (error (lisp-condition (make-instance '|java/lang/NullPointerException|)))))
                    :expression-type :BYTE)))
 
 (defmethod codegen ((insn ir-aaload) context)
-  ;;; FIXME: throw nullpointerexception if needed
   (with-slots (index arrayref) insn
     (make-instance '<expression>
                    :insn insn
@@ -343,7 +369,9 @@
                                     (arrayref ,(code (codegen arrayref context))))
                                 (aref arrayref index))
                             (sb-int:invalid-array-index-error (e)
-                              (error (lisp-condition (make-instance '|java/lang/ArrayIndexOutOfBoundsException|)))))
+                              (error (lisp-condition (make-instance '|java/lang/ArrayIndexOutOfBoundsException|))))
+                            (error (e)
+                              (error (lisp-condition (make-instance '|java/lang/NullPointerException|)))))
                    :expression-type :REFERENCE)))
 
 (defmethod codegen ((insn ir-castore) context)
@@ -362,15 +390,13 @@
   (with-slots (class) insn
     (make-instance '<expression>
                    :insn insn
-                   :code (list 'let (list (list 'objref (code (codegen (objref insn) context))))
-                               (list 'when 'objref
-                                     (list 'unless (list 'or
-                                                         (list 'typep 'objref
-                                                               (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))
-                                                         (list 'and
-                                                               (list 'arrayp 'objref)
-                                                               (list 'eq (list 'quote '|java/util/Arrays|) (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))))
-                                           (list 'error (list 'lisp-condition (list 'make-instance (list 'quote '|java/lang/ClassCastException|)))))))
+                   :code `(let ((objref ,(code (codegen (objref insn) context))))
+                            (when objref
+                              (unless (or (typep objref (quote ,(intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))
+                                          (and (arrayp objref)
+                                               (eq '|java/util/Arrays|
+                                                   (quote ,(intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))))
+                                (error (lisp-condition (make-instance '|java/lang/ClassCastException|))))))
                    :expression-type nil)))
 
 (defmethod codegen ((insn ir-class) context)
@@ -450,6 +476,20 @@
                                          (list 'if (list '< 'value1 'value2)
                                                -1
                                                0))))
+                 :expression-type :INTEGER))
+
+(defmethod codegen ((insn ir-dcmpl) context)
+  (make-instance '<expression>
+                 :insn insn
+                 :code `(let ((value2 ,(code (codegen (value2 insn) context)))
+                              (value1 ,(code (codegen (value1 insn) context))))
+                          (if (or (float-features:float-nan-p value1) (float-features:float-nan-p value2))
+                              -1
+                              (if (> value1 value2)
+                                  1
+                                  (if (< value1 value2)
+                                      -1
+                                      0))))
                  :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-i2f) context)
@@ -821,11 +861,34 @@
     (make-instance '<expression>
                    :insn insn
                    :code `(progn
-                            ;; FIXME: Ensure the array size is within a reasonable limit
-                            (assert (< ,(code (codegen (size insn) context)) 10000))
                             ;; Create the array with the determined initial element
                             (make-array ,(code (codegen (size insn) context))
                                         :initial-element ,init-element))
+                   :expression-type :ARRAY)))
+
+(defun %make-multi-array (dimensions)
+  (if (null dimensions)
+      nil
+      (make-array (car dimensions)
+                  :initial-contents
+                  (loop repeat (car dimensions)
+                        collect (%make-multi-array (cdr dimensions))))))
+
+(defmethod codegen ((insn ir-multi-new-array) context)
+  (let ((init-element
+          (case (atype insn)
+            ;; Determine the initial element based on the array type
+            (4 0)        ; Integer
+            (5 #\0)      ; Character
+            (6 0.0)      ; Single-precision float
+            (7 0.0d0)    ; Double-precision float
+            ((8 9 10 11) 0) ; Other integer types (assuming default to 0)
+            (t nil))))   ; Default to nil for unknown types
+    (make-instance '<expression>
+                   :insn insn
+                   :code `(progn
+                            ;; Create the multi-dimensional array with the determined initial element
+                            (%make-multi-array (list ,@(mapcar (lambda (c) (code (codegen c context))) (sizes insn)))))
                    :expression-type :ARRAY)))
 
 (defmethod codegen ((insn ir-nop) context)
