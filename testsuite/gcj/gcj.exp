@@ -9,7 +9,7 @@ set testargs ""
 proc openldk_load { classfile } {
 
     global testargs
-    set timeout 120
+    set timeout 20
     verbose "load $classfile"
     set ldkcp [getenv "LDK_CLASSPATH"]
     setenv "LDK_CLASSPATH" "$ldkcp:.:./gcj"
@@ -21,10 +21,10 @@ proc openldk_load { classfile } {
     set output [lindex $result 1]
     verbose "STATUS = $status"
     if { $status == 0 } {
-        verbose "PASSSSSSSSSSSSSS"
+        verbose "PASS"
         return [list "pass" $output]
     } else {
-        verbose "FAILLLLLLLLLLLLLL"
+        verbose "FAIL"
         return [list "fail" $output]
     }
 }
