@@ -239,6 +239,9 @@
 (defclass/std ir-i2s (ir-unop)
   ())
 
+(defclass/std ir-i2d (ir-unop)
+  ())
+
 (defclass/std ir-i2f (ir-unop)
   ())
 

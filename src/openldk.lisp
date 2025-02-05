@@ -473,7 +473,12 @@
                  "java/lang/ref/SoftReference"
                  "java/util/Properties"
                  "java/io/UnsupportedEncodingException"
-                 "java/lang/ArrayIndexOutOfBoundsException"))
+                 "java/lang/ArrayIndexOutOfBoundsException"
+                 "java/lang/ExceptionInInitializerError"
+                 "java/lang/InterruptedException"
+                 "java/lang/NullPointerException"
+                 "java/lang/OutOfMemoryError"
+                 "java/security/NoSuchProviderException"))
       (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil))
 
     (let ((props (make-instance '|java/util/Properties|)))

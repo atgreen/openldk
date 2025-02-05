@@ -177,6 +177,14 @@
     (setf (slot-value c '|objref|) throwable)
     c))
 
+(defclass |java/lang/ArrayIndexOutOfBoundsException| (|java/lang/Exception|)
+  ())
+
+(defmethod lisp-condition ((throwable |java/lang/ArrayIndexOutOfBoundsException|))
+  (let ((c (make-condition '|condition-java/lang/ArrayIndexOutOfBoundsException|)))
+    (setf (slot-value c '|objref|) throwable)
+    c))
+
 (define-condition |condition-java/lang/IllegalAccessException|
 		(|condition-java/lang/ReflectiveOperationException|)
 	((objref)))
