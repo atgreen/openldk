@@ -78,6 +78,14 @@
   (declare (ignore code))
   (%transpile-xastore context 'ir-iastore))
 
+(define-bytecode-transpiler :FASTORE (context code)
+  (declare (ignore code))
+  (%transpile-xastore context 'ir-fastore))
+
+(define-bytecode-transpiler :SASTORE (context code)
+  (declare (ignore code))
+  (%transpile-xastore context 'ir-sastore))
+
 (define-bytecode-transpiler :BASTORE (context code)
   (declare (ignore code))
   (%transpile-xastore context 'ir-bastore))
@@ -396,6 +404,42 @@
         (push var (stack context))
         code))))
 
+(define-bytecode-transpiler :FALOAD (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let* ((pc-start pc)
+           (var (make-stack-variable context pc-start :FLOAT)))
+      (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
+      (let ((code
+             (list (make-instance 'ir-assign
+                                  :address pc-start
+                                  :lvalue var
+                                  :rvalue (make-instance 'ir-faload
+                                                         :address pc-start
+                                                         :index (pop (stack context))
+                                                         :arrayref (pop (stack context)))))))
+        (push var (stack context))
+        code))))
+
+(define-bytecode-transpiler :DALOAD (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let* ((pc-start pc)
+           (var (make-stack-variable context pc-start :DOUBLE)))
+      (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
+      (let ((code
+             (list (make-instance 'ir-assign
+                                  :address pc-start
+                                  :lvalue var
+                                  :rvalue (make-instance 'ir-daload
+                                                         :address pc-start
+                                                         :index (pop (stack context))
+                                                         :arrayref (pop (stack context)))))))
+        (push var (stack context))
+        code))))
+
 (define-bytecode-transpiler :AALOAD (context code)
   (declare (ignore code))
   (with-slots (pc) context
@@ -462,6 +506,8 @@
                opcodes)))
 
 (%define-unop-transpilers
+ (:D2F 'ir-d2f :FLOAT)
+ (:D2I 'ir-d2i :INTEGER)
  (:D2L 'ir-d2l :LONG)
  (:F2D 'ir-f2d :DOUBLE)
  (:F2I 'ir-f2i :INTEGER)
@@ -505,6 +551,7 @@
                opcodes)))
 
 (%define-binop-transpilers
+  (:DDIV 'ir-ddiv :DOUBLE)
   (:DMUL 'ir-dmul :DOUBLE)
   (:DADD 'ir-dadd :DOUBLE)
   (:FADD 'ir-fadd :FLOAT)
@@ -527,6 +574,7 @@
   (:LCMP 'ir-lcmp :INTEGER)
   (:LDIV 'ir-ldiv :LONG)
   (:LMUL 'ir-lmul :LONG)
+  (:LOR 'ir-lor :LONG)
   (:LREM 'ir-lrem :LONG)
   (:LSHL 'ir-lshl :LONG)
   (:LSHR 'ir-lshr :LONG)
@@ -684,25 +732,10 @@
 
 (defun unsigned-to-signed-long (unsigned-value)
   "Convert a 64-bit unsigned integer (0-18446744073709551615) to a signed long (-9223372036854775808 to 9223372036854775807)."
-  (if (> unsigned-value 9223372036854775807)  ; 2^63 - 1
+  (if (or (< unsigned-value -9223372036854775808) (> unsigned-value 9223372036854775807))  ; 2^63 - 1
       (- unsigned-value 18446744073709551616) ; 2^64
       unsigned-value))
-#|
-(defun unsigned-to-signed-long (unsigned-value)
-  (if (>= unsigned-value (* 2 32768))
-      (- unsigned-value (* 2 65536))
-      unsigned-value))
 
-(defun unsigned-to-signed-integer (unsigned-value)
-  (if (>= unsigned-value 32768)
-      (- unsigned-value 65536)
-      unsigned-value))
-
-(defun unsigned-to-signed-short (unsigned-value)
-  (if (>= unsigned-value 16384)
-      (- unsigned-value 32768)
-      unsigned-value))
-|#
 (defun unsigned-to-signed-byte (unsigned-value)
   (if (> unsigned-value 127)  ; 128-255 should be negative
       (- unsigned-value 256)
@@ -734,6 +767,23 @@
                                        :address pc-start
                                        :lvalue var
                                        :rvalue (make-instance 'ir-fcmpg
+                                                              :value2 (pop (stack context))
+                                                              :value1 (pop (stack context))
+                                                              :address pc-start)))))
+        (push var (stack context))
+        code))))
+
+(define-bytecode-transpiler :DCMPG (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let* ((pc-start pc)
+           (var (make-stack-variable context pc-start :INTEGER)))
+      (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
+      (let ((code (list (make-instance 'ir-assign
+                                       :address pc-start
+                                       :lvalue var
+                                       :rvalue (make-instance 'ir-dcmpg
                                                               :value2 (pop (stack context))
                                                               :value1 (pop (stack context))
                                                               :address pc-start)))))
@@ -795,6 +845,10 @@
 (define-bytecode-transpiler :FCONST_1 (context code)
   (declare (ignore code))
   (%transpile-fconst-x context 1.0))
+
+(define-bytecode-transpiler :FCONST_2 (context code)
+  (declare (ignore code))
+  (%transpile-fconst-x context 2.0))
 
 (defun %transpile-dconst-x (context value)
   (with-slots (pc stack) context
@@ -1442,6 +1496,16 @@
   (with-slots (pc) context
     (incf pc)
     (push pc (aref (next-insn-list context) (1- pc)))
+    (pop (stack context))
+    (list (make-instance 'ir-nop :address (1- pc)))))
+
+(define-bytecode-transpiler :POP2 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (incf pc)
+    (push pc (aref (next-insn-list context) (1- pc)))
+    (when (find (var-type (car (stack context))) '(:LONG :DOUBLE))
+      (pop (stack context)))
     (pop (stack context))
     (list (make-instance 'ir-nop :address (1- pc)))))
 

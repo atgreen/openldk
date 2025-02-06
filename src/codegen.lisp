@@ -111,6 +111,34 @@
                             (error (e)
                               (error (lisp-condition (%make-throwable '|java/lang/NullPointerException|))))))))
 
+(defmethod codegen ((insn ir-fastore) context)
+  (with-slots (arrayref index value) insn
+    (make-instance '<expression>
+                   :insn insn
+                   :code `(handler-case
+                              (let ((value ,(code (codegen value context)))
+                                    (index ,(code (codegen index context)))
+                                    (arrayref ,(code (codegen arrayref context))))
+                                (setf (aref arrayref index) value))
+                            (sb-int:invalid-array-index-error (e)
+                              (error (lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
+                            (error (e)
+                              (error (lisp-condition (%make-throwable '|java/lang/NullPointerException|))))))))
+
+(defmethod codegen ((insn ir-sastore) context)
+  (with-slots (arrayref index value) insn
+    (make-instance '<expression>
+                   :insn insn
+                   :code `(handler-case
+                              (let ((value ,(code (codegen value context)))
+                                    (index ,(code (codegen index context)))
+                                    (arrayref ,(code (codegen arrayref context))))
+                                (setf (aref arrayref index) value))
+                            (sb-int:invalid-array-index-error (e)
+                              (error (lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
+                            (error (e)
+                              (error (lisp-condition (%make-throwable '|java/lang/NullPointerException|))))))))
+
 (defmethod codegen ((insn ir-bastore) context)
   (with-slots (arrayref index value) insn
     (make-instance '<expression>
@@ -248,6 +276,12 @@
                  :code (list 'logior (code (codegen (value1 insn) context)) (code (codegen (value2 insn) context)))
                  :expression-type :INTEGER))
 
+(defmethod codegen ((insn ir-lor) context)
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'logior (code (codegen (value1 insn) context)) (code (codegen (value2 insn) context)))
+                 :expression-type :LONG))
+
 (defmethod codegen ((insn ir-iand) context)
   (make-instance '<expression>
                  :insn insn
@@ -367,6 +401,34 @@
                               (error (lisp-condition (%make-throwable '|java/lang/NullPointerException|)))))
                    :expression-type :BYTE)))
 
+(defmethod codegen ((insn ir-daload) context)
+  (with-slots (index arrayref) insn
+    (make-instance '<expression>
+                   :insn insn
+                   :code `(handler-case
+                              (let ((index ,(code (codegen index context)))
+                                    (arrayref ,(code (codegen arrayref context))))
+                                (aref arrayref index))
+                            (sb-int:invalid-array-index-error (e)
+                              (error (lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
+                            (error (e)
+                              (error (lisp-condition (%make-throwable '|java/lang/NullPointerException|)))))
+                   :expression-type :DOUBLE)))
+
+(defmethod codegen ((insn ir-faload) context)
+  (with-slots (index arrayref) insn
+    (make-instance '<expression>
+                   :insn insn
+                   :code `(handler-case
+                              (let ((index ,(code (codegen index context)))
+                                    (arrayref ,(code (codegen arrayref context))))
+                                (aref arrayref index))
+                            (sb-int:invalid-array-index-error (e)
+                              (error (lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
+                            (error (e)
+                              (error (lisp-condition (%make-throwable '|java/lang/NullPointerException|)))))
+                   :expression-type :FLOAT)))
+
 (defmethod codegen ((insn ir-aaload) context)
   (with-slots (index arrayref) insn
     (make-instance '<expression>
@@ -457,7 +519,33 @@
                                    (list 'error (list 'lisp-condition (list '%make-throwable (list 'quote '|java/lang/ArithmeticException|))))))
                  :expression-type :FLOAT))
 
+(defmethod codegen ((insn ir-ddiv) context)
+  ;; FIXME - handle all weird conditions
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'handler-case
+                             (list 'let (list (list 'value2 (code (codegen (value2 insn) context)))
+                                              (list 'value1 (code (codegen (value1 insn) context))))
+                                   (list '/ 'value1 'value2))
+                             (list 'division-by-zero (list 'e)
+                                   (list 'error (list 'lisp-condition (list '%make-throwable (list 'quote '|java/lang/ArithmeticException|))))))
+                 :expression-type :DOUBLE))
+
 (defmethod codegen ((insn ir-fcmpg) context)
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'let (list (list 'value2 (code (codegen (value2 insn) context)))
+                                        (list 'value1 (code (codegen (value1 insn) context))))
+                             (list 'if (list 'or (list 'float-features:float-nan-p 'value1) (list 'float-features:float-nan-p 'value2))
+                                   1
+                                   (list 'if (list '> 'value1 'value2)
+                                         1
+                                         (list 'if (list '< 'value1 'value2)
+                                               -1
+                                               0))))
+                 :expression-type :INTEGER))
+
+(defmethod codegen ((insn ir-dcmpg) context)
   (make-instance '<expression>
                  :insn insn
                  :code (list 'let (list (list 'value2 (code (codegen (value2 insn) context)))
@@ -515,6 +603,19 @@
   (make-instance '<expression>
                  :insn insn
                  :code (code (codegen (value insn) context))
+                 :expression-type :DOUBLE))
+
+(defmethod codegen ((insn ir-d2f) context)
+  (make-instance '<expression>
+                 :insn insn
+                 :code (code (codegen (value insn) context))
+                 :expression-type :FLOAT))
+
+(defmethod codegen ((insn ir-d2i) context)
+  ;; FIXME sign conversion?
+  (make-instance '<expression>
+                 :insn insn
+                 :code `(logand (floor ,(code (codegen (value insn) context))) #xFFFFFFFF)
                  :expression-type :DOUBLE))
 
 (defmethod codegen ((insn ir-d2l) context)

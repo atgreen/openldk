@@ -97,6 +97,12 @@
 (defclass/std ir-iastore (ir-xastore)
   ())
 
+(defclass/std ir-fastore (ir-xastore)
+  ())
+
+(defclass/std ir-sastore (ir-xastore)
+  ())
+
 (defclass/std ir-bastore (ir-xastore)
   ())
 
@@ -107,6 +113,9 @@
   ())
 
 (defclass/std ir-fcmpl (ir-binop)
+  ())
+
+(defclass/std ir-dcmpg (ir-binop)
   ())
 
 (defclass/std ir-dcmpl (ir-binop)
@@ -141,6 +150,12 @@
   ())
 
 (defclass/std ir-baload (ir-array-index)
+  ())
+
+(defclass/std ir-daload (ir-array-index)
+  ())
+
+(defclass/std ir-faload (ir-array-index)
   ())
 
 (defclass/std ir-castore (ir-xastore)
@@ -233,7 +248,13 @@
 (defclass/std ir-l2i (ir-unop)
   ())
 
+(defclass/std ir-d2i (ir-unop)
+  ())
+
 (defclass/std ir-d2l (ir-unop)
+  ())
+
+(defclass/std ir-d2f (ir-unop)
   ())
 
 (defclass/std ir-i2b (ir-unop)
@@ -421,6 +442,9 @@
   ())
 
 (defclass/std ir-dsub (ir-binop)
+  ())
+
+(defclass/std ir-ddiv (ir-binop)
   ())
 
 (defclass/std ir-fdiv (ir-binop)
