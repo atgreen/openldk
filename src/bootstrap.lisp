@@ -127,21 +127,21 @@
 (defclass |java/lang/Exception| (|java/lang/Throwable|)
   ())
 
-(defclass |java/lang/ArithmeticException| (|java/lang/Exception|)
+(defclass |java/lang/ArithmeticException| (|java/lang/RuntimeException|)
   ())
 
 (define-condition |condition-java/io/InterruptedIOException| (|condition-java/lang/Throwable|)
   ())
 
-(define-condition |condition-java/lang/ArithmeticException|
+(define-condition |condition-java/lang/RuntimeException|
     (|condition-java/lang/Exception|)
+  ())
+
+(define-condition |condition-java/lang/ArithmeticException|
+    (|condition-java/lang/RuntimeException|)
   ())
 
 (defclass |java/lang/ClassCastException| (|java/lang/RuntimeException|)
-  ())
-
-(define-condition |condition-java/lang/RuntimeException|
-    (|condition-java/lang/Exception|)
   ())
 
 (define-condition |condition-java/lang/ClassCastException|

@@ -56,9 +56,9 @@
   (classload "java/lang/SecurityManager")
   (eval (list 'make-instance (list 'quote '|java/lang/SecurityManager|))))
 
-(defmethod |fillInStackTrace(I)| ((|this| |java/lang/Throwable|) dummy)
+(defmethod |fillInStackTrace(I)| ((this |java/lang/Throwable|) dummy)
   (let ((bt (trivial-backtrace:print-backtrace nil :output nil)))
-    (print bt)))
+    (setf (slot-value this '|backtrace|) bt)))
 
 (defun %remove-adjacent-repeats (list)
   "Remove all adjacent repeated objects from LIST."
