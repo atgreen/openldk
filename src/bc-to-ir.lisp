@@ -78,6 +78,10 @@
   (declare (ignore code))
   (%transpile-xastore context 'ir-iastore))
 
+(define-bytecode-transpiler :LASTORE (context code)
+  (declare (ignore code))
+  (%transpile-xastore context 'ir-lastore))
+
 (define-bytecode-transpiler :FASTORE (context code)
   (declare (ignore code))
   (%transpile-xastore context 'ir-fastore))

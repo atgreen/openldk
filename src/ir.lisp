@@ -97,6 +97,9 @@
 (defclass/std ir-iastore (ir-xastore)
   ())
 
+(defclass/std ir-lastore (ir-xastore)
+  ())
+
 (defclass/std ir-fastore (ir-xastore)
   ())
 

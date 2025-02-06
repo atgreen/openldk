@@ -111,6 +111,20 @@
                             (error (e)
                               (error (lisp-condition (%make-throwable '|java/lang/NullPointerException|))))))))
 
+(defmethod codegen ((insn ir-lastore) context)
+  (with-slots (arrayref index value) insn
+    (make-instance '<expression>
+                   :insn insn
+                   :code `(handler-case
+                              (let ((value ,(code (codegen value context)))
+                                    (index ,(code (codegen index context)))
+                                    (arrayref ,(code (codegen arrayref context))))
+                                (setf (aref arrayref index) value))
+                            (sb-int:invalid-array-index-error (e)
+                              (error (lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
+                            (error (e)
+                              (error (lisp-condition (%make-throwable '|java/lang/NullPointerException|))))))))
+
 (defmethod codegen ((insn ir-fastore) context)
   (with-slots (arrayref index value) insn
     (make-instance '<expression>
