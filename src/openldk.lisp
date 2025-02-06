@@ -46,6 +46,7 @@
 (defvar *condition-table* (make-hash-table))
 
 (defvar *dump-dir* nil)
+(defvar *debug-load nil)
 (defvar *debug-bytecode* nil)
 (defvar *debug-codegen* nil)
 (defvar *debug-slynk* nil)
@@ -318,6 +319,8 @@
     (if class
         class
         (let ((classfile-stream (open-java-classfile-on-classpath classname)))
+          (when *debug-load*
+            (format t "~&; LOADING ~A~%" classname))
           (if classfile-stream
               (unwind-protect
                    (let* ((class
@@ -398,6 +401,8 @@
       (progn
         (when (find #\c LDK_DEBUG)
           (setf *debug-codegen* t))
+        (when (find #\l LDK_DEBUG)
+          (setf *debug-load* t))
         (when (find #\s LDK_DEBUG)
           (setf *debug-slynk* t))
         (when (find #\t LDK_DEBUG)
@@ -411,7 +416,7 @@
 
   (when *debug-slynk*
     (slynk:create-server :port 2025)
-    (sleep 5))
+    (sleep 10))
 
   (setf *dump-dir* dump-dir)
 
@@ -448,6 +453,8 @@
                           (make-instance 'jar-classpath-entry :jarfile cpe)
                           (make-instance 'dir-classpath-entry :dir cpe))))
 
+  (setf *debug-load* t)
+
   ;; We need to hand load these before Class.forName0 will work.
   (%clinit (classload "java/lang/Object"))
   (%clinit (classload "java/lang/String"))
@@ -477,6 +484,7 @@
                  "java/lang/ArithmeticException"
                  "java/lang/ArrayIndexOutOfBoundsException"
                  "java/lang/ExceptionInInitializerError"
+                 "java/lang/IllegalArgumentException"
                  "java/lang/InterruptedException"
                  "java/lang/NullPointerException"
                  "java/lang/OutOfMemoryError"
@@ -490,5 +498,7 @@
     (|java/lang/System.initializeSystemClass()|)
 
     (|<init>()| boot-class-loader)
+
+    (setf *debug-load* nil)
 
     (sb-ext:save-lisp-and-die "openldk" :executable t :save-runtime-options t :toplevel #'main-wrapper)))
