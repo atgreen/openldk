@@ -678,7 +678,7 @@
 
 (defun unsigned-to-signed-integer (unsigned-value)
   "Convert a 32-bit unsigned integer (0-4294967295) to a signed int (-2147483648 to 2147483647)."
-  (if (> unsigned-value 2147483647)  ; 2^31 - 1
+  (if (or (< unsigned-value -2147483648) (> unsigned-value 2147483647))  ; 2^31 - 1
       (- unsigned-value 4294967296)  ; 2^32
       unsigned-value))
 
