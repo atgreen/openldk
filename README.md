@@ -129,12 +129,12 @@ bytecode and generates something like the following:
 ### Testing
 
 Run `make check` to run through the dejagnu-based testsuite.
-As of Feb 6 2025, the results look like this
+As of Feb 7 2025, the results look like this
 ```
 		=== openldk Summary ===
 
-# of expected passes		2004
-# of unexpected failures	1506
+# of expected passes		2005
+# of unexpected failures	1505
 # of unresolved testcases	13
 ```
 

@@ -157,10 +157,19 @@
         (push var (stack context))
         code))))
 
+(define-bytecode-transpiler :WIDE (context code)
+  (declare (ignore code))
+  (setf (next-is-wide-p context) t)
+  (list (make-instance 'ir-nop :address (pc context))))
+
 (define-bytecode-transpiler :ASTORE (context code)
   (with-slots (pc) context
     (let ((pc-start pc)
-          (index (aref code (incf pc))))
+          (index (if (next-is-wide-p context)
+                     (+ (* (aref code (incf pc)) 256)
+                        (aref code (incf pc)))
+                     (aref code  (incf pc)))))
+      (setf (next-is-wide-p context) nil)
       (incf pc)
       (push pc (aref (next-insn-list context) pc-start))
       (list (make-instance 'ir-assign
@@ -210,8 +219,16 @@
   (with-slots (pc) context
     (let ((pc-start pc))
       (with-slots (constant-pool) class
-        (let* ((index (aref code (incf pc)))
-               (const (%unsigned-to-signed-byte (aref code (incf pc)))))
+        (let* ((index (if (next-is-wide-p context)
+                          (+ (* (aref code (incf pc)) 256)
+                             (aref code (incf pc)))
+                          (aref code (incf pc))))
+               (const (%unsigned-to-signed-byte
+                       (if (next-is-wide-p context)
+                           (+ (* (aref code (incf pc)) 256)
+                              (aref code (incf pc)))
+                           (aref code (incf pc))))))
+          (setf (next-is-wide-p context) nil)
           (incf pc)
           (push pc (aref (next-insn-list context) pc-start))
           (list (make-instance 'ir-iinc
@@ -222,8 +239,12 @@
 (defun %transpile-xstore (context code jtype)
   (with-slots (pc) context
     (let ((pc-start pc)
-          (index (aref code (incf pc)))
+          (index (if (next-is-wide-p context)
+                     (+ (* (aref code (incf pc)) 256)
+                        (aref code (incf pc)))
+                     (aref code (incf pc))))
           (var (pop (stack context))))
+      (setf (next-is-wide-p context) nil)
       (incf pc)
       (push pc (aref (next-insn-list context) pc-start))
       (list (make-instance 'ir-assign
@@ -335,6 +356,36 @@
 (define-bytecode-transpiler :DSTORE_3 (context code)
   (declare (ignore code))
   (%transpile-dstore-x context 3))
+
+(defun %transpile-fstore-x (context index)
+  (with-slots (pc) context
+    (let* ((pc-start pc)
+           (var (pop (stack context))))
+      (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
+      (list (make-instance 'ir-assign
+                           :address pc-start
+                           :lvalue (make-instance 'ir-local-variable
+                                                  :address pc-start
+                                                  :index index
+                                                  :jtype :FLOAT)
+                           :rvalue var)))))
+
+(define-bytecode-transpiler :FSTORE_0 (context code)
+  (declare (ignore code))
+  (%transpile-fstore-x context 0))
+
+(define-bytecode-transpiler :FSTORE_1 (context code)
+  (declare (ignore code))
+  (%transpile-fstore-x context 1))
+
+(define-bytecode-transpiler :FSTORE_2 (context code)
+  (declare (ignore code))
+  (%transpile-fstore-x context 2))
+
+(define-bytecode-transpiler :FSTORE_3 (context code)
+  (declare (ignore code))
+  (%transpile-fstore-x context 3))
 
 (define-bytecode-transpiler :CALOAD (context code)
   (declare (ignore code))
@@ -1027,8 +1078,12 @@
 (defun %transpile-load (jtype context code)
   (with-slots (pc) context
     (let* ((pc-start pc)
-           (index (aref code (incf pc)))
+           (index (if (next-is-wide-p context)
+                      (+ (* (aref code (incf pc)) 256)
+                         (aref code (incf pc)))
+                      (aref code (incf pc))))
            (var (make-stack-variable context pc-start jtype)))
+      (setf (next-is-wide-p context) nil)
       (incf pc)
       (push pc (aref (next-insn-list context) pc-start))
       (push var (stack context))

@@ -56,6 +56,7 @@
    (blocks)
    (ir-code)
    (svcount :std 0)
+   (next-is-wide-p)
    (stack-state-table
     :doc "A hashtable mapping addresses to stack states")
    (try-end-table
