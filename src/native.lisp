@@ -839,7 +839,7 @@ the prompt I used:
 
 Prompt: Now do the same for StrictMath.
 
-FIXME: these aren't really strict.
+FIXME: these aren't really strict. Look at sb-mpfr.
 
 |#
 
