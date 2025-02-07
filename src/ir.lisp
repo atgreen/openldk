@@ -284,6 +284,9 @@
 (defclass/std ir-ineg (ir-unop)
   ())
 
+(defclass/std ir-dneg (ir-unop)
+  ())
+
 (defclass/std ir-iinc (ir-node)
   ((index const)))
 
@@ -439,6 +442,9 @@
   ())
 
 (defclass/std ir-fsub (ir-binop)
+  ())
+
+(defclass/std ir-dsub (ir-binop)
   ())
 
 (defclass/std ir-dadd (ir-binop)

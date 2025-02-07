@@ -259,6 +259,7 @@
 (%define-binop-codegen-methods
   (ir-dmul '* :DOUBLE nil)
   (ir-dadd '+ :DOUBLE nil)
+  (ir-dsub '- :DOUBLE nil)
   (ir-fadd '+ :FLOAT nil)
   (ir-fdiv '/ :FLOAT nil)
   (ir-fmul '* :FLOAT nil)
@@ -655,6 +656,12 @@
                  :insn insn
                  :code `(unsigned-to-signed-integer (- ,(code (codegen (value insn) context))))
                  :expression-type :INTEGER))
+
+(defmethod codegen ((insn ir-dneg) context)
+  (make-instance '<expression>
+                 :insn insn
+                 :code `(- ,(code (codegen (value insn) context)))
+                 :expression-type :DOUBLE))
 
 (defmethod codegen ((insn ir-i2l) context)
   (make-instance '<expression>
