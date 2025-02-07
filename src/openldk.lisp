@@ -265,16 +265,13 @@
                           (list
                            'defclass (intern name :openldk)
                            (if (or super interfaces) (append (if super (list (intern super :openldk)) nil) (mapcar (lambda (i) (intern i :openldk)) (coerce interfaces  'list))) (list))
-                           (append
-                            (map 'list
-                                 (lambda (f)
-                                   (list (intern (slot-value f 'name) :openldk)
-                                         :initform (initform-from-descriptor (slot-value f 'descriptor))
-                                         :allocation
-                                         (if (eq 0 (logand 8 (slot-value f 'access-flags))) :instance :class)))
-                                 fields)
-                            (when (string= name "java/lang/Object")
-                              (list (list '%hash-code :initform nil)))))
+                           (map 'list
+                                (lambda (f)
+                                  (list (intern (slot-value f 'name) :openldk)
+                                        :initform (initform-from-descriptor (slot-value f 'descriptor))
+                                        :allocation
+                                        (if (eq 0 (logand 8 (slot-value f 'access-flags))) :instance :class)))
+                                fields))
                           (list
                            'defparameter (intern (format nil "+static-~A+" (intern name)) :openldk)
                            (list
@@ -480,14 +477,23 @@
                  "java/lang/Thread"
                  "java/lang/ref/SoftReference"
                  "java/util/Properties"
+                 "java/beans/IntrospectionException"
                  "java/io/UnsupportedEncodingException"
                  "java/lang/ArithmeticException"
                  "java/lang/ArrayIndexOutOfBoundsException"
+                 "java/lang/ArrayStoreException"
+                 "java/lang/ClassFormatError"
                  "java/lang/ExceptionInInitializerError"
                  "java/lang/IllegalArgumentException"
+                 "java/lang/IllegalMonitorStateException"
                  "java/lang/InterruptedException"
+                 "java/lang/NegativeArraySizeException"
                  "java/lang/NullPointerException"
                  "java/lang/OutOfMemoryError"
+                 "java/lang/StackOverflowError"
+                 "java/net/SocketException"
+                 "java/net/URISyntaxException"
+                 "java/net/UnknownHostException"
                  "java/security/NoSuchProviderException"
                  "java/util/MissingResourceException"))
       (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil))

@@ -184,7 +184,12 @@
 
 (defun |java/lang/Class$Atomic.objectFieldOffset([Ljava/lang/reflect/Field;Ljava/lang/String;)| (field name)
   ;; FIXME
-  0)
+  (error "ofo"))
+
+(defmethod |staticFieldOffset(Ljava/lang/reflect/Field;)| (field)
+  (let ((offset (sxhash field)))
+    (setf (gethash offset field-offset-table) field)
+    offset))
 
 (defun %stringize-array (array)
   "Convert an array of characters and integers (ASCII values) into a string."
@@ -244,13 +249,8 @@
   ;; FIXME
   )
 
-(defvar hash-code-counter 2025)
-
 (defmethod |hashCode()| (obj)
-  (with-slots (%hash-code) obj
-    (or %hash-code
-        (setf %hash-code (incf hash-code-counter))
-        hash-code-counter)))
+  (|java/lang/System.identityHashCode(Ljava/lang/Object;)| obj))
 
 (defclass %array-base-offset ()
   ((array :initarg :array)))
@@ -1035,3 +1035,19 @@ FIXME: these aren't really strict/ Look at sb-mpfr/
   (multiple-value-bind (universal-time nanoseconds)
       (org.shirakumo.precise-time:get-precise-time)
     (+ (* universal-time 1000000000) nanoseconds)))
+
+(defun |java/lang/System.identityHashCode(Ljava/lang/Object;)| (objref)
+  ;; A bit mixing hash to bring 64-bit integers down to 32-bits.
+  (let ((x (sxhash objref)))
+    (let ((x (logxor x (ash x -33))))
+      (setf x (* x #x62A9D9ED799705F5))
+      (setf x (logxor x (ash x -28)))
+      (ldb (byte 32 0) x))))
+
+(defun |java/lang/Thread.yield()| ()
+  ;; FIXME
+  )
+
+(defmethod |notify()| ((objref |java/lang/Object|))
+  ;; FIXME
+  )

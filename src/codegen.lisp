@@ -285,6 +285,12 @@
                  :code (list 'logxor (code (codegen (value1 insn) context)) (code (codegen (value2 insn) context)))
                  :expression-type :INTEGER))
 
+(defmethod codegen ((insn ir-lxor) context)
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'logxor (code (codegen (value1 insn) context)) (code (codegen (value2 insn) context)))
+                 :expression-type :LONG))
+
 (defmethod codegen ((insn ir-ior) context)
   (make-instance '<expression>
                  :insn insn
@@ -313,14 +319,6 @@
   (let ((expr (make-instance '<expression>
                              :insn insn
                              :code (gen-push-item (list 'logior (gen-pop-item) (gen-pop-item)))
-                             :expression-type :LONG)))
-    (error (stack context)) (error (stack context)) (push expr (stack context))
-    expr))
-
-(defmethod codegen ((insn ir-lxor) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (gen-push-item (list 'logxor (gen-pop-item) (gen-pop-item)))
                              :expression-type :LONG)))
     (error (stack context)) (error (stack context)) (push expr (stack context))
     expr))
@@ -530,6 +528,8 @@
                              (list 'let (list (list 'value2 (code (codegen (value2 insn) context)))
                                               (list 'value1 (code (codegen (value1 insn) context))))
                                    (list '/ 'value1 'value2))
+                             (list 'floating-point-invalid-operation (list 'e)
+                                   (list 'error (list 'lisp-condition (list '%make-throwable (list 'quote '|java/lang/ArithmeticException|)))))
                              (list 'division-by-zero (list 'e)
                                    (list 'error (list 'lisp-condition (list '%make-throwable (list 'quote '|java/lang/ArithmeticException|))))))
                  :expression-type :FLOAT))
@@ -542,6 +542,8 @@
                              (list 'let (list (list 'value2 (code (codegen (value2 insn) context)))
                                               (list 'value1 (code (codegen (value1 insn) context))))
                                    (list '/ 'value1 'value2))
+                             (list 'floating-point-invalid-operation (list 'e)
+                                   (list 'error (list 'lisp-condition (list '%make-throwable (list 'quote '|java/lang/ArithmeticException|)))))
                              (list 'division-by-zero (list 'e)
                                    (list 'error (list 'lisp-condition (list '%make-throwable (list 'quote '|java/lang/ArithmeticException|))))))
                  :expression-type :DOUBLE))
@@ -704,6 +706,14 @@
                              (list 'floor (code (codegen (value insn) context)))
                              #xFFFFFFFF)
                  :expression-type :INTEGER))
+
+(defmethod codegen ((insn ir-f2l) context)
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'logand
+                             (list 'floor (code (codegen (value insn) context)))
+                             #xFFFFFFFFFFFFFFFF)
+                 :expression-type :LONG))
 
 (defmethod codegen ((insn ir-iinc) context)
   ;; FIXME: don't increment above width of type
