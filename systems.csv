@@ -100,3 +100,4 @@ local-time, ghcr.io/ocicl/local-time@sha256:ed7c32afa2aadc798f4183017b6bb4ceea9e
 cl-postgres_plus_local-time, ghcr.io/ocicl/local-time@sha256:ed7c32afa2aadc798f4183017b6bb4ceea9e287be83da8f24b212442207ba532, local-time-20241119-bcfaeb2/cl-postgres+local-time.asd
 slynk, ghcr.io/ocicl/slynk@sha256:b592df0641240584eb7242ea730fb9badcedb963da66c9d0182fdd13cebee6d0, sly-20240809-742355f7/slynk/slynk.asd
 file-attributes, ghcr.io/ocicl/file-attributes@sha256:ab2f00d3ba0a28c441aaa04175ce58d34913ec8bdb64ec7da36454ec8313d24c, file-attributes-20240820-07150b9/file-attributes.asd
+precise-time, ghcr.io/ocicl/precise-time@sha256:ab27ad93d2e78094ee9f95d760adb1efdbe5abd955fab20f3f9a024c3f3cedda, precise-time-20250124-08b7009/precise-time.asd

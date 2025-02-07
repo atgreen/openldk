@@ -1027,3 +1027,11 @@ FIXME: these aren't really strict/ Look at sb-mpfr/
 (defun |java/lang/StrictMath.ulp(D)| (a)
   "Returns the unit in the last place (ULP) of a double."
   (float-epsilon a))
+
+(defun |java/lang/System.nanoTime()| ()
+  ;; Do some more math if this is not true.
+  (assert (eq org.shirakumo.precise-time:precise-time-units-per-second
+              1000000000))
+  (multiple-value-bind (universal-time nanoseconds)
+      (org.shirakumo.precise-time:get-precise-time)
+    (+ (* universal-time 1000000000) nanoseconds)))
