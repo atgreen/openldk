@@ -612,3 +612,11 @@ user.variant
   ;; FIXME
   (let ((result (|run()| action)))
     result))
+
+(defun |java/net/InetAddress.init()| ()
+  ;; FIXME
+  )
+
+(defun |java/io/ObjectStreamClass.initNative()| ()
+  ;; FIXME
+  )
