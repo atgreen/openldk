@@ -623,3 +623,6 @@ user.variant
 
 (defmethod |java/lang/System.gc()| ()
   (trivial-garbage:gc))
+
+(defun |java/lang/Thread.sleep(J)| (milliseconds)
+  (sleep (/ milliseconds 1000.0)))
