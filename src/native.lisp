@@ -620,3 +620,6 @@ user.variant
 (defun |java/io/ObjectStreamClass.initNative()| ()
   ;; FIXME
   )
+
+(defmethod |java/lang/System.gc()| ()
+  (trivial-garbage:gc))
