@@ -488,7 +488,8 @@
                  "java/lang/InterruptedException"
                  "java/lang/NullPointerException"
                  "java/lang/OutOfMemoryError"
-                 "java/security/NoSuchProviderException"))
+                 "java/security/NoSuchProviderException"
+                 "java/util/MissingResourceException"))
       (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil))
 
     (let ((props (make-instance '|java/util/Properties|)))
