@@ -1419,7 +1419,6 @@
                          (aref code (incf pc))))
                (call-site-specifier (aref constant-pool index)))
           (format t "~&CSS: ~A~%" call-site-specifier)
-          (format t "~&CSS: ~A~%" (emit call-site-specifier))
           (incf pc 3)
           (error "unimplemented"))))))
 
