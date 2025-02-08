@@ -186,6 +186,9 @@
   ;; FIXME
   (error "ofo"))
 
+(defmethod |staticFieldBase(Ljava/lang/reflect/Field;| ((unsafe |sun/misc/Unsafe|) field)
+  nil)
+
 (defmethod |staticFieldOffset(Ljava/lang/reflect/Field;)| ((unsafe |sun/misc/Unsafe|) field)
   (let ((offset (sxhash field)))
     (setf (gethash offset field-offset-table) field)
@@ -367,7 +370,7 @@
            0)))))
 
 (defmethod |compareAndSwapInt(Ljava/lang/Object;JII)| ((unsafe |sun/misc/Unsafe|) obj field-id expected-value new-value)
-  ;; FIXME
+  ;; FIXME: use atomics package
   (let* ((field (gethash field-id field-offset-table))
          (key (intern (slot-value (slot-value field '|name|) '|value|) :openldk)))
     (if (equal (slot-value obj key) expected-value)
@@ -1051,3 +1054,6 @@ FIXME: these aren't really strict/ Look at sb-mpfr/
 (defmethod |notify()| ((objref |java/lang/Object|))
   ;; FIXME
   )
+
+(defun |java/util/concurrent/atomic/AtomicLong.VMSupportsCS8()| ()
+  0)
