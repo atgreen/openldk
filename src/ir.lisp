@@ -242,6 +242,9 @@
 (defclass/std ir-l2f (ir-unop)
   ())
 
+(defclass/std ir-l2d (ir-unop)
+  ())
+
 (defclass/std ir-f2i (ir-unop)
   ())
 
