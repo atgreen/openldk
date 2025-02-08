@@ -566,7 +566,7 @@ user.variant
       (setf (slot-value fis '|fd|) (open (coerce (slot-value filename '|value|) 'string)
                                          :element-type '(unsigned-byte 8)
                                          :direction :input))
-    (sb-ext:file-does-not-exist (e)
+    ((or sb-ext:file-does-not-exist sb-int:simple-file-error) (e)
       (declare (ignore e))
       (let ((fnf (make-instance '|java/io/FileNotFoundException|)))
         (|<init>(Ljava/lang/String;)| fnf filename)

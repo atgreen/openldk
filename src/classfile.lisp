@@ -56,6 +56,8 @@
   ((bootstrap-method-attr-index)
    (name-and-type-index)))
 
+(define-print-object/std constant-invoke-dynamic)
+
 (defclass/std constant-method-handle () ())
 
 (defclass/std constant-method-type () ())
@@ -179,6 +181,8 @@
 (defclass/std <bootstrap-method> ()
   ((method-ref)
    (method-args)))
+
+(define-print-object/std <bootstrap-method>)
 
 (define-print-object/std <method>)
 
