@@ -111,8 +111,8 @@
 (defclass |java/lang/Throwable| (|java/lang/Object|)
   ())
 
-(defmethod lisp-condition ((throwable |java/lang/Throwable|))
-  (error (format nil "Missing lisp-condition implementation for ~A." throwable)))
+(defmethod %lisp-condition ((throwable |java/lang/Throwable|))
+  (error (format nil "Missing %lisp-condition implementation for ~A." throwable)))
 
 (define-condition |condition-java/lang/Throwable| (error)
   ((|objref|)))

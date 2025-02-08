@@ -362,7 +362,7 @@
                          (let ((ccode `(define-condition ,condition-symbol ( ,(intern (format nil "condition-~A" (slot-value super 'name)) :openldk))
                                          ())))
                            (%eval ccode))
-                         (let ((ccode `(defmethod lisp-condition ((throwable ,(intern (format nil "~A" classname) :openldk)))
+                         (let ((ccode `(defmethod %lisp-condition ((throwable ,(intern (format nil "~A" classname) :openldk)))
                                          (let ((c (make-condition (quote ,(intern (format nil "condition-~A" classname) :openldk)))))
                                            (setf (slot-value c '|objref|) throwable)
                                            c))))
@@ -478,6 +478,7 @@
                  "java/lang/ref/SoftReference"
                  "java/util/Properties"
                  "java/beans/IntrospectionException"
+                 "java/io/FileNotFoundException"
                  "java/io/UnsupportedEncodingException"
                  "java/lang/ArithmeticException"
                  "java/lang/ArrayIndexOutOfBoundsException"
