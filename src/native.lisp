@@ -186,7 +186,7 @@
   ;; FIXME
   (error "ofo"))
 
-(defmethod |staticFieldOffset(Ljava/lang/reflect/Field;)| (field)
+(defmethod |staticFieldOffset(Ljava/lang/reflect/Field;)| ((unsafe |sun/misc/Unsafe|) field)
   (let ((offset (sxhash field)))
     (setf (gethash offset field-offset-table) field)
     offset))
