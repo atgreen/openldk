@@ -186,7 +186,7 @@
   ;; FIXME
   (error "ofo"))
 
-(defmethod |staticFieldBase(Ljava/lang/reflect/Field;| ((unsafe |sun/misc/Unsafe|) field)
+(defmethod |staticFieldBase(Ljava/lang/reflect/Field;)| ((unsafe |sun/misc/Unsafe|) field)
   nil)
 
 (defmethod |staticFieldOffset(Ljava/lang/reflect/Field;)| ((unsafe |sun/misc/Unsafe|) field)
@@ -404,6 +404,7 @@
                   ("java.class.version" . "52.0")
                   ;; FIXME
                   ("java.home" . "/home/green/git/openldk")
+                  ("user.home" . ,(uiop:getenv "HOME"))
                   ("os.name" . "Linux")
                   ("os.version" . "FIXME")
                   ("os.arch" . "FIXME")
