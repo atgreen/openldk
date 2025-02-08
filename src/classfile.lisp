@@ -52,7 +52,9 @@
 (defclass/std constant-int (constant-value) ())
 (defclass/std constant-long (constant-value) ())
 
-(defclass/std constant-invoke-dynamic () ())
+(defclass/std constant-invoke-dynamic ()
+  ((bootstrap-method-attr-index)
+   (name-and-type-index)))
 
 (defclass/std constant-method-handle () ())
 
@@ -403,8 +405,11 @@ stream."
                                  (let ((fixme1 (read-u2)))
                                    (make-instance 'constant-method-type)))
                                 (18
-                                 (let ((fixme (read-u4)))
-                                   (make-instance 'constant-invoke-dynamic)))
+                                 (let ((bootstrap-method-attr-index (read-u2))
+                                       (name-and-type-index (read-u2)))
+                                   (make-instance 'constant-invoke-dynamic
+                                                  :bootstrap-method-attr-index bootstrap-method-attr-index
+                                                  :name-and-type-index name-and-type-index)))
                                 )))))
 
                 (let* ((access-flags (read-u2))
