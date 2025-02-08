@@ -853,14 +853,18 @@
   ;; FIXME: this is wrong.
   (make-instance '<expression>
                  :insn insn
-                 :code (list 'ash (code (codegen (value1 insn) context)) (code (codegen (value2 insn) context)))
+                 :code `(logand
+                         (ash ,(code (codegen (value1 insn) context)) ,(code (codegen (value2 insn) context)))
+                         #xffffffff)
                  :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-lshl) context)
   ;; FIXME: this is wrong.
   (make-instance '<expression>
                  :insn insn
-                 :code (list 'ash (code (codegen (value1 insn) context)) (code (codegen (value2 insn) context)))
+                 :code `(logand
+                         (ash ,(code (codegen (value1 insn) context)) ,(code (codegen (value2 insn) context)))
+                         #xffffffffffffffff)
                  :expression-type :LONG))
 
 (defmethod codegen ((insn ir-iushr) context)
