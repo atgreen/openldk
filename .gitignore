@@ -9,3 +9,4 @@ systems
 *.class
 /testsuite/openldk.log
 /testsuite/openldk.sum
+/testsuite/mauve/gnu/testlet/config.java
