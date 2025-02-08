@@ -1410,6 +1410,19 @@
                                        :class (make-instance 'ir-class :class (classload callee-class)))
                         call)))))))))
 
+(define-bytecode-transpiler :INVOKEDYNAMIC (context code)
+  (with-slots (pc class is-clinit-p) context
+    (let ((context-class class)
+          (pc-start pc))
+      (with-slots (constant-pool) class
+        (let* ((index (+ (* (aref code (incf pc)) 256)
+                         (aref code (incf pc))))
+               (call-site-specifier (aref constant-pool index)))
+          (format t "~&CSS: ~A~%" call-site-specifier)
+          (format t "~&CSS: ~A~%" (emit call-site-specifier))
+          (incf pc 3)
+          (error "unimplemented"))))))
+
 (define-bytecode-transpiler :IRETURN (context code)
   (declare (ignore code))
   (with-slots (pc) context

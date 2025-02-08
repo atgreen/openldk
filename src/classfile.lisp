@@ -174,6 +174,10 @@
 (defclass/std <method> (<field>)
   ())
 
+(defclass/std <bootstrap-method> ()
+  ((method-ref)
+   (method-args)))
+
 (define-print-object/std <method>)
 
 (defun interface-p (class)
@@ -252,9 +256,18 @@ stream."
              (name (slot-value (aref constant-pool name-index) 'value))
              (attributes-length (read-u4)))
         (alexandria:eswitch (name :test 'string=)
-         ("BootstrapMethods"
-           (read-buffer attributes-length))
-         ("Code"
+          ("BootstrapMethods"
+           (let ((num-bootstrap-methods (read-u2)))
+             (setf (gethash "BootstrapMethods" attributes)
+                   (loop for i below num-bootstrap-methods
+                         collect (let* ((bootstrap-method-ref (read-u2))
+                                        (num-bootstrap-arguments (read-u2))
+                                        (bootstrap-arguments (loop for i below num-bootstrap-arguments
+                                                                   collect (read-u2))))
+                                   (make-instance '<bootstrap-method>
+                                                  :method-ref bootstrap-method-ref
+                                                  :method-args bootstrap-arguments))))))
+          ("Code"
            (let* ((max-stack (read-u2))
                   (max-locals (read-u2))
                   (code-length (read-u4))
