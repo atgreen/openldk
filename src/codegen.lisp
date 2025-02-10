@@ -524,28 +524,28 @@
   ;; FIXME - handle all weird conditions
   (make-instance '<expression>
                  :insn insn
-                 :code (list 'handler-case
-                             (list 'let (list (list 'value2 (code (codegen (value2 insn) context)))
-                                              (list 'value1 (code (codegen (value1 insn) context))))
-                                   (list '/ 'value1 'value2))
-                             (list 'floating-point-invalid-operation (list 'e)
-                                   (list 'error (list '%lisp-condition (list '%make-throwable (list 'quote '|java/lang/ArithmeticException|)))))
-                             (list 'division-by-zero (list 'e)
-                                   (list 'error (list '%lisp-condition (list '%make-throwable (list 'quote '|java/lang/ArithmeticException|))))))
+                 :code `(let ((value2 ,(code (codegen (value2 insn) context)))
+                              (value1 ,(code (codegen (value1 insn) context))))
+                          (if (eq value2 0.0)
+                              (cond
+                                ((< value1 0.0) float-features:single-float-negative-infinity)
+                                ((> value1 0.0) float-features:single-float-positive-infinity)
+                                (t float-features:single-float-nan))
+                              (/ value1 value2)))
                  :expression-type :FLOAT))
 
 (defmethod codegen ((insn ir-ddiv) context)
   ;; FIXME - handle all weird conditions
   (make-instance '<expression>
                  :insn insn
-                 :code (list 'handler-case
-                             (list 'let (list (list 'value2 (code (codegen (value2 insn) context)))
-                                              (list 'value1 (code (codegen (value1 insn) context))))
-                                   (list '/ 'value1 'value2))
-                             (list 'floating-point-invalid-operation (list 'e)
-                                   (list 'error (list '%lisp-condition (list '%make-throwable (list 'quote '|java/lang/ArithmeticException|)))))
-                             (list 'division-by-zero (list 'e)
-                                   (list 'error (list '%lisp-condition (list '%make-throwable (list 'quote '|java/lang/ArithmeticException|))))))
+                 :code `(let ((value2 ,(code (codegen (value2 insn) context)))
+                              (value1 ,(code (codegen (value1 insn) context))))
+                          (if (eq value2 0.0d0)
+                              (cond
+                                ((< value1 0.0) float-features:double-float-negative-infinity)
+                                ((> value1 0.0) float-features:double-float-positive-infinity)
+                                (t float-features:double-float-nan))
+                              (/ value1 value2)))
                  :expression-type :DOUBLE))
 
 (defmethod codegen ((insn ir-fcmpg) context)
