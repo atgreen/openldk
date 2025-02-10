@@ -162,6 +162,7 @@
 		access-flags
 		fields
 		methods
+    attributes
 		java-class)))
 
 (defmethod print-object ((class <class>) out)
@@ -450,21 +451,21 @@ stream."
                                                    :access-flags access-flags)))
                         (setf (aref fields i) field)
                         (setf (slot-value field 'attributes)
-                              (read-attributes bitio constant-pool class attributes-count))))
-                    (let ((methods-count (read-u2)))
-                      (setf methods (make-array methods-count))
-                      (dotimes (i methods-count)
-                        (let* ((access-flags (read-u2))
-                               (name-index (read-u2))
-                               (descriptor-index (read-u2))
-                               (attributes-count (read-u2))
-                               (method (make-instance '<method>
-                                                      :class class
-                                                      :name (slot-value (aref constant-pool name-index) 'value)
-                                                      :descriptor (slot-value (aref constant-pool descriptor-index) 'value)
-                                                      :access-flags access-flags)))
-                          (setf (aref methods i) method)
-                          (setf (slot-value method 'attributes)
-                                (read-attributes bitio constant-pool class attributes-count))))
-                      (read-attributes bitio constant-pool class (read-u2)))))
-                class))))))))
+                              (read-attributes bitio constant-pool class attributes-count)))))
+                  (let ((methods-count (read-u2)))
+                    (setf methods (make-array methods-count))
+                    (dotimes (i methods-count)
+                      (let* ((access-flags (read-u2))
+                             (name-index (read-u2))
+                             (descriptor-index (read-u2))
+                             (attributes-count (read-u2))
+                             (method (make-instance '<method>
+                                                    :class class
+                                                    :name (slot-value (aref constant-pool name-index) 'value)
+                                                    :descriptor (slot-value (aref constant-pool descriptor-index) 'value)
+                                                    :access-flags access-flags)))
+                        (setf (aref methods i) method)
+                        (setf (slot-value method 'attributes)
+                              (read-attributes bitio constant-pool class attributes-count)))))
+                  (setf (attributes class) (read-attributes bitio constant-pool class (read-u2))))))))))
+    class))
