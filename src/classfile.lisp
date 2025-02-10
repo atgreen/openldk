@@ -58,9 +58,16 @@
 
 (define-print-object/std constant-invoke-dynamic)
 
-(defclass/std constant-method-handle () ())
+(defclass/std constant-method-handle ()
+  ((reference-kind)
+   (reference-index)))
 
-(defclass/std constant-method-type () ())
+(define-print-object/std constant-method-handle)
+
+(defclass/std constant-method-type ()
+  ((descriptor-index)))
+
+(define-print-object/std constant-method-type)
 
 (defclass/std constant-field-reference ()
   ((class-index
@@ -403,12 +410,15 @@ stream."
                                                   :name-index name-index
                                                   :type-descriptor-index type-descriptor-index)))
                                 (15
-                                 (let ((fixme2 (read-u1))
-                                       (fixme1 (read-u2)))
-                                   (make-instance 'constant-method-handle)))
+                                 (let ((reference-kind (read-u1))
+                                       (reference-index (read-u2)))
+                                   (make-instance 'constant-method-handle
+                                                  :reference-kind reference-kind
+                                                  :reference-index reference-index)))
                                 (16
-                                 (let ((fixme1 (read-u2)))
-                                   (make-instance 'constant-method-type)))
+                                 (let ((descriptor-index (read-u2)))
+                                   (make-instance 'constant-method-type
+                                                  :descriptor-index descriptor-index)))
                                 (18
                                  (let ((bootstrap-method-attr-index (read-u2))
                                        (name-and-type-index (read-u2)))
