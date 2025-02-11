@@ -85,6 +85,35 @@
             do (setf (gethash (handler-pc ete) exception-handler-table) t)))
     exception-handler-table))
 
+(defun fix-stack-variables (stack-vars)
+  (let ((groups (make-hash-table :test 'equal)))
+    ;; Step 1: Group stack-variables by their var-numbers
+    (dolist (stack-var stack-vars)
+      (let ((var-numbers (slot-value stack-var 'var-numbers)))
+        (dolist (num var-numbers)
+          (push stack-var (gethash num groups)))))
+
+    ;; Step 2: Merge groups that share common numbers
+    (let ((merged-groups ()))
+      (maphash (lambda (num stack-vars)
+                 (declare (ignore num))
+                 (let ((merged-group ()))
+                   (dolist (stack-var stack-vars)
+                     (unless (member stack-var merged-group :test #'eq)
+                       (push stack-var merged-group)))
+                   (push merged-group merged-groups)))
+               groups)
+
+      ;; Step 3: Update var-numbers for each stack-variable
+      (dolist (group merged-groups)
+        (let ((all-var-numbers ()))
+          (dolist (stack-var group)
+            (setf all-var-numbers (union all-var-numbers (slot-value stack-var 'var-numbers))))
+          (dolist (stack-var group)
+            (setf (slot-value stack-var 'var-numbers) all-var-numbers))))))
+
+  stack-vars)
+
 (defun %compile-method (class-name method-index)
   (let* ((class (gethash class-name *classes*))
          (method (aref (slot-value class 'methods) (1- method-index))))
@@ -151,6 +180,7 @@
                                     (when (> (length v) 1)
                                       (reduce #'merge-stacks v)))
                                   (stack-state-table *context*))
+                         (fix-stack-variables (stack-variables *context*))
                          code)))
                ;; (sdfdfd (print ir-code-0))
                (blocks (build-basic-blocks ir-code-0))
@@ -460,6 +490,11 @@
 
   (let ((boot-class-loader (make-instance '|java/lang/ClassLoader|)))
 
+    (dolist (p '("byte" "char" "int" "short" "long" "double" "float" "boolean" "void"))
+      (let ((class (make-instance '|java/lang/Class|)))
+        (setf (slot-value class '|name|) (ijstring p))
+        (setf (gethash p *java-classes*) class)))
+
     ;; Preload some important classes.
     (dolist (c '("java/lang/Boolean"
                  "java/lang/Character"
@@ -506,6 +541,10 @@
     (|java/lang/System.initializeSystemClass()|)
 
     (|<init>()| boot-class-loader)
+
+    (dolist (c '("java/lang/invoke/MethodHandles"
+                 "java/lang/invoke/MethodHandles$Lookup"))
+      (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil))
 
     (setf *debug-load* nil)
 

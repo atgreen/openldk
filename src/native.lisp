@@ -127,35 +127,7 @@
 
 (defmethod |java/lang/Class.getPrimitiveClass(Ljava/lang/String;)| (class-name)
   (let ((name (slot-value class-name '|value|)))
-    (cond
-      ((string= name "float")
-       (let ((jc (java-class (gethash "java/lang/Float" *classes*))))
-         jc))
-      ((string= name "int")
-       (let ((jc (java-class (gethash "java/lang/Integer" *classes*))))
-         jc))
-      ((string= name "byte")
-       (let ((jc (java-class (gethash "java/lang/Byte" *classes*))))
-         jc))
-      ((string= name "long")
-       (let ((jc (java-class (gethash "java/lang/Long" *classes*))))
-         jc))
-      ((string= name "boolean")
-       (let ((jc (java-class (gethash "java/lang/Boolean" *classes*))))
-         jc))
-      ((string= name "char")
-       (let ((jc (java-class (gethash "java/lang/Character" *classes*))))
-         jc))
-      ((string= name "short")
-       (let ((jc (java-class (gethash "java/lang/Short" *classes*))))
-         jc))
-      ((string= name "double")
-       (let ((jc (java-class (gethash "java/lang/Double" *classes*))))
-         jc))
-      ((string= name "void")
-       (let ((jc (java-class (gethash "java/lang/Void" *classes*))))
-         jc))
-       (t (error (format nil "getPrimitiveClass(~A)" name))))))
+    (gethash name *java-classes*)))
 
 (defmethod |java/lang/Float.floatToRawIntBits(F)| (float)
   (float-features:single-float-bits float))
@@ -286,24 +258,25 @@
 
 (defmethod |isPrimitive()| ((class |java/lang/Class|))
   (let ((name-string (format nil "~A" (slot-value (slot-value class '|name|) '|value|))))
-    (if (null (find name-string '("java/lang/Boolean"
-                                  "java/lang/Character"
-                                  "java/lang/Byte"
-                                  "java/lang/Short"
-                                  "java/lang/Integer"
-                                  "java/lang/Long"
-                                  "java/lang/Float"
-                                  "java/lang/Double"
-                                  "java/lang/Void")
+    (if (null (find name-string '("boolean"
+                                  "char"
+                                  "byte"
+                                  "short"
+                                  "int"
+                                  "long"
+                                  "float"
+                                  "double"
+                                  "void")
                     :test #'equal))
         0
         1)))
 
 (defmethod |isInterface()| ((this |java/lang/Class|))
-  (let ((ldk-class (gethash (slot-value (slot-value this '|name|) '|value|) *classes*)))
-    (if (interface-p ldk-class)
-        1
-        0)))
+  (if (and (not (|isPrimitive()| this))
+           (let ((ldk-class (gethash (slot-value (slot-value this '|name|) '|value|) *classes*)))
+             (interface-p ldk-class)))
+      1
+      0))
 
 (defmethod |getDeclaredConstructors0(Z)| ((this |java/lang/Class|) arg)
   ;; FIXME
