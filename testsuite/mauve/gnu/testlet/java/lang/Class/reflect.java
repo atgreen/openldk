@@ -1,7 +1,7 @@
 // Tags: JDK1.1
 // Uses: rf_help rf2_help
 
-// Copyright (C) 2000, 2002 Cygnus Solutions
+// Copyright (C) 2000, 2002, 2025 Cygnus Solutions
 
 // This file is part of Mauve.
 
@@ -39,7 +39,7 @@ public class reflect implements Testlet
     try {
       k = Class.forName(name);
     }
-    catch (Throwable _) {
+    catch (Throwable _xx) {
       // Nothing.
     }
     return k;
@@ -50,8 +50,8 @@ public class reflect implements Testlet
     try {
       return decl ? k.getDeclaredConstructor(types) : k.getConstructor(types);
     }
-    catch (Throwable _) {
-      return _;
+    catch (Throwable _xx) {
+      return _xx;
     }
   }
 
@@ -59,11 +59,11 @@ public class reflect implements Testlet
   {
     try {
       return (decl ?
-	      k.getDeclaredMethod(name, types) : 
+	      k.getDeclaredMethod(name, types) :
 	      k.getMethod(name, types));
     }
-    catch (Throwable _) {
-      return _;
+    catch (Throwable _xx) {
+      return _xx;
     }
   }
 
@@ -72,8 +72,8 @@ public class reflect implements Testlet
     try {
       return decl ? k.getDeclaredField(name) : k.getField(name);
     }
-    catch (Throwable _) {
-      return _;
+    catch (Throwable _xx) {
+      return _xx;
     }
   }
 
@@ -116,7 +116,7 @@ public class reflect implements Testlet
       harness.check(false);
       harness.check(false);
     }
-    
+
     try {
       Constructor[] cls = rf_help_class.getConstructors();
       harness.check(cls.length, 1);
@@ -134,7 +134,7 @@ public class reflect implements Testlet
       // One per check above.
       harness.check(false);
     }
-    
+
     try {
       Constructor[] cls = array_class.getConstructors();
       harness.check(cls.length, 0);
@@ -142,7 +142,7 @@ public class reflect implements Testlet
     catch (SecurityException se) {
       harness.check(false);
     }
-    
+
     harness.checkPoint ("getDeclaredConstructor");
     cons = getCons (rf_help_class, ptz, true);
     harness.check(cons instanceof Constructor);
@@ -162,7 +162,7 @@ public class reflect implements Testlet
       harness.check(false);
       harness.check(false);
     }
-    
+
     try {
       Constructor[] cls = rf_help_class.getDeclaredConstructors();
       harness.check(cls.length, 2);
@@ -175,7 +175,7 @@ public class reflect implements Testlet
       harness.check(false);
       harness.check(false);
     }
-    
+
     try {
       Constructor[] cls = i_class.getDeclaredConstructors();
       harness.check(cls.length, 0);
@@ -184,7 +184,7 @@ public class reflect implements Testlet
       // One per check above.
       harness.check(false);
     }
-    
+
     try {
       Constructor[] cls = array_class.getDeclaredConstructors();
       harness.check(cls.length, 0);
@@ -192,7 +192,7 @@ public class reflect implements Testlet
     catch (SecurityException se) {
       harness.check(false);
     }
-    
+
     harness.checkPoint ("getDeclaredField");
     Object f = getField (rf_help_class, "size", true);
     harness.check(f instanceof Field);
@@ -223,7 +223,7 @@ public class reflect implements Testlet
       // One per check above.
       harness.check(false);
     }
-    
+
     harness.checkPoint("getFields");
     try {
       Field[] flds = rf_help_class.getFields();
@@ -233,7 +233,7 @@ public class reflect implements Testlet
       // One per check above.
       harness.check(false);
     }
-    
+
     try {
       Field[] flds = i_class.getFields();
       harness.check(flds.length, 0);
@@ -320,7 +320,7 @@ public class reflect implements Testlet
       // One per check above.
       harness.check(false);
     }
-    
+
     try {
       Method[] ms = reflect_class.getDeclaredMethods();
       harness.check(ms.length, 6);

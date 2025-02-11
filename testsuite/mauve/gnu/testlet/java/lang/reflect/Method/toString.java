@@ -1,6 +1,6 @@
 // Tags: JDK1.1
 
-// Copyright (C) 1999, 2000, 2001, 2004 Red Hat, Inc.
+// Copyright (C) 1999, 2000, 2001, 2004, 2025 Red Hat, Inc.
 
 // This file is part of Mauve.
 
@@ -33,7 +33,7 @@ public class toString implements Testlet
       {
 	m = ic.getMethod(name, list);
       }
-    catch (Throwable _)
+    catch (Throwable _xx)
       {
 	// Nothing.
       }
@@ -48,7 +48,7 @@ public class toString implements Testlet
   public void simpleargs (int i, byte b)
   {
   }
-  
+
   public int arrayargs (int[] z)
   {
     return z.length;
@@ -76,7 +76,7 @@ public class toString implements Testlet
       {
 	ic = Class.forName ("gnu.testlet.java.lang.reflect.Method.toString");
       }
-    catch (Throwable _)
+    catch (Throwable _xx)
       {
 	// Lose.
       }
@@ -93,7 +93,7 @@ public class toString implements Testlet
     harness.checkPoint("method with primitive argument types");
     harness.check (simple_meth.toString (),
 		    "public void gnu.testlet.java.lang.reflect.Method.toString.simpleargs(int,byte)");
-    
+
     Class[] aa_list = new Class[1];
     aa_list[0] = int[].class;
     Method aa_meth = getMethod (ic, "arrayargs", aa_list);

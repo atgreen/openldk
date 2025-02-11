@@ -1,6 +1,6 @@
 // Tags: JDK1.1
 
-// Copyright (C) 2000, 2001 Cygnus Solutions
+// Copyright (C) 2000, 2001, 2025 Cygnus Solutions
 
 // This file is part of Mauve.
 
@@ -56,7 +56,7 @@ public class newInstance implements Testlet
       {
 	k = Class.forName (name);
       }
-    catch (Throwable _)
+    catch (Throwable _xx)
       {
 	// Nothing.
       }
@@ -70,7 +70,7 @@ public class newInstance implements Testlet
       {
 	c = k.getDeclaredConstructor(ptypes);
       }
-    catch (Throwable _)
+    catch (Throwable _xx)
       {
 	// Nothing.
       }
@@ -83,9 +83,9 @@ public class newInstance implements Testlet
       {
 	return cons.newInstance(args);
       }
-    catch (Throwable _)
+    catch (Throwable _xx)
       {
-	return _;
+	return _xx;
       }
   }
 

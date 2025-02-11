@@ -1,7 +1,7 @@
 // Tags: JDK1.1
 // Uses: ../sub/InvokeHelper iface
 
-// Copyright (C) 1999, 2000, 2001, 2003, 2004 Cygnus Solutions
+// Copyright (C) 1999, 2000, 2001, 2003, 2004, 2025 Cygnus Solutions
 
 // This file is part of Mauve.
 
@@ -41,7 +41,7 @@ public class invoke implements Testlet, iface
       {
 	tclass = Class.forName("java.lang.Throwable");
       }
-    catch (Throwable _)
+    catch (Throwable _xx)
       {
 	// Nothing.
       }
@@ -105,7 +105,7 @@ public class invoke implements Testlet, iface
       {
 	m = ic.getMethod(name, list);
       }
-    catch (Throwable _)
+    catch (Throwable _xx)
       {
 	// Nothing.
       }
@@ -119,7 +119,7 @@ public class invoke implements Testlet, iface
       {
 	m = ic.getDeclaredMethod(name, list);
       }
-    catch (Throwable _)
+    catch (Throwable _xx)
       {
 	// Nothing.
       }
@@ -135,7 +135,7 @@ public class invoke implements Testlet, iface
 	ic[0] = Class.forName("gnu.testlet.java.lang.reflect.Method.invoke");
 	ic[1] = Class.forName("gnu.testlet.java.lang.reflect.Method.iface");
       }
-    catch (Throwable _)
+    catch (Throwable _xx)
       {
 	// Just lose.
       }
@@ -155,7 +155,7 @@ public class invoke implements Testlet, iface
 	  {
 	    rv_list[0] = Class.forName("java.lang.Integer");
 	  }
-	catch (Throwable _)
+	catch (Throwable _xx)
 	  {
 	    // Just lose.
 	  }

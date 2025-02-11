@@ -1,7 +1,7 @@
 // Tags: JDK1.4
 // Uses: BreakMe MyBreakMe
 
-// Copyright (C) 2005 Mark J. Wielaard <mark@klomp.org>
+// Copyright (C) 2005, 2025 Mark J. Wielaard <mark@klomp.org>
 // Based on an idea by Jeroen Frijters
 
 // This file is part of Mauve.
@@ -37,7 +37,7 @@ public class BreakMeTestSer implements Testlet
   public void test(TestHarness harness)
   {
     // This will partly fail since BreakMe.generating isn't set.
-    try { new MyBreakMe(); } catch(Throwable _) {}
+    try { new MyBreakMe(); } catch(Throwable _xx) {}
 
     boolean exception_thrown = false;
     try
