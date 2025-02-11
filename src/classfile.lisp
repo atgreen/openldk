@@ -412,7 +412,7 @@ stream."
                                 (15
                                  (let ((reference-kind (read-u1))
                                        (reference-index (read-u2)))
-                                   (make-instance 'constant-method-handle
+                                   (make-instance '|com/moxielogic/OpenLDK/MethodHandle|
                                                   :reference-kind reference-kind
                                                   :reference-index reference-index)))
                                 (16

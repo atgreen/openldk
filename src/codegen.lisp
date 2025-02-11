@@ -205,8 +205,6 @@
                             (error (%lisp-condition (%make-throwable '|java/lang/ArithmeticException|)))))
                  :expression-type :LONG))
 
-(unsigned-to-signed-integer (logand (floor (/ -2147483647 16)) #xFFFFFFFF))
-
 (defun %codegen-binop (insn operator jtype context)
   (make-instance '<expression>
                  :insn insn
@@ -334,9 +332,18 @@
 
 (defmethod codegen ((insn ir-assign) context)
   (with-slots (lvalue rvalue) insn
-    (make-instance '<expression>
+   (make-instance '<expression>
                    :insn insn
                    :code (list 'setf (code (codegen lvalue context)) (code (codegen rvalue context))))))
+
+(defmethod codegen ((insn ir-call-dynamic) context)
+  (with-slots (class) insn
+    (make-instance '<expression>
+                   :insn insn
+                   :code `(let ((lookup (make-instance '|java/lang/invoke/MethodHandles$Lookup|)))
+                            (|<init>(Ljava/lang/Class;)| lookup class)
+                            (print lookup)
+                            (error "unimplemented")))))
 
 (defmethod codegen ((insn ir-call-static-method) context)
   (with-slots (class method-name args return-type) insn
@@ -839,32 +846,34 @@
   ;; FIXME: this is wrong.
   (make-instance '<expression>
                  :insn insn
-                 :code (list 'ash (code (codegen (value1 insn) context)) (list '- 0 (code (codegen (value2 insn) context))))
+                 :code `(unsigned-to-signed-integer (ash ,(code (codegen (value1 insn) context)) (- 0 ,(code (codegen (value2 insn) context)))))
                  :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-lshr) context)
   ;; FIXME: this is wrong.
   (make-instance '<expression>
                  :insn insn
-                 :code (list 'ash (code (codegen (value1 insn) context)) (list '- 0 (code (codegen (value2 insn) context))))
+                 :code `(unsigned-to-signed-long (ash ,(code (codegen (value1 insn) context)) (- 0 ,(code (codegen (value2 insn) context)))))
                  :expression-type :LONG))
 
 (defmethod codegen ((insn ir-ishl) context)
   ;; FIXME: this is wrong.
   (make-instance '<expression>
                  :insn insn
-                 :code `(logand
-                         (ash ,(code (codegen (value1 insn) context)) ,(code (codegen (value2 insn) context)))
-                         #xffffffff)
+                 :code `(unsigned-to-signed-integer
+                         (logand
+                          (ash ,(code (codegen (value1 insn) context)) ,(code (codegen (value2 insn) context)))
+                          #xffffffff))
                  :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-lshl) context)
   ;; FIXME: this is wrong.
   (make-instance '<expression>
                  :insn insn
-                 :code `(logand
-                         (ash ,(code (codegen (value1 insn) context)) ,(code (codegen (value2 insn) context)))
-                         #xffffffffffffffff)
+                 :code `(unsigned-to-signed-long
+                         (logand
+                          (ash ,(code (codegen (value1 insn) context)) ,(code (codegen (value2 insn) context)))
+                          #xffffffffffffffff))
                  :expression-type :LONG))
 
 (defmethod codegen ((insn ir-iushr) context)

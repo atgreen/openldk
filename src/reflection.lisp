@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2025  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; This file is part of OpenLDK.
 
@@ -35,45 +35,11 @@
 ;;; library, but you are not obligated to do so.  If you do not wish
 ;;; to do so, delete this exception statement from your version.
 
-(declaim (optimize (speed 0) (space 0) (debug 3)))
-(sb-ext:restrict-compiler-policy 'debug 3)
+(in-package :openldk)
 
-(asdf:defsystem #:openldk
-  :description "Java in Common Lisp"
-  :author "Anthony Green <green@moxielogic.com>"
-  :license "GPL3+Classpath Exception"
-  :version "1"
-  :serial t
-  :components ((:file "src/package")
-							 (:file "src/debug")
-							 (:file "src/monitor")
-							 (:file "src/context")
-							 (:file "src/bootstrap")
-               (:file "src/strings")
-							 (:file "src/opcodes")
-							 (:file "src/ir")
-							 (:file "src/bc-to-ir")
-							 (:file "src/classpath")
-							 (:file "src/basic-block")
-							 (:file "src/codegen")
-							 (:file "src/descriptors")
-							 (:file "src/classfile")
-							 (:file "src/native")
-               (:file "src/reflection")
-							 (:file "src/openldk"))
-  :around-compile
-  "(lambda (thunk)
-     (cl-annot:enable-annot-syntax)
-     (funcall thunk))"
-  :depends-on (:cl-annot :whereiseveryone.command-line-args :flexi-streams
-               :zip :str :defclass-std :fast-io :bitio :pathname-utils
-               :cl-store :trivial-backtrace :fset :bordeaux-threads
-               :float-features :local-time :closer-mop :slynk
-               :file-attributes :trivial-garbage :precise-time)
-  :build-operation "program-op"
-  :build-pathname "openldk"
-  :entry-point "openldk:make-image")
+;; This will get redefined when we load the .class file
+(defclass/std |java/lang/invoke/MethodHandle| (|java/lang/Object|)
+  ())
 
-#+sb-core-compression
-(defmethod asdf:perform ((o asdf:image-op) (c asdf:system))
-  (uiop:dump-image (asdf:output-file o c) :executable t :compression t))
+(defclass/std |com/moxielogic/OpenLDK/MethodHandle| (|java/lang/invoke/MethodHandle| constant-method-handle)
+  ())

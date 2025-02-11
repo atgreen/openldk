@@ -389,6 +389,9 @@
   ((class :with)))
 (define-print-object/std ir-call-static-method)
 
+(defclass/std ir-call-dynamic (ir-node)
+  ((class :with)))
+
 (defclass/std ir-checkcast (ir-node)
   ((class :with)
    (objref)))

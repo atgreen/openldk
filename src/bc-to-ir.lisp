@@ -1419,10 +1419,19 @@
                          (aref code (incf pc))))
                (call-site-specifier (aref constant-pool index)))
           (format t "~&CSS: ~A~%" call-site-specifier)
+          (format t "~&CSS: ~A~%" (bootstrap-method-attr-index call-site-specifier))
           (format t "~&CSS: ~A~%" (aref constant-pool (bootstrap-method-attr-index call-site-specifier)))
-          (format t "~&CSS: ~A~%" (aref constant-pool (bootstrap-method-args call-site-specifier)))
           (incf pc 3)
-          (error "unimplemented"))))))
+          (let ((bootstrap-method (nth (bootstrap-method-attr-index call-site-specifier)
+                                       (gethash "BootstrapMethods" (attributes class)))))
+            (format t "~&CSS: ~A~%" bootstrap-method)
+            (format t "~&CSS: ~A~%" (aref constant-pool (method-ref bootstrap-method)))
+            (dolist (a (method-args bootstrap-method))
+              (format t "~&    arg: ~A~%" (aref constant-pool a)))
+            (format t "~&CSS: ~A~%" (emit (aref constant-pool (reference-index (aref constant-pool (method-ref bootstrap-method)))) constant-pool)))))
+      (list (make-instance 'ir-call-dynamic
+                           :address pc-start
+                           :class (java-class context-class))))))
 
 (define-bytecode-transpiler :IRETURN (context code)
   (declare (ignore code))
