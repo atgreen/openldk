@@ -70,6 +70,27 @@
                  :code (slot-value insn 'value)
                  :expression-type (slot-value insn 'type)))
 
+(defmethod codegen ((insn ir-int-literal) context)
+  (declare (ignore context))
+  (make-instance '<expression>
+                 :insn insn
+                 :code (unsigned-to-signed-integer (slot-value insn 'value))
+                 :expression-type (slot-value insn 'type)))
+
+(defmethod codegen ((insn ir-double-literal) context)
+  (declare (ignore context))
+  (make-instance '<expression>
+                 :insn insn
+                 :code (coerce (slot-value insn 'value) 'double-float)
+                 :expression-type (slot-value insn 'type)))
+
+(defmethod codegen ((insn ir-long-literal) context)
+  (declare (ignore context))
+  (make-instance '<expression>
+                 :insn insn
+                 :code (unsigned-to-signed-long (slot-value insn 'value))
+                 :expression-type (slot-value insn 'type)))
+
 (defmethod codegen ((insn ir-string-literal) context)
   (declare (ignore context))
   (make-instance '<expression>
