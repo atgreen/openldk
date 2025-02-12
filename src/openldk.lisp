@@ -461,7 +461,17 @@
         (setf (slot-value arg '|value|) (nth i args))
         (setf (aref argv i) arg)))
     (%clinit class)
-    (%eval (list (intern (format nil "~A.main([Ljava/lang/String;)" (slot-value class 'name)) :openldk) argv))))
+
+    ;; The `main` method may be in a superclass of CLASS.  Search for it.
+    (labels ((find-main (class)
+               (let ((main-symbol (intern (format nil "~A.main([Ljava/lang/String;)" (name class)) :openldk)))
+                 (if (fboundp main-symbol)
+                     main-symbol
+                     (find-main (gethash (super class) *classes*))))))
+      (let ((main-symbol (find-main class)))
+        (if main-symbol
+            (%eval (list main-symbol argv))
+            (error "Main method not found in class ~A." (name class)))))))
 
 (defun main-wrapper ()
   "Main entry point into OpenLDK.  Process command line errors here."
