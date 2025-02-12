@@ -811,11 +811,11 @@ the prompt I used:
 
 (defun |java/lang/Math.toDegrees(D)| (a)
   "Converts an angle from radians to degrees."
-  (* a (/ 180.0 pi)))
+  (* a (/ 180.0 cl-user::pi)))
 
 (defun |java/lang/Math.toRadians(D)| (a)
   "Converts an angle from degrees to radians."
-  (* a (/ pi 180.0)))
+  (* a (/ cl-user::pi 180.0)))
 
 (defun |java/lang/Math.ulp(F)| (a)
   "Returns the unit in the last place (ULP) of a float."
