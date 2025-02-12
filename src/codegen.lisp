@@ -1103,8 +1103,8 @@
                                                         (cons (find-class (intern (slot-value class 'name) :openldk))
                                                               (loop for a in args collect t))))
                                             (list 'let (list (list 'fn (list 'closer-mop:method-function 'method)))
-                                                  (list 'apply 'fn
-                                                        (list 'list (cons 'reverse (list (cons 'list (mapcar (lambda (a) (code (codegen a context))) args)))) 'next))))))
+                                                  (list 'funcall 'fn
+                                                        (cons 'list (mapcar (lambda (a) (code (codegen a context))) args)) 'next)))))
                             call))))
 
 (defmethod codegen ((insn ir-member) context)
