@@ -341,7 +341,7 @@
     (make-instance '<expression>
                    :insn insn
                    :code `(let ((lookup (make-instance '|java/lang/invoke/MethodHandles$Lookup|)))
-                            (|<init>(Ljava/lang/Class;)| lookup (class insn))
+                            (|<init>(Ljava/lang/Class;)| lookup ,class)
                             (print lookup)
                             (error "unimplemented")))))
 
