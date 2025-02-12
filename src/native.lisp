@@ -150,6 +150,7 @@
 (defvar field-offset-table (make-hash-table :test #'equal))
 
 (defmethod |objectFieldOffset(Ljava/lang/reflect/Field;)| ((unsafe |sun/misc/Unsafe|) field)
+  (declare (ignore unsafe))
   (let ((offset (sxhash field)))
     (setf (gethash offset field-offset-table) field)
     offset))
@@ -159,9 +160,12 @@
   (error "ofo"))
 
 (defmethod |staticFieldBase(Ljava/lang/reflect/Field;)| ((unsafe |sun/misc/Unsafe|) field)
+  (declare (ignore unsafe))
+  (declare (ignore field))
   nil)
 
 (defmethod |staticFieldOffset(Ljava/lang/reflect/Field;)| ((unsafe |sun/misc/Unsafe|) field)
+  (declare (ignore unsafe))
   (let ((offset (sxhash field)))
     (setf (gethash offset field-offset-table) field)
     offset))
@@ -531,6 +535,7 @@ user.variant
   )
 
 (defun |sun/misc/URLClassPath.getLookupCacheURLs(Ljava/lang/ClassLoader;)| (class-loader)
+  (declare (ignore class-loader))
   ;; FIXME
   nil)
 
@@ -593,6 +598,7 @@ user.variant
       0)))
 
 (defun |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedAction;Ljava/security/AccessControlContext;)| (action context)
+  (declare (ignore context))
   ;; FIXME
   (let ((result (|run()| action)))
     result))
