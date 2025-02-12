@@ -303,6 +303,27 @@
       (format t "~&; trace: leaving  java/lang/Class.getDeclaredConstructors0(Z)~%"))))
 
 
+(defmethod |getDeclaredMethods0(Z)| ((this |java/lang/Class|) arg)
+  ;; FIXME
+  (unwind-protect
+       (progn
+         (when *debug-trace*
+           (format t "~&; trace: entering java/lang/Class.getDeclaredConstructors0(Z)~%"))
+         (unless (gethash "java/lang/reflect/Method" *classes*)
+           (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/reflect/Method") nil nil nil))
+
+         ;; Get the ldk-class for THIS
+         (let ((ldk-class (gethash (slot-value (slot-value this '|name|) '|value|) *classes*)))
+           (coerce (append (loop for method across (methods ldk-class)
+                                 unless (str:starts-with? "<init>" (name method))
+                                   collect (let ((c (make-instance '|java/lang/reflect/Method|)))
+                                             (|<init>(Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/Class;Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B[B)| c this (ijstring (name method)) (%get-parameter-types (descriptor method)) nil (make-array 0) (access-flags method) 0 (ijstring (descriptor method)) (make-array 0) (make-array 0) (make-array 0))
+                                             c)))
+                   'vector)))
+    (when *debug-trace*
+      (format t "~&; trace: leaving  java/lang/Class.getDeclaredMethods0(Z)~%"))))
+
+
 (defmethod |getDeclaredFields0(Z)| ((this |java/lang/Class|) arg)
   (unwind-protect
        (progn
