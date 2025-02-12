@@ -495,7 +495,7 @@ user.variant
 (defmethod |getInterfaces0()| ((class |java/lang/Class|))
   ;; FIXME: do something different for interfaces?
   (let ((ldk-class (gethash (slot-value (slot-value class '|name|) '|value|) *classes*)))
-    (coerce (mapcar (lambda (iname) (java-class (gethash iname *classes*))) (interfaces ldk-class))
+    (coerce (mapcar (lambda (iname) (java-class (gethash iname *classes*))) (coerce (interfaces ldk-class) 'list))
             'vector)))
 
 (defun |sun/reflect/NativeConstructorAccessorImpl.newInstance0(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)|
