@@ -394,7 +394,7 @@
   (cond
     ((vectorp obj)
      (aref obj l))
-    (t (error "internal error: unrecognized object type in getObjectVolatile: " obj))))
+    (t (error "internal error: unrecognized object type in getObjectVolatile: ~A" obj))))
 
 (defun |java/security/AccessController.getStackAccessControlContext()| ()
   ;; FIXME -- implement
