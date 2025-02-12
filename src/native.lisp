@@ -133,7 +133,7 @@
   (float-features:single-float-bits float))
 
 (defmethod |java/lang/Double.doubleToRawLongBits(D)| (double)
-  (float-features:double-float-bits double))
+  (float-features:double-float-bits (coerce double 'double-float)))
 
 (defmethod |java/lang/Double.longBitsToDouble(J)| (long-bits)
   (float-features:bits-double-float long-bits))
