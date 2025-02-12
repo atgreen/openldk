@@ -37,6 +37,11 @@
 
 (in-package :openldk)
 
+(defmethod no-applicable-method ((gf generic-function) &rest args)
+  (if (null (car args))
+      (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|)))
+      (error "internal error: no applicable method for invocation of ~A with arguments ~S" gf args)))
+
 (defun |java/lang/Object.registerNatives()| ()
   ())
 
