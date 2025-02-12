@@ -37,6 +37,10 @@
 
 (in-package :openldk)
 
+;; In Java, a method call on a NULL object results in a
+;; NullPointerException.  CLOS makes it easy to implement this
+;; behaviour by providing our own CLOS no-applicable-method method.
+
 (defmethod no-applicable-method ((gf generic-function) &rest args)
   (if (null (car args))
       (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|)))
