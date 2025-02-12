@@ -970,10 +970,8 @@
                                          ;; FIXME: handle long/double
                                          (list (intern (format nil "~A" method-name) :openldk) (code (codegen (car args) context))))
                                         (t
-                                         (list 'apply
-                                               (list 'function (intern (format nil "~A"
-                                                                               method-name) :openldk))
-                                               (list 'reverse (cons 'list (mapcar (lambda (a) (code (codegen a context))) args))))))))
+                                         `(funcall (function ,(intern (format nil "~A" method-name) :openldk))
+                                                   ,@(mapcar (lambda (a) (code (codegen a context))) args))))))
                            call))))
 
 (defmethod codegen ((insn ir-clinit) context)

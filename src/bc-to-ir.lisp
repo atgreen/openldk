@@ -1305,7 +1305,7 @@
                                               :address pc-start
                                               :return-type (get-return-type (emit method-reference constant-pool))
                                               :method-name (lispize-method-name (emit method-reference constant-pool))
-                                              :args (pop-args parameter-count context))))
+                                              :args (reverse (pop-args parameter-count context)))))
                     (if (eq return-type :VOID)
                         call
                         (let ((var (make-stack-variable context pc-start return-type)))
