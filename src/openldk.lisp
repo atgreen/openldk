@@ -193,9 +193,11 @@
                                                   when code
                                                     collect (progn
                                                               code)))))))
-               (traced-lisp-code (if *debug-trace* (list (list 'unwind-protect (car lisp-code) (list 'format 't "~&; ~V@Atrace: leaving  ~A.~A~%"
-                                                                                                     (list 'incf '*call-nesting-level* -2) " "
-                                                                                                     class-name (fn-name *context*)))) lisp-code))
+               (traced-lisp-code (if *debug-trace* `((unwind-protect
+                                                          ,(car lisp-code)
+                                                       (incf *call-nesting-level* -1)))
+                                     lisp-code))
+
                (definition-code
                  (let ((parameter-count (count-parameters (slot-value method 'descriptor))))
                    (let ((args (if (static-p method)
@@ -203,44 +205,45 @@
                                          collect (intern (format nil "arg~A" (1- i)) :openldk))
                                    (loop for i from 1 upto parameter-count
                                          collect (intern (format nil "arg~A" i) :openldk)))))
-                     (append (if (static-p method)
-                                 (list 'defun (intern (fn-name *context*) :openldk) args)
-                                 (list 'defmethod
-                                       (intern (fn-name *context*) :openldk)
-                                       (cons (list (intern "this" :openldk) (intern (slot-value class 'name) :openldk))
-                                             args)))
-                             (when *debug-trace*
-                               (list (list 'format 't "~&; ~V@Atrace: entering ~A ~A.~A(~{~A~^ ~})~%"
-                                           (list 'incf '*call-nesting-level* 2) " "
-                                           (if (not (static-p method)) (intern "this" :openldk) "") class-name (fn-name *context*) (cons 'list args))))
-                             (when (not (static-p method))
-                               (list (list 'setf '*force-this-to-be-used* (intern "this" :openldk))))
-                             (let ((i 0)
-                                   (pc -1))
-                               (list (format nil "bridge=~A" (bridge-p method))
-                                     (append (list 'let (if (static-p method)
-                                                            (append (list (list '|condition-cache|))
-                                                                    (remove-duplicates
-                                                                     (loop for var in (stack-variables *context*)
-                                                                           collect (list (intern (format nil "s{~{~A~^,~}}" (sort (var-numbers var) #'<)) :openldk)))
-                                                                     :test #'equal)
-                                                                    (loop for ph in parameter-hints
-                                                                          collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" (incf pc)) :openldk))
-                                                                          do (if (eq ph t) (incf i) (incf i 2)))
-                                                                    (loop for pc from (- parameter-count 2) upto max-locals
-                                                                          collect (list (intern (format nil "local-~A" (1- (incf i))) :openldk))))
-                                                            (append (list (list '|condition-cache|))
-                                                                    (remove-duplicates
-                                                                     (loop for var in (stack-variables *context*)
-                                                                           collect (list (intern (format nil "s{~{~A~^,~}}" (sort (var-numbers var) #'<)) :openldk)))
-                                                                     :test #'equal)
-                                                                    (append (list (list (intern "local-0" :openldk) (intern "this" :openldk)))
-                                                                            (loop for ph in parameter-hints
-                                                                                  collect (list (intern (format nil "local-~A" (1+ i)) :openldk) (intern (format nil "arg~A" (1+ (incf pc))) :openldk))
-                                                                                  do (if (eq ph t) (incf i) (incf i 2)))
-                                                                            (loop for x from parameter-count upto (1+ max-locals)
-                                                                                  collect (list (intern (format nil "local-~A" (incf i)) :openldk)))))))
-                                             traced-lisp-code))))))))
+                     `(progn
+                        ,(append (if (static-p method)
+                                    (list 'defun (intern (fn-name *context*) :openldk) args)
+                                    (list 'defmethod
+                                          (intern (fn-name *context*) :openldk)
+                                          (cons (list (intern "this" :openldk) (intern (slot-value class 'name) :openldk))
+                                                args)))
+                                (when *debug-trace*
+                                  (list (list 'format 't "~&~V@A trace: entering ~A.~A(~{~A~^ ~}) ~A~%"
+                                              (list 'incf '*call-nesting-level* 1) "*"
+                                              class-name (fn-name *context*) (cons 'list args) (if (not (static-p method)) (intern "this" :openldk) ""))))
+                                (when (not (static-p method))
+                                  (list (list 'setf '*force-this-to-be-used* (intern "this" :openldk))))
+                                (let ((i 0)
+                                      (pc -1))
+                                  (list (format nil "bridge=~A" (bridge-p method))
+                                        (append (list 'let (if (static-p method)
+                                                               (append (list (list '|condition-cache|))
+                                                                       (remove-duplicates
+                                                                        (loop for var in (stack-variables *context*)
+                                                                              collect (list (intern (format nil "s{~{~A~^,~}}" (sort (var-numbers var) #'<)) :openldk)))
+                                                                        :test #'equal)
+                                                                       (loop for ph in parameter-hints
+                                                                             collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" (incf pc)) :openldk))
+                                                                             do (if (eq ph t) (incf i) (incf i 2)))
+                                                                       (loop for pc from (- parameter-count 2) upto max-locals
+                                                                             collect (list (intern (format nil "local-~A" (1- (incf i))) :openldk))))
+                                                               (append (list (list '|condition-cache|))
+                                                                       (remove-duplicates
+                                                                        (loop for var in (stack-variables *context*)
+                                                                              collect (list (intern (format nil "s{~{~A~^,~}}" (sort (var-numbers var) #'<)) :openldk)))
+                                                                        :test #'equal)
+                                                                       (append (list (list (intern "local-0" :openldk) (intern "this" :openldk)))
+                                                                               (loop for ph in parameter-hints
+                                                                                     collect (list (intern (format nil "local-~A" (1+ i)) :openldk) (intern (format nil "arg~A" (1+ (incf pc))) :openldk))
+                                                                                     do (if (eq ph t) (incf i) (incf i 2)))
+                                                                               (loop for x from parameter-count upto (1+ max-locals)
+                                                                                     collect (list (intern (format nil "local-~A" (incf i)) :openldk)))))))
+                                                traced-lisp-code)))))))))
           (%eval definition-code))))))
 
 (defun %clinit (class)
@@ -498,64 +501,75 @@
   (%clinit (classload "java/lang/Class"))
   (%clinit (classload "java/lang/ClassLoader"))
 
-  (let ((boot-class-loader (make-instance '|java/lang/ClassLoader|)))
 
-    (dolist (p '("byte" "char" "int" "short" "long" "double" "float" "boolean" "void"))
-      (let ((class (make-instance '|java/lang/Class|)))
-        (setf (slot-value class '|name|) (ijstring p))
-        (setf (gethash p *java-classes*) class)))
+  (handler-case
 
-    ;; Preload some important classes.
-    (dolist (c '("java/lang/Boolean"
-                 "java/lang/Character"
-                 "java/lang/Byte"
-                 "java/lang/Short"
-                 "java/lang/Integer"
-                 "java/lang/Long"
-                 "java/lang/Float"
-                 "java/lang/Double"
-                 "java/lang/Void"
-                 "java/lang/ClassLoader"
-                 "java/security/PrivilegedAction"
-                 "java/lang/System"
-                 "java/lang/ThreadGroup"
-                 "java/lang/Thread"
-                 "java/lang/ref/SoftReference"
-                 "java/util/Properties"
-                 "java/beans/IntrospectionException"
-                 "java/io/FileNotFoundException"
-                 "java/io/UnsupportedEncodingException"
-                 "java/lang/ArithmeticException"
-                 "java/lang/ArrayIndexOutOfBoundsException"
-                 "java/lang/ArrayStoreException"
-                 "java/lang/ClassFormatError"
-                 "java/lang/ExceptionInInitializerError"
-                 "java/lang/IllegalArgumentException"
-                 "java/lang/IllegalMonitorStateException"
-                 "java/lang/InterruptedException"
-                 "java/lang/NegativeArraySizeException"
-                 "java/lang/NullPointerException"
-                 "java/lang/OutOfMemoryError"
-                 "java/lang/StackOverflowError"
-                 "java/net/SocketException"
-                 "java/net/URISyntaxException"
-                 "java/net/UnknownHostException"
-                 "java/security/NoSuchProviderException"
-                 "java/util/MissingResourceException"))
-      (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil))
+      (let ((boot-class-loader (make-instance '|java/lang/ClassLoader|)))
 
-    (let ((props (make-instance '|java/util/Properties|)))
-      (|<init>()| props)
-      (setf (slot-value |+static-java/lang/System+| '|props|) props))
+        (dolist (p '("byte" "char" "int" "short" "long" "double" "float" "boolean" "void"))
+          (let ((class (make-instance '|java/lang/Class|)))
+            (setf (slot-value class '|name|) (ijstring p))
+            (setf (gethash p *java-classes*) class)))
 
-    (|java/lang/System.initializeSystemClass()|)
+        ;; Preload some important classes.
+        (dolist (c '("java/lang/Boolean"
+                     "java/lang/Character"
+                     "java/lang/Byte"
+                     "java/lang/Short"
+                     "java/lang/Integer"
+                     "java/lang/Long"
+                     "java/lang/Float"
+                     "java/lang/Double"
+                     "java/lang/Void"
+                     "java/lang/ClassLoader"
+                     "java/security/PrivilegedAction"
+                     "java/lang/StackTraceElement"
+                     "java/lang/System"
+                     "java/lang/ThreadGroup"
+                     "java/lang/Thread"
+                     "java/lang/ref/SoftReference"
+                     "java/util/Properties"
+                     "java/beans/IntrospectionException"
+                     "java/io/FileNotFoundException"
+                     "java/io/UnsupportedEncodingException"
+                     "java/lang/ArithmeticException"
+                     "java/lang/ArrayIndexOutOfBoundsException"
+                     "java/lang/ArrayStoreException"
+                     "java/lang/ClassFormatError"
+                     "java/lang/ExceptionInInitializerError"
+                     "java/lang/IllegalArgumentException"
+                     "java/lang/IllegalMonitorStateException"
+                     "java/lang/InterruptedException"
+                     "java/lang/NegativeArraySizeException"
+                     "java/lang/NullPointerException"
+                     "java/lang/OutOfMemoryError"
+                     "java/lang/StackOverflowError"
+                     "java/net/SocketException"
+                     "java/net/URISyntaxException"
+                     "java/net/UnknownHostException"
+                     "java/security/NoSuchProviderException"
+                     "java/util/MissingResourceException"))
+          (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil))
 
-    (|<init>()| boot-class-loader)
+        (let ((props (make-instance '|java/util/Properties|)))
+          (|<init>()| props)
+          (setf (slot-value |+static-java/lang/System+| '|props|) props))
 
-    (dolist (c '("java/lang/invoke/MethodHandles"
-                 "java/lang/invoke/MethodHandles$Lookup"))
-      (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil))
+        (|java/lang/System.initializeSystemClass()|)
 
-    (setf *debug-load* nil)
+        (|<init>()| boot-class-loader)
 
-    (sb-ext:save-lisp-and-die "openldk" :executable t :save-runtime-options t :toplevel #'main-wrapper)))
+        (dolist (c '("java/lang/invoke/MethodHandles"
+                     "java/lang/invoke/MethodHandles$Lookup"))
+          (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil)))
+
+    (|condition-java/lang/Throwable| (c)
+      (format t "~&Exception: ~A~%" c)
+      (let ((cause (slot-value (slot-value c '|objref|) '|cause|)))
+      (format t "   Caused by: ~A~%" cause)
+      ;; (|printStackTrace()| (slot-value c '|objref|))
+      (format t "~&~A~%" (slot-value cause '|backtrace|)))))
+
+  (setf *debug-load* nil)
+
+  (sb-ext:save-lisp-and-die "openldk" :executable t :save-runtime-options t :toplevel #'main-wrapper))

@@ -66,8 +66,32 @@
   (eval (list 'make-instance (list 'quote '|java/lang/SecurityManager|))))
 
 (defmethod |fillInStackTrace(I)| ((this |java/lang/Throwable|) dummy)
-  (let ((bt (trivial-backtrace:print-backtrace nil :output nil)))
-    (setf (slot-value this '|backtrace|) bt)))
+  (declare (ignore dummy))
+  (setf (slot-value this '|backtrace|) (sb-debug:list-backtrace)))
+
+(defmethod |getStackTraceDepth()| ((this |java/lang/Throwable|))
+  (length (slot-value this '|backtrace|)))
+
+(defun %caller-class-name-from-stack-frame (caller-list)
+  (let ((caller-string (format nil "~A" caller-list)))
+    (let ((dot-position (position #\. caller-string)))
+      (cond
+        ((str:starts-with? "(%clinit-" caller-string)
+         (subseq caller-string 9 (1- (length caller-string))))
+        ((str:starts-with? "((METHOD " caller-string)
+         (type-of (cadr caller-list)))
+        (dot-position
+         (subseq caller-string 1 dot-position))
+        (t "openldk-internal")))))
+
+(defmethod |getStackTraceElement(I)| ((this |java/lang/Throwable|) index)
+  (let ((ste (make-instance '|java/lang/StackTraceElement|))
+        (stack-frame (nth index (slot-value this '|backtrace|))))
+    (|<init>(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;I)|
+     ste
+     (jstring (%caller-class-name-from-stack-frame stack-frame))
+     (ijstring "unknown") (jstring (format nil "~A" stack-frame)) -1)
+    ste))
 
 (defun %remove-adjacent-repeats (list)
   "Remove all adjacent repeated objects from LIST."
@@ -81,42 +105,67 @@
 
 (defmethod |sun/reflect/Reflection.getCallerClass()| ()
   ;; FIXME: we don't need the whole backtrace
-  (let ((klass
-          (let* ((caller-list (fourth (%remove-adjacent-repeats (sb-debug:list-backtrace))))
-                 (caller-string (format nil "~A" caller-list)))
-            ;; (cstring (subseq caller-string 1 (position #\. caller-string))))
-            (let ((dot-position (position #\. caller-string)))
-              (cond
-                ((str:starts-with? "(%clinit-" caller-string)
-                 (java-class (gethash (subseq caller-string 9 (1- (length caller-string))) *classes*)))
-                ((str:starts-with? "((METHOD " caller-string)
-                 (|getClass()| (cadr caller-list)))
-                (dot-position
-                 (java-class (gethash (subseq caller-string 1 dot-position) *classes*)))
-                (t (error (format nil "ERROR in sun/reflect/Reflection.getCallerClass(): don't recognize ~S" caller-string))))))))
-    klass))
+  (let* ((caller-list (fourth (%remove-adjacent-repeats (sb-debug:list-backtrace)))))
+    (gethash (%caller-class-name-from-stack-frame caller-list) *java-classes*)))
+
+(defun %type-to-descriptor (type)
+  (cond
+    ((eq type 'double-float) "D")
+    ((eq type 'single-float) "F")
+    ((equal type '(signed-byte 8)) "B")
+    ((equal type '(signed-byte 16)) "S")
+    ((equal type '(signed-byte 32)) "I")
+    ((equal type '(signed-byte 64)) "J")
+    ((equal type 'standard-char) "C")
+    ((equal type 'bit) "Z")
+    ((stringp type) (if (eq 1 (length type)) type (format nil "L~A;" type)))
+    (t (format nil "Ljava/lang/Object;" type))))
+
+(defun %get-array-class (element-type)
+  (let* ((cname (format nil "[~A" (%type-to-descriptor element-type)))
+         (java-class (gethash cname *java-classes*)))
+    (if java-class
+        java-class
+        (let ((ldk-class (make-instance '<class>
+                                        :name cname
+                                        :super "java/lang/Object"))
+              (java-class (make-instance '|java/lang/Class|)))
+          (setf (slot-value java-class '|name|) (ijstring cname))
+          (setf (slot-value java-class '|classLoader|) nil)
+          (setf (slot-value ldk-class 'java-class) java-class)
+          (setf (gethash cname *classes*) ldk-class)
+          (setf (gethash cname *java-classes*) java-class)
+          java-class))))
 
 (defmethod |getClass()| (object)
   ;;; FIXME - throw nullpointerexception
-	(when *debug-trace*
-		(format t "; trace: java/lang/Object.getClass(~A)" object))
-  (cond
-    ((arrayp object) (java-class (gethash "java/util/Arrays" *classes*)))
-    (t (java-class (gethash (format nil "~A" (type-of object)) *classes*)))))
+  (unwind-protect
+       (progn
+         (when *debug-trace*
+           (format t "~&~V@A trace: java/lang/Object.getClass(~A)" (incf *call-nesting-level* 1) "*" object))
+         (cond
+           ((arrayp object) (%get-array-class (array-element-type object)))
+           (t (java-class (gethash (format nil "~A" (type-of object)) *classes*)))))
+    (when *debug-trace*
+      (incf *call-nesting-level* -1))))
 
 (defmethod |java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (name initialize loader caller)
   (unwind-protect
        (progn
          (when *debug-trace*
-           (format t "; trace: entering java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)~%"))
+           (format t "~&~V@A trace: entering java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;) ~A~%"
+                   (incf *call-nesting-level* 1) "*" name))
          (let ((lname (substitute #\/ #\. (coerce (slot-value name '|value|) 'string))))
-           (or (and (gethash lname *classes*)
+           (or (and (eq (char lname 0) #\[)
+                    (or (gethash lname *java-classes*)
+                        (%get-array-class (subseq lname 1))))
+               (and (gethash lname *classes*)
                     (java-class (gethash lname *classes*)))
                (progn (let ((klass (classload lname)))
                         (%clinit klass)
                         (java-class klass))))))
     (when *debug-trace*
-      (format t "; trace: leaving  java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)~%"))))
+      (incf *call-nesting-level* -1))))
 
 (defmethod |java/lang/System.currentTimeMillis()| ()
 	;;; FIXME: this probably isn't right.
@@ -296,7 +345,7 @@
   (unwind-protect
        (progn
          (when *debug-trace*
-           (format t "~&; trace: entering java/lang/Class.getDeclaredConstructors0(Z)~%"))
+           (format t "~&~V@A trace: entering java/lang/Class.getDeclaredConstructors0(Z)~%" (incf *call-nesting-level* 1) "*"))
          (unless (gethash "java/lang/reflect/Constructor" *classes*)
            (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/reflect/Constructor") nil nil nil))
 
@@ -309,7 +358,7 @@
                                              c)))
                    'vector)))
     (when *debug-trace*
-      (format t "~&; trace: leaving  java/lang/Class.getDeclaredConstructors0(Z)~%"))))
+      (incf *call-nesting-level* -1))))
 
 
 (defmethod |getDeclaredMethods0(Z)| ((this |java/lang/Class|) arg)
@@ -317,7 +366,7 @@
   (unwind-protect
        (progn
          (when *debug-trace*
-           (format t "~&; trace: entering java/lang/Class.getDeclaredConstructors0(Z)~%"))
+           (format t "~&~V@A trace: entering java/lang/Class.getDeclaredMethods(Z)~%" (incf *call-nesting-level* 1) "*"))
          (unless (gethash "java/lang/reflect/Method" *classes*)
            (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/reflect/Method") nil nil nil))
 
@@ -330,14 +379,14 @@
                                              c)))
                    'vector)))
     (when *debug-trace*
-      (format t "~&; trace: leaving  java/lang/Class.getDeclaredMethods0(Z)~%"))))
+      (incf *call-nesting-level* -1))))
 
 
 (defmethod |getDeclaredFields0(Z)| ((this |java/lang/Class|) arg)
   (unwind-protect
        (progn
          (when *debug-trace*
-           (format t "~&; trace: entering java/lang/Class.getDeclaredFields0(Z)~%"))
+           (format t "~&~V@A trace: entering java/lang/Class.getDeclaredFields0(Z)~%" (incf *call-nesting-level* 1) "*"))
          (unless (gethash "java/lang/reflect/Field" *classes*)
            (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/reflect/Field") nil nil nil))
 
@@ -352,7 +401,7 @@
                                 (get-fields (gethash (super ldk-class) *classes*))))))
              (coerce (get-fields ldk-class) 'vector))))
     (when *debug-trace*
-      (format t "~&; trace: leaving  java/lang/Class.getDeclaredFields0(Z)~%"))))
+      (incf *call-nesting-level* -1))))
 
 (defun |sun/misc/VM.initialize()| ()
   ;; FIXME
@@ -1075,3 +1124,31 @@ FIXME: these aren't really strict/ Look at sb-mpfr/
 
 (defun |java/util/concurrent/atomic/AtomicLong.VMSupportsCS8()| ()
   0)
+
+(defun |sun/reflect/NativeMethodAccessorImpl.invoke0(Ljava/lang/reflect/Method;Ljava/lang/Object;[Ljava/lang/Object;)| (method object args)
+  (when *debug-trace*
+    (format t "~&~V@A trace: entering sun/reflect/NativeMethodAccessorImpl.invoke0(Ljava/lang/reflect/Method;Ljava/lang/Object;[Ljava/lang/Object;)~A~%"
+            (incf *call-nesting-level* 1) "*"
+            (list method object args))
+    (unwind-protect
+         (progn
+           (let ((result (apply (intern
+                                 (lispize-method-name
+                                  (concatenate 'string
+                                               (coerce (slot-value (slot-value (slot-value method '|clazz|) '|name|) '|value|) 'string)
+                                               "."
+                                               (coerce (slot-value (slot-value method '|name|) '|value|) 'string)
+                                               (coerce (slot-value (slot-value method '|signature|) '|value|) 'string)))
+                                 :openldk)
+                                (if (eq 0 (logand #x8 (slot-value method '|modifiers|)))
+                                    (cons object (coerce args 'list)) ; non-static method
+                                    (coerce args 'list))))) ; static method
+             (format t "~&~V@A trace: result = ~A~%"
+                     *call-nesting-level* "*" result)
+             result))
+      (incf *call-nesting-level* -1))))
+
+(defun |java/lang/reflect/Array.newArray(Ljava/lang/Class;I)| (class size)
+  ;; FIXME
+  (make-array size
+              :initial-element nil))

@@ -418,9 +418,6 @@
   ((class :with)
    (member-name)))
 
-(defclass/std ir-lstore (ir-node)
-  ((target)))
-
 (defclass/std ir-if (ir-node)
   ((condition :with)
 	 (branch-if-true)
@@ -473,16 +470,6 @@
 
 (defclass/std ir-fmul (ir-binop)
   ())
-
-(defclass/std ir-pop (ir-node)
-  ())
-
-(defclass/std ir-push (ir-node)
-  ((value)))
-
-;; FIXME: delete this
-(defmethod initialize-instance ((ir ir-push) &key)
-  (error "IR-PUSH"))
 
 (defmethod uses-stack-p ((node ir-node))
   t)

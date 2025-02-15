@@ -207,7 +207,8 @@
                         do (incf index))
                   (when (char= (char descriptor index) #\L)
                     (setf index (position #\; descriptor :start index)))
-                  (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/Array") nil nil nil) param-list)
+                  ;; FIXME!
+                  (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/util/Arrays") nil nil nil) param-list)
                   (incf index))
 
                  (t (incf index)))))

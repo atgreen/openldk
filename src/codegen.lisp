@@ -46,22 +46,12 @@
   (print-unreadable-object (expr out :type t)
     (format out "{~A : ~A}" (slot-value expr 'insn) (slot-value expr 'code))))
 
-(defun gen-push-item (item)
-  (assert t))
-
-(defun gen-pop-item ()
-  (assert t))
-
 (defun trace-insn (insn code)
   (if *debug-x*
       (list 'progn
             (list 'format t (format nil "~&; x[~A]~%" (address insn)))
             code)
       code))
-
-(defun gen-peek-item ()
-  (error "PEEK")
-  (list 'car 'stack))
 
 (defmethod codegen ((insn ir-literal) context)
   (declare (ignore context))
@@ -112,6 +102,7 @@
                               (let ((value ,(code (codegen value context)))
                                     (index ,(code (codegen index context)))
                                     (arrayref ,(code (codegen arrayref context))))
+                                ;; (format t "~&aastore: index ~A into array size ~A: ~A~%" index (length arrayref) arrayref)
                                 (setf (aref arrayref index) value))
                             (sb-int:invalid-array-index-error (e)
                               (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
@@ -238,12 +229,13 @@
   (make-instance '<expression>
                  :insn insn
                  :code (list 'let* (list (list 'value2 (code (codegen (value2 insn) context)))
-                                         (list 'value1 (code (codegen (value1 insn) context))))
-                             (list 'declare (list 'type (list 'signed-byte 32) 'value1 'value2))
-                             (list 'let (list (list 'result (list 'logand (list operator 'value1 'value2) #xFFFFFFFF)))
-                                   (list 'if (list '> 'result 2147483647)
-                                         (list '- 'result 4294967296)
-                                         'result)))
+                                         (list 'value1 (code (codegen (value1 insn) context)))
+                                         (list 'result (list 'logand (list operator 'value1 'value2) #xFFFFFFFF))
+                                         (list 'sresult (list 'if (list '> 'result 2147483647)
+                                                              (list '- 'result 4294967296)
+                                                              'result)))
+                             ;; (list 'format t "~&~A: ~A ~A ~A = ~A" (list 'quote operator) 'value1 (list 'quote operator) 'value2 'sresult)
+                             'sresult)
                  :expression-type :INTEGER))
 
 (defun %codegen-long-binop (insn operator context)
@@ -251,10 +243,12 @@
                  :insn insn
                  :code (list 'let* (list (list 'value2 (code (codegen (value2 insn) context)))
                                          (list 'value1 (code (codegen (value1 insn) context)))
-                                         (list 'result (list 'logand (list operator 'value1 'value2) #xFFFFFFFFFFFFFFFF)))
-                             (list 'if (list '> 'result 9223372036854775807)
-                                   (list '- 'result 18446744073709551616)
-                                   'result))
+                                         (list 'result (list 'logand (list operator 'value1 'value2) #xFFFFFFFFFFFFFFFF))
+                                         (list 'sresult (list 'if (list '> 'result 9223372036854775807)
+                                                              (list '- 'result 18446744073709551616)
+                                                              'result)))
+                             ;; (list 'format t "~&~A: ~A ~A ~A = ~A" (list 'quote operator) 'value1 (list 'quote operator) 'value2 'sresult)
+                             'sresult)
                  :expression-type :LONG))
 
 (defmacro %define-binop-codegen-methods (&rest opcodes)
@@ -290,14 +284,6 @@
   (ir-lmul '* :LONG #xFFFFFFFFFFFFFFFF)
   (ir-lsub '- :LONG #xFFFFFFFFFFFFFFFF))
 
-(defmethod codegen ((insn ir-land) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (gen-push-item (list 'logand (gen-pop-item) (gen-pop-item)))
-                             :expression-type :LONG)))
-    (error (stack context)) (error (stack context)) (push expr (stack context))
-    expr))
-
 (defmethod codegen ((insn ir-ixor) context)
   (make-instance '<expression>
                  :insn insn
@@ -319,7 +305,7 @@
 (defmethod codegen ((insn ir-lor) context)
   (make-instance '<expression>
                  :insn insn
-                 :code (list 'logior (code (codegen (value1 insn) context)) (code (codegen (value2 insn) context)))
+                 :code `(logior ,(code (codegen (value1 insn) context)) ,(code (codegen (value2 insn) context)))
                  :expression-type :LONG))
 
 (defmethod codegen ((insn ir-iand) context)
@@ -331,16 +317,11 @@
 (defmethod codegen ((insn ir-land) context)
   (make-instance '<expression>
                  :insn insn
-                 :code (list 'logand (code (codegen (value1 insn) context)) (code (codegen (value2 insn) context)))
+                 :code `(let ((op1 ,(code (codegen (value1 insn) context)))
+                              (op2 ,(code (codegen (value2 insn) context))))
+                          (format t "~%land: ~A & ~A = ~A~%" op1 op2 (logand op1 op2))
+                          (logand op1 op2))
                  :expression-type :LONG))
-
-(defmethod codegen ((insn ir-lor) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (gen-push-item (list 'logior (gen-pop-item) (gen-pop-item)))
-                             :expression-type :LONG)))
-    (error (stack context)) (error (stack context)) (push expr (stack context))
-    expr))
 
 (defmethod codegen ((insn ir-array-length) context)
   (make-instance '<expression>
@@ -477,6 +458,7 @@
                    :code `(handler-case
                               (let ((index ,(code (codegen index context)))
                                     (arrayref ,(code (codegen arrayref context))))
+                                ;; (format t "~&aaload: index ~A into array size ~A: ~A~%" index (length arrayref) arrayref)
                                 (aref arrayref index))
                             (sb-int:invalid-array-index-error (e)
                               (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
@@ -678,7 +660,10 @@
 (defmethod codegen ((insn ir-lneg) context)
   (make-instance '<expression>
                  :insn insn
-                 :code (list '- (code (codegen (value insn) context)))
+                 :code `(progn
+                          (let ((value ,(code (codegen (value insn) context))))
+                            ;; (format t "~&lneg ~A = ~A~%" value (unsigned-to-signed-long (- value)))
+                            (unsigned-to-signed-long (- value))))
                  :expression-type :LONG))
 
 (defmethod codegen ((insn ir-ineg) context)
@@ -855,12 +840,13 @@
 
 (defun shl (x width bits)
   "Compute bitwise left shift of x by 'bits' bits, represented on 'width' bits"
-  (logand (ash x bits)
+  (logand (ash x (- (if (< bits 0) (mod width bits) bits)))
           (1- (ash 1 width))))
 
 (defun shr (x width bits)
   "Compute bitwise right shift of x by 'bits' bits, represented on 'width' bits"
-  (logand (ash x (- bits))
+  ;; (format t "~&Shifting ~A-bit wide value ~B right by ~A bits = ~B~%" width x bits (logand (ash x (if (< bits 0) (mod width bits) (- bits))) (1- (ash 1 width))))
+  (logand (ash (logand x (1- (ash 1 width))) (if (< bits 0) (mod width bits) (- bits)))
           (1- (ash 1 width))))
 
 (defmethod codegen ((insn ir-ishr) context)
@@ -1025,7 +1011,7 @@
           (case (atype insn)
             ;; Determine the initial element based on the array type
             (4 0)        ; Integer
-            (5 #\0)      ; Character
+            (5 #\Null)   ; Character
             (6 0.0)      ; Single-precision float
             (7 0.0d0)    ; Double-precision float
             ((8 9 10 11) 0) ; Other integer types (assuming default to 0)
@@ -1051,7 +1037,7 @@
           (case (atype insn)
             ;; Determine the initial element based on the array type
             (4 0)        ; Integer
-            (5 #\0)      ; Character
+            (5 #\Null)      ; Character
             (6 0.0)      ; Single-precision float
             (7 0.0d0)    ; Double-precision float
             ((8 9 10 11) 0) ; Other integer types (assuming default to 0)
@@ -1074,22 +1060,6 @@
   (make-instance '<expression>
                  :insn insn
                  :code (list 'return-from 'try-body nil)))
-
-(defmethod codegen ((insn ir-pop) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (gen-pop-item))))
-    (error (stack context))
-    expr))
-
-(defmethod codegen ((insn ir-push) context)
-  (let* ((value (codegen (value insn) context))
-         (expr (make-instance '<expression>
-                              :insn insn
-                              :code (gen-push-item (code value))
-                              :expression-type (expression-type value))))
-    (push expr (stack context))
-    expr))
 
 (defmethod codegen ((insn ir-call-special-method) context)
   (with-slots (class method-name args) insn
@@ -1129,14 +1099,6 @@
                                            (list 'quote (intern member-name :openldk))))))
       expr)))
 
-(defmethod codegen ((insn ir-lstore) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (with-slots (target) insn
-                                     (list 'setf (code (codegen target context)) (gen-pop-item))))))
-    (error (stack context))
-    expr))
-
 (define-condition java-lang-throwable (error)
   ((throwable :initarg :throwable :reader throwable)))
 
@@ -1158,12 +1120,14 @@
     expr))
 
 (defmethod codegen ((insn ir-return-value) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (list 'return-from
-                                         (intern (slot-value insn 'fn-name) :openldk)
-                                         (code (codegen (slot-value insn 'value) context))))))
-    expr))
+  (make-instance '<expression>
+                 :insn insn
+                 :code `(let ((result ,(code (codegen (slot-value insn 'value) context))))
+                          (when *debug-trace*
+                            (format t "~&~V@A trace: ~A result = ~A~%"
+                                    *call-nesting-level* "*"
+                                    ,(fn-name *context*) result))
+                          (return-from ,(intern (slot-value insn 'fn-name) :openldk) result))))
 
 (defmethod codegen ((insn ir-variable) context)
   (declare (ignore context))

@@ -63,3 +63,6 @@
     (or istr
         (let ((istr (setf (gethash str interned-string-table) (jstring str))))
           istr))))
+
+(defmethod |toString()| ((str vector))
+  (coerce str 'string))

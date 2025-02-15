@@ -157,7 +157,7 @@
   ())
 
 (define-condition |condition-java/lang/ClassNotFoundException|
-    (|condition-java/lang/RuntimeException|)
+    (|condition-java/lang/ReflectiveOperationException|)
   ())
 
 (define-condition |condition-java/nio/BufferOverflowException|
