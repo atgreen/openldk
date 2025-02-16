@@ -549,7 +549,7 @@
           (push pc (aref (next-insn-list context) pc-start))
           (list (make-instance 'ir-checkcast
                                :address pc-start
-                               :class (emit class constant-pool)
+                               :classname (slot-value (slot-value (emit class constant-pool) 'class) 'name)
                                :objref (car (stack context)))))))))
 
 (defun %transpile-unop (context ir-class op-type)

@@ -393,7 +393,7 @@
   ((class :with)))
 
 (defclass/std ir-checkcast (ir-node)
-  ((class :with)
+  ((classname)
    (objref)))
 
 (defclass/std ir-clinit (ir-call)

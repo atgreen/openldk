@@ -400,6 +400,11 @@
                                            (setf (slot-value c '|objref|) throwable)
                                            c))))
                            (%eval ccode))))
+
+                     ;; Load all of the field classes
+                     (loop for field across (fields class)
+                           do (classload (slot-value (slot-value field 'class) 'name)))
+
                      class)
                 (close classfile-stream))
               (format t "ERROR: Can't find ~A on classpath~%" classname))))))

@@ -93,6 +93,9 @@
 (defclass |sun/misc/Unsafe| (|java/lang/Object|)
   ())
 
+(defclass |java/lang/ClassLoader| (|java/lang/Object|)
+  ())
+
 (defclass |java/io/InputStream| (|java/lang/Object|)
   ())
 

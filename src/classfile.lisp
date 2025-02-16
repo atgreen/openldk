@@ -126,8 +126,11 @@
 (defmethod emit ((v constant-class-reference) cp)
   (let ((classname (emit (aref cp (slot-value v 'index)) cp)))
     (if (eq (aref classname 0) #\[)
-        (setf classname "java/util/Arrays"))
-    (make-instance 'ir-class :class (classload classname))))
+        (make-instance 'ir-class
+                       :class (if (eq (aref classname 1) #\L)
+                                  (%get-array-lclass-from-name "[Ljava/lang/Object;")
+                                  (%get-array-lclass-from-name classname)))
+        (make-instance 'ir-class :class (classload classname)))))
 
 (defmethod get-stack-jtype ((v constant-class-reference))
   :REFERENCE)

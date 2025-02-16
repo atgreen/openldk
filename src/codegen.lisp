@@ -319,7 +319,7 @@
                  :insn insn
                  :code `(let ((op1 ,(code (codegen (value1 insn) context)))
                               (op2 ,(code (codegen (value2 insn) context))))
-                          (format t "~%land: ~A & ~A = ~A~%" op1 op2 (logand op1 op2))
+                          ;; (format t "~%land: ~A & ~A = ~A~%" op1 op2 (logand op1 op2))
                           (logand op1 op2))
                  :expression-type :LONG))
 
@@ -484,10 +484,8 @@
                    :insn insn
                    :code `(let ((objref ,(code (codegen (objref insn) context))))
                             (when objref
-                              (unless (or (typep objref (quote ,(intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))
-                                          (and (arrayp objref)
-                                               (eq '|java/util/Arrays|
-                                                   (quote ,(intern (name (slot-value (slot-value insn 'class) 'class)) :openldk)))))
+                              (unless (or (arrayp objref) ;; FIXME
+                                          (typep objref (quote ,(intern (slot-value insn 'classname) :openldk))))
                                 (error (%lisp-condition (%make-throwable '|java/lang/ClassCastException|))))))
                    :expression-type nil)))
 
@@ -740,10 +738,10 @@
    (with-slots (index offset const) insn
      (make-instance '<expression>
                     :insn insn
-                    :code (list 'let (list (list 'o1 (list 'sxhash (code (codegen (value1 insn) context))))
-                                           (list 'o2 (list 'sxhash (code (codegen (value1 insn) context)))))
-                                (list 'when (list 'eq 'o1 'o2)
-                                      (list 'go (intern (format nil "branch-target-~A" offset))))))))
+                    :code `(let ((o1 (sxhash ,(code (codegen (value1 insn) context))))
+                                 (o2 (sxhash ,(code (codegen (value2 insn) context)))))
+                             (when (eq o1 o2)
+                               (go ,(intern (format nil "branch-target-~A" offset))))))))
 
 (defun %codegen-ir-if-xcmpne (insn context)
   (with-slots (offset value1 value2) insn

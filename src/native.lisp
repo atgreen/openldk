@@ -121,21 +121,24 @@
     ((stringp type) (if (eq 1 (length type)) type (format nil "L~A;" type)))
     (t (format nil "Ljava/lang/Object;" type))))
 
-(defun %get-array-class (element-type)
-  (let* ((cname (format nil "[~A" (%type-to-descriptor element-type)))
-         (java-class (gethash cname *java-classes*)))
-    (if java-class
-        java-class
-        (let ((ldk-class (make-instance '<class>
-                                        :name cname
-                                        :super "java/lang/Object"))
+(defun %get-array-lclass-from-name (cname)
+  (let* ((ldk-class (gethash cname *classes*)))
+    (if ldk-class
+        ldk-class
+        (let ((lclass (make-instance '<class>
+                                     :name cname
+                                     :super "java/lang/Object"))
               (java-class (make-instance '|java/lang/Class|)))
           (setf (slot-value java-class '|name|) (ijstring cname))
           (setf (slot-value java-class '|classLoader|) nil)
-          (setf (slot-value ldk-class 'java-class) java-class)
-          (setf (gethash cname *classes*) ldk-class)
+          (setf (slot-value lclass 'java-class) java-class)
+          (setf (gethash cname *classes*) lclass)
           (setf (gethash cname *java-classes*) java-class)
-          java-class))))
+          lclass))))
+
+(defun %get-array-lclass (element-type)
+  (let* ((cname (format nil "[~A" (%type-to-descriptor element-type))))
+    (%get-array-lclass-from-name cname)))
 
 (defmethod |getClass()| (object)
   ;;; FIXME - throw nullpointerexception
@@ -144,7 +147,7 @@
          (when *debug-trace*
            (format t "~&~V@A trace: java/lang/Object.getClass(~A)" (incf *call-nesting-level* 1) "*" object))
          (cond
-           ((arrayp object) (%get-array-class (array-element-type object)))
+           ((arrayp object) (java-class (%get-array-lclass (array-element-type object))))
            (t (java-class (gethash (format nil "~A" (type-of object)) *classes*)))))
     (when *debug-trace*
       (incf *call-nesting-level* -1))))
@@ -158,7 +161,7 @@
          (let ((lname (substitute #\/ #\. (coerce (slot-value name '|value|) 'string))))
            (or (and (eq (char lname 0) #\[)
                     (or (gethash lname *java-classes*)
-                        (%get-array-class (subseq lname 1))))
+                        (java-class (%get-array-ldk-class-from-name (subseq lname 1)))))
                (and (gethash lname *classes*)
                     (java-class (gethash lname *classes*)))
                (progn (let ((klass (classload lname)))
@@ -335,8 +338,8 @@
 
 (defmethod |isInterface()| ((this |java/lang/Class|))
   (if (and (not (|isPrimitive()| this))
-           (let ((ldk-class (gethash (slot-value (slot-value this '|name|) '|value|) *classes*)))
-             (interface-p ldk-class)))
+           (let ((lclass (gethash (slot-value (slot-value this '|name|) '|value|) *classes*)))
+             (interface-p lclass)))
       1
       0))
 
@@ -349,9 +352,9 @@
          (unless (gethash "java/lang/reflect/Constructor" *classes*)
            (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/reflect/Constructor") nil nil nil))
 
-         ;; Get the ldk-class for THIS
-         (let ((ldk-class (gethash (slot-value (slot-value this '|name|) '|value|) *classes*)))
-           (coerce (append (loop for method across (methods ldk-class)
+         ;; Get the lclass for THIS
+         (let ((lclass (gethash (slot-value (slot-value this '|name|) '|value|) *classes*)))
+           (coerce (append (loop for method across (methods lclass)
                                  when (str:starts-with? "<init>" (name method))
                                    collect (let ((c (make-instance '|java/lang/reflect/Constructor|)))
                                              (|<init>(Ljava/lang/Class;[Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B)| c this (%get-parameter-types (descriptor method)) (make-array 0) (access-flags method) 0 (ijstring (descriptor method)) (make-array 0) (make-array 0))
@@ -370,9 +373,9 @@
          (unless (gethash "java/lang/reflect/Method" *classes*)
            (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/reflect/Method") nil nil nil))
 
-         ;; Get the ldk-class for THIS
-         (let ((ldk-class (gethash (slot-value (slot-value this '|name|) '|value|) *classes*)))
-           (coerce (append (loop for method across (methods ldk-class)
+         ;; Get the lclass for THIS
+         (let ((lclass (gethash (slot-value (slot-value this '|name|) '|value|) *classes*)))
+           (coerce (append (loop for method across (methods lclass)
                                  unless (str:starts-with? "<init>" (name method))
                                    collect (let ((c (make-instance '|java/lang/reflect/Method|)))
                                              (|<init>(Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/Class;Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B[B)| c this (ijstring (name method)) (%get-parameter-types (descriptor method)) nil (make-array 0) (access-flags method) 0 (ijstring (descriptor method)) (make-array 0) (make-array 0) (make-array 0))
@@ -390,16 +393,23 @@
          (unless (gethash "java/lang/reflect/Field" *classes*)
            (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/reflect/Field") nil nil nil))
 
-         ;; Get the ldk-class for THIS
-         (let ((ldk-class (gethash (slot-value (slot-value this '|name|) '|value|) *classes*)))
-           (labels ((get-fields (ldk-class)
-                      (when ldk-class
-                        (append (loop for field across (fields ldk-class)
+         ;; Get the lclass for THIS
+         (let ((lclass (gethash (slot-value (slot-value this '|name|) '|value|) *classes*)))
+           (labels ((get-fields (lclass)
+                      (when lclass
+                        (append (loop for field across (fields lclass)
                                       collect (let ((f (make-instance '|java/lang/reflect/Field|)))
-                                                (|<init>(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;IILjava/lang/String;[B)| f this (ijstring (name field)) nil (access-flags field) nil nil nil)
+                                                (|<init>(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;IILjava/lang/String;[B)| f this (ijstring (name field))
+                                                 (gethash
+                                                  (let ((cn (slot-value field 'descriptor)))
+                                                    (if (eq (char cn 0) #\L)
+                                                        (subseq cn 1 (1- (length cn)))
+                                                        cn))
+                                                  *java-classes*)
+                                                 (access-flags field) nil nil nil)
                                                 f))
-                                (get-fields (gethash (super ldk-class) *classes*))))))
-             (coerce (get-fields ldk-class) 'vector))))
+                                (get-fields (gethash (super lclass) *classes*))))))
+             (coerce (get-fields lclass) 'vector))))
     (when *debug-trace*
       (incf *call-nesting-level* -1))))
 
@@ -512,6 +522,10 @@ user.variant
   (let ((result (|run()| action)))
     result))
 
+(defun |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedExceptionAction;Ljava/security/AccessControlContext;)| (action context)
+  ;; FIXME
+  (|run()| action))
+
 (defmethod |isAssignableFrom(Ljava/lang/Class;)| ((this |java/lang/Class|) other)
   (let ((this-class (find-class (intern (name (gethash (slot-value (slot-value this '|name|) '|value|) *classes*)) :openldk)))
         (other-class (find-class (intern (name (gethash (slot-value (slot-value other '|name|) '|value|) *classes*)) :openldk))))
@@ -539,21 +553,21 @@ user.variant
   (copy-seq array))
 
 (defun |sun/reflect/Reflection.getClassAccessFlags(Ljava/lang/Class;)| (class)
-  (let ((ldk-class (gethash (slot-value (slot-value class '|name|) '|value|) *classes*)))
-    (access-flags ldk-class)))
+  (let ((lclass (gethash (slot-value (slot-value class '|name|) '|value|) *classes*)))
+    (access-flags lclass)))
 
 (defmethod |getModifiers()| ((class |java/lang/Class|))
-  (let ((ldk-class (gethash (slot-value (slot-value class '|name|) '|value|) *classes*)))
-    (access-flags ldk-class)))
+  (let ((lclass (gethash (slot-value (slot-value class '|name|) '|value|) *classes*)))
+    (access-flags lclass)))
 
 (defmethod |getSuperclass()| ((class |java/lang/Class|))
-  (let ((ldk-class (gethash (slot-value (slot-value class '|name|) '|value|) *classes*)))
-    (gethash (super ldk-class) *java-classes*)))
+  (let ((lclass (gethash (slot-value (slot-value class '|name|) '|value|) *classes*)))
+    (gethash (super lclass) *java-classes*)))
 
 (defmethod |getInterfaces0()| ((class |java/lang/Class|))
   ;; FIXME: do something different for interfaces?
-  (let ((ldk-class (gethash (slot-value (slot-value class '|name|) '|value|) *classes*)))
-    (coerce (mapcar (lambda (iname) (java-class (gethash iname *classes*))) (coerce (interfaces ldk-class) 'list))
+  (let ((lclass (gethash (slot-value (slot-value class '|name|) '|value|) *classes*)))
+    (coerce (mapcar (lambda (iname) (java-class (gethash iname *classes*))) (coerce (interfaces lclass) 'list))
             'vector)))
 
 (defun |sun/reflect/NativeConstructorAccessorImpl.newInstance0(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)|
@@ -567,9 +581,9 @@ user.variant
       obj)))
 
 (defmethod |ensureClassInitialized(Ljava/lang/Class;)| ((unsafe |sun/misc/Unsafe|) class)
-  (let ((ldk-class (gethash (slot-value (slot-value class '|name|) '|value|) *classes*)))
-    (assert ldk-class)
-    (%clinit ldk-class)))
+  (let ((lclass (gethash (slot-value (slot-value class '|name|) '|value|) *classes*)))
+    (assert lclass)
+    (%clinit lclass)))
 
 (defvar %unsafe-memory-table (make-hash-table))
 
@@ -1152,3 +1166,11 @@ FIXME: these aren't really strict/ Look at sb-mpfr/
   ;; FIXME
   (make-array size
               :initial-element nil))
+
+(defmethod |findLoadedClass0(Ljava/lang/String;)| ((loader |java/lang/ClassLoader|) name)
+  ;; FIXME
+  (gethash (slot-value name '|value|) *java-classes*))
+
+(defmethod |findBootstrapClass(Ljava/lang/String;)| ((loader |java/lang/ClassLoader|) name)
+  ;; FIXME
+  (gethash (slot-value name '|value|) *java-classes*))
