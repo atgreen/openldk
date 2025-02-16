@@ -1157,8 +1157,9 @@ FIXME: these aren't really strict/ Look at sb-mpfr/
                               (if (eq 0 (logand #x8 (slot-value method '|modifiers|)))
                                   (cons object (coerce args 'list)) ; non-static method
                                   (coerce args 'list))))) ; static method
-           (format t "~&~V@A trace: result = ~A~%"
-                   *call-nesting-level* "*" result)
+           (when *debug-trace*
+             (format t "~&~V@A trace: result = ~A~%"
+                     *call-nesting-level* "*" result))
            result))
     (incf *call-nesting-level* -1)))
 
@@ -1173,4 +1174,5 @@ FIXME: these aren't really strict/ Look at sb-mpfr/
 
 (defmethod |findBootstrapClass(Ljava/lang/String;)| ((loader |java/lang/ClassLoader|) name)
   ;; FIXME
-  (gethash (slot-value name '|value|) *java-classes*))
+  (let ((ldk-class (classload (slot-value name '|value|))))
+    (java-class ldk-class)))
