@@ -1143,24 +1143,24 @@ FIXME: these aren't really strict/ Look at sb-mpfr/
   (when *debug-trace*
     (format t "~&~V@A trace: entering sun/reflect/NativeMethodAccessorImpl.invoke0(Ljava/lang/reflect/Method;Ljava/lang/Object;[Ljava/lang/Object;)~A~%"
             (incf *call-nesting-level* 1) "*"
-            (list method object args))
-    (unwind-protect
-         (progn
-           (let ((result (apply (intern
-                                 (lispize-method-name
-                                  (concatenate 'string
-                                               (coerce (slot-value (slot-value (slot-value method '|clazz|) '|name|) '|value|) 'string)
-                                               "."
-                                               (coerce (slot-value (slot-value method '|name|) '|value|) 'string)
-                                               (coerce (slot-value (slot-value method '|signature|) '|value|) 'string)))
-                                 :openldk)
-                                (if (eq 0 (logand #x8 (slot-value method '|modifiers|)))
-                                    (cons object (coerce args 'list)) ; non-static method
-                                    (coerce args 'list))))) ; static method
-             (format t "~&~V@A trace: result = ~A~%"
-                     *call-nesting-level* "*" result)
-             result))
-      (incf *call-nesting-level* -1))))
+            (list method object args)))
+  (unwind-protect
+       (progn
+         (let ((result (apply (intern
+                               (lispize-method-name
+                                (concatenate 'string
+                                             (coerce (slot-value (slot-value (slot-value method '|clazz|) '|name|) '|value|) 'string)
+                                             "."
+                                             (coerce (slot-value (slot-value method '|name|) '|value|) 'string)
+                                             (coerce (slot-value (slot-value method '|signature|) '|value|) 'string)))
+                               :openldk)
+                              (if (eq 0 (logand #x8 (slot-value method '|modifiers|)))
+                                  (cons object (coerce args 'list)) ; non-static method
+                                  (coerce args 'list))))) ; static method
+           (format t "~&~V@A trace: result = ~A~%"
+                   *call-nesting-level* "*" result)
+           result))
+    (incf *call-nesting-level* -1)))
 
 (defun |java/lang/reflect/Array.newArray(Ljava/lang/Class;I)| (class size)
   ;; FIXME
