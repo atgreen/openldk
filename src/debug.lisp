@@ -48,24 +48,27 @@
 	(dump-hashtable *classes*))
 
 (defun dump-method-dot (blocks)
-  (when *dump-dir*
-    (let ((class-name (slot-value (slot-value *context* 'class) 'name))
-          (fn-name (slot-value *context* 'fn-name))
-          (dt (make-hash-table)))
-      (let ((ffn-name (substitute #\. #\/ (if (alexandria:starts-with-subseq class-name fn-name)
-                                              fn-name
-                                              (format nil "~A~A" class-name fn-name)))))
-        (let* ((namestring (format nil "~A~A~A.dot" *dump-dir*
-                                   (uiop:directory-separator-for-host)
-                                   ffn-name))
-               (pathname (pathname-utils:parse-native-namestring namestring)))
-          (uiop:ensure-all-directories-exist
-           (list (pathname-utils:parent pathname)))
-          (with-open-file (stream pathname :direction :output :if-does-not-exist :create :if-exists :supersede)
-            (format stream "digraph code {~%graph [rankdir=TB];~%node [shape=box];~%")
-            (dolist (b blocks)
-              (dump-dot b dt stream))
-            (format stream "}~%")))))))
+  (handler-case
+      (when *dump-dir*
+        (let ((class-name (slot-value (slot-value *context* 'class) 'name))
+              (fn-name (slot-value *context* 'fn-name))
+              (dt (make-hash-table)))
+          (let ((ffn-name (substitute #\. #\/ (if (alexandria:starts-with-subseq class-name fn-name)
+                                                  fn-name
+                                                  (format nil "~A~A" class-name fn-name)))))
+            (let* ((namestring (format nil "~A~A~A.dot" *dump-dir*
+                                       (uiop:directory-separator-for-host)
+                                       ffn-name))
+                   (pathname (pathname-utils:parse-native-namestring namestring)))
+              (uiop:ensure-all-directories-exist
+               (list (pathname-utils:parent pathname)))
+              (with-open-file (stream pathname :direction :output :if-does-not-exist :create :if-exists :supersede)
+                (format stream "digraph code {~%graph [rankdir=TB];~%node [shape=box];~%")
+                (dolist (b blocks)
+                  (dump-dot b dt stream))
+                (format stream "}~%"))))))
+    (error (e)
+      )))
 
 (defun dump (id obj)
   "Dump OBJ, *CONTEXT* and *CLASSES* to disk in *DUMP-DIR*/[current-class]/ID."

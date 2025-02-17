@@ -344,70 +344,71 @@
     (append defclass-code methods-code)))
 
 (defun classload (classname)
-  (let ((class (gethash classname *classes*))
-        (internal-classname (intern (substitute #\/ #\. classname) :openldk)))
-    (if class
-        class
-        (let ((classfile-stream (open-java-classfile-on-classpath classname)))
-          (when *debug-load*
-            (format t "~&; LOADING ~A~%" classname))
-          (if classfile-stream
-              (unwind-protect
-                   (let* ((class
-                            (let ((c (read-classfile classfile-stream)))
-                              (setf (gethash (substitute #\/ #\. classname) *classes*) c)
-                              c))
-                          (super (let ((super (slot-value class 'super)))
-                                   (when super (classload super))))
-                          (interfaces (let ((interfaces (slot-value class 'interfaces)))
-                                        (when interfaces
-                                          (mapcar (lambda (i) (classload i)) (coerce interfaces 'list))))))
-                     (let ((klass (make-instance '|java/lang/Class|))
-                           (cname (make-instance '|java/lang/String|))
-                           (cloader nil)) ;; (make-instance '|java/lang/ClassLoader|)))
-                       (with-slots (|name| |classLoader|) klass
-                         (setf (slot-value cname '|value|) (substitute #\/ #\. classname))
-                         (setf |name| cname)
-                         (setf |classLoader| cloader))
-                       (setf (java-class class) klass)
-                       (setf (gethash (substitute #\/ #\. classname) *java-classes*) klass))
-                     (let ((code (emit-<class> class)))
-                       (%eval code))
+  (let ((classname (coerce classname 'string)))
+    (let ((class (gethash classname *classes*))
+          (internal-classname (intern (substitute #\/ #\. classname) :openldk)))
+      (if class
+          class
+          (let ((classfile-stream (open-java-classfile-on-classpath classname)))
+            (when *debug-load*
+              (format t "~&; LOADING ~A~%" classname))
+            (if classfile-stream
+                (unwind-protect
+                     (let* ((class
+                              (let ((c (read-classfile classfile-stream)))
+                                (setf (gethash (substitute #\/ #\. classname) *classes*) c)
+                                c))
+                            (super (let ((super (slot-value class 'super)))
+                                     (when super (classload super))))
+                            (interfaces (let ((interfaces (slot-value class 'interfaces)))
+                                          (when interfaces
+                                            (mapcar (lambda (i) (classload i)) (coerce interfaces 'list))))))
+                       (let ((klass (make-instance '|java/lang/Class|))
+                             (cname (make-instance '|java/lang/String|))
+                             (cloader nil)) ;; (make-instance '|java/lang/ClassLoader|)))
+                         (with-slots (|name| |classLoader|) klass
+                           (setf (slot-value cname '|value|) (substitute #\/ #\. classname))
+                           (setf |name| cname)
+                           (setf |classLoader| cloader))
+                         (setf (java-class class) klass)
+                         (setf (gethash (substitute #\/ #\. classname) *java-classes*) klass))
+                       (let ((code (emit-<class> class)))
+                         (%eval code))
 
-                     ;; Emit the class initializer
-                     (let ((lisp-class (find-class (intern (substitute #\/ #\. classname) :openldk))))
-                       (closer-mop:finalize-inheritance lisp-class)
-                       (let ((icc (append (list 'defun (intern (format nil "%clinit-~A" (substitute #\/ #\. classname)) :openldk) (list))
-                                          ;; (list (list 'format 't ">>> clinit ~A~%" lisp-class))
-                                          (loop for k in (reverse (closer-mop:class-precedence-list lisp-class))
-                                                for clinit-function = (intern (format nil "~a.<clinit>()" (class-name k)) :openldk)
-                                                when (fboundp clinit-function)
-                                                  collect (let ((ldkclass (gethash (format nil "~A" (class-name k)) *classes*)))
-                                                            (list 'unless (list 'initialized-p ldkclass)
-                                                                  (list 'setf (list 'initialized-p ldkclass) t)
-                                                                  (list clinit-function)))))))
-                         (%eval icc)))
+                       ;; Emit the class initializer
+                       (let ((lisp-class (find-class (intern (substitute #\/ #\. classname) :openldk))))
+                         (closer-mop:finalize-inheritance lisp-class)
+                         (let ((icc (append (list 'defun (intern (format nil "%clinit-~A" (substitute #\/ #\. classname)) :openldk) (list))
+                                            ;; (list (list 'format 't ">>> clinit ~A~%" lisp-class))
+                                            (loop for k in (reverse (closer-mop:class-precedence-list lisp-class))
+                                                  for clinit-function = (intern (format nil "~a.<clinit>()" (class-name k)) :openldk)
+                                                  when (fboundp clinit-function)
+                                                    collect (let ((ldkclass (gethash (format nil "~A" (class-name k)) *classes*)))
+                                                              (list 'unless (list 'initialized-p ldkclass)
+                                                                    (list 'setf (list 'initialized-p ldkclass) t)
+                                                                    (list clinit-function)))))))
+                           (%eval icc)))
 
-                     (when (and (not (string= classname "java/lang/Throwable"))
-                                (subtypep (find-class internal-classname) (find-class '|java/lang/Throwable|)))
-                       (let ((condition-symbol (intern (format nil "condition-~A" classname) :openldk)))
-                         (setf (gethash (find-class (intern classname :openldk)) *condition-table*) condition-symbol)
-                         (let ((ccode `(define-condition ,condition-symbol ( ,(intern (format nil "condition-~A" (slot-value super 'name)) :openldk))
-                                         ())))
-                           (%eval ccode))
-                         (let ((ccode `(defmethod %lisp-condition ((throwable ,(intern (format nil "~A" classname) :openldk)))
-                                         (let ((c (make-condition (quote ,(intern (format nil "condition-~A" classname) :openldk)))))
-                                           (setf (slot-value c '|objref|) throwable)
-                                           c))))
-                           (%eval ccode))))
+                       (when (and (not (string= classname "java/lang/Throwable"))
+                                  (subtypep (find-class internal-classname) (find-class '|java/lang/Throwable|)))
+                         (let ((condition-symbol (intern (format nil "condition-~A" classname) :openldk)))
+                           (setf (gethash (find-class (intern classname :openldk)) *condition-table*) condition-symbol)
+                           (let ((ccode `(define-condition ,condition-symbol ( ,(intern (format nil "condition-~A" (slot-value super 'name)) :openldk))
+                                           ())))
+                             (%eval ccode))
+                           (let ((ccode `(defmethod %lisp-condition ((throwable ,(intern (format nil "~A" classname) :openldk)))
+                                           (let ((c (make-condition (quote ,(intern (format nil "condition-~A" classname) :openldk)))))
+                                             (setf (slot-value c '|objref|) throwable)
+                                             c))))
+                             (%eval ccode))))
 
-                     ;; Load all of the field classes
-                     (loop for field across (fields class)
-                           do (classload (slot-value (slot-value field 'class) 'name)))
+                       ;; Load all of the field classes
+                       (loop for field across (fields class)
+                             do (classload (slot-value (slot-value field 'class) 'name)))
 
-                     class)
-                (close classfile-stream))
-              (format t "ERROR: Can't find ~A on classpath~%" classname))))))
+                       class)
+                  (close classfile-stream))
+                (format t "ERROR: Can't find ~A on classpath~%" classname)))))))
 
 @cli:command
 (defun main (mainclass &optional (args (list)) &key dump-dir classpath)

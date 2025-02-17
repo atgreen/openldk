@@ -56,7 +56,9 @@
    (blocks)
    (ir-code)
    (svcount :std 0)
-   (next-is-wide-p)
+   (next-is-wide-p
+    :doc "T if the next opcode is the wide variant.")
+   (emitted-block-scopes :std (list (list)))
    (stack-state-table
     :doc "A hashtable mapping addresses to stack states")
    (try-end-table
