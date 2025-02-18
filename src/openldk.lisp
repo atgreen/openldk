@@ -550,6 +550,7 @@
                      "java/lang/NullPointerException"
                      "java/lang/OutOfMemoryError"
                      "java/lang/StackOverflowError"
+                     "java/net/MalformedURLException"
                      "java/net/SocketException"
                      "java/net/URISyntaxException"
                      "java/net/UnknownHostException"
