@@ -305,7 +305,13 @@
 (defmethod codegen ((insn ir-lor) context)
   (make-instance '<expression>
                  :insn insn
-                 :code `(logior ,(code (codegen (value1 insn) context)) ,(code (codegen (value2 insn) context)))
+                 :code `(let ((op1 (logand ,(code (codegen (value1 insn) context)) #xFFFFFFFFFFFFFFFF))
+                              (op2 (logand ,(code (codegen (value2 insn) context)) #xFFFFFFFFFFFFFFFF)))
+                          ;; (format t "~&~A | ~A = ~A~%" op1 op2 (logior op1 op2))
+                          (logior (logand ,(code (codegen (value1 insn) context))
+                                          #xFFFFFFFFFFFFFFFF)
+                                  (logand ,(code (codegen (value2 insn) context))
+                                          #xFFFFFFFFFFFFFFFF)))
                  :expression-type :LONG))
 
 (defmethod codegen ((insn ir-iand) context)
@@ -851,14 +857,14 @@
   ;; FIXME: this is wrong.
   (make-instance '<expression>
                  :insn insn
-                 :code `(unsigned-to-signed-integer (ash ,(code (codegen (value1 insn) context)) (- 0 ,(code (codegen (value2 insn) context)))))
+                 :code `(unsigned-to-signed-integer (ash ,(code (codegen (value1 insn) context)) (- 0 (logand ,(code (codegen (value2 insn) context)) #x1f))))
                  :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-lshr) context)
   ;; FIXME: this is wrong.
   (make-instance '<expression>
                  :insn insn
-                 :code `(unsigned-to-signed-long (ash ,(code (codegen (value1 insn) context)) (- 0 ,(code (codegen (value2 insn) context)))))
+                 :code `(unsigned-to-signed-long (ash ,(code (codegen (value1 insn) context)) (- 0 (logand ,(code (codegen (value2 insn) context)) #x3f))))
                  :expression-type :LONG))
 
 (defmethod codegen ((insn ir-ishl) context)
@@ -867,7 +873,7 @@
                  :insn insn
                  :code `(unsigned-to-signed-integer
                          (logand
-                          (ash ,(code (codegen (value1 insn) context)) ,(code (codegen (value2 insn) context)))
+                          (ash ,(code (codegen (value1 insn) context)) (logand ,(code (codegen (value2 insn) context)) #x1f))
                           #xffffffff))
                  :expression-type :INTEGER))
 
@@ -875,10 +881,10 @@
   ;; FIXME: this is wrong.
   (make-instance '<expression>
                  :insn insn
-                 :code `(unsigned-to-signed-long
-                         (logand
-                          (ash ,(code (codegen (value1 insn) context)) ,(code (codegen (value2 insn) context)))
-                          #xffffffffffffffff))
+                 :code `(let ((op1 ,(code (codegen (value1 insn) context)))
+                              (op2 (logand ,(code (codegen (value2 insn) context)) #x3f)))
+                          ;; (format t "~&LSHL ~A ~A = ~A~%" op1 op2 (unsigned-to-signed-long (logand (ash op1 op2) #xffffffffffffffff)))
+                          (unsigned-to-signed-long (logand (ash op1 op2) #xffffffffffffffff)))
                  :expression-type :LONG))
 
 (defmethod codegen ((insn ir-iushr) context)
