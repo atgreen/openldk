@@ -297,7 +297,11 @@
                           'progn
                           (list
                            'defclass (intern name :openldk)
-                           (if (or super interfaces) (append (if super (list (intern super :openldk)) nil) (mapcar (lambda (i) (intern i :openldk)) (coerce interfaces  'list))) (list))
+                           (if (or super interfaces) (append (if super (list (intern super :openldk)) nil)
+                                                             (let ((ifaces (mapcar (lambda (i) (intern i :openldk))
+                                                                                   (coerce interfaces  'list))))
+                                                               (sort ifaces #'subtypep)))
+                               (list))
                            (map 'list
                                 (lambda (f)
                                   (list (intern (slot-value f 'name) :openldk)
