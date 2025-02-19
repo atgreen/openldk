@@ -468,9 +468,16 @@
                   ("java.vendor.url" . "https://github.com/atgreen/openldk")
                   ("java.vendor.url.bug" . "https://github.com/atgreen/openldk/issues")
                   ("java.class.version" . "52.0")
+;                  ("sun.misc.URLClassPath.debug" . "1")
+;                  ("sun.misc.URLClassPath.debugLookupCache" . "1")
+                  ("sun.cds.enableSharedLookupCache" . "1")
+                  ;; FIXME
+                  ("sun.boot.class.path" . ,(uiop:getenv "LDK_CLASSPATH"))
                   ;; FIXME
                   ("java.home" . "/home/green/git/openldk")
                   ("user.home" . ,(uiop:getenv "HOME"))
+                  ("user.dir" . ,(namestring (uiop:getcwd)))
+                  ("java.class.path" . ,(uiop:getenv "LDK_CLASSPATH"))
                   ("os.name" . "Linux")
                   ("os.version" . "FIXME")
                   ("os.arch" . "FIXME")
@@ -690,9 +697,12 @@ user.variant
   nil)
 
 (defmethod |getBooleanAttributes0(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
-  (format t "~&FILE-ATTRIBUTES: ~A~%" (lstring (slot-value file '|path|)))
   (handler-case
-      (org.shirakumo.file-attributes:attributes (lstring (slot-value file '|path|)))
+      (let ((attr (org.shirakumo.file-attributes:decode-attributes
+                   (org.shirakumo.file-attributes:attributes (lstring (slot-value file '|path|))))))
+        (+ #x01 ;; :EXISTS
+           (if (getf attr :NORMAL) #x02 #x00)
+           (if (getf attr :DIRECTORY) #x04 #x00)))
     (sb-int:simple-file-error (e)
       0)))
 
@@ -1176,3 +1186,21 @@ FIXME: these aren't really strict/ Look at sb-mpfr/
   ;; FIXME
   (let ((ldk-class (classload (slot-value name '|value|))))
     (java-class ldk-class)))
+
+(defun |java/io/UnixFileSystem.initIDs()| ()
+  ;; FIXME
+  )
+
+(defun |java/util/LinkedHashMap.hash(Ljava/lang/Object;)| (obj)
+  ;; FIXME: the compiler should not generate calls to LinkedHashMap.hash.
+  ;; It's provided by the parent class.
+  ;; This is a temp workaround.
+  (|java/util/HashMap.hash(Ljava/lang/Object;)| obj))
+
+(defmethod |canonicalize0(Ljava/lang/String;)| ((ufs |java/io/UnixFileSystem|) filename)
+  (declare (ignore ufs))
+  (jstring (namestring (uiop:parse-unix-namestring (coerce (slot-value filename '|value|) 'string)))))
+
+(defun |java/util/zip/ZipFile.initIDs()| ()
+  ;; FIXME
+  )
