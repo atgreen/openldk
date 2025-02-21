@@ -48,9 +48,9 @@
 (defvar *dump-dir* nil)
 (defvar *debug-load nil)
 (defvar *debug-bytecode* nil)
-(defvar *debug-codegen* nil)
+(defvar *debug-codegen* t)
 (defvar *debug-slynk* nil)
-(defvar *debug-trace* nil)
+(defvar *debug-trace* t)
 (defvar *debug-x* nil)
 (defvar *debug-unmuffle* nil)
 
@@ -217,7 +217,9 @@
                                               (list 'incf '*call-nesting-level* 1) "*"
                                               class-name (fn-name *context*) (cons 'list args) (if (not (static-p method)) (intern "this" :openldk) ""))))
                                 (when (not (static-p method))
-                                  (list (list 'setf '*force-this-to-be-used* (intern "this" :openldk))))
+                                  (list (list 'setf '*force-this-to-be-used* (intern "this" :openldk))
+;;                                        ))
+                                        (list 'describe (intern "this" :openldk))))
                                 (let ((i 0)
                                       (pc -1))
                                   (list (format nil "bridge=~A" (bridge-p method))
@@ -316,34 +318,36 @@
         (methods-code
           (let ((method-index 0)
                 (done-method-table (make-hash-table :test #'equal)))
-            (with-slots (name super methods) class
-              (remove nil (map 'list
-                               (lambda (m)
-                                 (if (or (native-p m) (null (gethash "Code" (attributes m)))
-                                         (and (bridge-p m) (gethash (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) done-method-table)))
-                                     (progn
-                                       (incf method-index)
-                                       nil)
-                                     (progn
-                                       (setf (gethash (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) done-method-table) t)
-                                       (if (static-p m)
-                                           (list 'defun (intern (format nil "~A.~A" (slot-value class 'name) (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor)))) :openldk)
-                                                 (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
-                                                       collect (intern (format nil "arg~A" i) :openldk))
-                                                 (list '%compile-method (slot-value class 'name) (incf method-index))
-                                                 (cons (intern (format nil "~A.~A" (slot-value class 'name) (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor)))) :openldk)
-                                                       (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
-                                                             collect (intern (format nil "arg~A" i) :openldk))))
-                                           (list 'defmethod (intern (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) :openldk)
-                                                 (cons (list (intern "this" :openldk) (intern (slot-value (slot-value m 'class) 'name) :openldk))
-                                                       (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
-                                                             collect (intern (format nil "arg~A" i) :openldk)))
-                                                 (list '%compile-method (slot-value class 'name) (incf method-index))
-                                                 (cons (intern (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) :openldk)
-                                                       (cons (intern "this" :openldk)
-                                                             (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
-                                                                   collect (intern (format nil "arg~A" i) :openldk)))))))))
-                               methods))))))
+            (if (string= (name class) "java/util/zip/ZipFile") ;; OpenLDK provides its own ZipFile implementation
+                nil
+                (with-slots (name super methods) class
+                  (remove nil (map 'list
+                                   (lambda (m)
+                                     (if (or (native-p m) (null (gethash "Code" (attributes m)))
+                                             (and (bridge-p m) (gethash (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) done-method-table)))
+                                         (progn
+                                           (incf method-index)
+                                           nil)
+                                         (progn
+                                           (setf (gethash (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) done-method-table) t)
+                                           (if (static-p m)
+                                               (list 'defun (intern (format nil "~A.~A" (slot-value class 'name) (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor)))) :openldk)
+                                                     (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
+                                                           collect (intern (format nil "arg~A" i) :openldk))
+                                                     (list '%compile-method (slot-value class 'name) (incf method-index))
+                                                     (cons (intern (format nil "~A.~A" (slot-value class 'name) (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor)))) :openldk)
+                                                           (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
+                                                                 collect (intern (format nil "arg~A" i) :openldk))))
+                                               (list 'defmethod (intern (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) :openldk)
+                                                     (cons (list (intern "this" :openldk) (intern (slot-value (slot-value m 'class) 'name) :openldk))
+                                                           (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
+                                                                 collect (intern (format nil "arg~A" i) :openldk)))
+                                                     (list '%compile-method (slot-value class 'name) (incf method-index))
+                                                     (cons (intern (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) :openldk)
+                                                           (cons (intern "this" :openldk)
+                                                                 (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
+                                                                       collect (intern (format nil "arg~A" i) :openldk)))))))))
+                                   methods)))))))
 
     (append defclass-code methods-code)))
 
@@ -530,6 +534,7 @@
                      "java/lang/Long"
                      "java/lang/Float"
                      "java/lang/Double"
+                     "java/nio/LongBuffer"
                      "java/lang/Void"
                      "java/lang/ClassLoader"
                      "java/security/PrivilegedAction"

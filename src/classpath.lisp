@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2023, 2024  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; This file is part of OpenLDK.
 
@@ -56,11 +56,13 @@
       (setf zipfile-entries (zip:zipfile-entries zipfile)))
     (let ((ze (gethash (format nil "~A.class" classname) zipfile-entries)))
       (when ze
-        (flexi-streams:make-in-memory-input-stream (zip:zipfile-entry-contents ze))))))
+        (let ((result (flexi-streams:make-in-memory-input-stream (zip:zipfile-entry-contents ze))))
+          result)))))
 
 (defmethod open-java-classfile ((cpe dir-classpath-entry) classname)
   "Return an input stream for a java class, CLASSNAME."
   (with-slots (dir) cpe
     (let ((fqn (format nil "~A~A~A.class" dir (uiop:directory-separator-for-host) classname)))
       (when (uiop:file-exists-p fqn)
-        (open fqn :direction :input :element-type '(unsigned-byte 8))))))
+        (let ((result (open fqn :direction :input :element-type '(unsigned-byte 8))))
+          result)))))

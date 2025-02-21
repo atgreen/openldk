@@ -158,7 +158,7 @@
          (when *debug-trace*
            (format t "~&~V@A trace: entering java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;) ~A~%"
                    (incf *call-nesting-level* 1) "*" name))
-         (let ((lname (substitute #\/ #\. (coerce (slot-value name '|value|) 'string))))
+         (let ((lname (substitute #\/ #\. (lstring name))))
            (or (and (eq (char lname 0) #\[)
                     (or (gethash lname *java-classes*)
                         (java-class (%get-array-ldk-class-from-name (subseq lname 1)))))
@@ -610,7 +610,7 @@ user.variant
   (sb-alien:free-alien (gethash address %unsafe-memory-table)))
 
 (defun |java/lang/System.mapLibraryName(Ljava/lang/String;)| (library-name)
-  #+LINUX (jstring (format nil "lib~A.so" (coerce (slot-value library-name '|value|) 'string)))
+  #+LINUX (jstring (format nil "lib~A.so" (lstring library-name)))
   #-LINUX (error "unimplemented"))
 
 (defun |java/lang/ClassLoader.findBuiltinLib(Ljava/lang/String;)| (library-name)
@@ -624,7 +624,7 @@ user.variant
   )
 
 (defmethod |sun/misc/Signal.findSignal(Ljava/lang/String;)| (signal-name)
-  (let ((sname (coerce (slot-value signal-name '|value|) 'string)))
+  (let ((sname (lstring signal-name)))
     (cond
       ((string= sname "HUP") 1)
       ((string= sname "INT") 2)
@@ -647,7 +647,7 @@ user.variant
 
 (defmethod |open0(Ljava/lang/String;)| ((fis |java/io/FileInputStream|) filename)
   (handler-case
-      (setf (slot-value fis '|fd|) (open (coerce (slot-value filename '|value|) 'string)
+      (setf (slot-value fis '|fd|) (open (lstring filename)
                                          :element-type '(unsigned-byte 8)
                                          :direction :input))
     ((or sb-ext:file-does-not-exist sb-int:simple-file-error) (e)
@@ -673,7 +673,7 @@ user.variant
     remaining))
 
 (defmethod |isInstance(Ljava/lang/Object;)| ((this |java/lang/Class|) objref)
-  (if (typep objref (intern (coerce (slot-value (slot-value this '|name|) '|value|) 'string) :openldk)) 1 0))
+  (if (typep objref (intern (lstring (slot-value this '|name|)) :openldk)) 1 0))
 
 (defmethod |closeAll(Ljava/io/Closeable;)| ((stream stream) closeable)
   (close stream))
@@ -1201,6 +1201,29 @@ FIXME: these aren't really strict/ Look at sb-mpfr/
   (declare (ignore ufs))
   (jstring (namestring (uiop:parse-unix-namestring (coerce (slot-value filename '|value|) 'string)))))
 
-(defun |java/util/zip/ZipFile.initIDs()| ()
+(defmethod |getLastModifiedTime(Ljava/io/File;)| ((ufs |java/io/UnixFileSystem|) file)
+  (declare (ignore ufs))
+  (* (org.shirakumo.file-attributes:modification-time
+      (lstring (|getName()| file)))
+     1000))
+
+(defun |sun/misc/Perf.registerNatives()| ()
   ;; FIXME
   )
+
+(defmethod |createLong(Ljava/lang/String;IIJ)| (perf name variability units value)
+  (classload "java/nio/DirectByteBuffer")
+  (let* ((dbb (make-instance '|java/nio/DirectByteBuffer|))
+         (mem (sb-alien:make-alien sb-alien:long 1))
+         (ptr (sb-sys:sap-int (sb-alien:alien-sap mem))))
+    (setf (sb-alien:deref mem 0) value)
+    (|<init>(JI)| dbb ptr 8)
+    dbb))
+
+(defmethod |getLong(J)| ((unsafe |sun/misc/Unsafe|) ptr)
+  (declare (ignore unsafe))
+  ;; Convert the integer pointer back to a system address pointer (SAP)
+  (let ((sap (sb-sys:int-sap ptr)))
+    ;; Dereference the memory to get the long value
+    (sb-alien:with-alien ((mem (* sb-alien:long) sap))
+      (sb-alien:deref mem 0))))

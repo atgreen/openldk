@@ -59,6 +59,7 @@
 							 (:file "src/descriptors")
 							 (:file "src/classfile")
 							 (:file "src/native")
+               (:file "src/zip")
                (:file "src/reflection")
 							 (:file "src/openldk"))
   :around-compile

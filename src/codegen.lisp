@@ -131,6 +131,7 @@
                               (let ((value ,(code (codegen value context)))
                                     (index ,(code (codegen index context)))
                                     (arrayref ,(code (codegen arrayref context))))
+                                ;; (format t "~&lastore: storing ~A to index ~A into array size ~A: ~A~%" value index (length arrayref) arrayref)
                                 (setf (aref arrayref index) value))
                             (sb-int:invalid-array-index-error (e)
                               (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
@@ -408,6 +409,7 @@
                    :code `(handler-case
                               (let ((index ,(code (codegen index context)))
                                     (arrayref ,(code (codegen arrayref context))))
+                                ;; (format t "~&laload: index ~A into array size ~A: ~A~%" index (length arrayref) arrayref)
                                 (aref arrayref index))
                             (sb-int:invalid-array-index-error (e)
                               (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
