@@ -1227,3 +1227,10 @@ FIXME: these aren't really strict/ Look at sb-mpfr/
     ;; Dereference the memory to get the long value
     (sb-alien:with-alien ((mem (* sb-alien:long) sap))
       (sb-alien:deref mem 0))))
+
+(defun |java/lang/Shutdown.beforeHalt()| ()
+  ;; FIXME
+  )
+
+(defun |java/lang/Shutdown.halt0(I)| (status)
+  (uiop:quit status t))
