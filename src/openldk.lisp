@@ -185,14 +185,14 @@
                ;; (sdfdfd (print ir-code-0))
                (blocks (build-basic-blocks ir-code-0))
                (lisp-code
-                (list (list 'block nil
-                            (append (list 'tagbody)
-                                    (mapcan (lambda (x) (if (listp x) x (list x)))
-                                            (loop for block in blocks
-                                                  for code = (codegen-block block block)
-                                                  when code
-                                                    collect (progn
-                                                              code)))))))
+                 (list (list 'block nil
+                             (append (list 'tagbody)
+                                     (mapcan (lambda (x) (if (listp x) x (list x)))
+                                             (loop for block in blocks
+                                                   for code = (codegen-block block block)
+                                                   when code
+                                                     collect (progn
+                                                               code)))))))
                (traced-lisp-code (if *debug-trace* `((unwind-protect
                                                           ,(car lisp-code)
                                                        (incf *call-nesting-level* -1)))
