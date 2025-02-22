@@ -354,6 +354,19 @@
                             (print lookup)
                             (error "unimplemented")))))
 
+(defun %find-declaring-class (class method-name)
+  (let* ((ldk-class (gethash class *classes*))
+         (method (find method-name (methods ldk-class)
+                       :test (lambda (method-name method)
+                               (string= method-name
+                                        (lispize-method-name
+                                         (format nil "~A~A" (name method) (descriptor method))))))))
+    (if method
+        class
+        (find method-name (cons (super ldk-class) (coerce (interfaces ldk-class) 'list))
+              :test (lambda (method-name class)
+                      (%find-declaring-class class method-name))))))
+
 (defmethod codegen ((insn ir-call-static-method) context)
   (with-slots (class method-name args return-type) insn
     (make-instance '<expression>
@@ -361,13 +374,13 @@
                    :code (let* ((nargs (length args))
                                 (call (cond
                                         ((eq nargs 0)
-                                         (list (intern (format nil "~A.~A" class method-name) :openldk)))
+                                         (list (intern (format nil "~A.~A" (%find-declaring-class class method-name) method-name) :openldk)))
                                         ((eq nargs 1)
-                                         (list (intern (format nil "~A.~A" class method-name) :openldk) (code (codegen (car args) context))))
+                                         (list (intern (format nil "~A.~A" (%find-declaring-class class method-name)  method-name) :openldk) (code (codegen (car args) context))))
                                         (t
                                          (list 'apply
                                                (list 'function (intern (format nil "~A.~A"
-                                                                               class
+                                                                              (%find-declaring-class class method-name)
                                                                                method-name)
                                                                        :openldk))
                                                (list 'reverse (cons 'list (mapcar (lambda (a) (code (codegen a context))) args))))))))
@@ -1129,10 +1142,14 @@
   (make-instance '<expression>
                  :insn insn
                  :code `(let ((result ,(code (codegen (slot-value insn 'value) context))))
-                          (when *debug-trace*
-                            (format t "~&~V@A trace: ~A result = ~A~%"
-                                    *call-nesting-level* "*"
-                                    ,(fn-name *context*) result))
+                          (cond
+                            (*debug-trace-args*
+                             (format t "~&~V@A trace: ~A result = ~A~%"
+                                     *call-nesting-level* "*"
+                                     ,(fn-name *context*) result))
+                            (*debug-trace*
+                             (format t "~&~V@A trace: ~A~%"
+                                     *call-nesting-level* "*" ,(fn-name *context*))))
                           (return-from ,(intern (slot-value insn 'fn-name) :openldk) result))))
 
 (defmethod codegen ((insn ir-variable) context)
@@ -1214,6 +1231,7 @@
                                 (BLOCK TRY-BODY
                                   (TAGBODY ,@lisp-code))
                               ,@(loop for (exception-type . handler-block) in try-catch-handlers
+                                      do (classload exception-type)
                                       collect `(,(intern (format nil "condition-~A" (or exception-type
                                                                                         "java/lang/Throwable")) :openldk)
                                                 (,(intern "condition" :openldk))
@@ -1223,6 +1241,7 @@
                               (BLOCK TRY-BODY
                                 (TAGBODY ,@lisp-code))
                             ,@(loop for (exception-type . handler-block) in try-catch-handlers
+                                    do (classload exception-type)
                                     collect `(,(intern (format nil "condition-~A" (or exception-type
                                                                                       "java/lang/Throwable")) :openldk)
                                               (,(intern "condition" :openldk))
