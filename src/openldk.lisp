@@ -416,7 +416,7 @@
 
                        class)
                   (close classfile-stream))
-                (format t "ERROR: Can't find ~A on classpath~%" classname)))))))
+                nil))))))
 
 @cli:command
 (defun main (mainclass &optional (args (list)) &key dump-dir classpath)
