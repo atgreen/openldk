@@ -169,7 +169,8 @@ string of characters that are interpreted as below:
 
 - `b` - trace bytecode compilation
 - `c` - dump all Lisp code prior to evaluation
-- `t` - trace method entries at runtime
+- `t` - trace method entry/exit at runtime
+- `T` - trace method entry/exit with arguments and return values
 - `s` - start a slynk server at startup (port 2025)
 - `u` - unmuffle the Lisp compiler
 - `x` - trace opcode execution (use with `t`)

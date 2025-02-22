@@ -68,6 +68,9 @@
     (setf |name| (|getPath()| file))
     (setf |jzfile| (zip:open-zipfile (lstring |name|)))))
 
+(defmethod |<init>(Ljava/io/File;)| ((this |java/util/zip/ZipFile|) file)
+  (|<init>(Ljava/io/File;I)| this file 1))
+
 (defmethod |getEntry(Ljava/lang/String;)| ((this |java/util/zip/ZipFile|) name)
   (let ((ze (zip:get-zipfile-entry (lstring name) (slot-value this '|jzfile|))))
     (when ze
@@ -105,3 +108,7 @@
 
 (defmethod |getName()| ((this |java/util/zip/ZipFile|))
   (slot-value this '|name|))
+
+(defmethod |close()| ((this |java/util/zip/ZipFile|))
+  (with-slots (|name| |jzfile|) this
+    (zip:close-zipfile |jzfile|)))
