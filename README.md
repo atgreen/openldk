@@ -195,7 +195,7 @@ library.
 
 Here's an incomplete list of what's not implemented:
 - support for class files beyond Java 8
-- a handful of instructions
+- dynamic method invocation
 - bytecode verification
 
 Author and License
