@@ -48,9 +48,9 @@
 (defvar *dump-dir* nil)
 (defvar *debug-load nil)
 (defvar *debug-bytecode* nil)
-(defvar *debug-codegen* t)
+(defvar *debug-codegen* nil)
 (defvar *debug-slynk* nil)
-(defvar *debug-trace* t)
+(defvar *debug-trace* nil)
 (defvar *debug-x* nil)
 (defvar *debug-unmuffle* nil)
 
@@ -189,7 +189,7 @@
                             (append (list 'tagbody)
                                     (mapcan (lambda (x) (if (listp x) x (list x)))
                                             (loop for block in blocks
-                                                  for code = (codegen-block block nil block)
+                                                  for code = (codegen-block block block)
                                                   when code
                                                     collect (progn
                                                               code)))))))
@@ -218,8 +218,8 @@
                                               class-name (fn-name *context*) (cons 'list args) (if (not (static-p method)) (intern "this" :openldk) ""))))
                                 (when (not (static-p method))
                                   (list (list 'setf '*force-this-to-be-used* (intern "this" :openldk))
-;;                                        ))
-                                        (list 'describe (intern "this" :openldk))))
+                                        ))
+;;                                        (list 'describe (intern "this" :openldk))))
                                 (let ((i 0)
                                       (pc -1))
                                   (list (format nil "bridge=~A" (bridge-p method))
