@@ -51,6 +51,7 @@
 (defvar *debug-codegen* nil)
 (defvar *debug-slynk* nil)
 (defvar *debug-trace* nil)
+(defvar *debug-trace-args* nil)
 (defvar *debug-x* nil)
 (defvar *debug-unmuffle* nil)
 
@@ -215,7 +216,10 @@
                                 (when *debug-trace*
                                   (list (list 'format 't "~&~V@A trace: entering ~A.~A(~{~A~^ ~}) ~A~%"
                                               (list 'incf '*call-nesting-level* 1) "*"
-                                              class-name (fn-name *context*) (cons 'list args) (if (not (static-p method)) (intern "this" :openldk) ""))))
+                                              class-name (fn-name *context*) (if *debug-trace-args*
+                                                                                 (cons 'list args)
+                                                                                 ())
+                                              (if (not (static-p method)) (intern "this" :openldk) ""))))
                                 (when (not (static-p method))
                                   (list (list 'setf '*force-this-to-be-used* (intern "this" :openldk))
                                         ))
@@ -451,6 +455,8 @@
           (setf *debug-slynk* t))
         (when (find #\t LDK_DEBUG)
           (setf *debug-trace* t))
+        (when (find #\T LDK_DEBUG)
+          (setf *debug-trace-args* t))
         (when (find #\b LDK_DEBUG)
           (setf *debug-bytecode* t))
         (when (find #\x LDK_DEBUG)
@@ -564,7 +570,9 @@
                      "java/net/URISyntaxException"
                      "java/net/UnknownHostException"
                      "java/security/NoSuchProviderException"
-                     "java/util/MissingResourceException"))
+                     "java/util/MissingResourceException"
+                     "java/io/CharConversionException"
+                     "java/util/zip/ZipException"))
           (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil))
 
         (let ((props (make-instance '|java/util/Properties|)))
