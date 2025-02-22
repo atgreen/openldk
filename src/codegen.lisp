@@ -948,7 +948,7 @@
                      :insn insn
                      :code (append (list 'case (code (codegen (index insn) context)))
                                    cases
-                                   (list `(:otherwise ,default-target)))))))
+                                   (list `(otherwise ,default-target)))))))
 
 (defmethod codegen ((insn ir-call-virtual-method) context)
   (with-slots (method-name args) insn
@@ -1149,13 +1149,16 @@
                              :code (intern (format nil "s{~{~A~^,~}}" (sort (slot-value insn 'var-numbers) #'<)) :openldk))))
     expr))
 
-(defmethod codegen-block ((basic-block <basic-block>) handler-start dominator-block)
+(defmethod codegen-block ((basic-block <basic-block>) dominator-block)
   "Generate Lisp code for a basic block, handling exception scopes and control flow."
 
   (let ((new-scope nil))
     ;;  (when (or handler-start (fset:contains? (dominators basic-block) dominator-block))
     (when (fset:contains? (dominators basic-block) dominator-block)
       (unless (find basic-block (car (emitted-block-scopes *context*)))
+        (when (try-catch basic-block)
+          (push basic-block (first (emitted-block-scopes *context*)))
+          (push (list) (emitted-block-scopes *context*)))
         (let* ((stop-emitting-blocks? nil)
                (lisp-code
                  (cons (intern (format nil "branch-target-~A" (address (car (slot-value basic-block 'code)))))
@@ -1172,9 +1175,11 @@
             ;; Emit code for successors if not stopping
             (unless stop-emitting-blocks?
               (when (fall-through-address basic-block)
+#|
                 (when (try-catch basic-block)
                   (push (list) (emitted-block-scopes *context*))
-                  (setf new-scope t))
+                (setf new-scope t))
+|#
                 (setf lisp-code
                       (nconc lisp-code
                              (if (or (find (fall-through-address basic-block) (car (emitted-block-scopes *context*)))
@@ -1182,18 +1187,17 @@
                                  (list (list 'go (intern (format nil "branch-target-~A" (address (car (code (fall-through-address basic-block))))))))
                                  (codegen-block
                                   (fall-through-address basic-block)
-                                  nil
                                   (if (try-catch basic-block) basic-block dominator-block))))))
-
+#|
               (when (and (not new-scope) (try-catch basic-block))
                 (push (list) (emitted-block-scopes *context*))
                 (setf new-scope t))
-
+|#
               (let ((successor-list (sort (fset:convert 'list (successors basic-block))
                                           (lambda (a b) (< (address a) (address b))))))
                 (dolist (successor successor-list)
                   (unless (gethash (address successor) (try-end-table *context*))
-                    (setf lisp-code (nconc lisp-code (codegen-block successor nil (if (try-catch basic-block) basic-block dominator-block)))))))))
+                    (setf lisp-code (nconc lisp-code (codegen-block successor (if (try-catch basic-block) basic-block dominator-block)))))))))
 
           ;; Handle exception handlers (try-catch)
           (let ((try-catch-handlers (try-catch basic-block)))
