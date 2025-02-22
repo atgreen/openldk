@@ -69,10 +69,11 @@
     (setf |jzfile| (zip:open-zipfile (lstring |name|)))))
 
 (defmethod |getEntry(Ljava/lang/String;)| ((this |java/util/zip/ZipFile|) name)
-  (let ((entry (make-instance '|java/util/zip/ZipEntry|))
-        (lname (lstring name)))
-    (|<init>(Ljava/lang/String;)| entry name)
-    entry))
+  (let ((ze (zip:get-zipfile-entry (lstring name) (slot-value this '|jzfile|))))
+    (when ze
+      (let ((entry (make-instance '|java/util/zip/ZipEntry|)))
+        (|<init>(Ljava/lang/String;)| entry name)
+        entry))))
 
 (defmethod |getMetaInfEntryNames()| ((this |java/util/jar/JarFile|))
   (with-slots (|jzfile|) this
@@ -84,7 +85,23 @@
       (coerce meta-entries 'vector))))
 
 (defclass/std <zip-input-stream> (|java/io/InputStream|)
-  ((entry)))
+  ((zip-file)
+   (entry)
+   (buffer)
+   (index)))
 
 (defmethod |getInputStream(Ljava/util/zip/ZipEntry;)| ((this |java/util/zip/ZipFile|) zip-entry)
-  (make-instance '<zip-input-stream> :entry zip-entry))
+  (make-instance '<zip-input-stream> :zip-file this :entry zip-entry))
+
+(defmethod |read()| ((this <zip-input-stream>))
+  (with-slots (zip-file entry buffer index) this
+    (unless buffer
+      (setf buffer (zip:zipfile-entry-contents (zip:get-zipfile-entry (lstring (slot-value entry '|name|))
+                                                                      (slot-value zip-file '|jzfile|))))
+      (setf index -1))
+    (if (< index (1- (length buffer)))
+        (aref buffer (incf index))
+        -1)))
+
+(defmethod |getName()| ((this |java/util/zip/ZipFile|))
+  (slot-value this '|name|))
