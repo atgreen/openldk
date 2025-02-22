@@ -128,6 +128,29 @@ bytecode and generates something like the following:
 
 ### Testing
 
+As of Feb 22, 2025, OpenLDK can start up `javac`.
+
+```
+$ ./openldk sun.tools.javac.Main
+Usage: javac <options> <source files>
+
+where <options> includes:
+  -g                     Generate all debugging info
+  -g:none                Generate no debugging info
+  -g:{lines,vars,source} Generate only some debugging info
+  -O                     Optimize; may hinder debugging or enlarge class files
+  -nowarn                Generate no warnings
+  -verbose               Output messages about what the compiler is doing
+  -deprecation           Output source locations where deprecated APIs are used
+  -classpath <path>      Specify where to find user class files
+  -sourcepath <path>     Specify where to find input source files
+  -bootclasspath <path>  Override location of bootstrap class files
+  -extdirs <dirs>        Override location of installed extensions
+  -d <directory>         Specify where to place generated class files
+  -encoding <encoding>   Specify character encoding used by source files
+  -target <release>      Generate class files for specific VM version
+```
+
 Run `make check` to run through the dejagnu-based testsuite.
 As of Feb 13 2025, the results look like this
 ```
