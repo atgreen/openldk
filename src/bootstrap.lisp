@@ -172,7 +172,7 @@
   ())
 
 (define-condition |condition-java/security/PrivilegedActionException|
-    (|condition-java/lang/RuntimeException|)
+    (|condition-java/lang/Exception|)
   ())
 
 (defclass |java/lang/ArrayIndexOutOfBoundsException| (|java/lang/Exception|)
