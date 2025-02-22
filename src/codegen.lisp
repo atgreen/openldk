@@ -936,7 +936,7 @@
                      :insn insn
                      :code (append (list 'case (code (codegen (index insn) context)))
                                    cases
-                                   (list `(:otherwise ,default-target)))))))
+                                   (list `(otherwise ,default-target)))))))
 
 (defmethod codegen ((insn ir-lookupswitch) context)
   (declare (ignore context))
