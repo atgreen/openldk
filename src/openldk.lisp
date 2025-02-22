@@ -549,30 +549,7 @@
                      "java/lang/ThreadGroup"
                      "java/lang/Thread"
                      "java/lang/ref/SoftReference"
-                     "java/util/Properties"
-                     "java/beans/IntrospectionException"
-                     "java/io/FileNotFoundException"
-                     "java/io/UnsupportedEncodingException"
-                     "java/lang/ArithmeticException"
-                     "java/lang/ArrayIndexOutOfBoundsException"
-                     "java/lang/ArrayStoreException"
-                     "java/lang/ClassFormatError"
-                     "java/lang/ExceptionInInitializerError"
-                     "java/lang/IllegalArgumentException"
-                     "java/lang/IllegalMonitorStateException"
-                     "java/lang/InterruptedException"
-                     "java/lang/NegativeArraySizeException"
-                     "java/lang/NullPointerException"
-                     "java/lang/OutOfMemoryError"
-                     "java/lang/StackOverflowError"
-                     "java/net/MalformedURLException"
-                     "java/net/SocketException"
-                     "java/net/URISyntaxException"
-                     "java/net/UnknownHostException"
-                     "java/security/NoSuchProviderException"
-                     "java/util/MissingResourceException"
-                     "java/io/CharConversionException"
-                     "java/util/zip/ZipException"))
+                     "java/util/Properties"))
           (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil))
 
         (let ((props (make-instance '|java/util/Properties|)))
