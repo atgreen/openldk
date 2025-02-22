@@ -680,13 +680,16 @@ user.variant
 
 (defmethod |writeBytes([BIIZ)| ((fos |java/io/FileOutputStream|) byte-array offset length append?)
   (declare (ignore append?))
+;;  (format t "~&WRITE-BYTES: 1:~A 2:~A 3:~A 4:~A 5:~A 6:~A 7:~A~%" fos (slot-value fos '|fd|) (slot-value (slot-value fos '|fd|) '|fd|) byte-array offset length append?)
   (let* ((file-descriptor (slot-value fos '|fd|))
          (fd (slot-value file-descriptor '|fd|)))
     (cond
       ((eq fd 1)
        (write-sequence byte-array *standard-output* :start offset :end (+ offset length)))
+      ((eq fd 2)
+       (write-sequence byte-array *error-output* :start offset :end (+ offset length)))
       (t
-       (assert "unimplemented")))))
+       (error "unimplemented")))))
 
 (defmethod |getEnclosingMethod0()| ((this |java/lang/Class|))
   ;; FIXME
