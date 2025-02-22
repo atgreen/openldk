@@ -1171,7 +1171,8 @@ FIXME: these aren't really strict/ Look at sb-mpfr/
              (format t "~&~V@A trace: result = ~A~%"
                      *call-nesting-level* "*" result))
            result))
-    (incf *call-nesting-level* -1)))
+    (when *debug-trace*
+      (incf *call-nesting-level* -1))))
 
 (defun |java/lang/reflect/Array.newArray(Ljava/lang/Class;I)| (class size)
   ;; FIXME
