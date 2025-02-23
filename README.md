@@ -32,12 +32,16 @@ only developing with sbcl for now.
 
 `openldk` has only been tested in Linux.
 
-`openldk` uses the `LDK_CLASSPATH` environment variable rather than
-`CLASSPATH`.  Be sure to point it at your Java 8 runtime jar file.  On
+`openldk` uses the `JAVA_HOME` environment variable to find the boot classpath.
+Be sure to point it at your Java 8 `jre` directory.  On
 my Fedora Linux system that looks like:
 ```
-$ export LDK_CLASSPATH=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.432.b06-3.fc40.x86_64/jre/lib/rt.jar
+$ export JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.432.b06-3.fc40.x86_64/jre
 ```
+
+You can provide additional classpath elements through the
+`LDK_CLASSPATH` environment variable.
+
 
 ## How it Works
 
