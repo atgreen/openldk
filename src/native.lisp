@@ -472,11 +472,20 @@
 ;                  ("sun.misc.URLClassPath.debugLookupCache" . "1")
                   ("sun.cds.enableSharedLookupCache" . "1")
                   ;; FIXME
-                  ("sun.boot.class.path" . ,(uiop:getenv "LDK_CLASSPATH"))
+                  ("java.class.path" . ,(or (uiop:getenv "LDK_CLASSPATH") "."))
+                  ("sun.boot.class.path" .
+                                         ,(format nil "~{~A~^:~}"
+                                                  (mapcar #'namestring
+                                                          (directory
+                                                           (concatenate 'string
+                                                                        (uiop:getenv "JAVA_HOME")
+                                                                        "/lib/*.jar")))))
                   ;; FIXME
-                  ("java.home" . "/home/green/git/openldk")
+                  ("java.home" . ,(uiop:getenv "JAVA_HOME"))
                   ("user.home" . ,(uiop:getenv "HOME"))
                   ("user.dir" . ,(namestring (uiop:getcwd)))
+                  ("user.name" . ,(let ((uid (sb-posix:getuid)))
+                                    (slot-value (sb-posix:getpwuid uid) 'sb-posix::name)))
                   ("java.class.path" . ,(uiop:getenv "LDK_CLASSPATH"))
                   ("os.name" . "Linux")
                   ("os.version" . "FIXME")

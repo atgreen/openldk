@@ -442,7 +442,11 @@
   ;; If classpath isn't set on the command line, then get it
   ;; from the LDK_CLASSPATH environment variable.
   (unless classpath
-    (setf classpath (uiop:getenv "LDK_CLASSPATH")))
+    (setf classpath
+          (concatenate 'string
+           (format nil "~{~A~^:~}"
+                   (mapcar #'namestring (directory #P"/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.442.b06-1.fc40.x86_64/jre/lib/*.jar")))
+           ":" (uiop:getenv "LDK_CLASSPATH"))))
 
   (let ((LDK_DEBUG (uiop:getenv "LDK_DEBUG")))
     (when LDK_DEBUG
@@ -505,13 +509,17 @@
 
 (defun make-image ()
 
-  (setf classpath (uiop:getenv "LDK_CLASSPATH"))
+  (let ((classpath
+          (concatenate 'string
+           (format nil "~{~A~^:~}"
+                   (mapcar #'namestring (directory #P"/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.442.b06-1.fc40.x86_64/jre/lib/*.jar")))
+           ":" (uiop:getenv "LDK_CLASSPATH"))))
 
-  (setf *classpath*
-        (loop for cpe in (split-sequence:split-sequence (uiop:inter-directory-separator) classpath)
-              collect (if (str:ends-with? ".jar" cpe)
-                          (make-instance 'jar-classpath-entry :jarfile cpe)
-                          (make-instance 'dir-classpath-entry :dir cpe))))
+    (setf *classpath*
+          (loop for cpe in (split-sequence:split-sequence (uiop:inter-directory-separator) classpath)
+                collect (if (str:ends-with? ".jar" cpe)
+                            (make-instance 'jar-classpath-entry :jarfile cpe)
+                            (make-instance 'dir-classpath-entry :dir cpe)))))
 
   (setf *debug-load* t)
 
