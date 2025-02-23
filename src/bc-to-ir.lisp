@@ -586,6 +586,7 @@
  (:F2D 'ir-f2d :DOUBLE)
  (:F2I 'ir-f2i :INTEGER)
  (:F2L 'ir-f2l :LONG)
+ (:FNEG 'ir-fneg :FLOAT)
  (:I2D 'ir-i2d :DOUBLE)
  (:I2F 'ir-i2f :FLOAT)
  (:I2B 'ir-i2b :BYTE)

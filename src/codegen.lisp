@@ -697,6 +697,12 @@
                  :code `(- ,(code (codegen (value insn) context)))
                  :expression-type :DOUBLE))
 
+(defmethod codegen ((insn ir-fneg) context)
+  (make-instance '<expression>
+                 :insn insn
+                 :code `(- ,(code (codegen (value insn) context)))
+                 :expression-type :FLOAT))
+
 (defmethod codegen ((insn ir-i2l) context)
   (make-instance '<expression>
                  :insn insn
