@@ -33,7 +33,7 @@ proc openldk-dg-test { prog do_what extra_tool_flags } {
     verbose "do_what $do_what" 2
     verbose "extra_tool_flags $extra_tool_flags" 2
 
-    set status [local_exec "javac $prog" "" "" $timeout]
+    set status [local_exec "javac -cp jikestst/hpj/src $prog" "" "" $timeout]
     set classname [string map {".java" ""} $prog]
 
     set testargs "1 2 3 4 5"
@@ -46,7 +46,7 @@ proc run_test { test_file expected_output } {
     file copy -force $test_file ./Test.java
 
     # Compile the test file
-    set compile_result [local_exec "javac Test.java" "" "" 10]
+    set compile_result [local_exec "javac -cp jikestst/hpj/src Test.java" "" "" 10]
     if { [lindex $compile_result 0] != 0 } {
         return [list "fail" "Compilation failed"]
     }
