@@ -1,0 +1,37 @@
+1999-06-08    <shields@jikes.watson.ibm.com>
+
+	* pr304a.java: 
+	* pr304b.java:
+	* pr308a.java:
+	* pr308b.java:
+	* pr308c.java:
+	* pr309a.java:
+	* pr309b.java:
+	* pr313a.java:
+	* pr313b.java:
+	* pr317a.java:
+	* pr317b.java:
+	* pr340a.java:
+	* pr340b.java:
+	Add more tests
+
+	* pr199a.java: 
+	* pr199e.java:
+	* pr199f.java:
+	* pr199g.java:
+	* pr199la.java:
+	* pr199lb.java:
+	* pr199o.java:
+	* pr199p.java:
+	* pr203.java:
+	* pr273.java:
+	* pr311.java:
+	Remove extraneous text that had been inadvertently added.
+	Add some new tests: pr350.java ... pr419.java (some incomplete)
+	
+
+1999-02-03    <shields@jikes.watson.ibm.com>
+
+	* Start log, just after updating to include tests through
+	PR 346, and after Cvs Id tag at start of files
+

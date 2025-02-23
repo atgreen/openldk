@@ -1,0 +1,163 @@
+#!/bin/ksh
+# $Id: jt,v 1.5 2000/02/04 02:40:52 lord Exp $
+#
+# This software is subject to the terms of the IBM Jikes Compiler
+# License Agreement available at the following URL:
+# http://www.ibm.com/research/jikes.
+# Copyright (C) 1996, 1999, International Business Machines Corporation
+# and others.  All Rights Reserved.
+# You must accept the terms of that agreement to use this software.
+#
+set -vx
+# adjust next line to point to your jikes executable
+COMP=javac
+
+SRCDIR=../src
+CPATH=$CLASSPATH
+REQCOMPARGS="-nowarn"
+COMPARGS=$REQCOMPARGS
+FILE=$(basename $1 .d)
+exec 3<$FILE.d
+exec 4>$FILE.r
+while read -u3 line
+do
+#  echo " read " $line
+  set $line
+  KIND=$1
+  # parse args
+  case $KIND in
+    [#*]);;
+    #c)
+    #e)
+    [ce]) 
+      # 1 is type, 2 is test name, 3 is class name (default Test)
+      echo "jt $1 $2"
+      NAME=$2
+      case $3 in
+        [A-Za-z][A-Za-z0-9]*)	CLASS=$3
+    		;;
+        *)		CLASS=Test
+    		;;
+      esac
+	;;
+    f) # compile file
+      PDIR=$2
+      CLASS=$3
+      ;;
+    g) # get source file
+      NAME=$2
+      PDIR=$3
+      CLASS=$4
+      ;;
+    m) PNAME=$2
+      echo "jt $1 $2"
+      NAME=$2
+      shift
+      shift
+      # erase directories used
+      PDIRS=$*
+      for D in $PDIRS
+      do
+        rm -fr $D
+	mkdir $D
+      done
+      ;;
+    Q) # quit
+      exit 0
+      ;;
+    r) 
+      shift
+      # erase directories named
+      PDIRS=$*
+      for D in $PDIRS
+      do
+	    rm -fr $D
+      done
+      ;;
+    s) # set source directory
+      shift
+      SRCDIR=$1
+      ;;
+    x)
+      CLASS=$2
+      # remaining args are used as arguments when execute
+      shift
+      shift
+      ARGS=$*
+      ;;
+    a)	# remaining args are used as arguments when compile
+      shift
+      COMPARGS="$REQCOMPARGS $*"
+      print -u4 "new compilation arguments: $COMPARGS"
+      ;;
+  esac
+
+  case $KIND in
+    [#*])	;;
+    c)	# compile only
+	print -u4 "compile: $CLASS"
+	rm -f *.class $CLASS.* *.java
+	cp $SRCDIR/$NAME.java $CLASS.java
+	$COMP $COMPARGS $CLASS.java >$NAME.c 2>&1
+#	rc=$?
+#	if (( rc )); then
+#	  print -u4 "fail: $NAME, in compilation"
+#	fi
+	;;
+    e)	# compile and execute
+	print -u4 "compile and execute: $2"
+#	print -u4 "  using class $CLASS"
+	rm -f *.class $CLASS.* *.java
+	cp $SRCDIR/$NAME.java $CLASS.java
+	$COMP $COMPARGS $CLASS.java >$NAME.c 2>&1
+#	rc=$?
+#	if (( rc )); then
+#	  print -u4 "fail: $NAME, in compilation"
+#	fi
+	openldk $CLASS >$NAME.e 2>&1
+#	rc=$?
+#	if (( rc )); then
+#	  print -u4 "fail: $NAME, in execution"
+#	fi
+	;;
+    f)
+	print -u4 "compile file: $PDIR/$CLASS"
+	#rm -f *.class $CLASS.* *.java
+	$COMP $COMPARGS $PDIR/$CLASS.java >>$PNAME.c 2>&1
+#	rc=$?
+#	if (( rc )); then
+#	  print -u4 "fail: compiling $PDIR/$CLASS"
+#	fi
+	;;
+    g)
+	print -u4 "get $NAME as $PDIR/$CLASS"
+	cp $SRCDIR/$NAME.java $PDIR/$CLASS.java
+	;;
+	
+    i)	# incomplete - only have partial code fragment
+	print -u4 "incomplete: $2"
+	;;
+    m)	# start multi-file test
+	rm -f $NAME.*
+	rm -f *.class $NAME.* *.java $PNAME.*
+	;;
+    x)	# execute test from package
+	print -u4 "executing $CLASS: $ARGS"
+	openldk -verify $CLASS $ARGS > $PNAME.e 2>&1
+#	rc=$?
+#	if (( rc )); then
+#	  print -u4 "fail: $CLASS, in execution"
+#	fi
+	;;
+
+    s)  ;;
+    Z)	# undone - don't know how to handle
+	print -u4 "undone: $2"
+	;;
+    a)
+      ;;
+    *)
+	print -u4 "unknown test kind: $1 $2"
+  esac
+done
+exit 0

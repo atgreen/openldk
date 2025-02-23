@@ -1,0 +1,27 @@
+#!/bin/ksh
+# $Id: jtclean,v 1.4 1999/11/04 14:59:36 shields Exp $
+#
+# This software is subject to the terms of the IBM Jikes Compiler
+# License Agreement available at the following URL:
+# http://www.ibm.com/research/jikes.
+# Copyright (C) 1996, 1999, International Business Machines Corporation
+# and others.  All Rights Reserved.
+# You must accept the terms of that agreement to use this software.
+#
+#set -vx
+C=$1
+if ! test -d $C
+then
+  print -u2 "$C must be a directory!"
+  exit 1
+fi
+cd ./$C
+shift
+for T in *
+do
+  if test -d $T
+  then
+    rm -fr $T
+  fi
+#    cat arc.$T.* > $T.arc
+done

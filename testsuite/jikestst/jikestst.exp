@@ -1,0 +1,112 @@
+load_lib dg.exp
+
+dg-init
+
+set dg-do-what-default run
+
+set testargs ""
+
+proc openldk_load { classfile } {
+    global testargs
+    set timeout 30
+    verbose "load $classfile"
+    set ldkcp [getenv "LDK_CLASSPATH"]
+    setenv "LDK_CLASSPATH" "$ldkcp:.:jikestst/hpj/src"
+    set classname [string map {".class" ""} $classfile]
+    set result [local_exec "../openldk $classname $testargs" "" "" $timeout]
+    verbose "result = $result"
+    set status [lindex $result 0]
+    set output [lindex $result 1]
+    verbose "STATUS = $status"
+    if { $status == 0 } {
+        return [list "pass" $output]
+    } else {
+        return [list "fail" $output]
+    }
+}
+
+proc openldk-dg-test { prog do_what extra_tool_flags } {
+    global testargs
+    set timeout 5
+
+    verbose "prog $prog" 2
+    verbose "do_what $do_what" 2
+    verbose "extra_tool_flags $extra_tool_flags" 2
+
+    set status [local_exec "javac $prog" "" "" $timeout]
+    set classname [string map {".java" ""} $prog]
+
+    set testargs "1 2 3 4 5"
+
+    return [list [lindex $status 1] "$classname.class"]
+}
+
+proc run_test { test_file expected_output } {
+    # Move the test file to the current directory and rename it to Test.java
+    file copy -force $test_file ./Test.java
+
+    # Compile the test file
+    set compile_result [local_exec "javac Test.java" "" "" 10]
+    if { [lindex $compile_result 0] != 0 } {
+        return [list "fail" "Compilation failed"]
+    }
+
+    # Run the test with OpenLDK
+    set run_result [openldk_load "Test.class"]
+    set run_status [lindex $run_result 0]
+    set run_output [lindex $run_result 1]
+
+    # Normalize line endings and remove trailing whitespace from the output
+    regsub -all {\r} $run_output "" run_output
+    set run_output_lines [split $run_output "\n"]
+    set run_output_cleaned ""
+    foreach line $run_output_lines {
+        regsub {[\s\t]+$} $line "" line ;# Remove trailing spaces and tabs
+        append run_output_cleaned "$line\n"
+    }
+
+    # Remove trailing newlines from the cleaned output
+    regsub {\n+$} $run_output_cleaned "" run_output_cleaned
+
+    # Read and normalize the expected output
+    set expected [exec cat $expected_output]
+    regsub -all {\r} $expected "" expected
+    set expected_lines [split $expected "\n"]
+    set expected_cleaned ""
+    foreach line $expected_lines {
+        regsub {[\s\t]+$} $line "" line ;# Remove trailing spaces and tabs
+        append expected_cleaned "$line\n"
+    }
+
+    # Remove trailing newlines from the cleaned expected output
+    regsub {\n+$} $expected_cleaned "" expected_cleaned
+
+    # Compare the cleaned output with the cleaned expected output
+    if { $run_output_cleaned == $expected_cleaned } {
+        return [list "pass" "Output matches expected"]
+    } else {
+        return [list "fail" "Output does not match expected"]
+    }
+}
+
+# Get the list of test files and their corresponding expected output files
+set test_files [lsort [glob -nocomplain -- jikestst/derek/ok/exec/*.e jikestst/hpj/ok/exec/*.e jikestst/unicode/ok/exec/*.e]]
+
+foreach test_file $test_files {
+    # Get the corresponding Java source file
+    set test_name [file rootname [file tail $test_file]]
+    set java_file [file dirname $test_file]/../../src/$test_name.java
+
+    verbose "Testing $java_file with expected output $test_file"
+    set result [run_test $java_file $test_file]
+    set status [lindex $result 0]
+    set message [lindex $result 1]
+
+    if { $status == "pass" } {
+        pass $test_file
+    } else {
+        fail $test_file
+    }
+}
+
+dg-finish

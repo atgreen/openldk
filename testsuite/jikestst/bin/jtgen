@@ -1,0 +1,124 @@
+#!/bin/ksh
+# $Id: jtgen,v 1.4 1999/11/04 14:59:36 shields Exp $
+#
+# This software is subject to the terms of the IBM Jikes Compiler
+# License Agreement available at the following URL:
+# http://www.ibm.com/research/jikes.
+# Copyright (C) 1996, 1999, International Business Machines Corporation
+# and others.  All Rights Reserved.
+# You must accept the terms of that agreement to use this software.
+#
+#set -vx
+# generate list of commands to run tests
+COMP=/u/shields/jp/mk/jikes
+SRCDIR=../src
+CPATH=$CLASSPATH
+COMPARGS="-nowarn"
+FILE=$(basename $1 .d)
+exec 3<$FILE.d
+exec 4>$FILE.bat
+while read -u3 line
+do
+#  echo " read " $line
+  set $line
+  KIND=$1
+  # parse args
+  case $KIND in
+    [#*]);;
+    #c)
+    #e)
+    [ce]) 
+      # 1 is type, 2 is test name, 3 is class name (default Test)
+#      echo "jt $1 $2"
+      NAME=$2
+      case $3 in
+        [A-Za-z]*)	CLASS=$3
+    		;;
+        *)		CLASS=Test
+    		;;
+      esac
+	;;
+    f) # compile file
+      PDIR=$2
+      CLASS=$3
+      ;;
+    g) # get source file
+      NAME=$2
+      PDIR=$3
+      CLASS=$4
+      ;;
+    m) PNAME=$2
+      echo "jt $1 $2"
+      NAME=$2
+      shift
+      shift
+      # erase directories used
+      PDIRS=$*
+      for D in $PDIRS
+      do
+        print -u4 "rm -fr $D"
+	print -u4 "mkdir $D"
+      done
+      ;;
+    Q) # quit
+      exit 0
+      ;;
+    r) 
+      shift
+      # erase directories named
+      PDIRS=$*
+      for D in $PDIRS
+      do
+	    print -u4 "rm -fr $D"
+      done
+      ;;
+    s) # set source directory
+      shift
+      SRCDIR=$1
+      ;;
+    x)
+      CLASS=$2
+      # remaining args are used as arguments when execute
+      shift
+      shift
+      ARGS=$*
+      ;;
+  esac
+
+  case $KIND in
+    [#*])	;;
+    c)	# compile only
+	print -u4 "rm -f *.class $CLASS.*"
+	print -u4 "cp $SRCDIR/$NAME.java $CLASS.java"
+	print -u4 "$COMP $COMPARGS $CLASS.java >$NAME.c 2>&1"
+	;;
+    e)	# compile and execute
+	print -u4 "rm -f *.class $CLASS.*"
+	print -u4 "cp $SRCDIR/$NAME.java $CLASS.java"
+	print -u4 "$COMP $COMPARGS $CLASS.java >$NAME.c 2>&1"
+	print -u4 "java $CLASS >$NAME.e 2>&1"
+	;;
+    f)
+	print -u4 "$COMP $COMPARGS $PDIR/$CLASS.java >>$PNAME.c 2>&1"
+	;;
+    g)
+	print -u4 "cp $SRCDIR/$NAME.java $PDIR/$CLASS.java"
+	;;
+	
+    i)	# incomplete - only have partial code fragment
+	;;
+    m)	# start multi-file test
+	print -u4 "rm -f $NAME.*"
+	print -u4 "rm -f *.class $NAME.* *.java $PNAME.*"
+	;;
+    x)	# execute test from package
+	print -u4 "java -verify $CLASS $ARGS > $PNAME.e 2>&1"
+	;;
+
+    s)  ;;
+    Z)	# undone - don't know how to handle
+	;;
+    *)
+  esac
+done
+exit 0

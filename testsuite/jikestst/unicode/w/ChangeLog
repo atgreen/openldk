@@ -1,0 +1,23 @@
+2000-03-13  Vadim Zaliva  <lord@crocodile.org>
+
+	* Added tests for umlauts handling in 'latin1' encoding.
+	Test case submitted by Pedro Dantas <p.dantas@intershop.de>.
+
+2000-02-18  Vadim Zaliva  <lord@crocodile.org>
+
+	* added tests for UTF16 little Endian file (w/o BOM)
+	and with BOM received from Pedro Dantas <p.dantas@intershop.de>.
+
+2000-02-03  Vadim Zaliva  <lord@crocodile.org>
+
+	* modified test suites to output data as sequence of text
+	representation of decial codes on unicode characters. The
+	reason for this is that java System.out output depends from
+	current locale.
+
+	* exec.d: Add everal test files contributed by:
+	1. Benjamin Chelf <chelf@codesourcery.com>
+	2. Pedro Dantas <p.dantas@intershop.de>
+
+	* new Unicode test suite created.
+

@@ -1,0 +1,193 @@
+<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type"
+content="text/html; charset=iso-8859-1">
+<title>Frequently Asked Questions About Jikes Test Suite (January 27, 1999)</title>
+</head>
+
+<body>
+
+<h2 align="center">The IBM Research Jikes Compiler Project</h2>
+<h2 align="center">http://www.ibm.com/research/jikes</h2>
+<h2 align="center">Frequently Asked Questions About Jikes Test Suite</h2>
+<h2 align="center">January 27, 1999</h2>
+<p>
+<h3><a href="#whatis"><b>What is the Jikes Test Suite?</b></a></h3>
+<h3><a href="#install"><b>How do I install the test environment?</b></a></h3>
+<h3><a href="#use"><b>How are the tests organized?</b></a></h3>
+<h3><a href="#scripts"><b>What are the test script commands?</b></a></h3>
+<h3><a href="#run"><b>How do I run the tests and check the output?</b></h3>
+<hr>
+<h3><a name="whatis"><b>What is the Jikes Test Suite</b></a></h3>
+
+<p>We currently test new versions of the Jikes compiler using the following tests
+<ul>
+<li>The <code>derek</code> tests, written by Derek Lieber of IBM for testing a java virtual
+machine he wrote early in 1996,</li>
+<li>The <code>hpj</code> tests, written by members of the High Performance Compiler for
+Java team.</li>,
+<li>The <code>spec</code> tests, based on the program fragments in the
+published Java Language Specification,</li>
+<li>The <code>unicode</code> tests, Test various aspects of Unicode support.
+</li>
+<li>Version 2.1.1. of the Modena Test Suite,</li>
+<li>The <code>lang</code> component of Sun's JCK test suite for JDK 1.1.4.</li>
+</ul>
+
+<p>We are releasing the <code>derek</code> and <code>hpj</code> tests
+along with the source for the compiler to provide a rudimentary
+regression test facility. We are not releasing the <code>spec</code>
+tests as they may be covered by Sun's copyright. The licenses for the
+Modena and JCK suites do not allow us to redistribute them.
+
+<p>We are also releasing the <code>pr</code> tests. These are based
+on the Problem Reports from 094 on that we have received this year.
+The problem reports can be found in the <a
+href="http://domino.watson.ibm.com/syssftpr/JavaTech/Jikes.nsf">
+Jikes Discussion Database</a>. 
+The <code>pr</code> test suite is a work in progress and we welcome
+volunteers who want to work with us to bring the test set to a usable
+state.
+
+<h3><a name="install"><b>How do I install the test environment?</b></h3>
+
+<p> Compile the programs <code>jtarccat</code>, <code>jtarcget</code>
+and <code>jtarcput</code>.  We suggest adding
+<code>jikestst/bin</code> to your <code>PATH</code>; otherwise, you
+will need to put copies of the scripts and executables to a directory
+on your <code>PATH</code>.
+
+<pre>
+    cd jikestst/bin
+    make
+</pre>
+
+<h3><a name="use"><b>How are the tests organized?</b></a></h3>
+
+<p>We use a number of small scripts to run the tests and analyze the
+results, and a few programs to manipulate the files involved. These
+can be found in the <code>jikestst/bin</code> directory.
+
+<p>Not all the scripts supplied will be needed. We are providing the
+<code>jtm</code> and <code>jsm</code> scripts used to run large sets
+of tests, as they may be needed as our test suite grows.
+
+<p>Tests are described using a description file, with suffix
+<code>d</code>, that serves as input to the test scripts. We
+distinguish <code>c</code> (<code>comp</code>) tests which test
+response to erroneous source, from <code>e</code> (<code>exec</code>)
+tests which test correct translation by compilation and execution of
+a test program (these tests always write something to standard
+output, sometimes just <code>0</code> to indicate the program has
+completed normally).
+
+<h3><a name="scripts"><b>What are the test script commands?</b></h3>
+
+
+<p> Tests are run using the <code>jt</code> script which takes as
+input test description files with type <code>.d</code>.
+
+<p> The <code>jt</code> script uses Jikes; <code>js</code> is
+similar, but uses another compiler, usually Sun's <code>javac</code>,
+for comparison purposes.
+
+<p>The script <code>jtgen</code> is like <code>jt</code>; however,
+while <code>jt</code> executes commands, <code>jtgen</code> just
+writes out commands to be executed later. This is useful in debugging
+multi-file tests.
+
+
+<p>Suitable changes are probably needed for the definition of
+<code>COMP</code> in the files <code>js</code>, <code>jt</code>,
+<code>jsm</code> and <code>jtm</code> (unless your username happens
+to be <code>shields</code>!).  
+
+<p>The test scripts take as input a descriptor file for a set of tests.
+Each line in the descriptor file has the form:
+<pre>
+    <code>command</code> <em>arguments</em>
+</pre>
+where the command and its arguments are separated by white space.
+The supported commands are as follows:
+<dl>
+<dt><code>#</code>
+<dd>comment
+<dt><code>a</code> <em>params</em>
+<dd>Add <em>params</em> to compiler command line for all subsequence tests.
+<dt><code>c</code> <em>file</em> <em>class</em>
+<dd>copy source file <em>file</em><code>.java</code> to file local <em>class</em><code>.java</code>
+    and compile it, saving compiler output in <em>file</em>.c
+<dt><code>e</code> <em>file</em> <em>class</em>
+<dd>    copy source file <em>file</em><code>.java</code> to local file <em>class</em><code>.java</code>
+    compile it, and
+    then execute <em>class</em>, saving output in <em>file</em><code>.e</code>
+
+<dt><code>g</code> <em>file</em> <em>package</em> <em>class</em>
+<dd>copy source file <em>file</em><code>.java</code> to <em>package</em>/<em>class</em><code>.java</code>
+<dt><code>f</code> <em>package</em> <em>class</em>
+<dd>
+    compile <em>package</em>/<em>class</em><code>.java</code>, appending compiler output to
+    <em>package</em><code>.c</code>
+<dt><code>m</code> <em>name</em> <em>directory_list</em>
+<dd>
+    start multi-file test with name <em>name</em>, <em>directory_list</em> is a
+    list of directories that should be created in an empty state.
+<dt><code>Q</code>
+<dd>quit
+<dt><code>r</code> <em>directory-list</em>
+<dd>erase each directory in the directory list
+<dt><code>s</code> <em>directory</em>
+<dd>set the directory to be searched for source files (default <code>../src</code>)
+<dt><code>x</code> <em>name</em> <em>args</em>
+<dd>execute <em>name</em><code>.class</code> with arguments <em>args</em>.
+The default for <em>name</em> is <code>Test</code>.
+</dl>
+
+<p> The <code>c</code> and <code>e</code> commands are used for
+single file tests. The arguments are the file name and an optional
+class name. If the class name is not given, <code>Test</code> is
+assumed. A <code>c</code> (or <code>comp</code>) test just compiles the file, an
+<code>e</code> (or <code>exec</code>) test compiles a file and executes the resulting
+class file.
+
+<p>
+Tests requiring more than one file take the form
+<pre>
+    <code>m</code> <em>name</em> <em>directories</em>
+    <code>g ...
+    f ...   
+    x ...</code>
+</pre>
+
+<p> where the intial <code>m</code> command names the tests and gives
+a list of directories needed if packages are involed. The
+<code>g</code> command is used to copy the source files, and the
+<code>f</code> command is used to compile them. The
+<code>x</code> command is used to execute the program.
+
+
+<h3><a name="run"><b>How do I run the tests and check the output?</b></h3>
+
+<p>Run the tests as follows (be sure that the definition of <code>COMP</code> in <code>jt</code>
+points to the executable that you are testing):
+<pre>
+    cd jikestst/derek/w
+    make exec
+    make chk
+    cat exec.dif   // examine the output
+    cd jikestst/hpj/w
+    make exec
+    make chk
+    cat exec.dif   // examine the output
+</pre>
+Check the resulting <code>.dif</code> files for surprises.
+You can clean up with "<code>make clean</code>".
+
+<p>These tests are intended mainly for regression testing and are by
+no means meant to be interpreted as a comprehensive test of
+compliance or conformance.
+
+
+</body>
+</html>

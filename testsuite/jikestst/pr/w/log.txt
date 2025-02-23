@@ -1,0 +1,291 @@
+# $Id: log.txt,v 1.4 1999/11/04 15:01:21 shields Exp $
+#
+# This software is subject to the terms of the IBM Jikes Compiler
+# License Agreement available at the following URL:
+# http://www.ibm.com/research/jikes.
+# Copyright (C) 1996, 1999, International Business Machines Corporation
+# and others.  All Rights Reserved.
+# You must accept the terms of that agreement to use this software.
+#
+
+23 nov 98 (DS)
+NOTE -- this is definitely a work in progress.
+Will need to round up some volunteers once OS available and sort this out.
+
+5 PM 30 Oct 31
+Reviewed open problems starting at PR236
+
+Jikes TODO
+
+Outstanding bugs (should review after next version out)
+
+Old:	106 116 126 129 115 140 154 163 170 171
+
+New (sort out, then post new version):
+194 still doing clone of array incorrectly (DS) incomplete example
+197 sun query access to inner classes (DS)
+198 jikes right - file as query to sun?
+199 (jdk 1.2 compatiblity,sun doc)
+201 unnamed package problem, dave to draft response
+203 jason's do-while, query filed to sun
+206 bad error message
+209 kasten query #1 (DS) sun query needed?
+210 kasten query #2 (DS) sun query needed?
+212 jikes +M bug (defer until incremental back??)
+216 dependency problem (defer)
+220 incorrect setting of return code (defer)
+223 classpath ? (may be ok now -- defer)
+232 dependency problem (defer)
+233 dependency generation (defer)
+236 super problem
+238 funny interfaces from jikes (DS needs to file Sun query)
+239 crash (Jim Cook problem) (DS)
+240 jikes/javac incompatibility
+242 jit problem
+245 problem compiling JServ
+246 problem with abstract method (PC)
+247 problem with tya, inner class (PC)
+248 problem with visibroker (DS - defer, need more)
+253 protected inner class and inheritance problem
+255 static final variables inside inner classes (PC)
+258 protected member duplication
+260 clone-related verification error
+262 Named inner classes within anonymous classes problem
+264 problem with +M and -d
+268 problem with +F/+V options
+269 crash using swing
+270 odd class file permissions (solaris only?)
+272 problem accessing protected members of anonymous super class
+275 -depend problem
+280 pesky zip-file comment message
+281 erroneous error message
+284 final attribute
+285 inheritance
+287 exception handling
+
+v0.40:
+Fixed 244 257 259 273 278 279 282 283 286 287
+
+
+v0.38: Fixed 206, 207, 215, 218, 222, 249,251, 252,254, 256,
+jpbugs entries:
+182 184 
+ 191 192 194  197 198 199
+201 203
+213 215 216 217  219
+223 
+233 234 235 236 237 238
+246 247 248 
+
+(also: 999 ernst mkdirnelson otiph1 plum sol -- DS to sort out)
+
+Others (not filed since proprietary or investigating) dave to do this
+Biesack
+David Warnock
+Ray Hollet
+Jon Heggland
+
+Defer:
+179 large number of files, defer until incremental back (DS)
+180 ??? (DS)
+235 problem with inheritance (only have incomplete example -- defer)
+
+Queries to Sun:
+
+#14: unreachability of do-while endin return (filed)
+#15 case senstivity (related problems 190, 196) (to be filed)
+
+
+Software changes (Philippe):
+incremental
+add option to concatenate .u files
+kenny's outstandng problems
+
+Dave to turn out tests based on old bug reports
+s->have source file
+n->no source file
+- -> no test here
+-- -> test not feasible
+100s COMP (was crashing)
+101- option related 
+102s EXEC
+103s EXEC
+104s COMP
+105- involves use of -g LATER
+106? swing problem	LATER
+107-
+108s complicated to run  LATER
+109s requires special handling to run LATER
+110- involves -g LATER
+111s	COMP
+112? complicated LATER
+113? complicated (Bruce Lucas problem) LATER
+114s EXEC
+115-
+116? no source available (open probl)
+117? -deprecated not implemented
+118? no source avail
+119s COMP
+120s EXEC
+121s COMP
+122s COMP
+123s COMP
+124s COMP
+125s COMP
+126- CLASSPATH problem
+127- incompatibility with other products
+128s EXEC
+129s need 1.2 beta2 (LATER)
+130s EXEC
+131s EXEC
+132s EXEC  PROBABLE BUG HERE -- fails VERIFY
+133s EXEC
+134--
+135- recurrence of zipfile problem
+136s EXEC
+137s only have incomplete source
+138s EXEC
+139s LATER -- source in zip file
+140- to be done, <clinit> generation
+141s EXEC
+142s EXEC
+143s COMP
+144- -nowarn behavior
+145s COMP
+146s EXEC
+147s EXEC
+148- no source (look in old mail)
+149s but may be hard to make test
+150-- same as problem 154
+151s EXEC
+152s COMP
+153s COMP
+154- code/locale problem
+155s COMP
+156s COMP
+157s test for control-Z hard to reproduce LATER
+158s -g LocalVaribaleTable LATER
+159s COMP
+160s EXEC
+161- capitalization in class files - make up test
+162s need source (in zip file enclosed with program
+163s EXEC
+164s COMP
+165s COMP
+166s COMP
+167s EXEC
+168s COMP
+169s COMP
+170-- jar file problem
+171-- request to use same file separator as OS
+172s EXEC
+173s EXEC crashes jp v0.38 !!!
+174s bug in sun jit
+175s COMP
+176s EXEC
+177s COMP
+178s COMP
+179-- only shows up on gigantic program
+180-- incomplete report
+181s
+182-- CLASSPATH
+183s COMP
+184s COMP
+185s COMP
+186s EXEC (crashes sun!)
+187s COMP
+188s COMP
+189s EXEC
+190s EXEC
+191s COMP
+192s COMP
+193s COMP
+194- problem with array clone
+195s EXEC
+196s EXEC
+197s COMP
+198s COMP (make into exec?)
+199-- 1.2 compatibility
+200s EXEC
+201s not obvious how to run -- review
+202-- there is no 202!
+203s COMP
+204-- crash if zip file not found
+205  CLASSPATH problem; no test needed
+206s COMP
+207  COMP
+208-- suggestion
+209s COMP
+210s COMP
+211  no test; uses -deprecated
+212-- +M problem
+213s source in zip file need to unpack
+214s +M complaint
+215s EXEC
+216s -depend complaint
+217s COMP
+218  COMP
+219s COMP (make into EXEC ?)
+220-- problems running Jikes as subprocess
+221s- uses +$ option
+222  COMP
+223-- CLASSPATH
+224-- CLASSPATH 
+225-- CLASSPATH
+226s EXEC
+227--don't have source
+228s EXEC
+229s EXEC
+230s COMP
+231s COMP
+232-- dependency problem
+233-- more dependency
+234-- option spelling problem
+235s need to adapt source
+236s EXEC
+237- need to make up test
+238s need to examine classfile
+239? need to get source from zip file
+240? need to get source from zip file
+241s COMP
+242-- JIT problem
+243s COMP
+244- need to make up test
+245? pending
+246s COMP
+247s EXEC
+248-? problem with visibroken
+249s COMP (was crashing)
+250s (have file elsewhere too)
+251? another jarfile thing
+252s EXEC
+253s COMP
+254s COMP
+255? pending
+256s COMP
+257s  ?? review this
+258s
+259s EXEC
+260s ?? clone-related verification error
+261s COMP
+265s COMP
+266s COMP
+267s COMP
+268 problem with +F/+V options
+269 crash using swing
+270 odd class file permissions (solaris only?)
+272s COMP
+273s COMP
+275s EXEC
+275 -depend problem
+277s COMP
+278s COMP
+279 no source (yet)
+280 pesky zip-file comment message
+281s COMP
+282s COMP
+283s COMP
+284 final attribute
+285s COMP
+286s EXEC
+287 exception handling

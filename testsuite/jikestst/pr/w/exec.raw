@@ -1,0 +1,83 @@
+# $Id: exec.raw,v 1.4 1999/11/04 15:01:21 shields Exp $
+#
+# This software is subject to the terms of the IBM Jikes Test Compiler
+# License Agreement available at the following URL:
+# http://www.ibm.com/research/jikes.
+# Copyright (C) 1996, 1999, International Business Machines Corporation
+# and others.  All Rights Reserved.
+# You must accept the terms of that agreement to use this software.
+#
+m pr100
+g pr100a . Whoops
+b pr100b . Derived
+f . Whoops
+f . Derived
+x Derived
+e pr102 TestChaos
+e pr103 Testsere pr104 C1
+m pr120
+g pr120a . A
+g pr120b . B
+g pr120c . C
+g pr120d . D
+f . A
+f . B
+f . C
+f . D
+x D
+m pr124 test
+g pr124 test Crash
+f test Crash
+x test.Crash
+m pr125 jalama
+g pr125 jalama Thing
+f jalama Thing
+x jalama.Thing
+e pr128 GaspodeParameters
+e pr129 X
+e pr130 core
+e pr131 t
+m pr132 test test.subpackage
+g pr132b test.subpackage C
+g pr132a test B
+f test.subpackage C
+f test B
+x test.B
+e pr133 neil1
+e pr136 Externalizable
+e pr137 tclone
+m pr138 cg10
+g pr138 cg10 Main
+f cg10 Main
+x cg10.Main
+e pr141 ThrowTest
+e pr142 test
+m pr143 com com.compname
+g pr143 com.compname Foo
+f com.compname Foo
+x com.compname.Foo
+e pr155 crash
+e pr160 jikes34bug
+e pr167 sup
+m pr168
+g pr168a . se1
+g pr168b . se2
+f . se1
+f . se2
+x se2
+e pr172 Test
+e pr173 super22
+e pr174 Jitbug
+e pr215 External
+e pr226 TestArrayClass
+e pr228 Test
+e pr236 SuperC
+m pr246 foo bar
+g pr246a foo Super
+g pr246b . sub
+f foo Super
+f . sub
+x sub
+e pr247 boom
+e pr257 JikesExceptions
+e pr259 PrintTest

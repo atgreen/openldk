@@ -1,0 +1,4 @@
+2000-02-03  Vadim Zaliva  <lord@crocodile.org>
+
+	* jt: added new command -a which allows to modify command line arguments.
+
