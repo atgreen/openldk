@@ -631,6 +631,7 @@
   (:DDIV 'ir-ddiv :DOUBLE)
   (:DMUL 'ir-dmul :DOUBLE)
   (:DADD 'ir-dadd :DOUBLE)
+  (:DREM 'ir-drem :DOUBLE)
   (:DSUB 'ir-fsub :DOUBLE)
   (:FADD 'ir-fadd :FLOAT)
   (:FDIV 'ir-fdiv :FLOAT)

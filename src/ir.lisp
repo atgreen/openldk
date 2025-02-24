@@ -224,6 +224,9 @@
 (defclass/std ir-ldiv (ir-binop)
   ())
 
+(defclass/std ir-drem (ir-binop)
+  ())
+
 (defclass/std ir-frem (ir-binop)
   ())
 

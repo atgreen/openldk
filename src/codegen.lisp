@@ -610,6 +610,39 @@
                                  (- value1 (* value2 q))))))
                  :expression-type :FLOAT))
 
+(defmethod codegen ((insn ir-drem) context)
+  (make-instance '<expression>
+                 :insn insn
+                 :code `(let ((value2 ,(code (codegen (value2 insn) context)))
+                              (value1 ,(code (codegen (value1 insn) context))))
+                          (cond
+                            ;; If either value1 or value2 is NaN, the result is NaN
+                            ((or (float-features:float-nan-p value1)
+                                 (float-features:float-nan-p value2))
+                             float-features:double-float-nan)
+
+                            ;; If the dividend is an infinity or the divisor is a zero or both, the result is NaN
+                            ((or (float-features:float-infinity-p value1)
+                                 (eq 0.0d0 value2)
+                                 (and (float-features:float-infinity-p value1)
+                                      (eq 0.0d0 value2)))
+                             float-features:double-float-nan)
+
+                            ;; If the dividend is finite and the divisor is an infinity, the result equals the dividend
+                            ((and (not (float-features:float-infinity-p value1))
+                                  (float-features:float-infinity-p value2))
+                             value1)
+
+                            ;; If the dividend is a zero and the divisor is finite, the result equals the dividend
+                            ((and (eq 0.0d0 value1)
+                                  (not (float-features:float-infinity-p value2)))
+                             value1)
+
+                            ;; In the remaining cases, compute the remainder
+                            (t (let ((q (truncate value1 value2)))
+                                 (- value1 (* value2 q))))))
+                 :expression-type :DOUBLE))
+
 (defmethod codegen ((insn ir-fcmpg) context)
   (make-instance '<expression>
                  :insn insn
