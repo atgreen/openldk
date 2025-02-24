@@ -110,7 +110,7 @@
   :INTEGER)
 
 (defmethod emit ((v constant-long) cp)
-  (make-instance 'ir-int-literal :value (slot-value v 'value)))
+  (make-instance 'ir-long-literal :value (slot-value v 'value)))
 
 (defmethod get-stack-jtype ((v constant-long))
   :LONG)
@@ -377,8 +377,9 @@ stream."
                                 (5
                                  (progn
                                    (setf skip t)
-                                   (make-instance 'constant-long
-                                                  :value (unsigned-to-signed-long (read-u8)))))
+                                   (let ((ul (read-u8)))
+                                     (make-instance 'constant-long
+                                                    :value (unsigned-to-signed-long ul)))))
                                 (6
                                  (progn
                                    (setf skip t)
