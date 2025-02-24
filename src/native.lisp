@@ -165,8 +165,9 @@
                (and (gethash lname *classes*)
                     (java-class (gethash lname *classes*)))
                (progn (let ((klass (classload lname)))
-                        (%clinit klass)
-                        (java-class klass))))))
+                        (when klass
+                          (%clinit klass)
+                          (java-class klass)))))))
     (when *debug-trace*
       (incf *call-nesting-level* -1))))
 
