@@ -39,22 +39,6 @@
 
 (in-package :openldk)
 
-(defvar *classpath* nil)
-(defvar *classes* (make-hash-table :test #'equal))
-(defvar *java-classes* (make-hash-table :test #'equal))
-(defvar *context* nil)
-(defvar *condition-table* (make-hash-table))
-
-(defvar *dump-dir* nil)
-(defvar *debug-load nil)
-(defvar *debug-bytecode* nil)
-(defvar *debug-codegen* nil)
-(defvar *debug-slynk* nil)
-(defvar *debug-trace* nil)
-(defvar *debug-trace-args* nil)
-(defvar *debug-x* nil)
-(defvar *debug-unmuffle* nil)
-
 ;; This is a hack to make sure getCallerClass works.
 ;; It would be good if we didn't have to do this.
 (defvar *force-this-to-be-used* nil)
@@ -74,8 +58,6 @@
 
 (defun lispize-method-name (name)
   (subseq name 0 (1+ (position #\) name))))
-
-(defvar *call-nesting-level* 0)
 
 (defun make-exception-handler-table (context)
   (let ((exception-table (exception-table context))
