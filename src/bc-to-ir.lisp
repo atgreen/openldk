@@ -635,6 +635,7 @@
   (:FADD 'ir-fadd :FLOAT)
   (:FDIV 'ir-fdiv :FLOAT)
   (:FMUL 'ir-fmul :FLOAT)
+  (:FREM 'ir-frem :FLOAT)
   (:FSUB 'ir-fsub :FLOAT)
   (:IADD 'ir-iadd :INTEGER)
   (:IAND 'ir-iand :INTEGER)
