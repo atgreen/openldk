@@ -1247,3 +1247,8 @@ FIXME: these aren't really strict/ Look at sb-mpfr/
 
 (defun |java/lang/Shutdown.halt0(I)| (status)
   (uiop:quit status t))
+
+(defmethod |getRawAnnotations()| ((class |java/lang/Class|))
+  (let ((lclass (gethash (lstring (slot-value class '|name|)) *classes*)))
+    (when (and lclass (attributes lclass))
+      (gethash "RuntimeVisibleAnnotations" (attributes lclass)))))

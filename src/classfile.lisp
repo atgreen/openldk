@@ -317,7 +317,8 @@ stream."
           ("LineNumberTable"
            (read-buffer attributes-length))
           ("RuntimeVisibleAnnotations"
-           (read-buffer attributes-length))
+           (setf (gethash "RuntimeVisibleAnnotations" attributes)
+                 (read-buffer attributes-length)))
           ("StackMapTable"
            (read-buffer attributes-length))
           ("SourceFile"
