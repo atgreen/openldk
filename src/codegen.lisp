@@ -1303,7 +1303,8 @@
                                 (BLOCK TRY-BODY
                                   (TAGBODY ,@lisp-code))
                               ,@(loop for (exception-type . handler-block) in try-catch-handlers
-                                      do (classload exception-type)
+                                      when (> (length exception-type) 0)
+                                        do (classload exception-type)
                                       collect `(,(intern (format nil "condition-~A" (or exception-type
                                                                                         "java/lang/Throwable")) :openldk)
                                                 (,(intern "condition" :openldk))

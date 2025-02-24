@@ -357,6 +357,7 @@
 
 (defun classload (classname)
   (let ((classname (coerce classname 'string)))
+    (assert (> (length classname) 0))
     (let ((class (gethash classname *classes*))
           (internal-classname (intern (substitute #\/ #\. classname) :openldk)))
       (if class
