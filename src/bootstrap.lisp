@@ -40,6 +40,9 @@
 (defclass/std |java/lang/Object| ()
   ())
 
+(defclass/std |java/lang/Cloneable| ()
+  ())
+
 (defmethod |clone()| ((|this| |java/lang/Object|))
   "Default implementation of clone for CLONEABLE objects."
   (assert (typep |this| '|java/lang/Cloneable|))
