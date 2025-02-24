@@ -42,6 +42,9 @@ $ export JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.432.b06-3.fc40.x86_64/j
 You can provide additional classpath elements through the
 `LDK_CLASSPATH` environment variable.
 
+The OpenLDK project uses `ocicl` for package management.  Be sure to
+run `ocicl install` before building `openldk`.
+
 
 ## How it Works
 
