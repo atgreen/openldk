@@ -50,6 +50,7 @@
 							 (:file "src/context")
 							 (:file "src/bootstrap")
                (:file "src/strings")
+               (:file "src/math")
 							 (:file "src/opcodes")
 							 (:file "src/ir")
 							 (:file "src/bc-to-ir")
