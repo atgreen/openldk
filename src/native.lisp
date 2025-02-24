@@ -769,19 +769,25 @@ the prompt I used:
 
 (defun |java/lang/Math.abs(I)| (a)
   "Returns the absolute value of an integer."
-  (abs a))
+  (if (eq a -2147483648)
+      a
+      (abs a)))
 
 (defun |java/lang/Math.abs(J)| (a)
   "Returns the absolute value of a long integer."
-  (abs a))
+  (if (eq a -9223372036854775808)
+      a
+      (abs a)))
 
 (defun |java/lang/Math.abs(F)| (a)
   "Returns the absolute value of a float."
-  (abs a))
+  (float-features:bits-single-float
+   (logand #x7FFFFFFF (float-features:single-float-bits a))))
 
 (defun |java/lang/Math.abs(D)| (a)
   "Returns the absolute value of a double."
-  (abs a))
+  (float-features:bits-double-float
+   (logand #x7FFFFFFFFFFFFFFF (float-features:double-float-bits a))))
 
 (defun |java/lang/Math.acos(D)| (a)
   "Returns the arc cosine of a value, in radians."
@@ -957,19 +963,25 @@ FIXME: these aren't really strict/ Look at sb-mpfr/
 
 (defun |java/lang/StrictMath.abs(I)| (a)
   "Returns the absolute value of an integer."
-  (abs a))
+  (if (eq a -2147483648)
+      a
+      (abs a)))
 
 (defun |java/lang/StrictMath.abs(J)| (a)
   "Returns the absolute value of a long integer."
-  (abs a))
+  (if (eq a -9223372036854775808)
+      a
+      (abs a)))
 
 (defun |java/lang/StrictMath.abs(F)| (a)
   "Returns the absolute value of a float."
-  (abs a))
+  (float-features:bits-single-float
+   (logand #x7FFFFFFF (float-features:single-float-bits a))))
 
 (defun |java/lang/StrictMath.abs(D)| (a)
   "Returns the absolute value of a double."
-  (abs a))
+  (float-features:bits-double-float
+   (logand #x7FFFFFFFFFFFFFFF (float-features:double-float-bits a))))
 
 (defun |java/lang/StrictMath.acos(D)| (a)
   "Returns the arc cosine of a value, in radians."
