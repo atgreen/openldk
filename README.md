@@ -33,10 +33,10 @@ only developing with sbcl for now.
 `openldk` has only been tested in Linux.
 
 `openldk` uses the `JAVA_HOME` environment variable to find the boot classpath.
-Be sure to point it at your Java 8 `jre` directory.  On
+Be sure to point it at your Java 8 directory.  On
 my Fedora Linux system that looks like:
 ```
-$ export JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.432.b06-3.fc40.x86_64/jre
+$ export JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.432.b06-3.fc40.x86_64
 ```
 
 You can provide additional classpath elements through the
@@ -159,13 +159,13 @@ where <options> includes:
 ```
 
 Run `make check` to run through the dejagnu-based testsuite.
-As of Feb 22 2025, the results look like this
+As of Feb 25 2025, the results look like this
 ```
 		=== openldk Summary ===
 
-# of expected passes		2098
-# of unexpected failures	1484
-# of unresolved testcases	13
+# of expected passes		4263
+# of unexpected failures	6209
+# of unresolved testcases	102
 ```
 
 ### Debugging

@@ -427,13 +427,19 @@
   (unless classpath
     (setf classpath
           (concatenate 'string
-           (format nil "~{~A~^:~}"
-                   (mapcar #'namestring (directory #P"/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.442.b06-1.fc40.x86_64/jre/lib/*.jar")))
-           ":" (uiop:getenv "LDK_CLASSPATH"))))
+                       (uiop:getenv "LDK_CLASSPATH")
+                       ":"
+                       (format nil "~{~A~^:~}"
+                               (mapcar #'namestring
+                                       (directory
+                                        (concatenate 'string
+                                                     (uiop:getenv "JAVA_HOME")
+                                                     "/jre/lib/*.jar")))))))
 
   (let ((LDK_DEBUG (uiop:getenv "LDK_DEBUG")))
     (when LDK_DEBUG
       (progn
+
         (when (find #\c LDK_DEBUG)
           (setf *debug-codegen* t))
         (when (find #\l LDK_DEBUG)
@@ -494,9 +500,14 @@
 
   (let ((classpath
           (concatenate 'string
-           (format nil "~{~A~^:~}"
-                   (mapcar #'namestring (directory #P"/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.442.b06-1.fc40.x86_64/jre/lib/*.jar")))
-           ":" (uiop:getenv "LDK_CLASSPATH"))))
+                       (uiop:getenv "LDK_CLASSPATH")
+                       ":"
+                       (format nil "~{~A~^:~}"
+                               (mapcar #'namestring
+                                       (directory
+                                        (concatenate 'string
+                                                     (uiop:getenv "JAVA_HOME")
+                                                     "/jre/lib/*.jar")))))))
 
     (setf *classpath*
           (loop for cpe in (split-sequence:split-sequence (uiop:inter-directory-separator) classpath)

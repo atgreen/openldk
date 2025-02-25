@@ -480,7 +480,7 @@
                                                           (directory
                                                            (concatenate 'string
                                                                         (uiop:getenv "JAVA_HOME")
-                                                                        "/lib/*.jar")))))
+                                                                        "/jre/lib/*.jar")))))
                   ;; FIXME
                   ("java.home" . ,(uiop:getenv "JAVA_HOME"))
                   ("user.home" . ,(uiop:getenv "HOME"))
@@ -688,6 +688,15 @@ user.variant
 (defmethod |closeAll(Ljava/io/Closeable;)| ((stream stream) closeable)
   (close stream))
 
+(defun %convert-to-unsigned-8-bit (signed-array)
+  "Convert a signed 8-bit array to an unsigned 8-bit array."
+  (let* ((dimensions (array-dimensions signed-array))
+         (unsigned-array (make-array dimensions :element-type '(unsigned-byte 8))))
+    (dotimes (i (array-total-size signed-array))
+      (setf (row-major-aref unsigned-array i)
+            (logand (row-major-aref signed-array i) #xFF)))
+    unsigned-array))
+
 (defmethod |writeBytes([BIIZ)| ((fos |java/io/FileOutputStream|) byte-array offset length append?)
   (declare (ignore append?))
 ;;  (format t "~&WRITE-BYTES: 1:~A 2:~A 3:~A 4:~A 5:~A 6:~A 7:~A~%" fos (slot-value fos '|fd|) (slot-value (slot-value fos '|fd|) '|fd|) byte-array offset length append?)
@@ -695,9 +704,9 @@ user.variant
          (fd (slot-value file-descriptor '|fd|)))
     (cond
       ((eq fd 1)
-       (write-sequence byte-array *standard-output* :start offset :end (+ offset length)))
+       (write-sequence (%convert-to-unsigned-8-bit byte-array) *standard-output* :start offset :end (+ offset length)))
       ((eq fd 2)
-       (write-sequence byte-array *error-output* :start offset :end (+ offset length)))
+       (write-sequence (%convert-to-unsigned-8-bit byte-array) *error-output* :start offset :end (+ offset length)))
       (t
        (error "unimplemented")))))
 
@@ -853,6 +862,15 @@ user.variant
     dbb))
 
 (defmethod |getLong(J)| ((unsafe |sun/misc/Unsafe|) ptr)
+  (declare (ignore unsafe))
+  ;; Convert the integer pointer back to a system address pointer (SAP)
+  (let ((sap (sb-sys:int-sap ptr)))
+    ;; Dereference the memory to get the long value
+    (sb-alien:with-alien ((mem (* sb-alien:long) sap))
+      (sb-alien:deref mem 0))))
+
+(defmethod |getLongVolatile(J)| ((unsafe |sun/misc/Unsafe|) ptr)
+  ;; FIXME: how is the volatile version different?
   (declare (ignore unsafe))
   ;; Convert the integer pointer back to a system address pointer (SAP)
   (let ((sap (sb-sys:int-sap ptr)))

@@ -174,6 +174,7 @@
                               (let ((value ,(code (codegen value context)))
                                     (index ,(code (codegen index context)))
                                     (arrayref ,(code (codegen arrayref context))))
+                                ;; (format t "~&STORED ~A at ~A in ~A~%" value index arrayref)
                                 (setf (aref arrayref index) value))
                             (sb-int:invalid-array-index-error (e)
                               (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))

@@ -20,10 +20,8 @@ proc openldk_load { classfile } {
     set output [lindex $result 1]
     verbose "STATUS = $status"
     if { $status == 0 } {
-        verbose "PASSSSSSSSSSSSSS"
         return [list "pass" $output]
     } else {
-        verbose "FAILLLLLLLLLLLLLL"
         return [list "fail" $output]
     }
 }
@@ -37,7 +35,8 @@ proc openldk-dg-test { prog do_what extra_tool_flags } {
     verbose "do_what $do_what" 2
     verbose "extra_tool_flags $extra_tool_flags" 2
 
-    set status [local_exec "javac $prog" "" "" $timeout]
+    set JAVA_HOME [getenv "JAVA_HOME"]
+    set status [local_exec "$JAVA_HOME/bin/javac $prog" "" "" $timeout]
     set classname [string map {".java" ""} $prog]
 
     set testargs "1 2 3 4 5"
