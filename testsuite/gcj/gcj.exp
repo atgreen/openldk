@@ -6,6 +6,7 @@ dg-init
 set dg-do-what-default run
 
 set testargs ""
+set testname ""
 
 proc openldk_load { classfile } {
 
@@ -58,19 +59,10 @@ proc openldk-dg-test { prog do_what extra_tool_flags } {
     # Extract the compiler output from the status list
     set output [lindex $status 1]
 
-    # Filter out lines that start with "Note:"
-    set filtered_output ""
-    foreach line [split $output "\n"] {
-        if {![regexp {^Note:} $line]} {
-            append filtered_output "$line\n"
-        }
-    }
-
-    # Reconstruct the status with the filtered output
     set classname [string map {".java" ""} $prog]
     set testargs "1 2 3 4 5"
 
-    return [list $filtered_output "$classname.class"]
+    return [list "" "$classname.class"]
 }
 
 
@@ -80,6 +72,7 @@ set tlist [lsort [glob -nocomplain -- gcj/*.java]]
 foreach test $tlist {
 
  		verbose "Testing $test"
+    set testname "$test"
 		dg-test $test "" ""
 
 }

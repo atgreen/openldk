@@ -6,6 +6,7 @@ dg-init
 set dg-do-what-default run
 
 set testargs ""
+set testname ""
 
 proc openldk_load { classfile } {
     global testargs
@@ -20,23 +21,10 @@ proc openldk_load { classfile } {
     set output [lindex $result 1]
     verbose "STATUS = $status"
 
-    # Check if the test is in the expected failures file
-    if {[is_expected_failure $classname]} {
-        if { $status == 0 } {
-            # Test passed but was expected to fail (xpass)
-            return [list "xpass" $output]
-        } else {
-            # Test failed as expected (xfail)
-            return [list "xfail" $output]
-        }
+    if { $status == 0 } {
+        return [list "pass" $output]
     } else {
-        if { $status == 0 } {
-            # Test passed as expected (pass)
-            return [list "pass" $output]
-        } else {
-            # Test failed unexpectedly (fail)
-            return [list "fail" $output]
-        }
+        return [list "fail" $output]
     }
 }
 
@@ -55,10 +43,13 @@ proc openldk-dg-test { prog do_what extra_tool_flags } {
 
     set testargs "1 2 3 4 5"
 
-    return [list [lindex $status 1] "$classname.class"]
+    return [list "" "$classname.class"]
 }
 
 proc run_test { test_file expected_output } {
+
+    set expected_failure 0
+
     # Move the test file to the current directory and rename it to Test.java
     file copy -force $test_file ./Test.java
 
@@ -100,11 +91,25 @@ proc run_test { test_file expected_output } {
     # Remove trailing newlines from the cleaned expected output
     regsub {\n+$} $expected_cleaned "" expected_cleaned
 
+    if {[catch {exec grep -q -- "$test_name" $expected_failures_file} result options]} {
+        set expected_failure 0
+    } else {
+        set expected_failure 1
+    }
+
     # Compare the cleaned output with the cleaned expected output
     if { $run_output_cleaned == $expected_cleaned } {
-        return [list "pass" "Output matches expected"]
+        if { $expected_failure == 0 } {
+            return [list "pass" "Output matches expected"]
+        } else {
+            return [list "xpass" "Output matches expected"]
+        }
     } else {
-        return [list "fail" "Output does not match expected"]
+        if { {expected_failure} == 0 } {
+            return [list "fail" "Output does not match expected"]
+        } else {
+            return [list "xfail" "Output does not match expected"]
+        }
     }
 }
 
@@ -122,9 +127,21 @@ foreach test_file $test_files {
     set message [lindex $result 1]
 
     if { $status == "pass" } {
+        verbose pass
         pass $test_file
     } else {
-        fail $test_file
+        if { $status == "xpass" } {
+            verbose unexpected pass
+            xpass $test_file
+        } else {
+            if { $status == "xfail" } {
+                verbose expected fail
+                xfail $test_file
+            } else {
+                verbose fail
+                fail $test_file
+            }
+        }
     }
 }
 

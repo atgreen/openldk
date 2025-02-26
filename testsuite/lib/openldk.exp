@@ -1,10 +1,15 @@
+
+
 proc is_expected_failure { classname } {
+
+    global testname
+
     set expected_failures_file "expected-failures.txt"
     # Just for logging
-    verbose "Running: grep -q -- \" $classname.java\" $expected_failures_file"
+    verbose "Running: grep -q -- \"$testname execution test\$\" $expected_failures_file"
 
     # Use catch to handle non-zero exit codes from grep
-    if {[catch {exec grep -q -- " $classname.java" $expected_failures_file} result options]} {
+    if {[catch {exec grep -q -- " $testname execution test\$" $expected_failures_file} result options]} {
         # grep returned a non-zero exit code
         # Get the errorcode list: CHILDSTATUS <pid> <exit-code>
         set exit_code_list [dict get $options -errorcode]

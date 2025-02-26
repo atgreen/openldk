@@ -6,6 +6,7 @@ dg-init
 set dg-do-what-default run
 
 set testargs ""
+set testname ""
 
 proc openldk_load { classfile } {
     global testargs
@@ -56,7 +57,7 @@ proc openldk-dg-test { prog do_what extra_tool_flags } {
 
     set testargs "1 2 3 4 5"
 
-    return [list [lindex $status 1] "$classname.class"]
+    return [list "" "$classname.class"]
 }
 
 
@@ -64,7 +65,10 @@ set tlist [lsort [glob -nocomplain -- aaa/*.java]]
 
 foreach test $tlist {
 
+    global testname
+
  		verbose "Testing $test"
+    set testname "$test"
 		dg-test $test "" ""
 
 }
