@@ -163,9 +163,9 @@ As of Feb 25 2025, the results look like this
 ```
 		=== openldk Summary ===
 
-# of expected passes		4263
-# of unexpected failures	6209
-# of unresolved testcases	102
+# of expected passes		7603
+# of unexpected failures	2774
+# of unresolved testcases	197
 ```
 
 ### Debugging

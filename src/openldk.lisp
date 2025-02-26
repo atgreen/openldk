@@ -487,7 +487,7 @@
                           (make-instance 'jar-classpath-entry :jarfile cpe)
                           (make-instance 'dir-classpath-entry :dir cpe))))
 
-  (let* ((class (classload mainclass))
+  (let* ((class (classload (substitute #\/ #\. mainclass)))
          (argv (make-array (length args))))
     (assert (or class (error "Can't load ~A" mainclass)))
     (dotimes (i (length args))
