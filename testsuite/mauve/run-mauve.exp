@@ -6,6 +6,7 @@ dg-init
 set dg-do-what-default run
 
 set testargs ""
+set testname ""
 
 proc openldk_load { classfile } {
 
@@ -80,6 +81,7 @@ local_exec "$JAVA_HOME/../bin/javac mauve/openldkHarness.java" "" "" "10"
 foreach test $tlist {
 
  		verbose "Testing $test"
+    set testname "$test"
 		dg-test $test "" ""
 
 }
