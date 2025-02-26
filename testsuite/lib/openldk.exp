@@ -1,0 +1,29 @@
+proc is_expected_failure { classname } {
+    set expected_failures_file "expected-failures.txt"
+    # Just for logging
+    verbose "Running: grep -q -- \" $classname.java\" $expected_failures_file"
+
+    # Use catch to handle non-zero exit codes from grep
+    if {[catch {exec grep -q -- " $classname.java" $expected_failures_file} result options]} {
+        # grep returned a non-zero exit code
+        # Get the errorcode list: CHILDSTATUS <pid> <exit-code>
+        set exit_code_list [dict get $options -errorcode]
+        # The real exit code is the third element
+        set exit_code [lindex $exit_code_list 2]
+
+        if {$exit_code == 1} {
+            # 1 => "pattern not found"
+            verbose "Test $classname.java NOT found in expected-failures.txt"
+            return 0
+        } else {
+            # Anything else => real error, e.g. file missing => exit code 2
+            verbose "ERROR: grep failed with exit code: $exit_code"
+            verbose "Error details: $result"
+            return 0
+        }
+    } else {
+        # grep returned 0 => "pattern found"
+        verbose "Test $classname.java found in expected-failures.txt"
+        return 1
+    }
+}
