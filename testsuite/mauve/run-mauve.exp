@@ -35,7 +35,7 @@ proc openldk-dg-test { prog do_what extra_tool_flags } {
 
     # Run the javac command
     set JAVA_HOME [getenv "JAVA_HOME"]
-    set status [local_exec "$JAVA_HOME/bin/javac $prog" "" "" $timeout]
+    set status [local_exec "$JAVA_HOME/../bin/javac $prog" "" "" $timeout]
 
     verbose "STATUS = $status"
 
@@ -61,7 +61,7 @@ setenv "LDK_CLASSPATH" "$ldkcp:.:./mauve"
 setenv "CLASSPATH" "$ldkcp:.:./mauve"
 
 set JAVA_HOME [getenv "JAVA_HOME"]
-local_exec "$JAVA_HOME/bin/javac mauve/openldkHarness.java" "" "" "10"
+local_exec "$JAVA_HOME/../bin/javac mauve/openldkHarness.java" "" "" "10"
 
 foreach test $tlist {
 

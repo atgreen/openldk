@@ -40,7 +40,7 @@ proc openldk-dg-test { prog do_what extra_tool_flags } {
 
     # Run the javac command
     set JAVA_HOME [getenv "JAVA_HOME"]
-    set status [local_exec "$JAVA_HOME/bin/javac $prog" "" "" $timeout]
+    set status [local_exec "$JAVA_HOME/../bin/javac $prog" "" "" $timeout]
 
     # Extract the compiler output from the status list
     set output [lindex $status 1]

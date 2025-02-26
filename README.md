@@ -36,7 +36,7 @@ only developing with sbcl for now.
 Be sure to point it at your Java 8 directory.  On
 my Fedora Linux system that looks like:
 ```
-$ export JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.432.b06-3.fc40.x86_64
+$ export JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.432.b06-3.fc40.x86_64/jre
 ```
 
 You can provide additional classpath elements through the

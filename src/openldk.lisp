@@ -98,7 +98,7 @@
   stack-vars)
 
 (defun %compile-method (class-name method-index)
-  (let* ((class (gethash class-name *classes*))
+  (let* ((class (%get-ldk-class-by-bin-name class-name))
          (method (aref (slot-value class 'methods) (1- method-index))))
     (when (gethash "Code" (slot-value method 'attributes)) ; otherwise it is abstract
       (let* ((parameter-hints (gen-parameter-hints (descriptor method)))
@@ -108,7 +108,7 @@
              (length (length code))
              (*context* (make-instance '<context>
                                        :class class
-                                       :classes *classes*
+                                       :classes *ldk-classes-by-bin-name*
                                        :exception-table exception-table
                                        :bytecode code
                                        :insn-size (make-array (length code) :element-type 'fixnum :initial-element -1)
@@ -235,11 +235,11 @@
           (%eval definition-code))))))
 
 (defun %clinit (class)
-  (let ((class (gethash (name class) *classes*)))
+  (let ((class (gethash (name class) *ldk-classes-by-bin-name*)))
     (assert
      (or class (error "Can't find ~A" class)))
     (labels ((clinit (class)
-               (let ((super-class (gethash (slot-value class 'super) *classes*)))
+               (let ((super-class (gethash (slot-value class 'super) *ldk-classes-by-bin-name*)))
                  (when (and super-class
                             (not (initialized-p super-class)))
                    (clinit super-class)))
@@ -339,9 +339,10 @@
 
 (defun classload (classname)
   (let ((classname (coerce classname 'string)))
+    (assert (not (find #\. classname)))
     (assert (> (length classname) 0))
-    (let ((class (gethash classname *classes*))
-          (internal-classname (intern (substitute #\/ #\. classname) :openldk)))
+    (let ((class (gethash classname *ldk-classes-by-bin-name*))
+          (classname-symbol (intern classname :openldk)))
       (if class
           class
           (let ((classfile-stream (open-java-classfile-on-classpath classname)))
@@ -351,22 +352,27 @@
                 (unwind-protect
                      (let* ((class
                               (let ((c (read-classfile classfile-stream)))
-                                (setf (gethash (substitute #\/ #\. classname) *classes*) c)
+                                (setf (gethash classname *ldk-classes-by-bin-name*) c)
+                                (setf (gethash (substitute #\. #\/ classname) *ldk-classes-by-fq-name*) c)
                                 c))
                             (super (let ((super (slot-value class 'super)))
                                      (when super (classload super))))
                             (interfaces (let ((interfaces (slot-value class 'interfaces)))
                                           (when interfaces
                                             (mapcar (lambda (i) (classload i)) (coerce interfaces 'list))))))
-                       (let ((klass (make-instance '|java/lang/Class|))
-                             (cname (make-instance '|java/lang/String|))
-                             (cloader nil)) ;; (make-instance '|java/lang/ClassLoader|)))
-                         (with-slots (|name| |classLoader|) klass
-                           (setf (slot-value cname '|value|) (substitute #\/ #\. classname))
-                           (setf |name| cname)
-                           (setf |classLoader| cloader))
+                       (let ((klass (or (%get-java-class-by-bin-name classname t)
+                                        (let ((klass (make-instance '|java/lang/Class|))
+                                              (cname (make-instance '|java/lang/String|))
+                                              (cloader nil)) ;; (make-instance '|java/lang/ClassLoader|)))
+                                          (with-slots (|name| |classLoader|) klass
+                                            (setf (slot-value cname '|value|) (substitute #\. #\/ classname))
+                                            (setf |name| cname)
+                                            (setf |classLoader| cloader))
+                                          klass))))
                          (setf (java-class class) klass)
-                         (setf (gethash (substitute #\/ #\. classname) *java-classes*) klass))
+                         (setf (gethash classname *java-classes-by-bin-name*) klass)
+                         (setf (gethash (substitute #\. #\/ classname) *java-classes-by-fq-name*) klass))
+
                        (let ((code (emit-<class> class)))
                          (%eval code))
 
@@ -378,14 +384,14 @@
                                             (loop for k in (reverse (closer-mop:class-precedence-list lisp-class))
                                                   for clinit-function = (intern (format nil "~a.<clinit>()" (class-name k)) :openldk)
                                                   when (fboundp clinit-function)
-                                                    collect (let ((ldkclass (gethash (format nil "~A" (class-name k)) *classes*)))
+                                                    collect (let ((ldkclass (gethash (format nil "~A" (class-name k)) *ldk-classes-by-bin-name*)))
                                                               (list 'unless (list 'initialized-p ldkclass)
                                                                     (list 'setf (list 'initialized-p ldkclass) t)
                                                                     (list clinit-function)))))))
                            (%eval icc)))
 
                        (when (and (not (string= classname "java/lang/Throwable"))
-                                  (subtypep (find-class internal-classname) (find-class '|java/lang/Throwable|)))
+                                  (subtypep classname-symbol (find-class '|java/lang/Throwable|)))
                          (let ((condition-symbol (intern (format nil "condition-~A" classname) :openldk)))
                            (setf (gethash (find-class (intern classname :openldk)) *condition-table*) condition-symbol)
                            (let ((ccode `(define-condition ,condition-symbol ( ,(intern (format nil "condition-~A" (slot-value super 'name)) :openldk))
@@ -405,6 +411,16 @@
                   (close classfile-stream))
                 nil))))))
 
+(defun ensure-JAVA_HOME ()
+  (let ((JAVA_HOME (uiop:getenv "JAVA_HOME")))
+    (unless JAVA_HOME
+      (format *error-output* "~%OpenLDK Error: JAVA_HOME environment variable not set~%")
+      (uiop:quit 1))
+
+    (unless (uiop:file-exists-p (concatenate 'string JAVA_HOME "/lib/rt.jar"))
+      (format *error-output* "~%OpenLDK Error: Cannot find $JAVA_HOME/lib/rt.jar~%")
+      (uiop:quit 1))))
+
 @cli:command
 (defun main (mainclass &optional (args (list)) &key dump-dir classpath)
   (declare
@@ -422,6 +438,8 @@
 
    DUMP-DIR: The directory into which internal debug info is dumped."
 
+  (ensure-JAVA_HOME)
+
   ;; If classpath isn't set on the command line, then get it
   ;; from the LDK_CLASSPATH environment variable.
   (unless classpath
@@ -434,7 +452,7 @@
                                        (directory
                                         (concatenate 'string
                                                      (uiop:getenv "JAVA_HOME")
-                                                     "/jre/lib/*.jar")))))))
+                                                     "/lib/*.jar")))))))
 
   (let ((LDK_DEBUG (uiop:getenv "LDK_DEBUG")))
     (when LDK_DEBUG
@@ -483,7 +501,7 @@
                (let ((main-symbol (intern (format nil "~A.main([Ljava/lang/String;)" (name class)) :openldk)))
                  (if (fboundp main-symbol)
                      main-symbol
-                     (find-main (gethash (super class) *classes*))))))
+                     (find-main (gethash (super class) *ldk-classes-by-bin-name*))))))
       (let ((main-symbol (find-main class)))
         (if main-symbol
             (%eval (list main-symbol argv))
@@ -498,6 +516,8 @@
 
 (defun make-image ()
 
+  (ensure-JAVA_HOME)
+
   (let ((classpath
           (concatenate 'string
                        (uiop:getenv "LDK_CLASSPATH")
@@ -507,7 +527,7 @@
                                        (directory
                                         (concatenate 'string
                                                      (uiop:getenv "JAVA_HOME")
-                                                     "/jre/lib/*.jar")))))))
+                                                     "/lib/*.jar")))))))
 
     (setf *classpath*
           (loop for cpe in (split-sequence:split-sequence (uiop:inter-directory-separator) classpath)
@@ -523,15 +543,17 @@
   (%clinit (classload "java/lang/Class"))
   (%clinit (classload "java/lang/ClassLoader"))
 
-
   (handler-case
 
       (let ((boot-class-loader (make-instance '|java/lang/ClassLoader|)))
 
-        (dolist (p '("byte" "char" "int" "short" "long" "double" "float" "boolean" "void"))
+        (dolist (p '(("byte" . "B") ("char" . "C") ("int" . "I")
+                     ("short" . "S") ("long" . "J") ("double" . "D")
+                     ("float" . "F") ("boolean" . "Z") ("void" . "Z")))
           (let ((class (make-instance '|java/lang/Class|)))
-            (setf (slot-value class '|name|) (ijstring p))
-            (setf (gethash p *java-classes*) class)))
+            (setf (slot-value class '|name|) (ijstring (car p)))
+            (setf (gethash (car p) *java-classes-by-fq-name*) class)
+            (setf (gethash (cdr p) *java-classes-by-bin-name*) class)))
 
         ;; Preload some important classes.
         (dolist (c '("java/lang/Boolean"

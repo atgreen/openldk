@@ -45,7 +45,7 @@
   t)
 
 (defun dump-classes ()
-	(dump-hashtable *classes*))
+	(dump-hashtable *ldk-classes-by-bin-name*))
 
 (defun dump-method-dot (blocks)
   (handler-case
@@ -71,7 +71,7 @@
       )))
 
 (defun dump (id obj)
-  "Dump OBJ, *CONTEXT* and *CLASSES* to disk in *DUMP-DIR*/[current-class]/ID."
+  "Dump OBJ, *CONTEXT* and *LDK-CLASSES-BY-BIN-NAME* to disk in *DUMP-DIR*/[current-class]/ID."
   (when *dump-dir*
     (let ((class-name (slot-value (slot-value *context* 'class) 'name))
           (fn-name (slot-value *context* 'fn-name)))
@@ -84,13 +84,13 @@
                (pathname (pathname-utils:parse-native-namestring namestring)))
           (uiop:ensure-all-directories-exist
            (list (pathname-utils:parent pathname)))
-          (cl-store:store (list obj *context* *classes*) pathname))))))
+          (cl-store:store (list obj *context* *ldk-classes-by-bin-name*) pathname))))))
 
 (defun restore (filename)
   "Restore an object from the given file, as well as *CONTEXT* and
-*CLASSES* at the time of dump."
+*LDK-CLASSES-BY-BIN-NAME* at the time of dump."
   (let ((v (cl-store:restore
             (pathname-utils:parse-native-namestring filename))))
     (setf *context* (cadr v))
-    (setf *classes* (caddr v))
+    (setf *ldk-classes-by-bin-name* (caddr v))
     (car v)))

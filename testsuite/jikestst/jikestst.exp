@@ -35,7 +35,7 @@ proc openldk-dg-test { prog do_what extra_tool_flags } {
 
     # Run the javac command
     set JAVA_HOME [getenv "JAVA_HOME"]
-    set status [local_exec "$JAVA_HOME/bin/javac $prog" "" "" $timeout]
+    set status [local_exec "$JAVA_HOME/../bin/javac $prog" "" "" $timeout]
     set classname [string map {".java" ""} $prog]
 
     set testargs "1 2 3 4 5"
@@ -50,7 +50,7 @@ proc run_test { test_file expected_output } {
     # Compile the test file
     # Run the javac command
     set JAVA_HOME [getenv "JAVA_HOME"]
-    set compile_result [local_exec "$JAVA_HOME/bin/javac -cp jikestst/hpj/src Test.java" "" "" 10]
+    set compile_result [local_exec "$JAVA_HOME/../bin/javac -cp jikestst/hpj/src Test.java" "" "" 10]
     if { [lindex $compile_result 0] != 0 } {
         return [list "fail" "Compilation failed"]
     }

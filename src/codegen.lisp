@@ -356,7 +356,7 @@
                             (error "unimplemented")))))
 
 (defun %find-declaring-class (class method-name)
-  (let* ((ldk-class (gethash class *classes*))
+  (let* ((ldk-class (%get-ldk-class-by-bin-name class))
          (method (find method-name (methods ldk-class)
                        :test (lambda (method-name method)
                                (string= method-name
@@ -516,7 +516,7 @@
   (let ((classname (slot-value (slot-value insn 'class) 'name)))
     (let ((expr (make-instance '<expression>
                                :insn insn
-                               :code (java-class (gethash classname *classes*))
+                               :code (java-class (%get-ldk-class-by-bin-name classname))
                                :expression-type :REFERENCE)))
       expr)))
 

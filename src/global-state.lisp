@@ -38,8 +38,21 @@
 (in-package :openldk)
 
 (defvar *classpath* nil)
-(defvar *classes* (make-hash-table :test #'equal))
-(defvar *java-classes* (make-hash-table :test #'equal))
+
+;; BIN-NAME is the binary name of a class.  eg: java/lang/String
+;; FQ-NAME is the fully qualified name of a class. eg: java.lang.String
+
+;; These two tables only contain entries for classes that have been
+;; loaded.
+(defvar *ldk-classes-by-bin-name* (make-hash-table :test #'equal))
+(defvar *ldk-classes-by-fq-name* (make-hash-table :test #'equal))
+
+;; These two tables contain java.lang.Class objects, some of which may
+;; not have been loaded yet.  We will populate them when they are
+;; loaded.
+(defvar *java-classes-by-bin-name* (make-hash-table :test #'equal))
+(defvar *java-classes-by-fq-name* (make-hash-table :test #'equal))
+
 (defvar *context* nil)
 (defvar *condition-table* (make-hash-table))
 
@@ -54,3 +67,31 @@
 (defvar *debug-trace-args* nil)
 (defvar *debug-x* nil)
 (defvar *debug-unmuffle* nil)
+
+(defun %get-java-class-by-bin-name (bin-name &optional fail-ok)
+  (assert (stringp bin-name))
+  (assert (not (find #\. bin-name)))
+  (unless fail-ok
+    (assert (gethash bin-name *java-classes-by-bin-name*)))
+  (gethash bin-name *java-classes-by-bin-name*))
+
+(defun %get-java-class-by-fq-name (fq-name &optional fail-ok)
+  (assert (stringp fq-name))
+  (assert (not (find #\. fq-name)))
+  (unless fail-ok
+    (assert (gethash fq-name *java-classes-by-fq-name*)))
+  (gethash fq-name *java-classes-by-fq-name*))
+
+(defun %get-ldk-class-by-bin-name (bin-name &optional fail-ok)
+  (assert (stringp bin-name))
+  (assert (not (find #\. bin-name)))
+  (unless fail-ok
+    (assert (gethash bin-name *ldk-classes-by-bin-name*)))
+  (gethash bin-name *ldk-classes-by-bin-name*))
+
+(defun %get-ldk-class-by-fq-name (fq-name &optional fail-ok)
+  (assert (stringp fq-name))
+  (assert (not (find #\/ fq-name)))
+  (unless fail-ok
+    (assert (gethash fq-name *ldk-classes-by-fq-name*)))
+  (gethash fq-name *ldk-classes-by-fq-name*))
