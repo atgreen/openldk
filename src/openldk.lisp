@@ -512,7 +512,10 @@
   (handler-case
       (main-command)
     (cli:wrong-number-of-args (e)
-      (format t "~A~%" e))))
+      (format t "~A~%" e))
+    (error (e)
+      (format *error-output* "~&~A~%" e)
+      (uiop:quit 1))))
 
 (defun make-image ()
 
