@@ -58,7 +58,7 @@ proc openldk-dg-test { prog do_what extra_tool_flags } {
 
     set testargs [string map {"/" "."} [string map {"mauve/" ""} $classname]]
 
-    return [list [lindex $status 1] "$classname.class"]
+    return [list "" "$classname.class"]
 }
 
 # Use find to locate all .java files under the specified directory
