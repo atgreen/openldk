@@ -905,3 +905,36 @@ user.variant
 (defun |java/awt/image/ColorModel.initIDs()| ()
   ;; FIXME
   )
+
+(defun |java/net/InetAddressImplFactory.isIPv6Supported()| ()
+  0)
+
+(defun |java/awt/image/IndexColorModel.initIDs()| ()
+  ;; FIXME
+  )
+
+(defun |java/awt/image/Raster.initIDs()| ()
+  ;; FIXME
+  )
+
+(defun |java/awt/image/SampleModel.initIDs()| ()
+  ;; FIXME
+  )
+
+(defun |java/util/zip/Deflater.initIDs()| ()
+  ;; FIXME
+  )
+
+(defun |java/util/zip/Inflater.initIDs()| ()
+  ;; FIXME
+  )
+
+(defun |java/security/SystemConfigurator.getSystemFIPSEnabled()| ( )
+  0)
+
+(defun |java/lang/Package.getSystemPackage0(Ljava/lang/String;)| (name)
+  (gethash (lstring name) *packages*))
+
+(defun |java/util/zip/Inflater.init(Z)| (v)
+  ;; FIXME
+  )
