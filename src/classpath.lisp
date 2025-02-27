@@ -57,6 +57,12 @@
     (let ((ze (gethash (format nil "~A.class" classname) zipfile-entries)))
       (when ze
         (let ((result (flexi-streams:make-in-memory-input-stream (zip:zipfile-entry-contents ze))))
+          ;; Add this package to the *PACKAGE* hashtable.
+          (let ((last-slash-position (position #\/ classname :from-end t)))
+            (if last-slash-position
+                (let ((package-name (subseq classname 0 (1+ last-slash-position))))
+                  (unless (gethash package-name *packages*)
+                    (setf (gethash package-name *packages*) (jstring jarfile))))))
           result)))))
 
 (defmethod open-java-classfile ((cpe dir-classpath-entry) classname)
@@ -65,4 +71,10 @@
     (let ((fqn (format nil "~A~A~A.class" dir (uiop:directory-separator-for-host) classname)))
       (when (uiop:file-exists-p fqn)
         (let ((result (open fqn :direction :input :element-type '(unsigned-byte 8))))
+          ;; Add this package to the *PACKAGE* hashtable.
+          (let ((last-slash-position (position #\/ classname :from-end t)))
+            (if last-slash-position
+                (let ((package-name (subseq classname 0 (1+ last-slash-position))))
+                  (unless (gethash package-name *packages*)
+                    (setf (gethash package-name *packages*) (jstring fqn))))))
           result)))))

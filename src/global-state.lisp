@@ -53,6 +53,8 @@
 (defvar *java-classes-by-bin-name* (make-hash-table :test #'equal))
 (defvar *java-classes-by-fq-name* (make-hash-table :test #'equal))
 
+(defvar *packages* (make-hash-table :test #'equal))
+
 (defvar *context* nil)
 (defvar *condition-table* (make-hash-table))
 
