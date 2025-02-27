@@ -45,11 +45,13 @@
 (defun jstring (value)
   (let ((s (make-instance '|java/lang/String|)))
     (setf (slot-value s '|value|) value)
+    (setf (slot-value s '|hash|) 0)
     s))
 
 (defun ijstring (value)
   (let ((s (make-instance '|java/lang/String|)))
     (setf (slot-value s '|value|) value)
+    (setf (slot-value s '|hash|) 0)
     (|intern()| s)))
 
 (defmethod |intern()| ((str |java/lang/String|))

@@ -350,6 +350,7 @@
               (format t "~&; LOADING ~A~%" classname))
             (if classfile-stream
                 (unwind-protect
+
                      (let* ((class
                               (let ((c (read-classfile classfile-stream)))
                                 (setf (gethash classname *ldk-classes-by-bin-name*) c)
@@ -362,10 +363,9 @@
                                             (mapcar (lambda (i) (classload i)) (coerce interfaces 'list))))))
                        (let ((klass (or (%get-java-class-by-bin-name classname t)
                                         (let ((klass (make-instance '|java/lang/Class|))
-                                              (cname (make-instance '|java/lang/String|))
+                                              (cname (jstring (substitute #\. #\/ classname)))
                                               (cloader nil)) ;; (make-instance '|java/lang/ClassLoader|)))
                                           (with-slots (|name| |classLoader|) klass
-                                            (setf (slot-value cname '|value|) (substitute #\. #\/ classname))
                                             (setf |name| cname)
                                             (setf |classLoader| cloader))
                                           klass))))
@@ -491,8 +491,7 @@
          (argv (make-array (length args))))
     (assert (or class (error "Can't load ~A" mainclass)))
     (dotimes (i (length args))
-      (let ((arg (make-instance '|java/lang/String|)))
-        (setf (slot-value arg '|value|) (nth i args))
+      (let ((arg (jstring (nth i args))))
         (setf (aref argv i) arg)))
     (%clinit class)
 
@@ -508,15 +507,23 @@
             (error "Main method not found in class ~A." (name class)))))))
 
 (defun main-wrapper ()
-  "Main entry point into OpenLDK.  Process command line errors here."
-  (handler-case
-      (main-command)
-    (cli:wrong-number-of-args (e)
-      (format t "~A~%" e))
-    (error (e)
-      (format *error-output* "~&~A~%" e)
-      (uiop:quit 1))))
+  "Main entry point into OpenLDK. Process command line errors here."
+  (let ((backtrace nil))
+    (handler-bind ((error (lambda (e)
+                            (setf backtrace (with-output-to-string (s)
+                                              (sb-debug:print-backtrace :stream s :count 100))))))
+      (handler-case
+          (main-command)
+        (cli:wrong-number-of-args (e)
+          (format t "~A~%" e))))))
 
+#|
+        (error (e)
+          (format *error-output* "~&~A~%" e)
+          (when backtrace
+            (format *error-output* "~&Backtrace:~%~A~%" backtrace))
+          (uiop:quit 1))))))
+|#
 (defun make-image ()
 
   (ensure-JAVA_HOME)
