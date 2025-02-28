@@ -19,6 +19,12 @@ public class openldkHarness extends gnu.testlet.TestHarness
 
     private String last_check;
 
+    public openldkHarness(Testlet t, boolean verbose)
+    {
+        this.verbose = verbose;
+        className = t.getClass().getName();
+    }
+
     public void check(boolean result)
     {
         String message = (result ? "PASS" : "FAIL") + ": " + className
@@ -116,6 +122,6 @@ public class openldkHarness extends gnu.testlet.TestHarness
     public static void main(String[] args) throws Exception {
         Class<?> clazz = Class.forName(args[0]);
         Testlet t = (Testlet) clazz.newInstance();
-        t.test(new openldkHarness());
+        t.test(new openldkHarness(t, false));
     }
 }
