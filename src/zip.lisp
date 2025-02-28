@@ -56,6 +56,10 @@
 (defclass |java/util/jar/JarFile| ()
   ())
 
+(defclass |java/util/jar/JarInputStream| ()
+  ())
+
+
 (defun |java/util/zip/ZipFile.<clinit>()| ()
   )
 
@@ -87,6 +91,13 @@
           (push (jstring name) meta-entries)))
       (coerce meta-entries 'vector))))
 
+(defmethod |<init>(Ljava/io/InputStream;Z)| ((this |java/util/jar/JarInputStream|) is verify)
+  (with-slots (|in|) this
+    (setf |in| (zip::open-zipfile-from-stream (make-instance '<java-input-stream> :java-stream is)))))
+
+(defmethod |close()| ((this |java/util/jar/JarInputStream|))
+  (zip:close-zipfile (slot-value this '|in|)))
+
 (defclass/std <zip-input-stream> (|java/io/InputStream|)
   ((zip-file)
    (entry)
@@ -112,3 +123,36 @@
 (defmethod |close()| ((this |java/util/zip/ZipFile|))
   (with-slots (|name| |jzfile|) this
     (zip:close-zipfile |jzfile|)))
+
+(defclass/std <buffer-input-stream> (|java/io/InputStream|)
+  ((buf)
+   (pos :std 0)))
+
+(defmethod |read()| ((bis <buffer-input-stream>))
+  (with-slots (pos buf) bis
+    (if (eq pos (length buf))
+        -1
+        (let ((byte (aref buf pos)))
+          (incf (slot-value bis 'pos))
+          byte))))
+
+(defmethod |readBytes([BII)| ((bis <buffer-input-stream>) byte-array offset length)
+  (let ((buf (slot-value bis 'buf))
+        (bytes-read 0))
+    (with-slots (pos) bis
+      (loop for i from offset below (+ offset length)
+            for byte = (aref buf pos)
+            do (progn
+                 (incf pos)
+                 (incf bytes-read)
+                 (setf (aref byte-array (+ offset pos)) byte)))
+      bytes-read)))
+
+(defmethod |getManifest()| ((this |java/util/jar/JarInputStream|))
+  (classload "java/util/jar/Manifest")
+  (let ((buffer (zip:zipfile-entry-contents (zip:get-zipfile-entry "META-INF/MANIFEST.MF"
+                                                                   (slot-value this '|in|))))
+        (manifest (make-instance '|java/util/jar/Manifest|)))
+    (|<init>()| manifest)
+    (setf (slot-value this '|man|) manifest)
+    (|read(Ljava/io/InputStream;)| manifest (make-instance '<buffer-input-stream> :buf buffer))))

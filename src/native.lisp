@@ -678,6 +678,18 @@ user.variant
         (|<init>(Ljava/lang/String;)| fnf filename)
         (error (%lisp-condition fnf))))))
 
+(defmethod |skip0(J)| ((fis |java/io/FileInputStream|) n)
+  (let ((in-stream (slot-value fis '|fd|))
+        (bytes-read 0))
+    (format t "SKIP0 ~A ~A~%" fis n)
+    (when (eq n :END)
+      (setf n 999999999999))
+    (loop for i from 0 below n
+          for byte = (read-byte in-stream nil nil) ; Read a byte, return NIL on EOF
+          while byte
+          do (incf bytes-read))  ; Count bytes read
+    bytes-read))
+
 (defmethod |readBytes([BII)| ((fis |java/io/FileInputStream|) byte-array offset length)
   (let ((in-stream (slot-value fis '|fd|))
         (bytes-read 0))
@@ -938,3 +950,9 @@ user.variant
 (defun |java/util/zip/Inflater.init(Z)| (v)
   ;; FIXME
   )
+
+(defun |java/lang/Thread.holdsLock(Ljava/lang/Object;)| (objref)
+  (let ((monitor (%get-monitor objref))
+        (current-thread (bordeaux-threads:current-thread)))
+    (if (eq (owner monitor) current-thread)
+        1 0)))

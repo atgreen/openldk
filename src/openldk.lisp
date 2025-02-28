@@ -304,7 +304,7 @@
         (methods-code
           (let ((method-index 0)
                 (done-method-table (make-hash-table :test #'equal)))
-            (if (string= (name class) "java/util/zip/ZipFile") ;; OpenLDK provides its own ZipFile implementation
+            (if (find (name class) '("java/util/jar/JarInputStream" "java/util/zip/ZipFile" "java/util/zip/ZipInputStream") :test #'equal)
                 nil
                 (with-slots (name super methods) class
                   (remove nil (map 'list
@@ -515,15 +515,13 @@
       (handler-case
           (main-command)
         (cli:wrong-number-of-args (e)
-          (format t "~A~%" e))))))
-
-#|
+          (format t "~A~%" e))
         (error (e)
           (format *error-output* "~&~A~%" e)
           (when backtrace
             (format *error-output* "~&Backtrace:~%~A~%" backtrace))
           (uiop:quit 1))))))
-|#
+
 (defun make-image ()
 
   (ensure-JAVA_HOME)

@@ -61,6 +61,7 @@
 							 (:file "src/descriptors")
 							 (:file "src/classfile")
 							 (:file "src/native")
+               (:file "src/streams")
                (:file "src/zip")
                (:file "src/reflection")
 							 (:file "src/openldk"))
@@ -72,7 +73,8 @@
                :zip :str :defclass-std :fast-io :bitio :pathname-utils
                :cl-store :trivial-backtrace :fset :bordeaux-threads
                :float-features :local-time :closer-mop :slynk
-               :file-attributes :trivial-garbage :precise-time)
+               :file-attributes :trivial-garbage :precise-time
+               :trivial-gray-streams)
   :build-operation "program-op"
   :build-pathname "openldk"
   :entry-point "openldk:make-image")
