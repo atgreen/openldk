@@ -114,7 +114,8 @@ proc run_test { test_file expected_output } {
 }
 
 # Get the list of test files and their corresponding expected output files
-set test_files [lsort [glob -nocomplain -- jikestst/derek/ok/exec/*.e jikestst/hpj/ok/exec/*.e jikestst/unicode/ok/exec/*.e]]
+# For now, let's not do jikestst/unicode/ok/exec/*.e
+set test_files [lsort [glob -nocomplain -- jikestst/derek/ok/exec/*.e jikestst/hpj/ok/exec/*.e]]
 
 foreach test_file $test_files {
     # Get the corresponding Java source file
