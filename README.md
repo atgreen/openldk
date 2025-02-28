@@ -159,15 +159,14 @@ where <options> includes:
 ```
 
 Run `make check` to run through the dejagnu-based testsuite.
-As of Feb 27 2025, the results look like this
+As of Feb 28 2025, the results look like this
 ```
 		=== openldk Summary ===
 
-# of expected passes		8514
-# of unexpected failures	186
-# of unexpected successes	4
-# of expected failures		1857
-# of unresolved testcases	13
+# of expected passes	    8713
+# of unexpected failures	13
+# of expected failures		1839
+# of unresolved testcases	12
 ```
 
 ### Debugging
