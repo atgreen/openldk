@@ -509,18 +509,12 @@
 (defun main-wrapper ()
   "Main entry point into OpenLDK. Process command line errors here."
   (let ((backtrace nil))
-    (handler-bind ((error (lambda (e)
-                            (setf backtrace (with-output-to-string (s)
-                                              (sb-debug:print-backtrace :stream s :count 100))))))
-      (handler-case
-          (main-command)
-        (cli:wrong-number-of-args (e)
-          (format t "~A~%" e))
-        (error (e)
-          (format *error-output* "~&~A~%" e)
-          (when backtrace
-            (format *error-output* "~&Backtrace:~%~A~%" backtrace))
-          (uiop:quit 1))))))
+    (handler-bind ((error
+                     (lambda (condition)
+                       (format *error-output* "~&*** Caught ERROR: ~A~%" condition)
+                       #+sbcl (sb-debug:backtrace)
+                       (uiop:quit 1))))
+      (main-command))))
 
 (defun make-image ()
 
