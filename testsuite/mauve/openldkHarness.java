@@ -16,6 +16,7 @@ public class openldkHarness extends gnu.testlet.TestHarness
     private int count;
     private String className;
     private boolean verbose = false;
+    private int exit_code = 0;
 
     private String last_check;
 
@@ -31,6 +32,8 @@ public class openldkHarness extends gnu.testlet.TestHarness
             + ((last_check == null) ? "" : (": " + last_check))
             + " (number " + count++ + ")";
         System.out.println(message);
+        if (! result)
+            exit_code = 1;
     }
 
     public Reader getResourceReader(String name) throws ResourceNotFoundException
@@ -123,5 +126,6 @@ public class openldkHarness extends gnu.testlet.TestHarness
         Class<?> clazz = Class.forName(args[0]);
         Testlet t = (Testlet) clazz.newInstance();
         t.test(new openldkHarness(t, false));
+        System.exit(exit_code);
     }
 }
