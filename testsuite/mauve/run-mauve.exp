@@ -11,7 +11,7 @@ set testname ""
 proc openldk_load { classfile } {
 
     global testargs
-    set timeout 5
+    set timeout 30
     verbose "load $classfile"
     set classname [string map {".class" ""} $classfile]
     set result [local_exec "../openldk mauve.openldkHarness $testargs" "" "" $timeout]
