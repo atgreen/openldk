@@ -917,12 +917,20 @@
                    :code (list 'when (list 'not (list 'null (code (codegen value context))))
                                (list 'go (intern (format nil "branch-target-~A" offset)))))))
 
+(defun %instanceof-array (objref typename)
+  ;; FIXME - this isn't following any of the array instanceof rules
+  (arrayp objref))
+
 (defmethod codegen ((insn ir-instanceof) context)
   (with-slots (class objref) insn
     (make-instance '<expression>
                    :insn insn
-                   :code (list 'if (list 'typep (code (codegen objref context))
-                                         (list 'quote (intern (name (slot-value (slot-value insn 'class) 'class)) :openldk))) 1 0)
+                   :code (let ((cname (name (slot-value (slot-value insn 'class) 'class))))
+                           (if (eq (char cname 0) #\[)
+                               `(%instanceof-array ,(code (codegen objref context)) ,cname)
+                               `(if (typep ,(code (codegen objref context))
+                                           (quote ,(intern cname :openldk)))
+                                    1 0)))
                    :expression-type :INTEGER)))
 
 (defun logical-shift-right-32 (integer shift)
