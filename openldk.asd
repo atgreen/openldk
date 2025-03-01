@@ -36,6 +36,8 @@
 ;;; to do so, delete this exception statement from your version.
 
 (declaim (optimize (speed 0) (space 0) (debug 3)))
+
+#+sbcl
 (sb-ext:restrict-compiler-policy 'debug 3)
 
 (asdf:defsystem #:openldk
