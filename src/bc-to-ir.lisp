@@ -972,7 +972,7 @@
 
 (defmethod print-object ((sv <stack-variable>) out)
   (print-unreadable-object (sv out :type t)
-    (format out "s{~{~A~^,~}}[~A]" (sort (slot-value sv 'var-numbers) #'<) (slot-value sv 'var-type))))
+    (format out "s{~{~A~^,~}}[~A]" (sort (copy-list (slot-value sv 'var-numbers)) #'<) (slot-value sv 'var-type))))
 
 (defun make-stack-variable (context pc-start type)
   (let ((var (make-instance '<stack-variable>

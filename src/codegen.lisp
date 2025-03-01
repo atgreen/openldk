@@ -1242,10 +1242,9 @@
 
 (defmethod codegen ((insn <stack-variable>) context)
   (declare (ignore context))
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (intern (format nil "s{~{~A~^,~}}" (sort (slot-value insn 'var-numbers) #'<)) :openldk))))
-    expr))
+  (make-instance '<expression>
+                 :insn insn
+                 :code (intern (format nil "s{~{~A~^,~}}" (sort (copy-list (slot-value insn 'var-numbers)) #'<)) :openldk)))
 
 (defmethod codegen-block ((basic-block <basic-block>) dominator-block)
   "Generate Lisp code for a basic block, handling exception scopes and control flow."

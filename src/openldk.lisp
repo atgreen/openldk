@@ -69,6 +69,7 @@
     exception-handler-table))
 
 (defun fix-stack-variables (stack-vars)
+
   (let ((groups (make-hash-table :test 'equal)))
     ;; Step 1: Group stack-variables by their var-numbers
     (dolist (stack-var stack-vars)
@@ -213,7 +214,7 @@
                                                                (append (list (list '|condition-cache|))
                                                                        (remove-duplicates
                                                                         (loop for var in (stack-variables *context*)
-                                                                              collect (list (intern (format nil "s{~{~A~^,~}}" (sort (var-numbers var) #'<)) :openldk)))
+                                                                              collect (list (intern (format nil "s{~{~A~^,~}}" (sort (copy-list (var-numbers var)) #'<)) :openldk)))
                                                                         :test #'equal)
                                                                        (loop for ph in parameter-hints
                                                                              collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" (incf pc)) :openldk))
@@ -223,7 +224,7 @@
                                                                (append (list (list '|condition-cache|))
                                                                        (remove-duplicates
                                                                         (loop for var in (stack-variables *context*)
-                                                                              collect (list (intern (format nil "s{~{~A~^,~}}" (sort (var-numbers var) #'<)) :openldk)))
+                                                                              collect (list (intern (format nil "s{~{~A~^,~}}" (sort (copy-list (var-numbers var)) #'<)) :openldk)))
                                                                         :test #'equal)
                                                                        (append (list (list (intern "local-0" :openldk) (intern "this" :openldk)))
                                                                                (loop for ph in parameter-hints
@@ -288,7 +289,7 @@
                            (if (or super interfaces) (append (if super (list (intern super :openldk)) nil)
                                                              (let ((ifaces (mapcar (lambda (i) (intern i :openldk))
                                                                                    (coerce interfaces  'list))))
-                                                               (sort ifaces #'subtypep)))
+                                                               (sort (copy-list ifaces) #'subtypep)))
                                (list))
                            (map 'list
                                 (lambda (f)
