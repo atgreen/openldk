@@ -205,7 +205,7 @@
                   (incf index)
                   (loop until (not (member (char descriptor index) '(#\I #\J #\S #\B #\C #\D #\F #\Z #\[)))
                         do (incf index))
-                  (when (char= (char descriptor index) #\L)
+                  (when (and (< index (length descriptor)) (char= (char descriptor index) #\L))
                     (setf index (position #\; descriptor :start index)))
                   ;; FIXME!
                   (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/util/Arrays") nil nil nil) param-list)
