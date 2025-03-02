@@ -33,6 +33,12 @@ jobs:
           distribution: 'temurin'
           java-version: '8'
 
+      - name: Show JAVA_HOME
+        run: |
+          set -x
+          find $JAVA_HOME -type f
+          ls -l $JAVA_HOME
+
       - name: Setup SBCL and ocicl
         run: |
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
@@ -46,8 +52,6 @@ jobs:
 
       - name: Build
         run: |
-          echo find $JAVA_HOME -type f
-          find $JAVA_HOME -type f
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           make
 
