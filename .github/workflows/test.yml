@@ -54,4 +54,4 @@ jobs:
         run: |
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           export JAVA_HOME=/usr/lib/jvm/temurin-8-jdk-amd64/jre
-          make check RUNTESTFLAGS="run.exp gcj.exp jikestst.exp"
+          make check RUNTESTFLAGS="-v run.exp gcj.exp jikestst.exp"
