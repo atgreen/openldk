@@ -46,11 +46,12 @@ jobs:
 
       - name: Build
         run: |
+          echo find $JAVA_HOME -type f
+          find $JAVA_HOME -type f
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           make
 
       - name: Test
         run: |
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-          find $JAVA_HOME -type f
           make check RUNTESTFLAGS=run.exp
