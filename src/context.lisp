@@ -65,6 +65,8 @@
     :std (make-hash-table)
     :doc "A tabled keyed on addresses, where if the value is T, then this is the end of a TRY region.")
    (stack-variables)
+   (single-assignment-table
+    :std (make-hash-table :test #'equal))
    (pc :std 0)
    (stack :std (list (make-instance '<stack-bottom-marker>)))))
 

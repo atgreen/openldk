@@ -98,6 +98,22 @@
 
   stack-vars)
 
+(defun propagate-copies (ir-code single-assignment-table)
+  ;; Scan through the code, looking for assignments to stack variables
+  ;; with single assignments.  Remove those assignments.
+  (mapcar (lambda (insn)
+            (if (and (typep insn 'ir-assign)
+                     (let ((lvalue (slot-value insn 'lvalue))
+                           (rvalue (slot-value insn 'rvalue)))
+                       (if (and (typep lvalue '<stack-variable>)
+                                (eq (length (slot-value lvalue 'var-numbers)) 1)
+                                (not (side-effect-p rvalue)))
+                           (setf (gethash lvalue single-assignment-table) (slot-value insn 'rvalue))
+                           nil)))
+                (make-instance 'ir-nop :address (address insn))
+                insn))
+          ir-code))
+
 (defun %compile-method (class-name method-index)
   (let* ((class (%get-ldk-class-by-bin-name class-name))
          (method (aref (slot-value class 'methods) (1- method-index))))
@@ -165,7 +181,7 @@
                                       (reduce #'merge-stacks v)))
                                   (stack-state-table *context*))
                          (fix-stack-variables (stack-variables *context*))
-                         code)))
+                         (propagate-copies code (single-assignment-table *context*)))))
                ;; (sdfdfd (print ir-code-0))
                (blocks (build-basic-blocks ir-code-0))
                (lisp-code
@@ -214,7 +230,8 @@
                                                                (append (list (list '|condition-cache|))
                                                                        (remove-duplicates
                                                                         (loop for var in (stack-variables *context*)
-                                                                              collect (list (intern (format nil "s{~{~A~^,~}}" (sort (copy-list (var-numbers var)) #'<)) :openldk)))
+                                                                              unless (gethash var (single-assignment-table *context*))
+                                                                                collect (list (intern (format nil "s{~{~A~^,~}}" (sort (copy-list (var-numbers var)) #'<)) :openldk)))
                                                                         :test #'equal)
                                                                        (loop for ph in parameter-hints
                                                                              collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" (incf pc)) :openldk))
@@ -224,7 +241,8 @@
                                                                (append (list (list '|condition-cache|))
                                                                        (remove-duplicates
                                                                         (loop for var in (stack-variables *context*)
-                                                                              collect (list (intern (format nil "s{~{~A~^,~}}" (sort (copy-list (var-numbers var)) #'<)) :openldk)))
+                                                                              unless (gethash var (single-assignment-table *context*))
+                                                                                collect (list (intern (format nil "s{~{~A~^,~}}" (sort (copy-list (var-numbers var)) #'<)) :openldk)))
                                                                         :test #'equal)
                                                                        (append (list (list (intern "local-0" :openldk) (intern "this" :openldk)))
                                                                                (loop for ph in parameter-hints

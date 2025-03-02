@@ -1151,9 +1151,7 @@
 
 (defmethod codegen ((insn ir-nop) context)
   (declare (ignore context))
-  (make-instance '<expression>
-                 :insn insn
-                 :code (list 'quote (gensym "NOP-"))))
+  nil)
 
 (defmethod codegen ((insn ir-stop-marker) context)
   (declare (ignore context))
@@ -1233,18 +1231,13 @@
                                      *call-nesting-level* "*" ,(fn-name *context*))))
                           (return-from ,(intern (slot-value insn 'fn-name) :openldk) result))))
 
-(defmethod codegen ((insn ir-variable) context)
-  (declare (ignore context))
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (slot-value insn 'name))))
-    expr))
-
 (defmethod codegen ((insn <stack-variable>) context)
-  (declare (ignore context))
-  (make-instance '<expression>
-                 :insn insn
-                 :code (intern (format nil "s{~{~A~^,~}}" (sort (copy-list (slot-value insn 'var-numbers)) #'<)) :openldk)))
+  (let ((v (gethash insn (single-assignment-table context))))
+    (if v
+        (codegen v context)
+        (make-instance '<expression>
+                       :insn insn
+                       :code (intern (format nil "s{~{~A~^,~}}" (sort (copy-list (slot-value insn 'var-numbers)) #'<)) :openldk)))))
 
 (defmethod codegen-block ((basic-block <basic-block>) dominator-block)
   "Generate Lisp code for a basic block, handling exception scopes and control flow."
@@ -1263,7 +1256,8 @@
                              for expr = (codegen insn *context*)
                              when (typep insn 'ir-stop-marker)
                                do (setf stop-emitting-blocks? t)
-                             collect (trace-insn insn (code expr))))))
+                             when expr
+                               collect (trace-insn insn (code expr))))))
           (push basic-block (first (emitted-block-scopes *context*)))
           (pop (slot-value *context* 'blocks))
 

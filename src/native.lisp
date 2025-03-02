@@ -149,7 +149,8 @@
            (format t "~&~V@A trace: java/lang/Object.getClass(~A)" (incf *call-nesting-level* 1) "*" object))
          (cond
            ((arrayp object) (java-class (%get-array-lclass (array-element-type object))))
-           (t (java-class (%get-ldk-class-by-bin-name (format nil "~A" (type-of object)))))))
+           (t (let ((jc (%get-java-class-by-bin-name (format nil "~A" (type-of object)) t)))
+                (or jc (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (format nil "~A" (type-of object)) nil nil nil))))))
     (when *debug-trace*
       (incf *call-nesting-level* -1))))
 
@@ -344,6 +345,11 @@
              (interface-p lclass)))
       1
       0))
+
+(defmethod |getConstantPool()| ((this |java/lang/Class|))
+  (let ((ldk-class (%get-ldk-class-by-fq-name (lstring (slot-value this '|name|)))))
+    (error "unimplemented")
+    ))
 
 (defmethod |getDeclaredConstructors0(Z)| ((this |java/lang/Class|) arg)
   ;; FIXME

@@ -40,6 +40,10 @@
 (defclass/std ir-node ()
   ((address :std -1)))
 
+(defmethod side-effect-p ((node ir-node))
+  (declare (ignore node))
+  t)
+
 (defmethod print-object ((node ir-node) out)
   (print-unreadable-object (node out :type t)
     (format out "~A" (slot-value node 'address))))
@@ -75,8 +79,16 @@
   ((value)
    (type :with)))
 
+(defmethod side-effect-p ((node ir-literal))
+  (declare (ignore node))
+  nil)
+
 (defmethod emit ((v ir-literal) cp)
   (slot-value v 'value))
+
+(defmethod side-effect-p ((node ir-literal))
+  (declare (ignore node))
+  nil)
 
 (defclass/std ir-local-variable (ir-node)
   ((index)
@@ -168,6 +180,10 @@
   ((class :with)))
 (define-print-object/std ir-class)
 
+(defmethod side-effect-p ((node ir-class))
+  (declare (ignore node))
+  nil)
+
 (defclass/std ir-array-length (ir-node)
   ((arrayref)))
 
@@ -181,6 +197,10 @@
 (defclass/std ir-binop (ir-node)
   ((value1)
    (value2)))
+
+(defmethod side-effect-p ((node ir-binop))
+  (declare (ignore node))
+  nil)
 
 (defclass/std ir-iadd (ir-binop)
   ())
@@ -244,6 +264,10 @@
 
 (defclass/std ir-unop (ir-node)
   ((value)))
+
+(defmethod side-effect-p ((node ir-unop))
+  (declare (ignore node))
+  nil)
 
 (defclass/std ir-l2f (ir-unop)
   ())
@@ -498,9 +522,6 @@
 
 (defclass/std ir-throw (ir-branch)
   ((objref)))
-
-(defclass/std ir-variable (ir-node)
-  ((name)))
 
 (defclass/std ir-condition-exception (ir-node)
   ())
