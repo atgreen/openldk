@@ -52,5 +52,5 @@ jobs:
       - name: Test
         run: |
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-          export JAVA_HOME=/usr/lib/jvm/temurin-8-jdk-amd64/jre
+          find $JAVA_HOME -type f
           make check RUNTESTFLAGS=run.exp
