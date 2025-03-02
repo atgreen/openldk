@@ -33,14 +33,6 @@ jobs:
           distribution: 'temurin'
           java-version: '8'
 
-      - name: Show JAVA_HOME
-        run: |
-          set -x
-          find $JAVA_HOME -type f
-          ls -l $JAVA_HOME
-          ls -l /usr/lib/jvm/temurin-8-jdk-amd64
-          find /usr/lib/jvm/temurin-8-jdk-amd64 -type f
-
       - name: Setup SBCL and ocicl
         run: |
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
@@ -58,8 +50,8 @@ jobs:
           export JAVA_HOME=/usr/lib/jvm/temurin-8-jdk-amd64/jre
           make
 
-      - name: Test
+      - name: Partial Test
         run: |
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           export JAVA_HOME=/usr/lib/jvm/temurin-8-jdk-amd64/jre
-          make check RUNTESTFLAGS=run.exp
+          make check RUNTESTFLAGS="run.exp gcj.exp jikestst.exp"
