@@ -52,5 +52,5 @@ jobs:
       - name: Test
         run: |
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-          export LDK_CLASSPATH=/usr/lib/jvm/temurin-8-jdk-amd64/jre/lib/rt.jar
+          export JAVA_HOME=/usr/lib/jvm/temurin-8-jdk-amd64/jre
           make check RUNTESTFLAGS=run.exp
