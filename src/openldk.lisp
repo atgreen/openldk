@@ -395,6 +395,12 @@
                        (let ((code (emit-<class> class)))
                          (%eval code))
 
+                       (dolist (ic (gethash "InnerClasses" (attributes class)))
+                         (when (zerop (outer-class-info-index ic))
+                           (let* ((class-reference (aref (constant-pool class) (inner-class-info-index ic)))
+                                  (class-name (aref (constant-pool class) (index class-reference))))
+                             (push class-name (inner-classes class)))))
+
                        ;; Emit the class initializer
                        (let ((lisp-class (find-class (intern (substitute #\/ #\. classname) :openldk))))
                          (closer-mop:finalize-inheritance lisp-class)
@@ -573,8 +579,8 @@
                      ("float" . "F") ("boolean" . "Z") ("void" . "Z")))
           (let ((class (make-instance '|java/lang/Class|)))
             (setf (slot-value class '|name|) (ijstring (car p)))
-            (setf (gethash (car p) *java-classes-by-fq-name*) class)
-            (setf (gethash (cdr p) *java-classes-by-bin-name*) class)))
+            (setf (gethash (car p) *java-classes-by-fq-name*) class)))
+;            (setf (gethash (cdr p) *java-classes-by-bin-name*) class)))
 
         ;; Preload some important classes.
         (dolist (c '("java/lang/Boolean"

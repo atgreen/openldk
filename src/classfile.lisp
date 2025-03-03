@@ -169,11 +169,19 @@
 		super
     interfaces
 		constant-pool
+    raw-constant-pool
 		access-flags
 		fields
 		methods
+    inner-classes
     attributes
 		java-class)))
+
+(defclass/std <inner-class> ()
+  ((inner-class-info-index
+    outer-class-info-index
+    inner-name-index
+    inner-class-access-flags)))
 
 (defmethod print-object ((class <class>) out)
   (print-unreadable-object (class out :type t)
@@ -309,7 +317,14 @@ stream."
           ("Exceptions"
            (read-buffer attributes-length))
           ("InnerClasses"
-           (read-buffer attributes-length))
+           (let ((count (read-u2)))
+             (setf (gethash "InnerClasses" attributes)
+                   (loop for num below count
+                         collect (make-instance '<inner-class>
+                                                :inner-class-info-index (read-u2)
+                                                :outer-class-info-index (read-u2)
+                                                :inner-name-index (read-u2)
+                                                :inner-class-access-flags (read-u2))))))
           ("LocalVariableTable"
            (read-buffer attributes-length))
           ("LocalVariableTypeTable"
