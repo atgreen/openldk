@@ -959,6 +959,9 @@
   ((var-numbers)
    (var-type)))
 
+(defclass/std <stack-variable-constant-int> (<stack-variable>)
+  ((value)))
+
 (defclass/std <stack-bottom-marker> (<stack-variable>)
   ())
 
@@ -982,10 +985,19 @@
     (push var (stack-variables context))
     var))
 
+(defun make-stack-variable-constant-int (context pc-start value)
+  (let ((var (make-instance '<stack-variable-constant-int>
+                            :address pc-start
+                            :var-numbers (list (incf (svcount context)))
+                            :var-type :INTEGER
+                            :value value)))
+    (push var (stack-variables context))
+    var))
+
 (defun %transpile-iconst-x (context value)
   (with-slots (pc stack) context
     (let* ((pc-start pc)
-           (var (make-stack-variable context pc-start :INTEGER)))
+           (var (make-stack-variable-constant-int context pc-start value)))
       (incf pc)
       (push pc (aref (next-insn-list context) pc-start))
       (push var (stack context))

@@ -114,6 +114,33 @@
                 insn))
           ir-code))
 
+(defun initialize-arrays (ir-code)
+  (let ((code-array (coerce ir-code 'vector)))
+    (loop for i below (length ir-code)
+          for insn = (aref code-array i)
+          when (and (typep insn 'ir-assign)
+                    (let ((rvalue (slot-value insn 'rvalue)))
+                      (and (typep rvalue 'ir-new-array)
+                           (typep (size rvalue) '<stack-variable-constant-int>))))
+            do (let* ((rvalue (slot-value insn 'rvalue))
+                      (init-element
+                        (case (atype rvalue)
+                          ;; Determine the initial element based on the array type
+                          (4 0)        ; Integer
+                          (5 #\Null)   ; Character
+                          (6 0.0)      ; Single-precision float
+                          (7 0.0d0)    ; Double-precision float
+                          ((8 9 10 11) 0) ; Other integer types (assuming default to 0)
+                          (t nil))))   ; Default to nil for unknown types
+                 (setf (slot-value insn 'rvalue)
+                       (make-instance 'ir-array-literal
+                                      :address (address insn)
+                                      :value
+                                      (make-array (slot-value (size rvalue) 'value)
+                                                  :initial-element init-element)))
+                 (assert (typep (aref code-array (1- i)) 'ir-nop))))
+    (coerce code-array 'list)))
+
 (defun %compile-method (class-name method-index)
   (let* ((class (%get-ldk-class-by-bin-name class-name))
          (method (aref (slot-value class 'methods) (1- method-index))))
@@ -181,7 +208,8 @@
                                       (reduce #'merge-stacks v)))
                                   (stack-state-table *context*))
                          (fix-stack-variables (stack-variables *context*))
-                         (propagate-copies code (single-assignment-table *context*)))))
+                         (initialize-arrays (propagate-copies code (single-assignment-table *context*))))))
+                         ; (propagate-copies code (single-assignment-table *context*)))))
                ;; (sdfdfd (print ir-code-0))
                (blocks (build-basic-blocks ir-code-0))
                (lisp-code

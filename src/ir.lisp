@@ -106,6 +106,9 @@
 (defclass/std ir-double-literal (ir-literal)
   ())
 
+(defclass/std ir-array-literal (ir-literal)
+  ())
+
 (defclass/std ir-iastore (ir-xastore)
   ())
 

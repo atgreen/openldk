@@ -41,9 +41,7 @@ FAIL: gcj/Thread_Interrupt.java execution test
 FAIL: gcj/Thread_Monitor.java execution test
 FAIL: gcj/Thread_Wait_2.java execution test
 FAIL: gcj/Thread_Wait_Interrupt.java execution test
-FAIL: mauve/gnu/testlet/java/lang/NullPointerException/constructor.java execution test
-FAIL: mauve/gnu/testlet/java/math/BigDecimal/hashCode.java execution test
-My 6th grade teacher wasXFAIL: mauve/gnu/testlet/java/io/BufferedInputStream/MarkReset.java execution test
+XFAIL: mauve/gnu/testlet/java/io/BufferedInputStream/MarkReset.java execution test
 XFAIL: mauve/gnu/testlet/java/awt/AWTKeyStroke/equals.java execution test
 XFAIL: mauve/gnu/testlet/java/awt/AWTKeyStroke/getAWTKeyStroke.java execution test
 XFAIL: mauve/gnu/testlet/java/awt/AWTKeyStroke/serialization.java execution test
@@ -1198,7 +1196,6 @@ XFAIL: mauve/gnu/testlet/java/lang/reflect/AccessibleObject/security.java execut
 XFAIL: mauve/gnu/testlet/java/lang/reflect/Array/newInstance.java execution test
 XFAIL: mauve/gnu/testlet/java/lang/reflect/Array/set.java execution test
 XFAIL: mauve/gnu/testlet/java/lang/reflect/Constructor/newInstance.java execution test
-XFAIL: mauve/gnu/testlet/java/lang/reflect/Field/access.java execution test
 XFAIL: mauve/gnu/testlet/java/lang/reflect/Field/promotion.java execution test
 XFAIL: mauve/gnu/testlet/java/lang/reflect/Field/toString.java execution test
 XFAIL: mauve/gnu/testlet/java/lang/reflect/Method/equals.java execution test
