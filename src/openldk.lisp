@@ -135,9 +135,8 @@
                  (setf (slot-value insn 'rvalue)
                        (make-instance 'ir-array-literal
                                       :address (address insn)
-                                      :value
-                                      (make-array (slot-value (size rvalue) 'value)
-                                                  :initial-element init-element)))
+                                      :value (make-array (slot-value (size rvalue) 'value)
+                                                         :initial-element init-element)))
                  (assert (typep (aref code-array (1- i)) 'ir-nop))))
     (coerce code-array 'list)))
 

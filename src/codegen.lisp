@@ -60,6 +60,13 @@
                  :code (slot-value insn 'value)
                  :expression-type (slot-value insn 'type)))
 
+(defmethod codegen ((insn ir-array-literal) context)
+  (declare (ignore context))
+  (make-instance '<expression>
+                 :insn insn
+                 :code `(vector ,@(coerce (slot-value insn 'value) 'list))
+                 :expression-type (slot-value insn 'type)))
+
 (defmethod codegen ((insn ir-int-literal) context)
   (declare (ignore context))
   (make-instance '<expression>
