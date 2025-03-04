@@ -132,11 +132,29 @@
                           (7 0.0d0)    ; Double-precision float
                           ((8 9 10 11) 0) ; Other integer types (assuming default to 0)
                           (t nil))))   ; Default to nil for unknown types
-                 (setf (slot-value insn 'rvalue)
-                       (make-instance 'ir-array-literal
-                                      :address (address insn)
-                                      :value (make-array (slot-value (size rvalue) 'value)
-                                                         :initial-element init-element)))
+                 (let* ((pc (1+ i))
+                        (values (loop for array-index from 0 below (slot-value (size rvalue) 'value)
+                                      collect (progn
+                                                (loop until (not (typep (aref code-array pc) 'ir-nop))
+                                                      do (incf pc))
+                                                (let ((insn (aref code-array pc)))
+                                                  (incf pc)
+                                                  (if (typep insn 'ir-xastore)
+                                                      (code (codegen (value insn) *context*))
+                                                      (return nil))))))
+                        (array (if (zerop (slot-value (size rvalue) 'value))
+                                   #()
+                                   (if values
+                                       (progn
+                                         (loop for nop-pc from (1+ i) below pc
+                                               do (setf (aref code-array nop-pc) (make-instance 'ir-nop :address (address (aref code-array nop-pc)))))
+                                         values)
+                                       (make-array (slot-value (size rvalue) 'value)
+                                                   :initial-element init-element)))))
+                   (setf (slot-value insn 'rvalue)
+                         (make-instance 'ir-array-literal
+                                        :address (address insn)
+                                        :value array)))
                  (assert (typep (aref code-array (1- i)) 'ir-nop))))
     (coerce code-array 'list)))
 
