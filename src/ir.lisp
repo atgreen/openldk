@@ -63,6 +63,10 @@
    (index)
    (value)))
 
+(defmethod print-object ((node ir-xastore) out)
+  (print-unreadable-object (node out :type t)
+    (format out "~A[~A] = ~A" (slot-value node 'arrayref) (slot-value node 'index) (slot-value node 'value))))
+
 (defclass/std ir-aastore (ir-xastore)
   ())
 
