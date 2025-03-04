@@ -150,7 +150,7 @@
          (cond
            ((arrayp object) (java-class (%get-array-lclass (array-element-type object))))
            (t (let ((jc (%get-java-class-by-bin-name (format nil "~A" (type-of object)) t)))
-                (or jc (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (format nil "~A" (type-of object)) nil nil nil))))))
+                (or jc (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring (format nil "~A" (type-of object))) nil nil nil))))))
     (when *debug-trace*
       (incf *call-nesting-level* -1))))
 
