@@ -24,7 +24,6 @@ FAIL: gcj/PR26858.java execution test
 FAIL: gcj/PR27908.java execution test
 FAIL: gcj/PR29495.java execution test
 FAIL: gcj/PR3096.java execution test
-FAIL: gcj/PR36252.java execution test
 FAIL: gcj/Process_1.java execution test
 FAIL: gcj/Process_2.java execution test
 FAIL: gcj/Process_3.java execution test
