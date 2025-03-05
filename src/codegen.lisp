@@ -940,68 +940,88 @@
                                     1 0)))
                    :expression-type :INTEGER)))
 
-(defun logical-shift-right-32 (integer shift)
-  (logand
-   (ash (logand integer #xffffffff) (- shift))
-   #xffffffff))
+;; Utility functions for signed shifts
+(defun %int-to-signed (n)
+  "Convert a 32-bit unsigned integer to signed representation"
+  (if (logbitp 31 n)
+      (- n #x100000000)
+      n))
 
-(defun shl (x width bits)
-  "Compute bitwise left shift of x by 'bits' bits, represented on 'width' bits"
-  (logand (ash x (- (if (< bits 0) (mod width bits) bits)))
-          (1- (ash 1 width))))
+(defun %long-to-signed (n)
+  "Convert a 64-bit unsigned integer to signed representation"
+  (if (logbitp 63 n)
+      (- n #x10000000000000000)
+      n))
 
-(defun shr (x width bits)
-  "Compute bitwise right shift of x by 'bits' bits, represented on 'width' bits"
-  ;; (format t "~&Shifting ~A-bit wide value ~B right by ~A bits = ~B~%" width x bits (logand (ash x (if (< bits 0) (mod width bits) (- bits))) (1- (ash 1 width))))
-  (logand (ash (logand x (1- (ash 1 width))) (if (< bits 0) (mod width bits) (- bits)))
-          (1- (ash 1 width))))
-
-(defmethod codegen ((insn ir-ishr) context)
-  ;; FIXME: this is wrong.
+;; Fixed codegen methods
+(defmethod codegen ((insn ir-ishl) context)
   (make-instance '<expression>
                  :insn insn
-                 :code `(unsigned-to-signed-integer (ash ,(code (codegen (value1 insn) context)) (- 0 (logand ,(code (codegen (value2 insn) context)) #x1f))))
+                 :code `(let* ((int-value (logand ,(code (codegen (value1 insn) context)) #xFFFFFFFF))
+                               (shift-amount (logand ,(code (codegen (value2 insn) context)) #x1F))
+                               (result (logand (ash int-value shift-amount) #xFFFFFFFF)))
+                          (%int-to-signed result))
                  :expression-type :INTEGER))
 
-(defmethod codegen ((insn ir-lshr) context)
-  ;; FIXME: this is wrong.
+(defmethod codegen ((insn ir-ishr) context)
   (make-instance '<expression>
                  :insn insn
-                 :code `(unsigned-to-signed-long (ash ,(code (codegen (value1 insn) context)) (- 0 (logand ,(code (codegen (value2 insn) context)) #x3f))))
-                 :expression-type :LONG))
+                 :code `(let* ((int-value (logand ,(code (codegen (value1 insn) context)) #xFFFFFFFF))
+                               (shift-amount (logand ,(code (codegen (value2 insn) context)) #x1F)))
+                          ;; Special case for -1
+                          (if (= int-value #xFFFFFFFF)
+                              -1
+                              (let ((sign-bit (logbitp 31 int-value)))
+                                (%int-to-signed
+                                 (logand
+                                  (if sign-bit
+                                      (logior (ash int-value (- shift-amount))
+                                              (ash (lognot 0) (- 32 shift-amount)))
+                                      (ash int-value (- shift-amount)))
+                                  #xFFFFFFFF)))))
+                 :expression-type :INTEGER))
 
-(defmethod codegen ((insn ir-ishl) context)
-  ;; FIXME: this is wrong.
+(defmethod codegen ((insn ir-iushr) context)
   (make-instance '<expression>
                  :insn insn
-                 :code `(unsigned-to-signed-integer
-                         (logand
-                          (ash ,(code (codegen (value1 insn) context)) (logand ,(code (codegen (value2 insn) context)) #x1f))
-                          #xffffffff))
+                 :code `(let ((shift-amount (logand ,(code (codegen (value2 insn) context)) #x1F)))
+                          (%int-to-signed (logand (ash (logand ,(code (codegen (value1 insn) context)) #xFFFFFFFF) (- shift-amount)) #xFFFFFFFF)))
                  :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-lshl) context)
-  ;; FIXME: this is wrong.
   (make-instance '<expression>
                  :insn insn
-                 :code `(let ((op1 ,(code (codegen (value1 insn) context)))
-                              (op2 (logand ,(code (codegen (value2 insn) context)) #x3f)))
-                          ;; (format t "~&LSHL ~A ~A = ~A~%" op1 op2 (unsigned-to-signed-long (logand (ash op1 op2) #xffffffffffffffff)))
-                          (unsigned-to-signed-long (logand (ash op1 op2) #xffffffffffffffff)))
+                 :code `(let* ((long-value (logand ,(code (codegen (value1 insn) context)) #xFFFFFFFFFFFFFFFF))
+                               (shift-amount (logand ,(code (codegen (value2 insn) context)) #x3F))
+                               (result (logand (ash long-value shift-amount) #xFFFFFFFFFFFFFFFF)))
+                          (%long-to-signed result))
                  :expression-type :LONG))
 
-(defmethod codegen ((insn ir-iushr) context)
-  ;; FIXME: this is wrong.
+(defmethod codegen ((insn ir-lshr) context)
   (make-instance '<expression>
                  :insn insn
-                 :code (list 'shr (code (codegen (value1 insn) context)) 32 (code (codegen (value2 insn) context)))
-                 :expression-type :INTEGER))
+                 :code `(let* ((long-value (logand ,(code (codegen (value1 insn) context)) #xFFFFFFFFFFFFFFFF))
+                               (shift-amount (logand ,(code (codegen (value2 insn) context)) #x3F)))
+                          ;; Special case for -1
+                          (if (= long-value #xFFFFFFFFFFFFFFFF)
+                              -1
+                              (let ((sign-bit (logbitp 63 long-value)))
+                                (%long-to-signed
+                                 (logand
+                                  (if sign-bit
+                                      (logior (ash long-value (- shift-amount))
+                                              (ash (lognot 0) (- 64 shift-amount)))
+                                      (ash long-value (- shift-amount)))
+                                  #xFFFFFFFFFFFFFFFF)))))
+                 :expression-type :LONG))
 
 (defmethod codegen ((insn ir-lushr) context)
-  ;; FIXME: this is wrong.
   (make-instance '<expression>
                  :insn insn
-                 :code (list 'shr (code (codegen (value1 insn) context)) 64 (code (codegen (value2 insn) context)))
+                 :code `(let ((shift-amount (logand ,(code (codegen (value2 insn) context)) #x3F)))
+                          (%long-to-signed (logand (ash (logand ,(code (codegen (value2 insn) context)) #xFFFFFFFFFFFFFFFF)
+                                                       (- shift-amount))
+                                                  #xFFFFFFFFFFFFFFFF)))
                  :expression-type :LONG))
 
 (defmethod codegen ((insn ir-lcmp) context)
