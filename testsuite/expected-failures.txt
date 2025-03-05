@@ -1,6 +1,5 @@
 FAIL: aaa/ni.java execution test
 FAIL: gcj/bytearray.java execution test
-FAIL: gcj/Divide_1.java execution test
 FAIL: gcj/err4.java execution test
 FAIL: gcj/ExtraClassLoader.java execution test
 FAIL: gcj/Float_2.java execution test
@@ -1714,3 +1713,74 @@ XFAIL: mauve/gnu/testlet/java/util/zip/InflaterInputStream/basic.java execution 
 XFAIL: mauve/gnu/testlet/java/util/zip/ZipFile/newZipFile.java execution test
 XFAIL: mauve/gnu/testlet/java/util/zip/ZipInputStream/basic.java execution test
 XFAIL: mauve/gnu/testlet/java/util/zip/ZipInputStream/close.java execution test
+
+* pr27171 fails intermittently. Here's the stack trace.  It's the same as RH194522, below.
+
+2025-03-04T02:27:43.6506876Z result = 1 {*** Caught ERROR: Condition OPENLDK::|condition-java/lang/NullPointerException| was signalled.
+2025-03-04T02:27:43.6507432Z Backtrace for: #<SB-THREAD:THREAD tid=8855 "main thread" RUNNING {1005500003}>
+2025-03-04T02:27:43.6508019Z 0: ((LAMBDA (CONDITION) :IN OPENLDK:MAIN-WRAPPER) #<OPENLDK::|condition-java/lang/NullPointerException| {100BB6E303}>)
+2025-03-04T02:27:43.6508652Z 1: (SB-KERNEL::%SIGNAL #<OPENLDK::|condition-java/lang/NullPointerException| {100BB6E303}>)
+2025-03-04T02:27:43.6509162Z 2: (ERROR #<OPENLDK::|condition-java/lang/NullPointerException| {100BB6E303}>)
+2025-03-04T02:27:43.6510062Z 3: ((:METHOD OPENLDK::|<init>(Ljava/nio/charset/Charset;FF)| (OPENLDK::|java/nio/charset/CharsetEncoder| T T T)) #<OPENLDK::|sun/nio/cs/UTF_8$Encoder| {1009810B83}> #<OPENLDK::|sun/nio/cs/UTF_8| {1001513AD3}> 1.1 3.0) [fast-method]
+2025-03-04T02:27:43.6511294Z 4: ((:METHOD OPENLDK::|<init>(Ljava/nio/charset/Charset;)| (OPENLDK::|sun/nio/cs/UTF_8$Encoder| T)) #<OPENLDK::|sun/nio/cs/UTF_8$Encoder| {1009810B83}> #<OPENLDK::|sun/nio/cs/UTF_8| {1001513AD3}>) [fast-method]
+2025-03-04T02:27:43.6512909Z 5: ((:METHOD OPENLDK::|<init>(Ljava/nio/charset/Charset;Lsun/nio/cs/UTF_8$1;)| (OPENLDK::|sun/nio/cs/UTF_8$Encoder| T T)) #<OPENLDK::|sun/nio/cs/UTF_8$Encoder| {1009810B83}> #<OPENLDK::|sun/nio/cs/UTF_8| {1001513AD3}> #<unused argument>) [fast-method]
+2025-03-04T02:27:43.6514055Z 6: ((:METHOD OPENLDK::|newEncoder()| (OPENLDK::|sun/nio/cs/UTF_8|)) #<OPENLDK::|sun/nio/cs/UTF_8| {1001513AD3}>) [fast-method]
+2025-03-04T02:27:43.6515249Z 7: ((:METHOD OPENLDK::|<init>(Ljava/nio/charset/Charset;Ljava/lang/String;)| (OPENLDK::|java/lang/StringCoding$StringEncoder| T T)) #<OPENLDK::|java/lang/StringCoding$StringEncoder| {10094AC503}> #<OPENLDK::|sun/nio/cs/UTF_8| {1001513AD3}> #<OPENLDK::|java/lang/String| "UTF-8">) [fast-method]
+2025-03-04T02:27:43.6516975Z 8: ((:METHOD OPENLDK::|<init>(Ljava/nio/charset/Charset;Ljava/lang/String;)| (OPENLDK::|java/lang/StringCoding$StringEncoder| T T)) #<OPENLDK::|java/lang/StringCoding$StringEncoder| {10094AC503}> #<OPENLDK::|sun/nio/cs/UTF_8| {1001513AD3}> #<OPENLDK::|java/lang/String| "UTF-8">) [fast-method]
+2025-03-04T02:27:43.6518970Z 9: ((:METHOD OPENLDK::|<init>(Ljava/nio/charset/Charset;Ljava/lang/String;Ljava/lang/StringCoding$1;)| (OPENLDK::|java/lang/StringCoding$StringEncoder| T T T)) #<OPENLDK::|java/lang/StringCoding$StringEncoder| {10094AC503}> #<OPENLDK::|sun/nio/cs/UTF_8| {1001513AD3}> #<OPENLDK::|java/lang/String| "UTF-8"> #<unused argument>) [fast-method]
+2025-03-04T02:27:43.6520943Z 10: ((:METHOD OPENLDK::|<init>(Ljava/nio/charset/Charset;Ljava/lang/String;Ljava/lang/StringCoding$1;)| (OPENLDK::|java/lang/StringCoding$StringEncoder| T T T)) #<OPENLDK::|java/lang/StringCoding$StringEncoder| {10094AC503}> #<OPENLDK::|sun/nio/cs/UTF_8| {1001513AD3}> #<OPENLDK::|java/lang/String| "UTF-8"> NIL) [fast-method]
+2025-03-04T02:27:43.6523018Z 11: (OPENLDK::|java/lang/StringCoding.encode(Ljava/lang/String;[CII)| #<OPENLDK::|java/lang/String| "UTF-8"> #(#\UDC9E) 0 1)
+2025-03-04T02:27:43.6524377Z 12: (OPENLDK::|java/lang/StringCoding.encode(Ljava/lang/String;[CII)| #<OPENLDK::|java/lang/String| "UTF-8"> #(#\UDC9E) 0 1)
+2025-03-04T02:27:43.6526149Z 13: ((:METHOD OPENLDK::|getBytes(Ljava/lang/String;)| (OPENLDK::|java/lang/String| T)) #<OPENLDK::|java/lang/String| "�"> #<OPENLDK::|java/lang/String| "UTF-8">) [fast-method]
+2025-03-04T02:27:43.6527289Z 14: ((:METHOD OPENLDK::|getBytes(Ljava/lang/String;)| (OPENLDK::|java/lang/String| T)) #<OPENLDK::|java/lang/String| "�"> #<OPENLDK::|java/lang/String| "UTF-8">) [fast-method]
+2025-03-04T02:27:43.6527988Z 15: (OPENLDK::|pr27171.main([Ljava/lang/String;)| #<unused argument>)
+2025-03-04T02:27:43.6528803Z 16: (OPENLDK::|pr27171.main([Ljava/lang/String;)| #(#<OPENLDK::|java/lang/String| "1"> #<OPENLDK::|java/lang/String| "2"> #<OPENLDK::|java/lang/String| "3"> #<OPENLDK::|java/lang/String| "4"> #<OPENLDK::|java/lang/String| "5">))
+2025-03-04T02:27:43.6530160Z 17: (SB-INT:SIMPLE-EVAL-IN-LEXENV (OPENLDK::|pr27171.main([Ljava/lang/String;)| #(#<OPENLDK::|java/lang/String| "1"> #<OPENLDK::|java/lang/String| "2"> #<OPENLDK::|java/lang/String| "3"> #<OPENLDK::|java/lang/String| "4"> #<OPENLDK::|java/lang/String| "5">)) #<NULL-LEXENV>)
+2025-03-04T02:27:43.6531893Z 18: (EVAL (OPENLDK::|pr27171.main([Ljava/lang/String;)| #(#<OPENLDK::|java/lang/String| "1"> #<OPENLDK::|java/lang/String| "2"> #<OPENLDK::|java/lang/String| "3"> #<OPENLDK::|java/lang/String| "4"> #<OPENLDK::|java/lang/String| "5">)))
+2025-03-04T02:27:43.6533184Z 19: (OPENLDK::%EVAL (OPENLDK::|pr27171.main([Ljava/lang/String;)| #(#<OPENLDK::|java/lang/String| "1"> #<OPENLDK::|java/lang/String| "2"> #<OPENLDK::|java/lang/String| "3"> #<OPENLDK::|java/lang/String| "4"> #<OPENLDK::|java/lang/String| "5">)))
+2025-03-04T02:27:43.6534045Z 20: (OPENLDK::MAIN "pr27171" ("1" "2" "3" "4" "5") :DUMP-DIR NIL :CLASSPATH NIL)
+2025-03-04T02:27:43.6534396Z 21: (OPENLDK::MAIN-COMMAND "../openldk" NIL)
+2025-03-04T02:27:43.6534695Z 22: (OPENLDK::MAIN-COMMAND "../openldk") [optional]
+2025-03-04T02:27:43.6534981Z 23: (OPENLDK:MAIN-WRAPPER)
+2025-03-04T02:27:43.6535346Z 24: ((FLET SB-UNIX::BODY :IN SB-IMPL::START-LISP))
+2025-03-04T02:27:43.6535764Z 25: ((FLET "WITHOUT-INTERRUPTS-BODY-3" :IN SB-IMPL::START-LISP))
+2025-03-04T02:27:43.6536075Z 26: (SB-IMPL::%START-LISP)
+2025-03-04T02:27:43.6536279Z }
+2025-03-04T02:27:43.6536432Z STATUS = 1
+2025-03-04T02:27:43.6536829Z Running: grep -qi -- "gcj/pr27171.java execution test$" expected-failures.txt
+2025-03-04T02:27:43.6537234Z Test pr27171.java NOT found in expected-failures.txt
+2025-03-04T02:27:43.6537525Z FAIL: gcj/pr27171.java execution test
+
+* RH194522 fails intermittently. Here's the stack trace:
+
+2025-03-04T02:24:14.7074765Z result = 1 {*** Caught ERROR: Condition OPENLDK::|condition-java/lang/NullPointerException| was signalled.
+2025-03-04T02:24:14.7075312Z Backtrace for: #<SB-THREAD:THREAD tid=6589 "main thread" RUNNING {1005500003}>
+2025-03-04T02:24:14.7075896Z 0: ((LAMBDA (CONDITION) :IN OPENLDK:MAIN-WRAPPER) #<OPENLDK::|condition-java/lang/NullPointerException| {100A68C913}>)
+2025-03-04T02:24:14.7076511Z 1: (SB-KERNEL::%SIGNAL #<OPENLDK::|condition-java/lang/NullPointerException| {100A68C913}>)
+2025-03-04T02:24:14.7077011Z 2: (ERROR #<OPENLDK::|condition-java/lang/NullPointerException| {100A68C913}>)
+2025-03-04T02:24:14.7077899Z 3: ((:METHOD OPENLDK::|<init>(Ljava/nio/charset/Charset;FF)| (OPENLDK::|java/nio/charset/CharsetEncoder| T T T)) #<OPENLDK::|sun/nio/cs/UTF_8$Encoder| {1008447F63}> #<OPENLDK::|sun/nio/cs/UTF_8| {1001513AD3}> 1.1 3.0) [fast-method]
+2025-03-04T02:24:14.7079117Z 4: ((:METHOD OPENLDK::|<init>(Ljava/nio/charset/Charset;)| (OPENLDK::|sun/nio/cs/UTF_8$Encoder| T)) #<OPENLDK::|sun/nio/cs/UTF_8$Encoder| {1008447F63}> #<OPENLDK::|sun/nio/cs/UTF_8| {1001513AD3}>) [fast-method]
+2025-03-04T02:24:14.7080477Z 5: ((:METHOD OPENLDK::|<init>(Ljava/nio/charset/Charset;Lsun/nio/cs/UTF_8$1;)| (OPENLDK::|sun/nio/cs/UTF_8$Encoder| T T)) #<OPENLDK::|sun/nio/cs/UTF_8$Encoder| {1008447F63}> #<OPENLDK::|sun/nio/cs/UTF_8| {1001513AD3}> #<unused argument>) [fast-method]
+2025-03-04T02:24:14.7081719Z 6: ((:METHOD OPENLDK::|newEncoder()| (OPENLDK::|sun/nio/cs/UTF_8|)) #<OPENLDK::|sun/nio/cs/UTF_8| {1001513AD3}>) [fast-method]
+2025-03-04T02:24:14.7083212Z 7: ((:METHOD OPENLDK::|<init>(Ljava/io/OutputStream;Ljava/lang/Object;Ljava/nio/charset/Charset;)| (OPENLDK::|sun/nio/cs/StreamEncoder| T T T)) #<OPENLDK::|sun/nio/cs/StreamEncoder| {1008447E43}> #<OPENLDK::|java/io/ByteArrayOutputStream| {1007D02DB3}> #<OPENLDK::|java/io/OutputStreamWriter| {1008160DE3}> #<OPENLDK::|sun/nio/cs/UTF_8| {1001513AD3}>) [fast-method]
+2025-03-04T02:24:14.7085358Z 8: (OPENLDK::|sun/nio/cs/StreamEncoder.forOutputStreamWriter(Ljava/io/OutputStream;Ljava/lang/Object;Ljava/nio/charset/Charset;)| #<OPENLDK::|java/io/ByteArrayOutputStream| {1007D02DB3}> #<OPENLDK::|java/io/OutputStreamWriter| {1008160DE3}> #<OPENLDK::|sun/nio/cs/UTF_8| {1001513AD3}>)
+2025-03-04T02:24:14.7087296Z 9: (OPENLDK::|sun/nio/cs/StreamEncoder.forOutputStreamWriter(Ljava/io/OutputStream;Ljava/lang/Object;Ljava/nio/charset/Charset;)| #<OPENLDK::|java/io/ByteArrayOutputStream| {1007D02DB3}> #<OPENLDK::|java/io/OutputStreamWriter| {1008160DE3}> #<OPENLDK::|sun/nio/cs/UTF_8| {1001513AD3}>)
+2025-03-04T02:24:14.7089200Z 10: ((:METHOD OPENLDK::|<init>(Ljava/io/OutputStream;Ljava/nio/charset/Charset;)| (OPENLDK::|java/io/OutputStreamWriter| T T)) #<OPENLDK::|java/io/OutputStreamWriter| {1008160DE3}> #<OPENLDK::|java/io/ByteArrayOutputStream| {1007D02DB3}> #<OPENLDK::|sun/nio/cs/UTF_8| {1001513AD3}>) [fast-method]
+2025-03-04T02:24:14.7092008Z 11: ((:METHOD OPENLDK::|<init>(Ljava/io/OutputStream;Ljava/nio/charset/Charset;)| (OPENLDK::|java/io/OutputStreamWriter| T T)) #<OPENLDK::|java/io/OutputStreamWriter| {1008160DE3}> #<OPENLDK::|java/io/ByteArrayOutputStream| {1007D02DB3}> #<OPENLDK::|sun/nio/cs/UTF_8| {1001513AD3}>) [fast-method]
+2025-03-04T02:24:14.7093121Z 12: (OPENLDK::|RH194522.main([Ljava/lang/String;)| #<unused argument>)
+2025-03-04T02:24:14.7093948Z 13: (OPENLDK::|RH194522.main([Ljava/lang/String;)| #(#<OPENLDK::|java/lang/String| "1"> #<OPENLDK::|java/lang/String| "2"> #<OPENLDK::|java/lang/String| "3"> #<OPENLDK::|java/lang/String| "4"> #<OPENLDK::|java/lang/String| "5">))
+2025-03-04T02:24:14.7095299Z 14: (SB-INT:SIMPLE-EVAL-IN-LEXENV (OPENLDK::|RH194522.main([Ljava/lang/String;)| #(#<OPENLDK::|java/lang/String| "1"> #<OPENLDK::|java/lang/String| "2"> #<OPENLDK::|java/lang/String| "3"> #<OPENLDK::|java/lang/String| "4"> #<OPENLDK::|java/lang/String| "5">)) #<NULL-LEXENV>)
+2025-03-04T02:24:14.7096823Z 15: (EVAL (OPENLDK::|RH194522.main([Ljava/lang/String;)| #(#<OPENLDK::|java/lang/String| "1"> #<OPENLDK::|java/lang/String| "2"> #<OPENLDK::|java/lang/String| "3"> #<OPENLDK::|java/lang/String| "4"> #<OPENLDK::|java/lang/String| "5">)))
+2025-03-04T02:24:14.7098099Z 16: (OPENLDK::%EVAL (OPENLDK::|RH194522.main([Ljava/lang/String;)| #(#<OPENLDK::|java/lang/String| "1"> #<OPENLDK::|java/lang/String| "2"> #<OPENLDK::|java/lang/String| "3"> #<OPENLDK::|java/lang/String| "4"> #<OPENLDK::|java/lang/String| "5">)))
+2025-03-04T02:24:14.7098962Z 17: (OPENLDK::MAIN "RH194522" ("1" "2" "3" "4" "5") :DUMP-DIR NIL :CLASSPATH NIL)
+2025-03-04T02:24:14.7106858Z 18: (OPENLDK::MAIN-COMMAND "../openldk" NIL)
+2025-03-04T02:24:14.7107260Z 19: (OPENLDK::MAIN-COMMAND "../openldk") [optional]
+2025-03-04T02:24:14.7107568Z 20: (OPENLDK:MAIN-WRAPPER)
+2025-03-04T02:24:14.7107821Z 21: ((FLET SB-UNIX::BODY :IN SB-IMPL::START-LISP))
+2025-03-04T02:24:14.7108180Z 22: ((FLET "WITHOUT-INTERRUPTS-BODY-3" :IN SB-IMPL::START-LISP))
+2025-03-04T02:24:14.7108514Z 23: (SB-IMPL::%START-LISP)
+2025-03-04T02:24:14.7108727Z }
+2025-03-04T02:24:14.7108890Z STATUS = 1
+2025-03-04T02:24:14.7109189Z Running: grep -qi -- "gcj/RH194522.java execution test$" expected-failures.txt
+2025-03-04T02:24:14.7109777Z Test RH194522.java NOT found in expected-failures.txt
+2025-03-04T02:24:14.7110086Z FAIL: gcj/RH194522.java execution test

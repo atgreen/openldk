@@ -74,6 +74,7 @@
 
 (defun %caller-class-name-from-stack-frame (caller-list)
   (let ((caller-string (format nil "~A" caller-list)))
+    ; (format t "XXXXXXXXXXXX ~A~%" caller-string)
     (let ((dot-position (position #\. caller-string)))
       (cond
         ((str:starts-with? "(%clinit-" caller-string)
@@ -105,7 +106,13 @@
 
 (defmethod |sun/reflect/Reflection.getCallerClass()| ()
   ;; FIXME: we don't need the whole backtrace
-  (let* ((caller-list (fourth (%remove-adjacent-repeats (sb-debug:list-backtrace)))))
+  (let* ((backtrace (%remove-adjacent-repeats (sb-debug:list-backtrace)))
+         (caller-list (cond
+                        ((and (listp (car (fourth backtrace)))
+                              (eq 'LAMBDA (caar (fourth backtrace))))
+                         (fifth backtrace))
+                        (t
+                         (fourth backtrace)))))
     (assert (stringp (%caller-class-name-from-stack-frame caller-list)))
     (%get-java-class-by-bin-name (%caller-class-name-from-stack-frame caller-list))))
 
@@ -835,10 +842,10 @@ user.variant
          (let ((result (apply (intern
                                (lispize-method-name
                                 (concatenate 'string
-                                             (coerce (slot-value (slot-value (slot-value method '|clazz|) '|name|) '|value|) 'string)
+                                             (substitute #\/ #\. (lstring (slot-value (slot-value method '|clazz|) '|name|)))
                                              "."
-                                             (coerce (slot-value (slot-value method '|name|) '|value|) 'string)
-                                             (coerce (slot-value (slot-value method '|signature|) '|value|) 'string)))
+                                             (lstring (slot-value method '|name|))
+                                             (lstring (slot-value method '|signature|))))
                                :openldk)
                               (if (eq 0 (logand #x8 (slot-value method '|modifiers|)))
                                   (cons object (coerce args 'list)) ; non-static method

@@ -57,9 +57,6 @@ cl-fad, ghcr.io/ocicl/cl-fad@sha256:c0aaffc859e419e0a94cedb08f48c2484da404363fb0
 defclass-std, ghcr.io/ocicl/defclass-std@sha256:47ed2c44381191d4382a0a5800f4b2394854cabca71254bfc78d6b33190e199b, defclass-std-20241228-6d003a5/defclass-std.asd
 defclass-std-test, ghcr.io/ocicl/defclass-std@sha256:47ed2c44381191d4382a0a5800f4b2394854cabca71254bfc78d6b33190e199b, defclass-std-20241228-6d003a5/defclass-std-test.asd
 anaphora, ghcr.io/ocicl/anaphora@sha256:55f1c61b7826c5451a60b4b4522e35e770504bbfa2036d8becbf21f6d654925a, anaphora-20240503-bcf0f74/anaphora.asd
-fast-io, ghcr.io/ocicl/fast-io@sha256:7ba35a0eddf00b3c25656b3c5a93e95460f6cb8f807afbc04ef4f50076d95aff, fast-io-20240503-a4c5ad6/fast-io.asd
-fast-io-test, ghcr.io/ocicl/fast-io@sha256:7ba35a0eddf00b3c25656b3c5a93e95460f6cb8f807afbc04ef4f50076d95aff, fast-io-20240503-a4c5ad6/fast-io-test.asd
-static-vectors, ghcr.io/ocicl/static-vectors@sha256:53e11e5689c3dbea6a3017760b55f052588003d774913539930ddc4330a69970, static-vectors-20240624-3d9d89b/static-vectors.asd
 uffi, ghcr.io/ocicl/cffi@sha256:f19b3fcbc624c403699fb231dc9acb928b244c3a54ab6fa8f7efefeedfcff1c0, cffi-20250210-22762bf/uffi-compat/uffi.asd
 cffi, ghcr.io/ocicl/cffi@sha256:f19b3fcbc624c403699fb231dc9acb928b244c3a54ab6fa8f7efefeedfcff1c0, cffi-20250210-22762bf/cffi.asd
 cffi-uffi-compat, ghcr.io/ocicl/cffi@sha256:f19b3fcbc624c403699fb231dc9acb928b244c3a54ab6fa8f7efefeedfcff1c0, cffi-20250210-22762bf/cffi-uffi-compat.asd
@@ -68,13 +65,6 @@ cffi-tests, ghcr.io/ocicl/cffi@sha256:f19b3fcbc624c403699fb231dc9acb928b244c3a54
 cffi-libffi, ghcr.io/ocicl/cffi@sha256:f19b3fcbc624c403699fb231dc9acb928b244c3a54ab6fa8f7efefeedfcff1c0, cffi-20250210-22762bf/cffi-libffi.asd
 cffi-grovel, ghcr.io/ocicl/cffi@sha256:f19b3fcbc624c403699fb231dc9acb928b244c3a54ab6fa8f7efefeedfcff1c0, cffi-20250210-22762bf/cffi-grovel.asd
 cffi-examples, ghcr.io/ocicl/cffi@sha256:f19b3fcbc624c403699fb231dc9acb928b244c3a54ab6fa8f7efefeedfcff1c0, cffi-20250210-22762bf/cffi-examples.asd
-bitio, ghcr.io/ocicl/bitio@sha256:5c8d67fc928bd0548ab23aa59a7a59d51b581995bf5d7890eb4bdf7f150b8312, bitio-20240503-c295a66/bitio.asd
-cl-package-locks, ghcr.io/ocicl/cl-package-locks@sha256:3cc3430aa866786164cd64110795ba329d72cd98f6606a72a83b04c1dc295a0d, cl-package-locks-20240503-96a358e/cl-package-locks.asd
-checkl, ghcr.io/ocicl/checkl@sha256:23688171cdd124474ada1dfe65404258f2faa2d806f5f97a7cab10a7fb601d72, CheckL-20240503-8032880/checkl.asd
-checkl-test, ghcr.io/ocicl/checkl@sha256:23688171cdd124474ada1dfe65404258f2faa2d806f5f97a7cab10a7fb601d72, CheckL-20240503-8032880/checkl-test.asd
-checkl-docs, ghcr.io/ocicl/checkl@sha256:23688171cdd124474ada1dfe65404258f2faa2d806f5f97a7cab10a7fb601d72, CheckL-20240503-8032880/checkl-docs.asd
-marshal, ghcr.io/ocicl/marshal@sha256:a1e4be46c96220d69e43a1cdedd2d4cefe2a65780ee32da01440ebadc05aba30, cl-marshal-20240503-f169abd/marshal.asd
-marshal-tests, ghcr.io/ocicl/marshal@sha256:a1e4be46c96220d69e43a1cdedd2d4cefe2a65780ee32da01440ebadc05aba30, cl-marshal-20240503-f169abd/marshal-tests.asd
 pathname-utils, ghcr.io/ocicl/pathname-utils@sha256:d4f3caf787ee476558d655557e7e15a4103df9ab54ae64e3732bc8cd801b6c93, pathname-utils-20250203-3cc7a48/pathname-utils.asd
 pathname-utils-test, ghcr.io/ocicl/pathname-utils@sha256:d4f3caf787ee476558d655557e7e15a4103df9ab54ae64e3732bc8cd801b6c93, pathname-utils-20250203-3cc7a48/pathname-utils-test.asd
 cl-store, ghcr.io/ocicl/cl-store@sha256:9c58bb54e0b871e06b47e049314f890a7e0cf8133aa47cdd7fc06590d564681b, cl-store-20240503-adb52a1/cl-store.asd
@@ -95,3 +85,13 @@ slynk, ghcr.io/ocicl/slynk@sha256:94a927f09f1aadd797c301dcef6c8cd2a9789a29326bbb
 file-attributes, ghcr.io/ocicl/file-attributes@sha256:ab2f00d3ba0a28c441aaa04175ce58d34913ec8bdb64ec7da36454ec8313d24c, file-attributes-20240820-07150b9/file-attributes.asd
 precise-time, ghcr.io/ocicl/precise-time@sha256:ab27ad93d2e78094ee9f95d760adb1efdbe5abd955fab20f3f9a024c3f3cedda, precise-time-20250124-08b7009/precise-time.asd
 asdf-package-system, ghcr.io/ocicl/asdf-package-system@sha256:dfacc260786f4e9e2aa13a797a7b326b58e08ea5db778421a9985b9c67362df1, asdf-package-system-20240503-61776f2/asdf-package-system.asd
+bitio, ghcr.io/ocicl/bitio@sha256:5c8d67fc928bd0548ab23aa59a7a59d51b581995bf5d7890eb4bdf7f150b8312, bitio-20240503-c295a66/bitio.asd
+static-vectors, ghcr.io/ocicl/static-vectors@sha256:53e11e5689c3dbea6a3017760b55f052588003d774913539930ddc4330a69970, static-vectors-20240624-3d9d89b/static-vectors.asd
+cl-package-locks, ghcr.io/ocicl/cl-package-locks@sha256:3cc3430aa866786164cd64110795ba329d72cd98f6606a72a83b04c1dc295a0d, cl-package-locks-20240503-96a358e/cl-package-locks.asd
+checkl, ghcr.io/ocicl/checkl@sha256:23688171cdd124474ada1dfe65404258f2faa2d806f5f97a7cab10a7fb601d72, CheckL-20240503-8032880/checkl.asd
+checkl-test, ghcr.io/ocicl/checkl@sha256:23688171cdd124474ada1dfe65404258f2faa2d806f5f97a7cab10a7fb601d72, CheckL-20240503-8032880/checkl-test.asd
+checkl-docs, ghcr.io/ocicl/checkl@sha256:23688171cdd124474ada1dfe65404258f2faa2d806f5f97a7cab10a7fb601d72, CheckL-20240503-8032880/checkl-docs.asd
+marshal, ghcr.io/ocicl/marshal@sha256:a1e4be46c96220d69e43a1cdedd2d4cefe2a65780ee32da01440ebadc05aba30, cl-marshal-20240503-f169abd/marshal.asd
+marshal-tests, ghcr.io/ocicl/marshal@sha256:a1e4be46c96220d69e43a1cdedd2d4cefe2a65780ee32da01440ebadc05aba30, cl-marshal-20240503-f169abd/marshal-tests.asd
+fast-io, ghcr.io/ocicl/fast-io@sha256:7ba35a0eddf00b3c25656b3c5a93e95460f6cb8f807afbc04ef4f50076d95aff, fast-io-20240503-a4c5ad6/fast-io.asd
+fast-io-test, ghcr.io/ocicl/fast-io@sha256:7ba35a0eddf00b3c25656b3c5a93e95460f6cb8f807afbc04ef4f50076d95aff, fast-io-20240503-a4c5ad6/fast-io-test.asd
