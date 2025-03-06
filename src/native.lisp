@@ -378,7 +378,7 @@
     (when *debug-trace*
       (incf *call-nesting-level* -1))))
 
-(defmethod |getDeclaredClasses0()| ((this |java/lang/Class|) arg)
+(defmethod |getDeclaredClasses0()| ((this |java/lang/Class|))
   (let ((lclass (%get-ldk-class-by-fq-name (slot-value (slot-value this '|name|) '|value|))))
     (let ((java-classes (mapcar (lambda (name)
                                   (%get-java-class-by-bin-name name))
