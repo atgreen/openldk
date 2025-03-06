@@ -76,7 +76,7 @@
                :cl-store :trivial-backtrace :fset :bordeaux-threads
                :float-features :local-time :closer-mop :slynk
                :file-attributes :trivial-garbage :precise-time
-               :trivial-gray-streams)
+               :trivial-gray-streams :cl-murmurhash)
   :build-operation "program-op"
   :build-pathname "openldk"
   :entry-point "openldk:make-image")

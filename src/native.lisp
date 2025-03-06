@@ -827,12 +827,8 @@ user.variant
     (+ (* universal-time 1000000000) nanoseconds)))
 
 (defun |java/lang/System.identityHashCode(Ljava/lang/Object;)| (objref)
-  ;; A bit mixing hash to bring 64-bit integers down to 32-bits.
-  (let ((x (sxhash objref)))
-    (let ((x (logxor x (ash x -33))))
-      (setf x (* x #x62A9D9ED799705F5))
-      (setf x (logxor x (ash x -28)))
-      (ldb (byte 32 0) x))))
+  ;; Hash down the 64-bit SXHASH to 32-bits.
+  (cl-murmurhash:murmurhash (sxhash objref)))
 
 (defun |java/lang/Thread.yield()| ()
   ;; FIXME

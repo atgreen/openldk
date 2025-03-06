@@ -95,3 +95,4 @@ marshal, ghcr.io/ocicl/marshal@sha256:a1e4be46c96220d69e43a1cdedd2d4cefe2a65780e
 marshal-tests, ghcr.io/ocicl/marshal@sha256:a1e4be46c96220d69e43a1cdedd2d4cefe2a65780ee32da01440ebadc05aba30, cl-marshal-20240503-f169abd/marshal-tests.asd
 fast-io, ghcr.io/ocicl/fast-io@sha256:7ba35a0eddf00b3c25656b3c5a93e95460f6cb8f807afbc04ef4f50076d95aff, fast-io-20240503-a4c5ad6/fast-io.asd
 fast-io-test, ghcr.io/ocicl/fast-io@sha256:7ba35a0eddf00b3c25656b3c5a93e95460f6cb8f807afbc04ef4f50076d95aff, fast-io-20240503-a4c5ad6/fast-io-test.asd
+cl-murmurhash, ghcr.io/ocicl/cl-murmurhash@sha256:cf21eb7af128c36416f40e842e622bb2f04c09803587333a1cfa489a0c0d1525, cl-murmurhash-20240503-5433f5e/cl-murmurhash.asd
