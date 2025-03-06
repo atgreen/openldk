@@ -163,14 +163,16 @@ where <options> includes:
   -target <release>      Generate class files for specific VM version
 ```
 
-Run `make check` to run through the dejagnu-based testsuite.
-As of Mar 1 2025, the results look like this
+Run `make check` to run through the
+[dejagnu](https://www.gnu.org/software/dejagnu/dejagnu)-based testsuite.
+As of Mar 6 2025, the results look like this
 ```
 		=== openldk Summary ===
 
-# of expected passes		8374
-# of expected failures		1676
-# of unresolved testcases	10
+# of expected passes		8839
+# of unexpected failures	11
+# of expected failures		1712
+# of unresolved testcases	11
 ```
 
 ### Debugging
