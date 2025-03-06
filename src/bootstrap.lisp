@@ -111,6 +111,9 @@
 (defclass |java/io/FileOutputStream| (|java/io/OutputStream|)
   ())
 
+(defclass |java/io/RandomAccessFile| (|java/lang/Object|)
+  ())
+
 (defclass |java/lang/Thread| (|java/lang/Object|)
   ())
 
