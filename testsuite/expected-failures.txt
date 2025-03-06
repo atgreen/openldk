@@ -13,7 +13,6 @@ FAIL: gcj/md5test.java execution test
 FAIL: gcj/N19990310_5.java execution test
 FAIL: gcj/negzero.java execution test
 FAIL: gcj/newarray_overflow.java execution test
-FAIL: gcj/PR100.java execution test
 FAIL: gcj/PR141.java execution test
 FAIL: gcj/pr21785.java execution test
 FAIL: gcj/PR218.java execution test
