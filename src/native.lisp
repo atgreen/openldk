@@ -686,6 +686,19 @@ user.variant
   ;; FIXME
   nil)
 
+(defmethod |open0(Ljava/lang/String;I)| ((fis |java/io/RandomAccessFile|) filename mode)
+  (handler-case
+      (setf (slot-value fis '|fd|) (open (lstring filename)
+                                         :element-type '(unsigned-byte 8)
+                                         :direction (ecase mode
+                                                      (1 :input)
+                                                      (2 :io))))
+    ((or sb-ext:file-does-not-exist sb-int:simple-file-error) (e)
+      (declare (ignore e))
+      (let ((fnf (make-instance '|java/io/FileNotFoundException|)))
+        (|<init>(Ljava/lang/String;)| fnf filename)
+        (error (%lisp-condition fnf))))))
+
 (defmethod |open0(Ljava/lang/String;)| ((fis |java/io/FileInputStream|) filename)
   (handler-case
       (setf (slot-value fis '|fd|) (open (lstring filename)
