@@ -1069,7 +1069,6 @@ user.variant
   (assert (null source))
   (let ((sap (sb-alien:alien-sap (gethash source-offset %unsafe-memory-table)))
         (bytes-read 0))
-    (format t "copyMemory ~A ~A ~A ~A ~A~%" source sap dest dest-offset length)
     (loop for i below length
           do (let ((offset-sap (sb-sys:sap+ sap i)))
                (setf (aref dest (+ dest-offset i)) (sb-sys:sap-ref-8 offset-sap 0))
