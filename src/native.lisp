@@ -291,6 +291,10 @@
   ;; FIXME
   0)
 
+(defmethod |isInterrupted(Z)| ((thread |java/lang/Thread|) x)
+  ;; FIXME
+  0)
+
 (defmethod |start0()| ((thread |java/lang/Thread|))
   ;; FIXME
   )
@@ -487,6 +491,27 @@
      (setf (aref obj l) value))
     (t (error "internal error: unrecognized object type in putObjectVolatile: ~A" obj))))
 
+(defmethod |getLongVolatile(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) obj l)
+  (cond
+    ((vectorp obj)
+     (aref obj l))
+    ((typep obj '|java/lang/Object|)
+     (let* ((field (gethash l field-offset-table))
+            (key (intern (slot-value (slot-value field '|name|) '|value|) :openldk)))
+       (slot-value obj key)))
+    (t (error "internal error: unrecognized object type in getLongVolatile: ~A" obj))))
+
+(defmethod |putObject(Ljava/lang/Object;JLjava/lang/Object;)| ((unsafe |sun/misc/Unsafe|) obj l value)
+  (format t "putObject: ~A ~A ~A~%" obj (gethash l field-offset-table) value)
+  (cond
+    ((vectorp obj)
+     (setf (aref obj l) value))
+    ((typep obj '|java/lang/Object|)
+     (let* ((field (gethash l field-offset-table))
+            (key (intern (slot-value (slot-value field '|name|) '|value|) :openldk)))
+       (setf (slot-value obj key) value)))
+    (t (error "internal error: unrecognized object type in putObjectVolatile: ~A" obj))))
+
 (defun |java/security/AccessController.getStackAccessControlContext()| ()
   ;; FIXME -- implement
   nil)
@@ -560,6 +585,9 @@ user.variant
 |#
 
 (defun |java/io/FileDescriptor.initIDs()| ()
+  )
+
+(defun |sun/nio/ch/IOUtil.initIDs()| ()
   )
 
 (defmethod |run()| (arg)
@@ -755,7 +783,7 @@ user.variant
 
 (defmethod |writeBytes([BIIZ)| ((fos |java/io/FileOutputStream|) byte-array offset length append?)
   (declare (ignore append?))
-;;  (format t "~&WRITE-BYTES: 1:~A 2:~A 3:~A 4:~A 5:~A 6:~A 7:~A~%" fos (slot-value fos '|fd|) (slot-value (slot-value fos '|fd|) '|fd|) byte-array offset length append?)
+  ;;  (format t "~&WRITE-BYTES: 1:~A 2:~A 3:~A 4:~A 5:~A 6:~A 7:~A~%" fos (slot-value fos '|fd|) (slot-value (slot-value fos '|fd|) '|fd|) byte-array offset length append?)
   (let* ((file-descriptor (slot-value fos '|fd|))
          (fd (slot-value file-descriptor '|fd|)))
     (cond
@@ -783,6 +811,10 @@ user.variant
            (if (getf attr :DIRECTORY) #x04 #x00)))
     (sb-int:simple-file-error (e)
       0)))
+
+(defmethod |getLength(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
+  (with-open-file (stream (lstring (slot-value file '|path|)) :element-type '(unsigned-byte 8))
+    (file-length stream)))
 
 (defun |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedAction;Ljava/security/AccessControlContext;)| (action context)
   (declare (ignore context))
@@ -930,6 +962,16 @@ user.variant
     (sb-alien:with-alien ((mem (* sb-alien:long) sap))
       (sb-alien:deref mem 0))))
 
+(defmethod |setMemory(Ljava/lang/Object;JJB)| ((unsafe |sun/misc/Unsafe|) obj ptr size byte)
+  (assert (null obj))
+  (let ((sap (sb-sys:int-sap ptr)))
+    ;; Loop through the memory range and set each byte to the specified value
+    (dotimes (i size)
+      ;; Calculate the offset for the current byte
+      (let ((offset-sap (sb-sys:sap+ sap i)))
+        ;; Set the byte at the current offset
+        (setf (sb-sys:sap-ref-8 offset-sap 0) byte)))))
+
 (defun |java/lang/Shutdown.beforeHalt()| ()
   ;; FIXME
   )
@@ -984,3 +1026,52 @@ user.variant
         (current-thread (bordeaux-threads:current-thread)))
     (if (eq (owner monitor) current-thread)
         1 0)))
+
+(defun |sun/nio/ch/IOUtil.iovMax()| ()
+  0)
+
+(defun |sun/nio/ch/FileChannelImpl.initIDs()| ()
+  )
+
+(defun |sun/nio/ch/NativeThread.init()| ()
+  )
+
+(defun |sun/nio/ch/NativeThread.current()| ()
+  -1)
+
+(defun |java/nio/Bits.pageSize()| ()
+  4096)
+
+(defmethod |pageSize()| ((unsafe |sun/misc/Unsafe|))
+  4096)
+
+(defun |sun/nio/ch/FileDispatcherImpl.init()| ()
+  ;; FIXME
+  )
+
+(defun |sun/nio/ch/FileDispatcherImpl.read0(Ljava/io/FileDescriptor;JI)| (fd ptr length)
+  (let ((in-stream fd)
+        (bytes-read 0)
+        (sap (sb-sys:int-sap ptr)))
+    (loop for i below length
+          for byte = (read-byte in-stream nil nil) ; Read a byte, return NIL on EOF
+          while byte
+          do (let ((offset-sap (sb-sys:sap+ sap i)))
+               (setf (sb-sys:sap-ref-8 offset-sap 0) byte)
+               (incf bytes-read)))  ; Count bytes read
+    bytes-read))
+
+(defun |java/nio/MappedByteBuffer.checkBounds(III)| (off len size)
+  ;; FIXME
+  )
+
+(defmethod |copyMemory(Ljava/lang/Object;JLjava/lang/Object;JJ)| ((unsafe |sun/misc/Unsafe|) source source-offset dest dest-offset length)
+  (assert (null source))
+  (let ((sap (sb-alien:alien-sap (gethash source-offset %unsafe-memory-table)))
+        (bytes-read 0))
+    (format t "copyMemory ~A ~A ~A ~A ~A~%" source sap dest dest-offset length)
+    (loop for i below length
+          do (let ((offset-sap (sb-sys:sap+ sap i)))
+               (setf (aref dest (+ dest-offset i)) (sb-sys:sap-ref-8 offset-sap 0))
+               (incf bytes-read)))  ; Count bytes read
+    bytes-read))
