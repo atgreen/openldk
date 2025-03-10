@@ -531,12 +531,14 @@
                   ;; FIXME
                   ("java.class.path" . ,(or (uiop:getenv "LDK_CLASSPATH") "."))
                   ("sun.boot.class.path" .
-                                         ,(format nil "~{~A~^:~}"
+                                         ,(format nil "~{~A~^:~}:~A"
                                                   (mapcar #'namestring
                                                           (directory
                                                            (concatenate 'string
                                                                         (uiop:getenv "JAVA_HOME")
-                                                                        "/lib/*.jar")))))
+                                                                        "/lib/*.jar")))
+                                                  (or (uiop:getenv "LDK_CLASSPATH") ".")))
+
                   ;; FIXME
                   ("java.home" . ,(uiop:getenv "JAVA_HOME"))
                   ("user.home" . ,(uiop:getenv "HOME"))
