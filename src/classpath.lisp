@@ -48,21 +48,40 @@
 (defclass dir-classpath-entry (classpath-entry)
   ((dir :initarg :dir)))
 
+;; Modify the :around method to establish the restart at the right time
+(defmethod open-java-classfile :around ((cpe jar-classpath-entry) classname)
+  (restart-case
+      (handler-case
+          (call-next-method)
+        (sb-int:closed-saved-stream-error ()
+          (invoke-restart 'reopen-zipfile)))
+    (reopen-zipfile ()
+      :report "Reopen the zipfile and retry."
+      (with-slots (zipfile zipfile-entries jarfile) cpe
+        (setf zipfile (zip:open-zipfile jarfile))
+        (setf zipfile-entries (zip:zipfile-entries zipfile))
+        (open-java-classfile cpe classname)))))
+
+;; And simplify the primary method - no restart needed here
 (defmethod open-java-classfile ((cpe jar-classpath-entry) classname)
   "Return an input stream for a java class, CLASSNAME."
   (with-slots (jarfile zipfile zipfile-entries) cpe
+    ;; Ensure the zipfile is open
     (unless zipfile
       (setf zipfile (zip:open-zipfile jarfile))
       (setf zipfile-entries (zip:zipfile-entries zipfile)))
+    ;; Look up the class file in the zipfile entries
     (let ((ze (gethash (format nil "~A.class" classname) zipfile-entries)))
       (when ze
+        ;; Create an in-memory input stream for the class file contents
         (let ((result (flexi-streams:make-in-memory-input-stream (zip:zipfile-entry-contents ze))))
-          ;; Add this package to the *PACKAGE* hashtable.
+          ;; Add the package to the *PACKAGE* hashtable if it doesn't already exist
           (let ((last-slash-position (position #\/ classname :from-end t)))
             (if last-slash-position
                 (let ((package-name (subseq classname 0 (1+ last-slash-position))))
                   (unless (gethash package-name *packages*)
                     (setf (gethash package-name *packages*) (jstring jarfile))))))
+          ;; Return the input stream
           result)))))
 
 (defmethod open-java-classfile ((cpe dir-classpath-entry) classname)
