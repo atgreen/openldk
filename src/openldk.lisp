@@ -545,6 +545,9 @@
         (when (find #\u LDK_DEBUG)
           (setf *debug-unmuffle* t)))))
 
+  (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring "java.class.path") (jstring (uiop:getenv "LDK_CLASSPATH")))
+  (%clinit (%get-ldk-class-by-bin-name "sun/misc/Launcher"))
+
   (when *debug-slynk*
     (slynk:create-server :port 2025)
     (sleep 10))
@@ -645,7 +648,8 @@
                      "java/lang/ThreadGroup"
                      "java/lang/Thread"
                      "java/lang/ref/SoftReference"
-                     "java/util/Properties"))
+                     "java/util/Properties"
+		     "java/lang/SecurityManager"))
           (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil))
 
         (let ((props (make-instance '|java/util/Properties|)))
