@@ -517,7 +517,7 @@
   nil)
 
 (defun |java/lang/System.initProperties(Ljava/util/Properties;)| (props)
-  (dolist (prop `(("java.specification.version" . "8.0")
+  (dolist (prop `(("java.specification.version" . "1.8")
                   ("java.specification.name" . "Java Platform API Specification")
                   ("java.specification.vendor" . "Oracle Corporation")
                   ("java.version" . "8.0")
@@ -525,30 +525,48 @@
                   ("java.vendor.url" . "https://github.com/atgreen/openldk")
                   ("java.vendor.url.bug" . "https://github.com/atgreen/openldk/issues")
                   ("java.class.version" . "52.0")
-;                  ("sun.misc.URLClassPath.debug" . "1")
-;                  ("sun.misc.URLClassPath.debugLookupCache" . "1")
                   ("sun.cds.enableSharedLookupCache" . "1")
-                  ;; FIXME
-                  ("java.class.path" . ,(or (uiop:getenv "LDK_CLASSPATH") "."))
+                  ("java.class.path" . ,(or (uiop:getenv "LDK_CLASSPATH")
+                                            (uiop:getenv "CLASSPATH")
+                                            "."))
                   ("sun.boot.class.path" .
-                                         ,(format nil "~{~A~^:~}:~A"
+                                         ,(format nil "~{~A~^:~}"
                                                   (mapcar #'namestring
                                                           (directory
                                                            (concatenate 'string
                                                                         (uiop:getenv "JAVA_HOME")
-                                                                        "/lib/*.jar")))
-                                                  (or (uiop:getenv "LDK_CLASSPATH") ".")))
-
-                  ;; FIXME
+                                                                        "/lib/*.jar")))))
                   ("java.home" . ,(uiop:getenv "JAVA_HOME"))
                   ("user.home" . ,(uiop:getenv "HOME"))
                   ("user.dir" . ,(namestring (uiop:getcwd)))
                   ("user.name" . ,(let ((uid (sb-posix:getuid)))
                                     (slot-value (sb-posix:getpwuid uid) 'sb-posix::name)))
-                  ("os.name" . "Linux")
-                  ("os.version" . "FIXME")
-                  ("os.arch" . "FIXME")
+                  ("os.name" . ,(cond
+                                  ((find :LINUX *features*)
+                                   "Linux")
+                                  (t (error "internal error"))))
+                  ("os.version" . ,(if (find :LINUX *features*)
+                                       (with-open-file (stream "/proc/version" :direction :input)
+                                         (let ((line (read-line stream)))
+                                           (let* ((version-start (+ (search "Linux version " line)
+                                                                    (length "Linux version ")))
+                                                  (space-pos (position #\Space line :start version-start))
+                                                  (version (subseq line version-start space-pos)))
+                                             version)))
+                                       (error "internal error")))
+                  ("os.arch" . ,(cond
+                                  ((find :X86-64 *features*)
+                                   "amd64")
+                                  (t (error "internal error"))))
+                  ("sun.cpu.endian" . ,(cond
+                                         ((find :LITTLE-ENDIAN *features*)
+                                          "little")
+                                         ((find :BIG-ENDIAN *features*)
+                                          "big")
+                                         (t (error "internal error"))))
                   ("file.separator" . "/")
+                  ("file.encoding.pkg" . "sun.io")
+                  ("java.io.tmpdir" . ,(namestring (uiop:temporary-directory)))
                   ("file.encoding" . "UTF-8")
                   ("path.separator" . ":")
                   ("java.library.path" . ,(concatenate 'string
@@ -561,12 +579,9 @@
 #|
 Need to add:
 
-file.encoding.pkg
 java.awt.printerjob
-java.io.tmpdir
 sun.arch.data.model
 sun.awt.graphicsenv
-sun.cpu.endian
 sun.cpu.isalist
 sun.desktop
 sun.io.unicode.encoding
@@ -577,7 +592,6 @@ sun.stderr.encoding
 sun.stdout.encoding
 user.country
 user.dir
-user.home
 user.language
 user.name
 user.script
