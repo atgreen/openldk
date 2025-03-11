@@ -545,7 +545,11 @@
         (when (find #\u LDK_DEBUG)
           (setf *debug-unmuffle* t)))))
 
-  (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring "java.class.path") (jstring (uiop:getenv "LDK_CLASSPATH")))
+  ;; Reset system properties to fix things that change between
+  ;; build-time and run-time.
+  (|java/lang/System.initProperties(Ljava/util/Properties;)|
+   (slot-value |+static-java/lang/System+| '|props|))
+
   (%clinit (%get-ldk-class-by-bin-name "sun/misc/Launcher"))
 
   (when *debug-slynk*
