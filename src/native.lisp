@@ -502,7 +502,7 @@
     (t (error "internal error: unrecognized object type in getLongVolatile: ~A" obj))))
 
 (defmethod |putObject(Ljava/lang/Object;JLjava/lang/Object;)| ((unsafe |sun/misc/Unsafe|) obj l value)
-  (format t "putObject: ~A ~A ~A~%" obj (gethash l field-offset-table) value)
+  ; (format t "putObject: ~A ~A ~A~%" obj (gethash l field-offset-table) value)
   (cond
     ((vectorp obj)
      (setf (aref obj l) value))
