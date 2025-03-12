@@ -667,6 +667,8 @@
 
         (|java/lang/System.initializeSystemClass()|)
 
+        (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "sun/misc/Launcher") nil boot-class-loader nil)
+
         (|<init>()| boot-class-loader)
 
         (dolist (c '("java/lang/invoke/MethodHandles"
