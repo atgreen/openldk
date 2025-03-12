@@ -74,16 +74,20 @@
 
 (defun %caller-class-name-from-stack-frame (caller-list)
   (let ((caller-string (format nil "~A" caller-list)))
-    ; (format t "XXXXXXXXXXXX ~A~%" caller-string)
     (let ((dot-position (position #\. caller-string)))
       (cond
         ((str:starts-with? "(%clinit-" caller-string)
          (subseq caller-string 9 (1- (length caller-string))))
-        ((str:starts-with? "((METHOD " caller-string)
+        ((str:starts-with? "((METHOD" caller-string)
          (format nil "~A" (type-of (cadr caller-list))))
+        ((str:starts-with? "((LABELS CLINIT IN %CLINIT" caller-string)
+         (name (cadr caller-list)))
+        ((str:starts-with? "(%CLINIT " caller-string)
+         (name (cadr caller-list)))
         (dot-position
          (subseq caller-string 1 dot-position))
-        (t "openldk-internal")))))
+        ;; FIXME: maybe use an OpenLDK internal class to indicate internal frame
+        (t "java/lang/System")))))
 
 (defmethod |getStackTraceElement(I)| ((this |java/lang/Throwable|) index)
   (let ((ste (make-instance '|java/lang/StackTraceElement|))
@@ -104,17 +108,35 @@
           do (setf last item))
     (nreverse result)))
 
-(defmethod |sun/reflect/Reflection.getCallerClass()| ()
+(defun %remove-elements-with-substrings (element-list substring-list)
+  "Remove elements from ELEMENT-LIST whose string representation contains
+any substring in SUBSTRING-LIST."
+  (remove-if
+   (lambda (elem)
+     (let ((str-representation (format nil "~A" elem)))
+       (some (lambda (substr)
+               (search substr str-representation))
+             substring-list)))
+   element-list))
+
+(defun %remove-invoke-frames (frames)
+  "Remove any frames associated with java.lang.reflect.Method.invoke()
+and its implementation."
+  (%remove-elements-with-substrings
+   frames
+   '("sun/reflect/NativeMethodAccessorImpl.invoke0"
+     "METHOD invoke"
+     "#<java/lang/reflect/Method "
+     "#<sun/reflect/NativeMethodAccessorImpl ")))
+
+(defun |sun/reflect/Reflection.getCallerClass(I)| (index)
   ;; FIXME: we don't need the whole backtrace
-  (let* ((backtrace (%remove-adjacent-repeats (sb-debug:list-backtrace)))
-         (caller-list (cond
-                        ((and (listp (car (fourth backtrace)))
-                              (eq 'LAMBDA (caar (fourth backtrace))))
-                         (fifth backtrace))
-                        (t
-                         (fourth backtrace)))))
-    (assert (stringp (%caller-class-name-from-stack-frame caller-list)))
-    (%get-java-class-by-bin-name (%caller-class-name-from-stack-frame caller-list))))
+  (let* ((backtrace (%remove-invoke-frames (%remove-adjacent-repeats (sb-debug:list-backtrace)))))
+    (assert (stringp (%caller-class-name-from-stack-frame (nth index backtrace))))
+    (%get-java-class-by-bin-name (%caller-class-name-from-stack-frame (nth index backtrace)))))
+
+(defun |sun/reflect/Reflection.getCallerClass()| ()
+  (|sun/reflect/Reflection.getCallerClass(I)| 3))
 
 (defun %type-to-descriptor (type)
   (cond
@@ -402,8 +424,25 @@
          (let ((lclass (%get-ldk-class-by-fq-name (slot-value (slot-value this '|name|) '|value|))))
            (coerce (append (loop for method across (methods lclass)
                                  unless (str:starts-with? "<init>" (name method))
+                                   #|
+                                   Method(Class<?> declaringClass,
+                                          String name,
+                                          Class<?>[] parameterTypes,
+                                          Class<?> returnType,
+                                          Class<?>[] checkedExceptions,
+                                          int modifiers,
+                                          int slot,
+                                          String signature,
+                                          byte[] annotations,
+                                          byte[] parameterAnnotations,
+                                          byte[] annotationDefault)
+                                   |#
                                    collect (let ((c (make-instance '|java/lang/reflect/Method|)))
-                                             (|<init>(Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/Class;Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B[B)| c this (ijstring (name method)) (%get-parameter-types (descriptor method)) nil (make-array 0) (access-flags method) 0 (ijstring (descriptor method)) (make-array 0) (make-array 0) (make-array 0))
+                                             (|<init>(Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/Class;Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B[B)|
+                                              c this (ijstring (name method))
+                                              (%get-parameter-types (descriptor method))
+                                              (%get-return-type (descriptor method))
+                                              (make-array 0) (access-flags method) 0 (ijstring (descriptor method)) (make-array 0) (make-array 0) (make-array 0))
                                              c)))
                    'vector)))
     (when *debug-trace*
