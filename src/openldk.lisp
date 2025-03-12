@@ -412,6 +412,7 @@
           (let ((classfile-stream (open-java-classfile-on-classpath classname)))
             (when *debug-load*
               (format t "~&; LOADING ~A~%" classname))
+            (assert classfile-stream)
             (if classfile-stream
                 (unwind-protect
 
@@ -585,13 +586,15 @@
 
 (defun main-wrapper ()
   "Main entry point into OpenLDK. Process command line errors here."
+  #|
   (let ((backtrace nil))
     (handler-bind ((error
                      (lambda (condition)
                        (format *error-output* "~&*** Caught ERROR: ~A~%" condition)
                        #+sbcl (sb-debug:backtrace)
-                       (uiop:quit 1))))
-      (main-command))))
+  (uiop:quit 1))))
+  |#
+      (main-command))
 
 (defun make-image ()
 
