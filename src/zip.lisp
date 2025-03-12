@@ -76,6 +76,7 @@
   (|<init>(Ljava/io/File;I)| this file 1))
 
 (defmethod |getEntry(Ljava/lang/String;)| ((this |java/util/zip/ZipFile|) name)
+  ; (format t "GET-ENTRY: ~A in ~A~%" (lstring name) (slot-value this '|jzfile|))
   (let ((ze (zip:get-zipfile-entry (lstring name) (slot-value this '|jzfile|))))
     (when ze
       (let ((entry (make-instance '|java/util/zip/ZipEntry|)))
