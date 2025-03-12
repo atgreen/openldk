@@ -966,8 +966,11 @@ user.variant
 
 (defmethod |findBootstrapClass(Ljava/lang/String;)| ((loader |java/lang/ClassLoader|) name)
   ;; FIXME
-  (let ((ldk-class (classload (substitute #\/ #\. (coerce (slot-value name '|value|) 'string)))))
-    (java-class ldk-class)))
+  (handler-case
+      (let ((ldk-class (classload (substitute #\/ #\. (coerce (slot-value name '|value|) 'string)))))
+        (java-class ldk-class))
+    (condition (c)
+      nil)))
 
 (defun |java/io/UnixFileSystem.initIDs()| ()
   ;; FIXME
