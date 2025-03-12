@@ -597,6 +597,7 @@ and its implementation."
                                   ((find :X86-64 *features*)
                                    "amd64")
                                   (t (error "internal error"))))
+                  ("sun.jnu.encoding" . "UTF-8")
                   ("sun.cpu.endian" . ,(cond
                                          ((find :LITTLE-ENDIAN *features*)
                                           "little")
@@ -1134,3 +1135,10 @@ user.variant
                (setf (aref dest (+ dest-offset i)) (sb-sys:sap-ref-8 offset-sap 0))
                (incf bytes-read)))  ; Count bytes read
     bytes-read))
+
+(defun |sun/nio/fs/UnixNativeDispatcher.init()| ()
+  ;; FIXME
+  )
+
+(defun |sun/nio/fs/UnixNativeDispatcher.getcwd()| ()
+  (jstring (namestring (uiop:getcwd))))
