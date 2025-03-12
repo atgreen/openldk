@@ -716,7 +716,13 @@
 (defmethod codegen ((insn ir-i2d) context)
   (make-instance '<expression>
                  :insn insn
-                 :code (list 'float (code (codegen (value insn) context)))
+                 :code `(float ,(code (codegen (value insn) context)))
+                 :expression-type :DOUBLE))
+
+(defmethod codegen ((insn ir-l2d) context)
+  (make-instance '<expression>
+                 :insn insn
+                 :code `(float ,(code (codegen (value insn) context)))
                  :expression-type :DOUBLE))
 
 (defmethod codegen ((insn ir-f2d) context)
