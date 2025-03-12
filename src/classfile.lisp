@@ -337,6 +337,8 @@ stream."
            (read-buffer attributes-length))
           ("RuntimeInvisibleParameterAnnotations"
            (read-buffer attributes-length))
+          ("RuntimeVisibleParameterAnnotations"
+           (read-buffer attributes-length))
           ("RuntimeVisibleAnnotations"
            (setf (gethash "RuntimeVisibleAnnotations" attributes)
                  (read-buffer attributes-length)))
