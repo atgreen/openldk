@@ -592,9 +592,7 @@ sun.os.patch.level
 sun.stderr.encoding
 sun.stdout.encoding
 user.country
-user.dir
 user.language
-user.name
 user.script
 user.timezone
 user.variant
