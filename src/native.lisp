@@ -914,7 +914,7 @@ user.variant
 
 (defun |java/lang/System.identityHashCode(Ljava/lang/Object;)| (objref)
   ;; Hash down the 64-bit SXHASH to 32-bits.
-  (cl-murmurhash:murmurhash (sxhash objref)))
+  (unsigned-to-signed-integer (cl-murmurhash:murmurhash (sxhash objref))))
 
 (defun |java/lang/Thread.yield()| ()
   ;; FIXME
