@@ -629,10 +629,15 @@
         (dolist (p '(("byte" . "B") ("char" . "C") ("int" . "I")
                      ("short" . "S") ("long" . "J") ("double" . "D")
                      ("float" . "F") ("boolean" . "Z") ("void" . "Z")))
-          (let ((class (make-instance '|java/lang/Class|)))
-            (setf (slot-value class '|name|) (ijstring (car p)))
-            (setf (gethash (car p) *java-classes-by-fq-name*) class)))
-;            (setf (gethash (cdr p) *java-classes-by-bin-name*) class)))
+          (let ((jclass (make-instance '|java/lang/Class|))
+                (lclass (make-instance '<class>)))
+            (setf (slot-value jclass '|name|) (ijstring (car p)))
+            (setf (name lclass) (car p))
+            (setf (java-class lclass) jclass)
+            (setf (gethash (car p) *ldk-classes-by-fq-name*) lclass)
+            (setf (gethash (car p) *ldk-classes-by-bin-name*) lclass)
+            (setf (gethash (car p) *java-classes-by-fq-name*) jclass)
+            (setf (gethash (car p) *java-classes-by-bin-name*) jclass)))
 
         ;; Preload some important classes.
         (dolist (c '("java/lang/Boolean"
