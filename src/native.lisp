@@ -195,10 +195,10 @@ and its implementation."
                         (java-class (%get-array-ldk-class-from-name (subseq lname 1)))))
                (and (%get-ldk-class-by-bin-name lname t)
                     (java-class (%get-ldk-class-by-bin-name lname)))
-               (progn (let ((klass (classload lname)))
-                        (when klass
-                          (%clinit klass)
-                          (java-class klass)))))))
+               (let ((klass (classload lname)))
+                 (when klass
+                   (%clinit klass)
+                   (java-class klass))))))
     (when *debug-trace*
       (incf *call-nesting-level* -1))))
 
