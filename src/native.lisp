@@ -895,6 +895,9 @@ user.variant
             (list method object args)))
   (unwind-protect
        (progn
+         (dotimes (i (length args))
+           (when (typep (aref args i) '|java/lang/Integer|)
+             (setf (aref args i) (slot-value (aref args i) '|value|))))
          (let ((result (apply (intern
                                (lispize-method-name
                                 (concatenate 'string
