@@ -572,6 +572,7 @@
                   ("java.library.path" . ,(concatenate 'string
                                                        (uiop:getenv "JAVA_HOME")
                                                        "/lib/"))
+                  ("java.security.debug" . "0")
                   ("line.separator" . ,(format nil "~%"))))
     (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring (car prop)) (ijstring (cdr prop))))
   props)
