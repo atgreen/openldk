@@ -658,7 +658,7 @@
                      "java/lang/Thread"
                      "java/lang/ref/SoftReference"
                      "java/util/Properties"
-		     "java/lang/SecurityManager"))
+                     "java/lang/SecurityManager"))
           (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil))
 
         (let ((props (make-instance '|java/util/Properties|)))
