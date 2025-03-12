@@ -515,7 +515,7 @@
   (unless classpath
     (setf classpath
           (concatenate 'string
-                       (uiop:getenv "LDK_CLASSPATH")
+                       (or (uiop:getenv "CLASSPATH") (uiop:getenv "LDK_CLASSPATH") ".")
                        ":"
                        (format nil "~{~A~^:~}"
                                (mapcar #'namestring
