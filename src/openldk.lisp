@@ -258,8 +258,8 @@
                                           (cons (list (intern "this" :openldk) (intern (slot-value class 'name) :openldk))
                                                 args)))
                                 (when *debug-trace*
-                                  (list (list 'format 't "~&~V@A trace: entering ~A.~A(~{~A~^ ~}) ~A~%"
-                                              (list 'incf '*call-nesting-level* 1) "*"
+                                  (list (list 'format 't "~&~V@A <~A> trace: entering ~A.~A(~{~A~^ ~}) ~A~%"
+                                              (list 'incf '*call-nesting-level* 1) "*" '*call-nesting-level*
                                               class-name (fn-name *context*) (if *debug-trace-args*
                                                                                  (cons 'list args)
                                                                                  ())
