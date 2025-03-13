@@ -342,6 +342,8 @@ stream."
           ("RuntimeVisibleAnnotations"
            (setf (gethash "RuntimeVisibleAnnotations" attributes)
                  (read-buffer attributes-length)))
+          ("AnnotationDefault"
+           (read-buffer attributes-length))
           ("StackMapTable"
            (read-buffer attributes-length))
           ("SourceFile"
