@@ -159,8 +159,11 @@
 
 (define-bytecode-transpiler :WIDE (context code)
   (declare (ignore code))
-  (setf (next-is-wide-p context) t)
-  (list (make-instance 'ir-nop :address (pc context))))
+  (with-slots (pc next-is-wide-p) context
+    (let ((pc-start pc))
+      (setf next-is-wide-p t)
+      (incf pc)
+      (list (make-instance 'ir-nop :address pc-start)))))
 
 (define-bytecode-transpiler :ASTORE (context code)
   (with-slots (pc) context
