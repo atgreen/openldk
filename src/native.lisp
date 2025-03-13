@@ -235,7 +235,7 @@ and its implementation."
   (jstring (local-time:format-timestring nil (local-time:now) :format '(:timezone))))
 
 (defmethod |length()| ((str string))
-  (length str))
+  (length (lstring str)))
 
 (defmethod |java/util/TimeZone.getSystemGMTOffsetID()| ()
   (jstring (local-time:format-timestring nil (local-time:now) :format '(:gmt-offset))))
