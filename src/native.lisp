@@ -379,10 +379,17 @@ and its implementation."
       1
       0))
 
+(defclass/std <constant-pool> (|java/lang/Object|)
+  ((ldk-class)))
+
 (defmethod |getConstantPool()| ((this |java/lang/Class|))
+  (unless (%get-ldk-class-by-fq-name "sun.reflect.ConstantPool" t)
+    (%clinit (classload "sun/reflect/ConstantPool")))
   (let ((ldk-class (%get-ldk-class-by-fq-name (lstring (slot-value this '|name|)))))
-    (error "unimplemented")
-    ))
+    (let ((cp (make-instance '|sun/reflect/ConstantPool|)))
+      (setf (slot-value cp '|constantPoolOop|)
+            (make-instance '<constant-pool> :ldk-class ldk-class))
+      cp)))
 
 (defmethod |getDeclaredConstructors0(Z)| ((this |java/lang/Class|) arg)
   ;; FIXME
@@ -1142,3 +1149,10 @@ user.variant
 
 (defun |sun/nio/fs/UnixNativeDispatcher.getcwd()| ()
   (flexi-streams:string-to-octets (namestring (uiop:getcwd)) :external-format :utf-8))
+
+(defmethod |getUTF8At0(Ljava/lang/Object;I)| ((this |sun/reflect/ConstantPool|) cp index)
+  (format t "GETUTF8AT0 ~A ~A ~A~%" this (ldk-class cp) index)
+  (let* ((cp (constant-pool (ldk-class cp)))
+         (s (format nil "~A" (emit (aref cp index) cp))))
+    (format t " = ~S~%" s)
+    (jstring s)))

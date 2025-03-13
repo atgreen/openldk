@@ -120,6 +120,9 @@
 (defclass |java/lang/Throwable| (|java/lang/Object|)
   ())
 
+(defclass |sun/reflect/ConstantPool| (|java/lang/Object|)
+  ())
+
 (defmethod %lisp-condition ((throwable |java/lang/Throwable|))
   (error (format nil "Missing %lisp-condition implementation for ~A." throwable)))
 
