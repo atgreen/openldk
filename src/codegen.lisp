@@ -1256,12 +1256,12 @@
                  :code `(let ((result ,(code (codegen (slot-value insn 'value) context))))
                           (cond
                             (*debug-trace-args*
-                             (format t "~&~V@A trace: ~A result = ~A~%"
-                                     *call-nesting-level* "*"
+                             (format t "~&~V@A <~A> trace: ~A result = ~A~%"
+                                     *call-nesting-level* "*" *call-nesting-level*
                                      ,(fn-name *context*) result))
                             (*debug-trace*
-                             (format t "~&~V@A trace: ~A~%"
-                                     *call-nesting-level* "*" ,(fn-name *context*))))
+                             (format t "~&~V@A <~A> trace: ~A~%"
+                                     *call-nesting-level* "*" *call-nesting-level* ,(fn-name *context*))))
                           (return-from ,(intern (slot-value insn 'fn-name) :openldk) result))))
 
 (defmethod codegen ((insn <stack-variable>) context)
