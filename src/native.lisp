@@ -1141,4 +1141,4 @@ user.variant
   )
 
 (defun |sun/nio/fs/UnixNativeDispatcher.getcwd()| ()
-  (jstring (namestring (uiop:getcwd))))
+  (flexi-streams:string-to-octets (namestring (uiop:getcwd)) :external-format :utf-8))
