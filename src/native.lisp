@@ -80,6 +80,8 @@
          (subseq caller-string 9 (1- (length caller-string))))
         ((str:starts-with? "((METHOD" caller-string)
          (format nil "~A" (type-of (cadr caller-list))))
+        ((str:starts-with? "((LAMBDA " caller-string)
+         (substitute #\/ #\. (lstring (slot-value (cadr caller-list) '|name|))))
         ((str:starts-with? "((LABELS CLINIT IN %CLINIT" caller-string)
          (name (cadr caller-list)))
         ((str:starts-with? "(%CLINIT " caller-string)
