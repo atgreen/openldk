@@ -446,12 +446,13 @@ and its implementation."
                                           byte[] parameterAnnotations,
                                           byte[] annotationDefault)
                                    |#
+
                                    collect (let ((c (make-instance '|java/lang/reflect/Method|)))
                                              (|<init>(Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/Class;Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B[B)|
                                               c this (ijstring (name method))
                                               (%get-parameter-types (descriptor method))
                                               (%get-return-type (descriptor method))
-                                              (make-array 0) (access-flags method) 0 (ijstring (descriptor method)) (make-array 0) (make-array 0) (make-array 0))
+                                              (make-array 0) (access-flags method) 0 (ijstring (descriptor method)) (make-array 5) (make-array 6) (gethash "AnnotationDefault" (attributes method)))
                                              c)))
                    'vector)))
     (when *debug-trace*
