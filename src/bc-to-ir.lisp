@@ -212,6 +212,12 @@
   (declare (ignore code))
   (%transpile-astore-x context 3))
 
+(defun %signed-to-unsigned-byte (value)
+  "Convert a signed byte (-128 to 127) to an unsigned byte (0-255)."
+  (if (< value 0)
+      (+ value 256)
+      value))
+
 (defun %unsigned-to-signed-byte (value)
   "Convert an unsigned byte (0-255) to a signed byte (-128 to 127)."
   (if (> value 127)
