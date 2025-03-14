@@ -1159,3 +1159,10 @@ user.variant
          (s (format nil "~A" (emit (aref cp index) cp))))
     (format t " = ~S~%" s)
     (jstring s)))
+
+(defmethod |getIntAt0(Ljava/lang/Object;I)| ((this |sun/reflect/ConstantPool|) cp index)
+  (format t "GETINTAT0 ~A ~A ~A~%" this (ldk-class cp) index)
+  (let* ((cp (constant-pool (ldk-class cp)))
+         (i (slot-value (aref cp index) 'value)))
+    (format t " = ~S~%" i)
+    i))
