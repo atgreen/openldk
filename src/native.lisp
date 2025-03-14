@@ -1154,15 +1154,34 @@ user.variant
   (flexi-streams:string-to-octets (namestring (uiop:getcwd)) :external-format :utf-8))
 
 (defmethod |getUTF8At0(Ljava/lang/Object;I)| ((this |sun/reflect/ConstantPool|) cp index)
-  (format t "GETUTF8AT0 ~A ~A ~A~%" this (ldk-class cp) index)
   (let* ((cp (constant-pool (ldk-class cp)))
          (s (format nil "~A" (emit (aref cp index) cp))))
-    (format t " = ~S~%" s)
     (jstring s)))
 
 (defmethod |getIntAt0(Ljava/lang/Object;I)| ((this |sun/reflect/ConstantPool|) cp index)
-  (format t "GETINTAT0 ~A ~A ~A~%" this (ldk-class cp) index)
   (let* ((cp (constant-pool (ldk-class cp)))
          (i (slot-value (aref cp index) 'value)))
     (format t " = ~S~%" i)
     i))
+
+(defclass byte-array-input-stream (trivial-gray-streams:fundamental-binary-input-stream)
+  ((array :initarg :array :reader stream-array)
+   (start :initarg :start :reader stream-start)
+   (end   :initarg :end   :reader stream-end)
+   (pos   :initform 0     :accessor stream-pos)))
+
+(defmethod trivial-gray-streams:stream-read-byte ((stream byte-array-input-stream))
+  ;; Reads the next byte or returns (values NIL T) on EOF
+  (with-slots (array start end pos) stream
+    (let ((index (+ start pos)))
+      (if (>= index end)
+          (values nil t)  ; indicates EOF
+          (prog1 (%signed-to-unsigned-byte (aref array index))
+            (incf pos))))))
+
+(defmethod common-lisp:stream-element-type ((stream byte-array-input-stream))
+  '(unsigned-byte 8))
+
+(defun |java/lang/reflect/Proxy.defineClass0(Ljava/lang/ClassLoader;Ljava/lang/String;[BII)| (class-loader class-name data offset length)
+  (let ((stream (make-instance 'byte-array-input-stream :array data :start offset :end (+ offset length))))
+    (%classload-from-stream (substitute #\/ #\. (lstring class-name)) stream)))
