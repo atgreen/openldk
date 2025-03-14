@@ -375,8 +375,8 @@ and its implementation."
         1)))
 
 (defmethod |isInterface()| ((this |java/lang/Class|))
-  (if (and (not (|isPrimitive()| this))
-           (let ((lclass (%get-ldk-class-by-bin-name (slot-value (slot-value this '|name|) '|value|))))
+  (if (and (eq 0 (|isPrimitive()| this))
+           (let ((lclass (%get-ldk-class-by-fq-name (slot-value (slot-value this '|name|) '|value|))))
              (interface-p lclass)))
       1
       0))
