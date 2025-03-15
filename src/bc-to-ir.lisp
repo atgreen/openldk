@@ -695,6 +695,18 @@
         (push value (stack context)))
       (list (make-instance 'ir-nop :address pc-start)))))
 
+(define-bytecode-transpiler :SWAP (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
+      (let* ((value1 (pop (stack context)))
+             (value2 (pop (stack context))))
+        (push value1 (stack context))
+        (push value2 (stack context)))
+      (list (make-instance 'ir-nop :address pc-start)))))
+
 (define-bytecode-transpiler :DUP2 (context code)
   (declare (ignore code))
   (if (find (var-type (car (stack context))) '(:DOUBLE :LONG))
