@@ -81,7 +81,7 @@
         ((str:starts-with? "((METHOD" caller-string)
          (format nil "~A" (type-of (cadr caller-list))))
         ((str:starts-with? "((LAMBDA " caller-string)
-         (substitute #\/ #\. (lstring (slot-value (cadr caller-list) '|name|))))
+         (substitute #\/ #\. (format nil "~A" (type-of (cadr caller-list)))))
         ((str:starts-with? "((LABELS CLINIT IN %CLINIT" caller-string)
          (name (cadr caller-list)))
         ((str:starts-with? "(%CLINIT " caller-string)
@@ -561,6 +561,10 @@ and its implementation."
        (setf (slot-value obj key) value)))
     (t (error "internal error: unrecognized object type in putObjectVolatile: ~A" obj))))
 
+(defmethod |putOrderedObject(Ljava/lang/Object;JLjava/lang/Object;)| ((unsafe |sun/misc/Unsafe|) obj l value)
+  ;; FIXME
+  (|putObject(Ljava/lang/Object;JLjava/lang/Object;)| unsafe obj l value))
+
 (defun |java/security/AccessController.getStackAccessControlContext()| ()
   ;; FIXME -- implement
   nil)
@@ -718,7 +722,10 @@ user.variant
     (let ((obj (make-instance (intern bin-class-name :openldk))))
       (if (string= "()V" (slot-value (slot-value constructor '|signature|) '|value|))
           (|<init>()| obj)
-          (error "unimplemented"))
+          (progn
+            (format t "NEWINSTANCE ~A~%" (slot-value (slot-value constructor '|signature|) '|value|))
+            (format t params)
+            (error "unimplemented")))
       obj)))
 
 (defmethod |ensureClassInitialized(Ljava/lang/Class;)| ((unsafe |sun/misc/Unsafe|) class)
@@ -1161,7 +1168,6 @@ user.variant
 (defmethod |getIntAt0(Ljava/lang/Object;I)| ((this |sun/reflect/ConstantPool|) cp index)
   (let* ((cp (constant-pool (ldk-class cp)))
          (i (slot-value (aref cp index) 'value)))
-    (format t " = ~S~%" i)
     i))
 
 (defclass byte-array-input-stream (trivial-gray-streams:fundamental-binary-input-stream)
@@ -1184,4 +1190,4 @@ user.variant
 
 (defun |java/lang/reflect/Proxy.defineClass0(Ljava/lang/ClassLoader;Ljava/lang/String;[BII)| (class-loader class-name data offset length)
   (let ((stream (make-instance 'byte-array-input-stream :array data :start offset :end (+ offset length))))
-    (%classload-from-stream (substitute #\/ #\. (lstring class-name)) stream)))
+    (java-class (%classload-from-stream (substitute #\/ #\. (lstring class-name)) stream))))
