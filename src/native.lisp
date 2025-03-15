@@ -153,7 +153,7 @@ and its implementation."
     ((stringp type) (if (eq 1 (length type)) type (format nil "L~A;" type)))
     (t (format nil "Ljava/lang/Object;" type))))
 
-(defun %get-array-lclass-from-name (cname)
+(defun %get-array-ldk-class-from-name (cname)
   (let* ((ldk-class (%get-ldk-class-by-bin-name cname t)))
     (if ldk-class
         ldk-class
@@ -168,9 +168,9 @@ and its implementation."
           (setf (gethash cname *java-classes-by-bin-name*) java-class)
           lclass))))
 
-(defun %get-array-lclass (element-type)
+(defun %get-array-ldk-class (element-type)
   (let* ((cname (format nil "[~A" (%type-to-descriptor element-type))))
-    (%get-array-lclass-from-name cname)))
+    (%get-array-ldk-class-from-name cname)))
 
 (defmethod |getClass()| (object)
   ;;; FIXME - throw nullpointerexception
@@ -179,7 +179,7 @@ and its implementation."
          (when *debug-trace*
            (format t "~&~V@A trace: java/lang/Object.getClass(~A)" (incf *call-nesting-level* 1) "*" object))
          (cond
-           ((arrayp object) (java-class (%get-array-lclass (array-element-type object))))
+           ((arrayp object) (java-class (%get-array-ldk-class (array-element-type object))))
            (t (let ((jc (%get-java-class-by-bin-name (format nil "~A" (type-of object)) t)))
                 (or jc (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring (format nil "~A" (type-of object))) nil nil nil))))))
     (when *debug-trace*
@@ -356,8 +356,10 @@ and its implementation."
         0)))
 
 (defmethod |getComponentType()| ((class |java/lang/Class|))
-  ;; FIXME
-  (java-class (gethash "java/lang/Object" *ldk-classes-by-bin-name*)))
+  (let ((cn (lstring (slot-value class '|name|))))
+    (if (eq #\L (char cn 1))
+        (java-class (gethash (subseq cn 2 (- (length cn) 2)) *ldk-classes-by-bin-name*))
+        (java-class (gethash (subseq cn 1) *ldk-classes-by-bin-name*)))))
 
 (defmethod |isPrimitive()| ((class |java/lang/Class|))
   (let ((name-string (format nil "~A" (slot-value (slot-value class '|name|) '|value|))))

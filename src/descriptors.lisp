@@ -198,20 +198,12 @@
                 (res (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring (subseq return-type-descriptor 1 obj-end)) nil nil nil)))
            res)))
 
-      ;; For array types
       ((char= ch #\[)
-       (let ((index 1))
-         (loop until (not (member (char return-type-descriptor index) '(#\I #\J #\S #\B #\C #\D #\F #\Z #\[)))
-               do (incf index))
-         (when (and (< index (length return-type-descriptor)) (char= (char return-type-descriptor index) #\L))
-           (setf index (position #\; return-type-descriptor :start index)))
-         ;; FIXME!
-         (let ((res (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/util/Arrays") nil nil nil)))
-           res))))))
-
+       (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
+        (jstring return-type-descriptor) nil nil nil)))))
 
 (defun %get-parameter-types (descriptor)
-  "Parse the Java method descriptor and return a list of parameter types as strings."
+ "Parse the Java method descriptor and return a list of parameter types as strings."
   (let ((param-list nil)
         (index 0)
         (descriptor (subseq descriptor (position #\( descriptor) (position #\) descriptor))))
@@ -236,14 +228,15 @@
 
                  ;; For array types
                  ((char= ch #\[)
-                  (incf index)
-                  (loop until (not (member (char descriptor index) '(#\I #\J #\S #\B #\C #\D #\F #\Z #\[)))
-                        do (incf index))
-                  (when (and (< index (length descriptor)) (char= (char descriptor index) #\L))
-                    (setf index (position #\; descriptor :start index)))
-                  ;; FIXME!
-                  (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/util/Arrays") nil nil nil) param-list)
-                  (incf index))
+                  (let ((start index))
+                    (incf index)
+                    (loop until (not (member (char descriptor index) '(#\I #\J #\S #\B #\C #\D #\F #\Z #\[)))
+                          do (incf index))
+                    (when (and (< index (length descriptor)) (char= (char descriptor index) #\L))
+                      (setf index (position #\; descriptor :start index)))
+                    (incf index)
+                    (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
+                           (jstring (subseq descriptor start index)) nil nil nil) param-list)))
 
                  (t (incf index)))))
     (coerce (nreverse param-list) 'vector))) ; Reverse the list before returning it, since we used push
