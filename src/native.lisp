@@ -1193,5 +1193,14 @@ user.variant
   '(unsigned-byte 8))
 
 (defun |java/lang/reflect/Proxy.defineClass0(Ljava/lang/ClassLoader;Ljava/lang/String;[BII)| (class-loader class-name data offset length)
+  ;; FIXME
   (let ((stream (make-instance 'byte-array-input-stream :array data :start offset :end (+ offset length))))
     (java-class (%classload-from-stream (substitute #\/ #\. (lstring class-name)) stream))))
+
+(defmethod |defineClass(Ljava/lang/String;[BIILjava/lang/ClassLoader;Ljava/security/ProtectionDomain;)| ((unsafe |sun/misc/Unsafe|) class-name data offset length class-loader protection-domain)
+  ;; FIXME
+  (let ((stream (make-instance 'byte-array-input-stream :array data :start offset :end (+ offset length))))
+    (java-class (%classload-from-stream (substitute #\/ #\. (lstring class-name)) stream))))
+
+(defmethod |allocateInstance(Ljava/lang/Class;)| ((unsafe |sun/misc/Unsafe|) class)
+  (make-instance (intern (substitute #\/ #\. (lstring (slot-value class '|name|))) :openldk)))
