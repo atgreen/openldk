@@ -723,13 +723,15 @@ user.variant
       (if (string= "()V" (slot-value (slot-value constructor '|signature|) '|value|))
           (|<init>()| obj)
           (progn
-            (format t "NEWINSTANCE ~A~%" (slot-value (slot-value constructor '|signature|) '|value|))
-            (format t params)
-            (error "unimplemented")))
+            (apply (intern
+                    (lispize-method-name
+                     (format nil "<init>~A" (lstring (slot-value constructor '|signature|))))
+                    :openldk)
+                   (cons obj (coerce params 'list)))))
       obj)))
 
 (defmethod |ensureClassInitialized(Ljava/lang/Class;)| ((unsafe |sun/misc/Unsafe|) class)
-  (let ((lclass (%get-ldk-class-by-fq-name (slot-value (slot-value class '|name|) '|value|))))
+  (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value class '|name|)))))
     (assert lclass)
     (%clinit lclass)))
 
