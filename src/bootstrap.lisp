@@ -141,3 +141,6 @@
 
 (defclass |java/lang/ArithmeticException| (|java/lang/RuntimeException|)
   ())
+
+(defclass |java/net/Inet4AddressImpl| (|java/lang/Object|)
+  ())
