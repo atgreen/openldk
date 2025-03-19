@@ -1160,10 +1160,10 @@
 (defun %make-multi-array (dimensions)
   (if (null dimensions)
       nil
-      (make-array (car dimensions)
-                  :initial-contents
-                  (loop repeat (car dimensions)
-                        collect (%make-multi-array (cdr dimensions))))))
+      (make-java-array :size (car dimensions)
+                       :initial-contents
+                       (loop repeat (car dimensions)
+                             collect (%make-multi-array (cdr dimensions))))))
 
 (defmethod codegen ((insn ir-multi-new-array) context)
   (let ((init-element
