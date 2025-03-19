@@ -90,7 +90,7 @@
         (when (and (< 9 (length name))
                    (string= (subseq name 0 9) "META-INF/"))
           (push (jstring name) meta-entries)))
-      (coerce meta-entries 'vector))))
+      (make-java-array :initial-contents meta-entries))))
 
 (defmethod |<init>(Ljava/io/InputStream;Z)| ((this |java/util/jar/JarInputStream|) is verify)
   (with-slots (|in|) this
@@ -146,7 +146,7 @@
             do (progn
                  (incf pos)
                  (incf bytes-read)
-                 (setf (aref byte-array (+ offset pos)) byte)))
+                 (setf (jaref byte-array (+ offset pos)) byte)))
       bytes-read)))
 
 (defmethod |getManifest()| ((this |java/util/jar/JarInputStream|))
@@ -210,6 +210,6 @@
 (defun |java/util/zip/CRC32.updateBytes(I[BII)| (crc array offset length)
   (setf crc (logxor crc #xffffffff))
   (dotimes (n length)
-    (let ((i (logand #xff (logxor crc (aref array (+ offset n))))))
+    (let ((i (logand #xff (logxor crc (jaref array (+ offset n))))))
       (setf crc (logxor (aref *crc-table* i) (ash crc -8)))))
   (logxor crc #xfffffff))
