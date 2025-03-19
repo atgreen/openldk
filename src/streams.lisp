@@ -61,13 +61,13 @@
          (when *debug-trace*
            (format t "~&~V@A trace: <java-input-stream> stream-read-sequence(~A ~A ~A ~A)" (incf *call-nesting-level* 1) "*" stream sequence start end))
          (let ((java-stream (java-stream stream)))
-           (let* ((buffer (make-array (- end start) :element-type '(unsigned-byte 8)))
+           (let* ((buffer (make-java-array :size (- end start)))
                   (bytes-read (|readBytes([BII)| java-stream buffer 0 (- end start))))
              (if (eql bytes-read -1)
                  start ; Return the start position if no bytes were read (EOF)
                  (progn
                    (incf (pos stream) bytes-read)
-                   (replace sequence buffer :start1 start :end1 (+ start bytes-read))
+                   (replace sequence (java-array-data buffer) :start1 start :end1 (+ start bytes-read))
                    (+ start bytes-read))))))
     (incf *call-nesting-level* -1)))
 
