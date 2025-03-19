@@ -752,7 +752,7 @@ user.variant
                     (lispize-method-name
                      (format nil "<init>~A" (lstring (slot-value constructor '|signature|))))
                     :openldk)
-                   (cons obj (coerce params 'list)))))
+                   (cons obj (coerce (java-array-data params) 'list)))))
       obj)))
 
 (defmethod |ensureClassInitialized(Ljava/lang/Class;)| ((unsafe |sun/misc/Unsafe|) class)
