@@ -680,7 +680,8 @@
         (|<init>()| boot-class-loader)
 
         (dolist (c '("java/lang/invoke/MethodHandles"
-                     "java/lang/invoke/MethodHandles$Lookup"))
+                     "java/lang/invoke/MethodHandles$Lookup"
+                     "java/net/Inet4Address"))
           (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil)))
 
     (|condition-java/lang/Throwable| (c)
