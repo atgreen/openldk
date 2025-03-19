@@ -59,6 +59,7 @@
   ())
 
 (defun |java/lang/Class.desiredAssertionStatus0(Ljava/lang/Class;)| (class)
+  (declare (ignore class))
   nil)
 
 (defun |java/lang/Class.getSecurityManager()| ()
@@ -151,7 +152,7 @@ and its implementation."
     ((equal type 'standard-char) "C")
     ((equal type 'bit) "Z")
     ((stringp type) (if (eq 1 (length type)) type (format nil "L~A;" type)))
-    (t (format nil "Ljava/lang/Object;" type))))
+    (t (format nil "Ljava/lang/Object;"))))
 
 (defun %get-array-ldk-class-from-name (cname)
   (let* ((ldk-class (%get-ldk-class-by-bin-name cname t)))
@@ -161,9 +162,11 @@ and its implementation."
                                      :name cname
                                      :super "java/lang/Object"))
               (java-class (make-instance '|java/lang/Class|)))
-          (setf (slot-value java-class '|name|) (ijstring cname))
+          (setf (slot-value java-class '|name|) (ijstring (substitute #\. #\/ cname)))
           (setf (slot-value java-class '|classLoader|) nil)
           (setf (slot-value lclass 'java-class) java-class)
+          (setf (gethash cname *ldk-classes-by-fq-name*) lclass)
+          (setf (gethash cname *java-classes-by-fq-name*) java-class)
           (setf (gethash cname *ldk-classes-by-bin-name*) lclass)
           (setf (gethash cname *java-classes-by-bin-name*) java-class)
           lclass))))
@@ -179,7 +182,7 @@ and its implementation."
          (when *debug-trace*
            (format t "~&~V@A trace: java/lang/Object.getClass(~A)" (incf *call-nesting-level* 1) "*" object))
          (cond
-           ((arrayp object) (java-class (%get-array-ldk-class (array-element-type object))))
+           ((typep object 'java-array) (java-class (%get-array-ldk-class (array-element-type (java-array-data object)))))
            (t (let ((jc (%get-java-class-by-bin-name (format nil "~A" (type-of object)) t)))
                 (or jc (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring (format nil "~A" (type-of object))) nil nil nil))))))
     (when *debug-trace*
@@ -211,7 +214,7 @@ and its implementation."
 
 (defmethod |java/lang/System.arraycopy(Ljava/lang/Object;ILjava/lang/Object;II)| (source_arr sourcePos dest_arr destPos len)
 	(dotimes (i len)
-		(setf (aref dest_arr (+ destPos i)) (aref source_arr (+ sourcePos i)))))
+		(setf (jaref dest_arr (+ destPos i)) (jaref source_arr (+ sourcePos i)))))
 
 (defmethod |run()| (arg)
   (declare (ignore arg))
@@ -221,7 +224,7 @@ and its implementation."
   (|run()| action))
 
 (defmethod |java/lang/Class.getPrimitiveClass(Ljava/lang/String;)| (class-name)
-  (let ((name (slot-value class-name '|value|)))
+  (let ((name (lstring class-name)))
     (%get-java-class-by-fq-name name)))
 
 (defmethod |java/lang/Float.floatToRawIntBits(F)| (float)
@@ -251,12 +254,14 @@ and its implementation."
     offset))
 
 (defun |java/lang/Class$Atomic.objectFieldOffset([Ljava/lang/reflect/Field;Ljava/lang/String;)| (field name)
+  (declare (ignore field)
+           (ignore name))
   ;; FIXME
   (error "ofo"))
 
 (defmethod |staticFieldBase(Ljava/lang/reflect/Field;)| ((unsafe |sun/misc/Unsafe|) field)
-  (declare (ignore unsafe))
-  (declare (ignore field))
+  (declare (ignore unsafe)
+           (ignore field))
   nil)
 
 (defmethod |staticFieldOffset(Ljava/lang/reflect/Field;)| ((unsafe |sun/misc/Unsafe|) field)
@@ -273,7 +278,7 @@ and its implementation."
           (if (integerp x)
               (code-char x) ;; Convert integer to character
               x))           ;; Keep character as is
-        array)
+        (if array (java-array-data array) nil))
    'string))
 
 (defmethod print-object ((str |java/lang/String|) out)
@@ -357,12 +362,17 @@ and its implementation."
 
 (defmethod |getComponentType()| ((class |java/lang/Class|))
   (let ((cn (lstring (slot-value class '|name|))))
-    (if (eq #\L (char cn 1))
-        (java-class (gethash (subseq cn 2 (- (length cn) 2)) *ldk-classes-by-bin-name*))
-        (java-class (gethash (subseq cn 1) *ldk-classes-by-bin-name*)))))
+    (format t "GETCOMPONENTTYPE ~A~%" cn)
+    (if (eq #\L (char cn 0))
+        (let ((ldk-class (gethash (subseq cn 1 (- (length cn) 1)) *ldk-classes-by-bin-name*)))
+          (format t "  LDK-CLASS(~A) = ~A~%" (subseq cn 1 (- (length cn) 1)) ldk-class)
+          (java-class ldk-class))
+        (let ((ldk-class (gethash cn *ldk-classes-by-bin-name*)))
+          (format t "  LDK-CLASS(~A) = ~A~%" cn ldk-class)
+          (java-class ldk-class)))))
 
 (defmethod |isPrimitive()| ((class |java/lang/Class|))
-  (let ((name-string (format nil "~A" (slot-value (slot-value class '|name|) '|value|))))
+  (let ((name-string (lstring (slot-value class '|name|))))
     (if (null (find name-string '("boolean"
                                   "char"
                                   "byte"
@@ -378,7 +388,7 @@ and its implementation."
 
 (defmethod |isInterface()| ((this |java/lang/Class|))
   (if (and (eq 0 (|isPrimitive()| this))
-           (let ((lclass (%get-ldk-class-by-fq-name (slot-value (slot-value this '|name|) '|value|))))
+           (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value this '|name|)))))
              (interface-p lclass)))
       1
       0))
@@ -405,22 +415,27 @@ and its implementation."
            (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/reflect/Constructor") nil nil nil))
 
          ;; Get the lclass for THIS
-         (let ((lclass (%get-ldk-class-by-fq-name (slot-value (slot-value this '|name|) '|value|))))
-           (coerce (append (loop for method across (methods lclass)
-                                 when (str:starts-with? "<init>" (name method))
-                                   collect (let ((c (make-instance '|java/lang/reflect/Constructor|)))
-                                             (|<init>(Ljava/lang/Class;[Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B)| c this (%get-parameter-types (descriptor method)) (make-array 0) (access-flags method) 0 (ijstring (descriptor method)) (make-array 0) (make-array 0))
-                                             c)))
-                   'vector)))
+         (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value this '|name|)))))
+           (make-java-array :initial-contents
+                            (coerce (append (loop for method across (methods lclass)
+                                                  when (str:starts-with? "<init>" (name method))
+                                                    collect (let ((c (make-instance '|java/lang/reflect/Constructor|)))
+                                                              (|<init>(Ljava/lang/Class;[Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B)|
+                                                               c this
+                                                               (make-java-array :initial-contents (%get-parameter-types (descriptor method)))
+                                                               (make-java-array :size 0) (access-flags method) 0 (ijstring (descriptor method))
+                                                               (make-java-array :size 0) (make-java-array :size 0))
+                                                              c)))
+                                    'vector))))
     (when *debug-trace*
       (incf *call-nesting-level* -1))))
 
 (defmethod |getDeclaredClasses0()| ((this |java/lang/Class|))
-  (let ((lclass (%get-ldk-class-by-fq-name (slot-value (slot-value this '|name|) '|value|))))
+  (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value this '|name|)))))
     (let ((java-classes (mapcar (lambda (name)
                                   (%get-java-class-by-bin-name name))
                                 (inner-classes lclass))))
-    (coerce java-classes 'vector))))
+    (make-java-array :initial-contents (coerce java-classes 'vector)))))
 
 (defmethod |getDeclaredMethods0(Z)| ((this |java/lang/Class|) arg)
   ;; FIXME
@@ -432,33 +447,36 @@ and its implementation."
            (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/reflect/Method") nil nil nil))
 
          ;; Get the lclass for THIS
-         (let ((lclass (%get-ldk-class-by-fq-name (slot-value (slot-value this '|name|) '|value|))))
-           (coerce (append (loop for method across (methods lclass)
-                                 unless (str:starts-with? "<init>" (name method))
-                                   #|
-                                   Method(Class<?> declaringClass,
-                                          String name,
-                                          Class<?>[] parameterTypes,
-                                          Class<?> returnType,
-                                          Class<?>[] checkedExceptions,
-                                          int modifiers,
-                                          int slot,
-                                          String signature,
-                                          byte[] annotations,
-                                          byte[] parameterAnnotations,
-                                          byte[] annotationDefault)
-                                   |#
+         (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value this '|name|)))))
+           (make-java-array
+            :initial-contents (coerce (append (loop for method across (methods lclass)
+                                                    unless (str:starts-with? "<init>" (name method))
+                                                      #|
+                                                      Method(Class<?> declaringClass,
+                                                      String name,
+                                                      Class<?>[] parameterTypes,
+                                                      Class<?> returnType,
+                                                      Class<?>[] checkedExceptions,
+                                                      int modifiers,
+                                                      int slot,
+                                                      String signature,
+                                                      byte[] annotations,
+                                                      byte[] parameterAnnotations,
+                                                      byte[] annotationDefault)
+                                                      |#
 
-                                   collect (let ((c (make-instance '|java/lang/reflect/Method|)))
-                                             (|<init>(Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/Class;Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B[B)|
-                                              c this (ijstring (name method))
-                                              (%get-parameter-types (descriptor method))
-                                              (%get-return-type (descriptor method))
-                                              (make-array 0) (access-flags method) 0 (ijstring (descriptor method)) (make-array 5) (make-array 6) (gethash "AnnotationDefault" (attributes method)))
-                                             c)))
-                   'vector)))
-    (when *debug-trace*
-      (incf *call-nesting-level* -1))))
+                                                      collect (let ((c (make-instance '|java/lang/reflect/Method|)))
+                                                                (|<init>(Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/Class;Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B[B)|
+                                                                 c this (ijstring (name method))
+                                                                 (make-java-array :initial-contents (%get-parameter-types (descriptor method)))
+                                                                 (%get-return-type (descriptor method))
+                                                                 (make-java-array :size 0) (access-flags method) 0 (ijstring (descriptor method))
+                                                                 (make-java-array :size 5) (make-java-array :size 6)
+                                                                 (make-java-array :initial-contents (gethash "AnnotationDefault" (attributes method))))
+                                                                c)))
+                                      'vector))))
+         (when *debug-trace*
+           (incf *call-nesting-level* -1))))
 
 
 (defmethod |getDeclaredFields0(Z)| ((this |java/lang/Class|) arg)
@@ -470,7 +488,7 @@ and its implementation."
            (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/reflect/Field") nil nil nil))
 
          ;; Get the lclass for THIS
-         (let ((lclass (%get-ldk-class-by-fq-name (slot-value (slot-value this '|name|) '|value|))))
+         (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value this '|name|)))))
            (labels ((get-fields (lclass)
                       (when lclass
                         (append (loop for field across (fields lclass)
@@ -482,14 +500,14 @@ and its implementation."
                                                      (setf cn (subseq cn 1 (1- (length cn)))))
                                                    (or (%get-java-class-by-bin-name cn t)
                                                        (let ((njc (make-instance '|java/lang/Class|)))
-                                                         (setf (slot-value njc '|name|) (ijstring cn))
+                                                         (setf (slot-value njc '|name|) (ijstring (substitute #\/ #\. cn)))
                                                          (setf (gethash (substitute #\. #\/ cn) *java-classes-by-fq-name*) njc)
                                                          (setf (gethash cn *java-classes-by-bin-name*) njc))))
                                                  (access-flags field) nil nil nil)
                                                 f))
                                 (when (super lclass)
                                   (get-fields (%get-ldk-class-by-bin-name (super lclass) t)))))))
-             (coerce (get-fields lclass) 'vector))))
+             (make-java-array :initial-contents (coerce (get-fields lclass) 'vector)))))
     (when *debug-trace*
       (incf *call-nesting-level* -1))))
 
@@ -500,15 +518,15 @@ and its implementation."
 (defmethod |compareAndSwapObject(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)| ((unsafe |sun/misc/Unsafe|) obj field-id expected-value new-value)
   ;; FIXME
   (cond
-    ((vectorp obj)
-     (if (equal (aref obj field-id) expected-value)
+    ((typep obj 'java-array)
+     (if (equal (jaref obj field-id) expected-value)
          (progn
-           (setf (aref obj field-id) new-value)
+           (setf (jaref obj field-id) new-value)
            1)
          0))
     (t
      (let* ((field (gethash field-id field-offset-table))
-            (key (intern (slot-value (slot-value field '|name|) '|value|) :openldk)))
+            (key (intern (lstring (slot-value field '|name|)) :openldk)))
        (if (equal (slot-value obj key) expected-value)
            (progn
              (setf (slot-value obj key) new-value)
@@ -518,7 +536,7 @@ and its implementation."
 (defmethod |compareAndSwapInt(Ljava/lang/Object;JII)| ((unsafe |sun/misc/Unsafe|) obj field-id expected-value new-value)
   ;; FIXME: use atomics package
   (let* ((field (gethash field-id field-offset-table))
-         (key (intern (slot-value (slot-value field '|name|) '|value|) :openldk)))
+         (key (intern (lstring (slot-value field '|name|)) :openldk)))
     (if (equal (slot-value obj key) expected-value)
         (progn
           (setf (slot-value obj key) new-value)
@@ -531,35 +549,37 @@ and its implementation."
 (defmethod |getObjectVolatile(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) obj l)
   ;; FIXME
   (cond
-    ((vectorp obj)
-     (aref obj l))
+    ((typep obj 'java-array)
+     (jaref obj l))
+    ((null obj)
+     nil)
     (t (error "internal error: unrecognized object type in getObjectVolatile: ~A" obj))))
 
 (defmethod |putObjectVolatile(Ljava/lang/Object;JLjava/lang/Object;)| ((unsafe |sun/misc/Unsafe|) obj l value)
   ;; FIXME
   (cond
-    ((vectorp obj)
-     (setf (aref obj l) value))
+    ((typep obj 'java-array)
+     (setf (jaref obj l) value))
     (t (error "internal error: unrecognized object type in putObjectVolatile: ~A" obj))))
 
 (defmethod |getLongVolatile(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) obj l)
   (cond
-    ((vectorp obj)
-     (aref obj l))
+    ((typep obj 'java-array)
+     (jaref obj l))
     ((typep obj '|java/lang/Object|)
      (let* ((field (gethash l field-offset-table))
-            (key (intern (slot-value (slot-value field '|name|) '|value|) :openldk)))
+            (key (intern (lstring (slot-value field '|name|)) :openldk)))
        (slot-value obj key)))
     (t (error "internal error: unrecognized object type in getLongVolatile: ~A" obj))))
 
 (defmethod |putObject(Ljava/lang/Object;JLjava/lang/Object;)| ((unsafe |sun/misc/Unsafe|) obj l value)
   ; (format t "putObject: ~A ~A ~A~%" obj (gethash l field-offset-table) value)
   (cond
-    ((vectorp obj)
-     (setf (aref obj l) value))
+    ((typep obj 'java-array)
+     (setf (jaref obj l) value))
     ((typep obj '|java/lang/Object|)
      (let* ((field (gethash l field-offset-table))
-            (key (intern (slot-value (slot-value field '|name|) '|value|) :openldk)))
+            (key (intern (lstring (slot-value field '|name|)) :openldk)))
        (setf (slot-value obj key) value)))
     (t (error "internal error: unrecognized object type in putObjectVolatile: ~A" obj))))
 
@@ -670,12 +690,13 @@ user.variant
     result))
 
 (defun |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedExceptionAction;Ljava/security/AccessControlContext;)| (action context)
+  (declare (ignore context))
   ;; FIXME
   (|run()| action))
 
 (defmethod |isAssignableFrom(Ljava/lang/Class;)| ((this |java/lang/Class|) other)
-  (let ((this-class (find-class (intern (name (%get-ldk-class-by-fq-name (slot-value (slot-value this '|name|) '|value|))) :openldk)))
-        (other-class (find-class (intern (name (%get-ldk-class-by-fq-name (slot-value (slot-value other '|name|) '|value|))) :openldk))))
+  (let ((this-class (find-class (intern (name (%get-ldk-class-by-fq-name (lstring (slot-value this '|name|)))) :openldk)))
+        (other-class (find-class (intern (name (%get-ldk-class-by-fq-name (lstring (slot-value other '|name|)))) :openldk))))
     (closer-mop:subclassp this-class other-class)))
 
 (defun |java/lang/System.setIn0(Ljava/io/InputStream;)| (in-stream)
@@ -689,40 +710,42 @@ user.variant
 
 (defmethod |getIntVolatile(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) param-object param-long)
   (cond
-    ((vectorp param-object)
-     (aref param-object param-long))
+    ((typep param-object 'java-array)
+     (jaref param-object param-long))
     (t
      (let* ((field (gethash param-long field-offset-table))
-            (key (intern (slot-value (slot-value field '|name|) '|value|) :openldk)))
+            (key (intern (lstring (slot-value field '|name|)) :openldk)))
        (slot-value param-object key)))))
 
-(defmethod |clone()| ((array vector))
-  (copy-seq array))
+(defmethod |clone()| ((array java-array))
+  (make-java-array :initial-contents (copy-seq (java-array-data array))))
 
 (defun |sun/reflect/Reflection.getClassAccessFlags(Ljava/lang/Class;)| (class)
-  (let ((lclass (%get-ldk-class-by-fq-name (slot-value (slot-value class '|name|) '|value|))))
+  (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value class '|name|)))))
     (access-flags lclass)))
 
 (defmethod |getModifiers()| ((class |java/lang/Class|))
-  (let ((lclass (%get-ldk-class-by-fq-name (slot-value (slot-value class '|name|) '|value|))))
+  (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value class '|name|)))))
     (access-flags lclass)))
 
 (defmethod |getSuperclass()| ((class |java/lang/Class|))
-  (let ((lclass (%get-ldk-class-by-fq-name (slot-value (slot-value class '|name|) '|value|))))
+  (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value class '|name|)))))
     (gethash (super lclass) *java-classes-by-bin-name*)))
 
 (defmethod |getInterfaces0()| ((class |java/lang/Class|))
   ;; FIXME: do something different for interfaces?
-  (let ((lclass (%get-ldk-class-by-fq-name (slot-value (slot-value class '|name|) '|value|))))
-    (coerce (mapcar (lambda (iname) (java-class (gethash iname *ldk-classes-by-bin-name*))) (coerce (interfaces lclass) 'list))
-            'vector)))
+  (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value class '|name|)))))
+    (make-java-array
+     :initial-contents
+     (coerce (mapcar (lambda (iname) (java-class (gethash iname *ldk-classes-by-bin-name*))) (coerce (interfaces lclass) 'list))
+             'vector))))
 
 (defun |sun/reflect/NativeConstructorAccessorImpl.newInstance0(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)|
     (constructor params)
   (let ((bin-class-name (substitute #\/ #\. (lstring (slot-value (slot-value constructor '|clazz|) '|name|)))))
     (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring bin-class-name) nil nil nil)
     (let ((obj (make-instance (intern bin-class-name :openldk))))
-      (if (string= "()V" (slot-value (slot-value constructor '|signature|) '|value|))
+      (if (string= "()V" (lstring (slot-value constructor '|signature|)))
           (|<init>()| obj)
           (progn
             (apply (intern
@@ -778,10 +801,13 @@ user.variant
       (t (error "unimplemented")))))
 
 (defun |sun/misc/Signal.handle0(IJ)| (sig native-h)
+  (declare (ignore sig)
+           (ignore native-h))
   ;; FIXME
   1)
 
 (defmethod |notifyAll()| ((objref |java/lang/Object|))
+  (declare (ignore objref))
   ;; FIXME
   )
 
@@ -832,7 +858,7 @@ user.variant
     (loop for i from offset below (+ offset length)
           for byte = (read-byte in-stream nil nil) ; Read a byte, return NIL on EOF
           while byte
-          do (setf (aref byte-array i) byte)
+          do (setf (jaref byte-array i) byte)
              (incf bytes-read))  ; Count bytes read
     bytes-read))
 
@@ -864,9 +890,9 @@ user.variant
          (fd (slot-value file-descriptor '|fd|)))
     (cond
       ((eq fd 1)
-       (write-sequence (%convert-to-unsigned-8-bit byte-array) *standard-output* :start offset :end (+ offset length)))
+       (write-sequence (%convert-to-unsigned-8-bit (java-array-data byte-array)) *standard-output* :start offset :end (+ offset length)))
       ((eq fd 2)
-       (write-sequence (%convert-to-unsigned-8-bit byte-array) *error-output* :start offset :end (+ offset length)))
+       (write-sequence (%convert-to-unsigned-8-bit (java-array-data byte-array)) *error-output* :start offset :end (+ offset length)))
       (t
        (error "unimplemented")))))
 
@@ -886,6 +912,7 @@ user.variant
            (if (getf attr :NORMAL) #x02 #x00)
            (if (getf attr :DIRECTORY) #x04 #x00)))
     (sb-int:simple-file-error (e)
+      (declare (ignore e))
       0)))
 
 (defmethod |getLength(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
@@ -915,15 +942,15 @@ user.variant
 (defun |java/lang/ProcessEnvironment.environ()| ()
   ;; FIXME: don't force utf-8 encoding
   (let ((env (remove-if (lambda (e) (not (find #\= e))) (sb-ext:posix-environ))))
-    (let ((jenvs (make-array (* 2 (length env)))))
+    (let ((jenvs (make-java-array :size (* 2 (length env)))))
       (loop for kv in env
             for i from 0 by 2
             for p = (position #\= kv)
             do (progn
-                 (setf (aref jenvs i)
-                       (flexi-streams:string-to-octets (subseq kv 0 p) :external-format :utf-8))
-                 (setf (aref jenvs (+ i 1))
-                       (flexi-streams:string-to-octets (subseq kv (1+ p)) :external-format :utf-8))))
+                 (setf (jaref jenvs i)
+                       (make-java-array :initial-contents (flexi-streams:string-to-octets (subseq kv 0 p) :external-format :utf-8)))
+                 (setf (jaref jenvs (+ i 1))
+                       (make-java-array :initial-contents (flexi-streams:string-to-octets (subseq kv (1+ p)) :external-format :utf-8)))))
       jenvs)))
 
 (defun |java/lang/System.nanoTime()| ()
@@ -957,8 +984,8 @@ user.variant
   (unwind-protect
        (progn
          (dotimes (i (length args))
-           (when (typep (aref args i) '|java/lang/Integer|)
-             (setf (aref args i) (slot-value (aref args i) '|value|))))
+           (when (typep (jaref args i) '|java/lang/Integer|)
+             (setf (jaref args i) (slot-value (jaref args i) '|value|))))
          (let ((result (apply (intern
                                (lispize-method-name
                                 (concatenate 'string
@@ -979,19 +1006,21 @@ user.variant
 
 (defun |java/lang/reflect/Array.newArray(Ljava/lang/Class;I)| (class size)
   ;; FIXME
-  (make-array size
-              :initial-element nil))
+  (make-java-array :size size
+                   :class class
+                   :initial-element nil))
 
 (defmethod |findLoadedClass0(Ljava/lang/String;)| ((loader |java/lang/ClassLoader|) name)
   ;; FIXME
-  (gethash (slot-value name '|value|) *java-classes-by-fq-name*))
+  (gethash (lstring name) *java-classes-by-fq-name*))
 
 (defmethod |findBootstrapClass(Ljava/lang/String;)| ((loader |java/lang/ClassLoader|) name)
   ;; FIXME
   (handler-case
-      (let ((ldk-class (classload (substitute #\/ #\. (coerce (slot-value name '|value|) 'string)))))
+      (let ((ldk-class (classload (substitute #\/ #\. (lstring name)))))
         (java-class ldk-class))
     (condition (c)
+      (declare (ignore c))
       nil)))
 
 (defun |java/io/UnixFileSystem.initIDs()| ()
@@ -1006,7 +1035,7 @@ user.variant
 
 (defmethod |canonicalize0(Ljava/lang/String;)| ((ufs |java/io/UnixFileSystem|) filename)
   (declare (ignore ufs))
-  (jstring (namestring (uiop:parse-unix-namestring (coerce (slot-value filename '|value|) 'string)))))
+  (jstring (namestring (uiop:parse-unix-namestring (lstring filename)))))
 
 (defmethod |getLastModifiedTime(Ljava/io/File;)| ((ufs |java/io/UnixFileSystem|) file)
   (declare (ignore ufs))
@@ -1026,6 +1055,30 @@ user.variant
     (setf (sb-alien:deref mem 0) value)
     (|<init>(JI)| dbb ptr 8)
     dbb))
+
+(defmethod |getInt(Ljava/lang/Object;J)|((unsafe |sun/misc/Unsafe|) objref ptr)
+  (declare (ignore unsafe))
+  (let* ((field (gethash ptr field-offset-table))
+         (key (intern (lstring (slot-value field '|name|)) :openldk)))
+    (slot-value objref key)))
+
+(defmethod |putLong(Ljava/lang/Object;JJ)|((unsafe |sun/misc/Unsafe|) objref ptr value)
+  (declare (ignore unsafe))
+  (let* ((field (gethash ptr field-offset-table))
+         (key (intern (lstring (slot-value field '|name|)) :openldk)))
+    (setf (slot-value objref key) value)))
+
+(defmethod |putInt(Ljava/lang/Object;JI)|((unsafe |sun/misc/Unsafe|) objref ptr value)
+  (declare (ignore unsafe))
+  (let* ((field (gethash ptr field-offset-table))
+         (key (intern (lstring (slot-value field '|name|)) :openldk)))
+    (setf (slot-value objref key) value)))
+
+(defmethod |getLong(Ljava/lang/Object;J)|((unsafe |sun/misc/Unsafe|) objref ptr)
+  (declare (ignore unsafe))
+  (let* ((field (gethash ptr field-offset-table))
+         (key (intern (lstring (slot-value field '|name|)) :openldk)))
+    (slot-value objref key)))
 
 (defmethod |getLong(J)| ((unsafe |sun/misc/Unsafe|) ptr)
   (declare (ignore unsafe))
@@ -1062,7 +1115,7 @@ user.variant
   (uiop:quit status t))
 
 (defmethod |getRawAnnotations()| ((class |java/lang/Class|))
-  (let ((lclass (%get-ldk-class-by-fq-name (slot-value (slot-value class '|name|) '|value|))))
+  (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value class '|name|)))))
     (when (and lclass (attributes lclass))
       (gethash "RuntimeVisibleAnnotations" (attributes lclass)))))
 
@@ -1100,6 +1153,7 @@ user.variant
   (gethash (lstring name) *packages*))
 
 (defun |java/util/zip/Inflater.init(Z)| (v)
+  (declare (ignore v))
   ;; FIXME
   )
 
@@ -1144,6 +1198,9 @@ user.variant
     bytes-read))
 
 (defun |java/nio/MappedByteBuffer.checkBounds(III)| (off len size)
+  (declare (ignore off)
+           (ignore len)
+           (ignore size))
   ;; FIXME
   )
 
@@ -1153,7 +1210,7 @@ user.variant
         (bytes-read 0))
     (loop for i below length
           do (let ((offset-sap (sb-sys:sap+ sap i)))
-               (setf (aref dest (+ dest-offset i)) (sb-sys:sap-ref-8 offset-sap 0))
+               (setf (jaref dest (+ dest-offset i)) (sb-sys:sap-ref-8 offset-sap 0))
                (incf bytes-read)))  ; Count bytes read
     bytes-read))
 
@@ -1166,12 +1223,12 @@ user.variant
 
 (defmethod |getUTF8At0(Ljava/lang/Object;I)| ((this |sun/reflect/ConstantPool|) cp index)
   (let* ((cp (constant-pool (ldk-class cp)))
-         (s (format nil "~A" (emit (aref cp index) cp))))
+         (s (format nil "~A" (emit (jaref cp index) cp))))
     (jstring s)))
 
 (defmethod |getIntAt0(Ljava/lang/Object;I)| ((this |sun/reflect/ConstantPool|) cp index)
   (let* ((cp (constant-pool (ldk-class cp)))
-         (i (slot-value (aref cp index) 'value)))
+         (i (slot-value (jaref cp index) 'value)))
     i))
 
 (defclass byte-array-input-stream (trivial-gray-streams:fundamental-binary-input-stream)
@@ -1186,14 +1243,14 @@ user.variant
     (let ((index (+ start pos)))
       (if (>= index end)
           (values nil t)  ; indicates EOF
-          (prog1 (%signed-to-unsigned-byte (aref array index))
+          (prog1 (%signed-to-unsigned-byte (jaref array index))
             (incf pos))))))
 
 (defmethod common-lisp:stream-element-type ((stream byte-array-input-stream))
   '(unsigned-byte 8))
 
 (defun |java/lang/reflect/Proxy.defineClass0(Ljava/lang/ClassLoader;Ljava/lang/String;[BII)| (class-loader class-name data offset length)
-  ;; FIXME
+  (declare (ignore class-loader))  ;; FIXME
   (let ((stream (make-instance 'byte-array-input-stream :array data :start offset :end (+ offset length))))
     (java-class (%classload-from-stream (substitute #\/ #\. (lstring class-name)) stream))))
 
@@ -1204,3 +1261,23 @@ user.variant
 
 (defmethod |allocateInstance(Ljava/lang/Class;)| ((unsafe |sun/misc/Unsafe|) class)
   (make-instance (intern (substitute #\/ #\. (lstring (slot-value class '|name|))) :openldk)))
+
+(defmethod |getLocalHostName()| ((inet4 |java/net/Inet4AddressImpl|))
+  (jstring (uiop:hostname)))
+
+(defmethod |getLocalHostName()| ((inet4 |java/net/Inet4AddressImpl|))
+  (jstring (uiop:hostname)))
+
+(defmethod |lookupAllHostAddr(Ljava/lang/String;)| ((inet4 |java/net/Inet4AddressImpl|) hostname)
+  (let (;; FIXME (hostent (sb-bsd-sockets:get-host-by-name (lstring hostname)))
+        (inet4addr (make-instance '|java/net/Inet4Address|)))
+    (|<init>(Ljava/lang/String;[B)| inet4addr hostname (make-java-array :initial-contents (coerce (mapcar #'parse-integer (uiop:split-string "127.0.0.1" :separator '(#\.))) 'vector)))
+    (make-java-array :initial-contents (coerce (list inet4addr) 'vector))))
+
+#|
+(sb-bsd-sockets:host-ent-addresses (sb-bsd-sockets:get-host-by-name "fedora"))
+|#
+
+(defun |java/net/Inet4Address.init()| ()
+  ;; FIXME
+  )

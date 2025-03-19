@@ -40,25 +40,26 @@
 (defvar interned-string-table (make-hash-table :test #'equal))
 
 (defun lstring (string)
-  (coerce (slot-value string '|value|) 'string))
+  (coerce (java-array-data (slot-value string '|value|)) 'string))
 
 (defun jstring (value)
   (let ((s (make-instance '|java/lang/String|)))
-    (setf (slot-value s '|value|) value)
+    (setf (slot-value s '|value|) (make-java-array :initial-contents value))
     (setf (slot-value s '|hash|) 0)
     s))
 
 (defun ijstring (value)
   (let ((s (make-instance '|java/lang/String|)))
-    (setf (slot-value s '|value|) value)
+    (setf (slot-value s '|value|) (make-java-array :initial-contents value))
     (setf (slot-value s '|hash|) 0)
     (|intern()| s)))
 
 (defmethod |intern()| ((str |java/lang/String|))
-  (let ((istr (gethash (slot-value str '|value|) interned-string-table)))
-    (or istr
-        (let ((istr (setf (gethash (slot-value str '|value|) interned-string-table) str)))
-          istr))))
+  (let ((lisp-string (lstring str)))
+    (let ((istr (gethash lisp-string interned-string-table)))
+      (or istr
+          (let ((istr (setf (gethash lisp-string interned-string-table) str)))
+            istr)))))
 
 (defmethod |intern()| ((str string))
   (let ((istr (gethash str interned-string-table)))
@@ -66,5 +67,5 @@
         (let ((istr (setf (gethash str interned-string-table) (jstring str))))
           istr))))
 
-(defmethod |toString()| ((str vector))
-  (coerce str 'string))
+(defmethod |toString()| (str)
+  str)

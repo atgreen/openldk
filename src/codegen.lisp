@@ -64,7 +64,7 @@
   (declare (ignore context))
   (make-instance '<expression>
                  :insn insn
-                 :code `(vector ,@(coerce (slot-value insn 'value) 'list))
+                 :code `(make-java-array :initial-contents (vector ,@(coerce (slot-value insn 'value) 'list)))
                  :expression-type (slot-value insn 'type)))
 
 (defmethod codegen ((insn ir-int-literal) context)
@@ -110,7 +110,7 @@
                                     (index ,(code (codegen index context)))
                                     (arrayref ,(code (codegen arrayref context))))
                                 ;; (format t "~&aastore: index ~A into array size ~A: ~A~%" index (length arrayref) arrayref)
-                                (setf (aref arrayref index) value))
+                                (setf (jaref arrayref index) value))
                             (sb-int:invalid-array-index-error (e)
                               (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
                             (error (e)
@@ -124,7 +124,7 @@
                               (let ((value ,(code (codegen value context)))
                                     (index ,(code (codegen index context)))
                                     (arrayref ,(code (codegen arrayref context))))
-                                (setf (aref arrayref index) value))
+                                (setf (jaref arrayref index) value))
                             (sb-int:invalid-array-index-error (e)
                               (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
                             (error (e)
@@ -139,7 +139,7 @@
                                     (index ,(code (codegen index context)))
                                     (arrayref ,(code (codegen arrayref context))))
                                 ;; (format t "~&lastore: storing ~A to index ~A into array size ~A: ~A~%" value index (length arrayref) arrayref)
-                                (setf (aref arrayref index) value))
+                                (setf (jaref arrayref index) value))
                             (sb-int:invalid-array-index-error (e)
                               (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
                             (error (e)
@@ -153,7 +153,7 @@
                               (let ((value ,(code (codegen value context)))
                                     (index ,(code (codegen index context)))
                                     (arrayref ,(code (codegen arrayref context))))
-                                (setf (aref arrayref index) value))
+                                (setf (jaref arrayref index) value))
                             (sb-int:invalid-array-index-error (e)
                               (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
                             (error (e)
@@ -167,7 +167,7 @@
                               (let ((value ,(code (codegen value context)))
                                     (index ,(code (codegen index context)))
                                     (arrayref ,(code (codegen arrayref context))))
-                                (setf (aref arrayref index) value))
+                                (setf (jaref arrayref index) value))
                             (sb-int:invalid-array-index-error (e)
                               (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
                             (error (e)
@@ -182,7 +182,7 @@
                                     (index ,(code (codegen index context)))
                                     (arrayref ,(code (codegen arrayref context))))
                                 ;; (format t "~&STORED ~A at ~A in ~A~%" value index arrayref)
-                                (setf (aref arrayref index) value))
+                                (setf (jaref arrayref index) value))
                             (sb-int:invalid-array-index-error (e)
                               (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
                             (error (e)
@@ -196,7 +196,7 @@
                               (let ((value ,(code (codegen value context)))
                                     (index ,(code (codegen index context)))
                                     (arrayref ,(code (codegen arrayref context))))
-                                (setf (aref arrayref index) value))
+                                (setf (jaref arrayref index) value))
                             (sb-int:invalid-array-index-error (e)
                               (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
                             (error (e)
@@ -343,7 +343,7 @@
                  :insn insn
                  :code `(let ((arrayref ,(code (codegen (slot-value insn 'arrayref) context))))
                           (if arrayref
-                              (length arrayref)
+                              (if (stringp arrayref) (length arrayref) (java-array-length arrayref))
                               (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|)))))
                  :expression-type :INTEGER))
 
@@ -402,7 +402,7 @@
                    :code `(handler-case
                               (let ((index ,(code (codegen index context)))
                                     (arrayref ,(code (codegen arrayref context))))
-                                (char-code (aref arrayref index)))
+                                (char-code (jaref arrayref index)))
                             (sb-int:invalid-array-index-error (e)
                               (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
                             (error (e)
@@ -416,7 +416,7 @@
                    :code `(handler-case
                               (let ((index ,(code (codegen index context)))
                                     (arrayref ,(code (codegen arrayref context))))
-                                (aref arrayref index))
+                                (jaref arrayref index))
                             (sb-int:invalid-array-index-error (e)
                               (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
                             (error (e)
@@ -431,7 +431,7 @@
                               (let ((index ,(code (codegen index context)))
                                     (arrayref ,(code (codegen arrayref context))))
                                 ;; (format t "~&laload: index ~A into array size ~A: ~A~%" index (length arrayref) arrayref)
-                                (aref arrayref index))
+                                (jaref arrayref index))
                             (sb-int:invalid-array-index-error (e)
                               (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
                             (error (e)
@@ -445,7 +445,7 @@
                    :code `(handler-case
                               (let ((index ,(code (codegen index context)))
                                     (arrayref ,(code (codegen arrayref context))))
-                                (aref arrayref index))
+                                (jaref arrayref index))
                             (sb-int:invalid-array-index-error (e)
                               (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
                             (error (e)
@@ -459,7 +459,7 @@
                    :code `(handler-case
                               (let ((index ,(code (codegen index context)))
                                     (arrayref ,(code (codegen arrayref context))))
-                                (aref arrayref index))
+                                (jaref arrayref index))
                             (sb-int:invalid-array-index-error (e)
                               (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
                             (error (e)
@@ -473,7 +473,7 @@
                    :code `(handler-case
                               (let ((index ,(code (codegen index context)))
                                     (arrayref ,(code (codegen arrayref context))))
-                                (aref arrayref index))
+                                (jaref arrayref index))
                             (sb-int:invalid-array-index-error (e)
                               (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
                             (error (e)
@@ -488,7 +488,7 @@
                               (let ((index ,(code (codegen index context)))
                                     (arrayref ,(code (codegen arrayref context))))
                                 ;; (format t "~&aaload: index ~A into array size ~A: ~A~%" index (length arrayref) arrayref)
-                                (aref arrayref index))
+                                (jaref arrayref index))
                             (sb-int:invalid-array-index-error (e)
                               (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
                             (error (e)
@@ -503,7 +503,7 @@
                    :code (list 'let (list (list 'value (code (codegen value context)))
                                           (list 'index (code (codegen index context)))
                                           (list 'arrayref (code (codegen arrayref context))))
-                               (list 'setf (list 'aref 'arrayref 'index) (list 'code-char 'value))))))
+                               (list 'setf (list 'jaref 'arrayref 'index) (list 'code-char 'value))))))
 
 (defmethod codegen ((insn ir-checkcast) context)
   (declare (ignore context))
@@ -513,7 +513,7 @@
                    :insn insn
                    :code `(let ((objref ,(code (codegen (objref insn) context))))
                             (when objref
-                              (unless (or (arrayp objref) ;; FIXME
+                              (unless (or (typep objref 'openldk::java-array)
                                           (typep objref (quote ,(intern (slot-value insn 'classname) :openldk))))
                                 (error (%lisp-condition (%make-throwable '|java/lang/ClassCastException|))))))
                    :expression-type nil)))
@@ -932,7 +932,7 @@
 
 (defun %instanceof-array (objref typename)
   ;; FIXME - this isn't following any of the array instanceof rules
-  (arrayp objref))
+  (typep objref 'java-array))
 
 (defmethod codegen ((insn ir-instanceof) context)
   (with-slots (class objref) insn
@@ -1153,8 +1153,8 @@
                    :insn insn
                    :code `(progn
                             ;; Create the array with the determined initial element
-                            (make-array ,(code (codegen (size insn) context))
-                                        :initial-element ,init-element))
+                            (make-java-array :size ,(code (codegen (size insn) context))
+                                             :initial-element ,init-element))
                    :expression-type :ARRAY)))
 
 (defun %make-multi-array (dimensions)

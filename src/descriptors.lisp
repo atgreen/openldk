@@ -236,7 +236,7 @@
                       (setf index (position #\; descriptor :start index)))
                     (incf index)
                     (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
-                           (jstring (subseq descriptor start index)) nil nil nil) param-list)))
+                           (jstring (format nil "[~A" (substitute #\. #\/ (subseq descriptor start index)))) nil nil nil) param-list)))
 
                  (t (incf index)))))
     (coerce (nreverse param-list) 'vector))) ; Reverse the list before returning it, since we used push

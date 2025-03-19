@@ -71,29 +71,41 @@
 (defvar *debug-unmuffle* nil)
 
 (defun %get-java-class-by-bin-name (bin-name &optional fail-ok)
-  (assert (stringp bin-name))
-  (assert (not (find #\. bin-name)))
-  (unless fail-ok
-    (assert (gethash bin-name *java-classes-by-bin-name*)))
-  (gethash bin-name *java-classes-by-bin-name*))
+  (let ((bin-name (if (stringp bin-name)
+                      bin-name
+                      (coerce (java-array-data bin-name) 'string))))
+    (assert (stringp bin-name))
+    (assert (not (find #\. bin-name)))
+    (unless fail-ok
+      (assert (gethash bin-name *java-classes-by-bin-name*)))
+    (gethash bin-name *java-classes-by-bin-name*)))
 
 (defun %get-java-class-by-fq-name (fq-name &optional fail-ok)
-  (assert (stringp fq-name))
-  (assert (not (find #\. fq-name)))
-  (unless fail-ok
-    (assert (gethash fq-name *java-classes-by-fq-name*)))
-  (gethash fq-name *java-classes-by-fq-name*))
+  (let ((fq-name (if (stringp fq-name)
+                     fq-name
+                     (coerce (java-array-data fq-name) 'string))))
+    (assert (stringp fq-name))
+    (assert (not (find #\. fq-name)))
+    (unless fail-ok
+      (assert (gethash fq-name *java-classes-by-fq-name*)))
+    (gethash fq-name *java-classes-by-fq-name*)))
 
 (defun %get-ldk-class-by-bin-name (bin-name &optional fail-ok)
-  (assert (stringp bin-name))
-  (assert (not (find #\. bin-name)))
-  (unless fail-ok
-    (assert (gethash bin-name *ldk-classes-by-bin-name*)))
-  (gethash bin-name *ldk-classes-by-bin-name*))
+  (let ((bin-name (if (stringp bin-name)
+                      bin-name
+                      (coerce (java-array-data bin-name) 'string))))
+    (assert (stringp bin-name))
+    (assert (not (find #\. bin-name)))
+    (unless fail-ok
+      (assert (gethash bin-name *ldk-classes-by-bin-name*)))
+    (gethash bin-name *ldk-classes-by-bin-name*)))
 
 (defun %get-ldk-class-by-fq-name (fq-name &optional fail-ok)
-  (assert (stringp fq-name))
-  (assert (not (find #\/ fq-name)))
-  (unless fail-ok
-    (assert (gethash fq-name *ldk-classes-by-fq-name*)))
-  (gethash fq-name *ldk-classes-by-fq-name*))
+  (let ((fq-name (if (stringp fq-name)
+                     fq-name
+                     (coerce (java-array-data fq-name) 'string))))
+    (assert (stringp fq-name))
+    (assert (not (find #\/ fq-name)))
+    (unless fail-ok
+      (assert (gethash fq-name *ldk-classes-by-fq-name*)))
+    (gethash fq-name *ldk-classes-by-fq-name*)))
