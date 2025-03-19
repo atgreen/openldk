@@ -53,6 +53,7 @@
 							 (:file "src/context")
 							 (:file "src/bootstrap")
                (:file "src/strings")
+               (:file "src/arrays")
                (:file "src/math")
 							 (:file "src/opcodes")
 							 (:file "src/ir")
