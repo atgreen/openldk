@@ -571,11 +571,9 @@
                           (make-instance 'dir-classpath-entry :dir cpe))))
 
   (let* ((class (classload (substitute #\/ #\. mainclass)))
-         (argv (make-array (length args))))
+         (argv (make-java-array :initial-contents (mapcar #'jstring args))))
+
     (assert (or class (error "Can't load ~A" mainclass)))
-    (dotimes (i (length args))
-      (let ((arg (jstring (nth i args))))
-        (setf (aref argv i) arg)))
     (%clinit class)
 
     ;; The `main` method may be in a superclass of CLASS.  Search for it.
