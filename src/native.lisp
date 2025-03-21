@@ -1281,3 +1281,9 @@ user.variant
 (defun |java/net/Inet4Address.init()| ()
   ;; FIXME
   )
+
+(defmethod |getOption(I)| ((this |java/net/SocketOptions|) option-id)
+  (declare (ignore this)
+           (ignore option-id))
+  ;; FIXME
+  (slot-value |+static-java/lang/Boolean+| '|TRUE|))
