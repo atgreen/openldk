@@ -144,3 +144,6 @@
 
 (defclass |java/net/Inet4AddressImpl| (|java/lang/Object|)
   ())
+
+(defclass |java/net/SocketOptions| (|java/lang/Object|)
+  ())
