@@ -402,7 +402,10 @@
                    :code `(handler-case
                               (let ((index ,(code (codegen index context)))
                                     (arrayref ,(code (codegen arrayref context))))
-                                (char-code (jaref arrayref index)))
+                                (let ((c (jaref arrayref index)))
+                                  (typecase c
+                                    (character (char-code c))
+                                    (integer c))))
                             (sb-int:invalid-array-index-error (e)
                               (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
                             (error (e)
