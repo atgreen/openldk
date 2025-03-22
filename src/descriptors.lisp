@@ -176,10 +176,8 @@
                  (t (incf index)))))
     (nreverse param-list))) ; Reverse the list before returning it, since we used push
 
-(defun %get-return-type (descriptor)
-  (let* ((return-type-descriptor
-           (subseq descriptor (1+ (position #\) descriptor))))
-         (ch (char return-type-descriptor 0)))
+(defun %bin-type-name-to-class (bin-type-name)
+  (let ((ch (char bin-type-name 0)))
     (cond
       ((char= ch #\I) (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "int") nil nil nil))
       ((char= ch #\J) (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "long") nil nil nil))
@@ -194,13 +192,19 @@
       ;; For object types
       ((char= ch #\L)
        (progn
-         (let* ((obj-end (position #\; return-type-descriptor))
-                (res (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring (subseq return-type-descriptor 1 obj-end)) nil nil nil)))
+         (let* ((obj-end (position #\; bin-type-name))
+                (res (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring (subseq bin-type-name 1 obj-end)) nil nil nil)))
            res)))
 
       ((char= ch #\[)
        (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
-        (jstring return-type-descriptor) nil nil nil)))))
+        (jstring bin-type-name) nil nil nil)))))
+
+
+(defun %get-return-type (descriptor)
+  (let* ((return-type-descriptor
+           (subseq descriptor (1+ (position #\) descriptor)))))
+    (%bin-type-name-to-class return-type-descriptor)))
 
 (defun %get-parameter-types (descriptor)
  "Parse the Java method descriptor and return a list of parameter types as strings."
