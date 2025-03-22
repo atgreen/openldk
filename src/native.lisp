@@ -990,8 +990,8 @@ user.variant
                                              (lstring (slot-value method '|signature|))))
                                :openldk)
                               (if (eq 0 (logand #x8 (slot-value method '|modifiers|)))
-                                  (cons object (coerce args 'list)) ; non-static method
-                                  (coerce args 'list))))) ; static method
+                                  (cons object (coerce (java-array-data args) 'list)) ; non-static method
+                                  (coerce (java-array-data args) 'list))))) ; static method
            (when *debug-trace*
              (format t "~&~V@A trace: result = ~A~%"
                      *call-nesting-level* "*" result))
