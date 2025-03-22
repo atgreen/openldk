@@ -1214,7 +1214,7 @@ user.variant
   )
 
 (defun |sun/nio/fs/UnixNativeDispatcher.getcwd()| ()
-  (flexi-streams:string-to-octets (namestring (uiop:getcwd)) :external-format :utf-8))
+  (make-java-array :initial-contents (flexi-streams:string-to-octets (namestring (uiop:getcwd)) :external-format :utf-8)))
 
 (defmethod |getUTF8At0(Ljava/lang/Object;I)| ((this |sun/reflect/ConstantPool|) cp index)
   (let* ((cp (constant-pool (ldk-class cp)))
