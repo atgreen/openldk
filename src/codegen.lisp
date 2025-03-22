@@ -1135,12 +1135,10 @@
 (defmethod codegen ((insn ir-new) context)
   (with-slots (class) insn
     (with-slots (class) class
-      (let ((expr (make-instance '<expression>
-                                 :insn insn
-                                 :code (list 'make-instance (list 'quote (intern (slot-value class 'name) :openldk)))
-                                 :expression-type :REFERENCE)))
-        ;; We don't push this. bc-2-ir pushes this.
-        expr))))
+      (make-instance '<expression>
+                     :insn insn
+                     :code (list 'make-instance (list 'quote (intern (slot-value class 'name) :openldk)))
+                     :expression-type :REFERENCE))))
 
 (defmethod codegen ((insn ir-new-array) context)
   (let ((init-element
