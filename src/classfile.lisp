@@ -341,10 +341,10 @@ stream."
            (read-buffer attributes-length))
           ("RuntimeVisibleAnnotations"
            (setf (gethash "RuntimeVisibleAnnotations" attributes)
-                 (read-buffer attributes-length)))
+                 (make-java-array :initial-contents (read-buffer attributes-length))))
           ("AnnotationDefault"
            (setf (gethash "AnnotationDefault" attributes)
-                 (read-buffer attributes-length)))
+                 (make-java-array :initial-contents (read-buffer attributes-length))))
           ("StackMapTable"
            (read-buffer attributes-length))
           ("SourceFile"

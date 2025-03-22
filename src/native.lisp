@@ -467,7 +467,7 @@ and its implementation."
                                                                  (%get-return-type (descriptor method))
                                                                  (make-java-array :size 0) (access-flags method) 0 (ijstring (descriptor method))
                                                                  (make-java-array :size 5) (make-java-array :size 6)
-                                                                 (make-java-array :initial-contents (gethash "AnnotationDefault" (attributes method))))
+                                                                 (gethash "AnnotationDefault" (attributes method)))
                                                                 c)))
                                       'vector))))
          (when *debug-trace*
@@ -1218,12 +1218,12 @@ user.variant
 
 (defmethod |getUTF8At0(Ljava/lang/Object;I)| ((this |sun/reflect/ConstantPool|) cp index)
   (let* ((cp (constant-pool (ldk-class cp)))
-         (s (format nil "~A" (emit (jaref cp index) cp))))
+         (s (format nil "~A" (emit (aref cp index) cp))))
     (jstring s)))
 
 (defmethod |getIntAt0(Ljava/lang/Object;I)| ((this |sun/reflect/ConstantPool|) cp index)
   (let* ((cp (constant-pool (ldk-class cp)))
-         (i (slot-value (jaref cp index) 'value)))
+         (i (slot-value (aref cp index) 'value)))
     i))
 
 (defclass byte-array-input-stream (trivial-gray-streams:fundamental-binary-input-stream)
