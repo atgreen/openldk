@@ -363,13 +363,8 @@ and its implementation."
 (defmethod |getComponentType()| ((class |java/lang/Class|))
   (let ((cn (lstring (slot-value class '|name|))))
     (format t "GETCOMPONENTTYPE ~A~%" cn)
-    (if (eq #\L (char cn 0))
-        (let ((ldk-class (gethash (subseq cn 1 (- (length cn) 1)) *ldk-classes-by-bin-name*)))
-          (format t "  LDK-CLASS(~A) = ~A~%" (subseq cn 1 (- (length cn) 1)) ldk-class)
-          (java-class ldk-class))
-        (let ((ldk-class (gethash cn *ldk-classes-by-bin-name*)))
-          (format t "  LDK-CLASS(~A) = ~A~%" cn ldk-class)
-          (java-class ldk-class)))))
+    (when (eq #\[ (char cn 0))
+      (%bin-type-name-to-class (subseq cn 1)))))
 
 (defmethod |isPrimitive()| ((class |java/lang/Class|))
   (let ((name-string (lstring (slot-value class '|name|))))
@@ -983,7 +978,7 @@ user.variant
             (list method object args)))
   (unwind-protect
        (progn
-         (dotimes (i (length args))
+         (dotimes (i (length (java-array-data args)))
            (when (typep (jaref args i) '|java/lang/Integer|)
              (setf (jaref args i) (slot-value (jaref args i) '|value|))))
          (let ((result (apply (intern
