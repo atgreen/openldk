@@ -10,9 +10,9 @@ public class EvaluationOrder
          int l = args.length;
 
          /* This should print:
- 0
- 0
- 1
+ 5
+ 5
+ 6
          */
          System.out.println (l);
          System.out.println (first (l, ++l));
