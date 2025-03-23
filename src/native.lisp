@@ -690,9 +690,16 @@ user.variant
   (|run()| action))
 
 (defmethod |isAssignableFrom(Ljava/lang/Class;)| ((this |java/lang/Class|) other)
-  (let ((this-class (find-class (intern (name (%get-ldk-class-by-fq-name (lstring (slot-value this '|name|)))) :openldk)))
-        (other-class (find-class (intern (name (%get-ldk-class-by-fq-name (lstring (slot-value other '|name|)))) :openldk))))
-    (closer-mop:subclassp this-class other-class)))
+  (if (equal this other)
+      1
+      (let ((this-ldk-class (%get-ldk-class-by-fq-name (lstring (slot-value this '|name|)) t))
+            (other-ldk-class (%get-ldk-class-by-fq-name (lstring (slot-value other '|name|)) t)))
+        (if (and this-ldk-class
+                 other-ldk-class
+                 (closer-mop:subclassp (find-class (intern (name other-ldk-class) :openldk))
+                                       (find-class (intern (name this-ldk-class) :openldk))))
+            1
+            0))))
 
 (defun |java/lang/System.setIn0(Ljava/io/InputStream;)| (in-stream)
   (setf (slot-value |+static-java/lang/System+| '|in|) in-stream))
