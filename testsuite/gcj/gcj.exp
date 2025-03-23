@@ -100,6 +100,7 @@ proc openldk-dg-test { prog do_what extra_tool_flags } {
     verbose "extra_tool_flags $extra_tool_flags" 2
 
     # Run the javac command
+    local_exec "rm -f *.class" "" "" $timeout
     set JAVA_HOME [getenv "JAVA_HOME"]
     set status [local_exec "$JAVA_HOME/../bin/javac $prog" "" "" $timeout]
 
