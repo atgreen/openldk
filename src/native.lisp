@@ -355,14 +355,14 @@ and its implementation."
 
 (defmethod |isArray()| ((class |java/lang/Class|))
   ;; FIXME
-  (let ((name-string (format nil "~A" (slot-value (slot-value class '|name|) '|value|))))
-    (if (string= name-string "java/util/Arrays")
+  (let ((name-string (lstring (slot-value class '|name|))))
+    (if (or (eq #\[ (char name-string 0))
+            (string= name-string "java.util.Arrays"))
         1
         0)))
 
 (defmethod |getComponentType()| ((class |java/lang/Class|))
   (let ((cn (lstring (slot-value class '|name|))))
-    (format t "GETCOMPONENTTYPE ~A~%" cn)
     (when (eq #\[ (char cn 0))
       (%bin-type-name-to-class (subseq cn 1)))))
 
