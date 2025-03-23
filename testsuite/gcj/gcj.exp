@@ -15,7 +15,7 @@ proc openldk_load { classfile } {
     set timeout 20
     verbose "load $classfile"
     set ldkcp [getenv "LDK_CLASSPATH"]
-    setenv "LDK_CLASSPATH" "$ldkcp:.:./gcj"
+    setenv "LDK_CLASSPATH" "$ldkcp:./gcj"
     set classname [string map {".class" ""} $classfile]
     set classname [string trimleft $classname "gcj/"]
     set result [local_exec "../openldk $classname $testargs" "" "" $timeout]
