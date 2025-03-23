@@ -1289,3 +1289,7 @@ user.variant
            (ignore option-id))
   ;; FIXME
   (slot-value |+static-java/lang/Boolean+| '|TRUE|))
+
+;; FIXME -- am I picking up the wrong static method?  Found with log4j.
+(defun |sun/util/calendar/BaseCalendar.getDayOfWeekDateOnOrBefore(JI)| (l i)
+  (|sun/util/calendar/AbstractCalendar.getDayOfWeekDateOnOrBefore(JI)| l i))
