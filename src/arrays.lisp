@@ -65,3 +65,6 @@
 
 (defun java-array-length (array)
   (length (java-array-data array)))
+
+(defun |java/lang/reflect/Array.getLength(Ljava/lang/Object;)| (obj)
+  (length (java-array-data obj)))
