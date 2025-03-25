@@ -114,14 +114,24 @@
                 insn))
           ir-code))
 
-(defun initialize-arrays (ir-code)
-  (let ((code-array (coerce ir-code 'vector)))
+(defun %get-constant-int (ir context)
+  (let ((ir (or (gethash ir (single-assignment-table context))
+                ir)))
+    (cond
+     ((typep ir 'ir-int-literal)
+      (value ir))
+     (t
+      nil))))
+
+(defun initialize-arrays (ir-code context)
+  (let ((code-array (coerce ir-code 'vector))
+        (changed nil))
     (loop for i below (length ir-code)
           for insn = (aref code-array i)
           when (and (typep insn 'ir-assign)
                     (let ((rvalue (slot-value insn 'rvalue)))
                       (and (typep rvalue 'ir-new-array)
-                           (typep (size rvalue) '<stack-variable-constant-int>))))
+                           (%get-constant-int (size rvalue) context))))
             do (let* ((rvalue (slot-value insn 'rvalue))
                       (init-element
                         (case (atype rvalue)
@@ -133,7 +143,7 @@
                           ((8 9 10 11) 0) ; Other integer types (assuming default to 0)
                           (t nil))))   ; Default to nil for unknown types
                  (let* ((pc (1+ i))
-                        (values (loop for array-index from 0 below (slot-value (size rvalue) 'value)
+                        (values (loop for array-index from 0 below (%get-constant-int (size rvalue) context)
                                       collect (progn
                                                 (loop until (not (typep (aref code-array pc) 'ir-nop))
                                                       do (incf pc))
@@ -142,21 +152,22 @@
                                                   (if (typep insn 'ir-xastore)
                                                       (code (codegen (value insn) *context*))
                                                       (return nil))))))
-                        (array (if (zerop (slot-value (size rvalue) 'value))
+                        (array (if (zerop (%get-constant-int (size rvalue) context))
                                    #()
                                    (if values
                                        (progn
                                          (loop for nop-pc from (1+ i) below pc
                                                do (setf (aref code-array nop-pc) (make-instance 'ir-nop :address (address (aref code-array nop-pc)))))
+                                         (setf changed t)
                                          values)
-                                       (make-array (slot-value (size rvalue) 'value)
+                                       (make-array (%get-constant-int (size rvalue) context)
                                                    :initial-element init-element)))))
                    (setf (slot-value insn 'rvalue)
                          (make-instance 'ir-array-literal
                                         :address (address insn)
                                         :value array)))
                  (assert (typep (aref code-array (1- i)) 'ir-nop))))
-    (coerce code-array 'list)))
+    (values (coerce code-array 'list) changed)))
 
 (defun %compile-method (class-name method-index)
   (let* ((class (%get-ldk-class-by-bin-name class-name))
@@ -225,8 +236,14 @@
                                       (reduce #'merge-stacks v)))
                                   (stack-state-table *context*))
                          (fix-stack-variables (stack-variables *context*))
-                         (initialize-arrays (propagate-copies code (single-assignment-table *context*))))))
-                         ; (propagate-copies code (single-assignment-table *context*)))))
+                         (setf code (propagate-copies code (single-assignment-table *context*)))
+                         (loop
+                           (multiple-value-bind (new-code changed?)
+                               (initialize-arrays code *context*)
+                             (unless changed?
+                               (return))
+                             (setf code new-code)))
+                         code)))
                ;; (sdfdfd (print ir-code-0))
                (blocks (build-basic-blocks ir-code-0))
                (lisp-code
