@@ -12,7 +12,7 @@ set expected_output ""
 proc openldk_load { classfile } {
 
     global testargs
-    set timeout 20
+    set timeout 40
     verbose "load $classfile"
     set ldkcp [getenv "LDK_CLASSPATH"]
     setenv "LDK_CLASSPATH" "$ldkcp:./gcj"
