@@ -193,17 +193,19 @@ and its implementation."
        (progn
          (when *debug-trace*
            (format t "~&~V@A trace: entering java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;) ~A~%"
-                   (incf *call-nesting-level* 1) "*" name))
-         (let ((lname (substitute #\/ #\. (lstring name))))
-           (or (and (eq (char lname 0) #\[)
-                    (or (%get-java-class-by-bin-name lname t)
-                        (java-class (%get-array-ldk-class-from-name (subseq lname 1)))))
-               (and (%get-ldk-class-by-bin-name lname t)
-                    (java-class (%get-ldk-class-by-bin-name lname)))
-               (let ((klass (classload lname)))
-                 (when klass
-                   (%clinit klass)
-                   (java-class klass))))))
+                   (incf *call-nesting-level* 1) "*" (list name initialize loader caller)))
+         (if (and loader (not (equal loader *boot-class-loader*)))
+             (|findClass(Ljava/lang/String;)| loader name)
+             (let ((lname (substitute #\/ #\. (lstring name))))
+               (or (and (eq (char lname 0) #\[)
+                        (or (%get-java-class-by-bin-name lname t)
+                            (java-class (%get-array-ldk-class-from-name (subseq lname 1)))))
+                   (and (%get-ldk-class-by-bin-name lname t)
+                        (java-class (%get-ldk-class-by-bin-name lname)))
+                   (let ((klass (classload lname)))
+                     (when klass
+                       (%clinit klass)
+                       (java-class klass)))))))
     (when *debug-trace*
       (incf *call-nesting-level* -1))))
 
@@ -1252,14 +1254,22 @@ user.variant
   '(unsigned-byte 8))
 
 (defun |java/lang/reflect/Proxy.defineClass0(Ljava/lang/ClassLoader;Ljava/lang/String;[BII)| (class-loader class-name data offset length)
-  (declare (ignore class-loader))  ;; FIXME
   (let ((stream (make-instance 'byte-array-input-stream :array data :start offset :end (+ offset length))))
-    (java-class (%classload-from-stream (substitute #\/ #\. (lstring class-name)) stream))))
+    (java-class (%classload-from-stream (substitute #\/ #\. (lstring class-name)) stream class-loader))))
 
 (defmethod |defineClass(Ljava/lang/String;[BIILjava/lang/ClassLoader;Ljava/security/ProtectionDomain;)| ((unsafe |sun/misc/Unsafe|) class-name data offset length class-loader protection-domain)
+  (declare (ignore protection-domain))
   ;; FIXME
   (let ((stream (make-instance 'byte-array-input-stream :array data :start offset :end (+ offset length))))
-    (java-class (%classload-from-stream (substitute #\/ #\. (lstring class-name)) stream))))
+    (java-class (%classload-from-stream (substitute #\/ #\. (lstring class-name)) stream class-loader))))
+
+(defmethod |defineClass1(Ljava/lang/String;[BIILjava/security/ProtectionDomain;Ljava/lang/String;)|
+    ((class-loader |java/lang/ClassLoader|) class-name data offset length protection-domain source)
+  (declare (ignore source)
+           (ignore protection-domain))
+  ;; FIXME
+  (let ((stream (make-instance 'byte-array-input-stream :array data :start offset :end (+ offset length))))
+    (java-class (%classload-from-stream (substitute #\/ #\. (lstring class-name)) stream class-loader))))
 
 (defmethod |allocateInstance(Ljava/lang/Class;)| ((unsafe |sun/misc/Unsafe|) class)
   (make-instance (intern (substitute #\/ #\. (lstring (slot-value class '|name|))) :openldk)))

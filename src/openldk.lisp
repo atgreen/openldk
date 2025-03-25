@@ -402,7 +402,7 @@
     (append defclass-code methods-code)))
 
 
-(defun %classload-from-stream (classname classfile-stream)
+(defun %classload-from-stream (classname classfile-stream class-loader)
   (unwind-protect
        (let* ((classname-symbol (intern classname :openldk))
               (class
@@ -417,13 +417,13 @@
                               (mapcar (lambda (i) (classload i)) (coerce interfaces 'list))))))
          (let ((klass (or (%get-java-class-by-bin-name classname t)
                           (let ((klass (make-instance '|java/lang/Class|))
-                                (cname (jstring (substitute #\. #\/ classname)))
-                                (cloader nil)) ;; (make-instance '|java/lang/ClassLoader|)))
+                                (cname (jstring (substitute #\. #\/ classname))))
                             (with-slots (|name| |classLoader|) klass
                               (setf |name| cname)
-                              (setf |classLoader| cloader))
+                              (setf |classLoader| class-loader))
                             klass))))
            (setf (java-class class) klass)
+           (setf (slot-value klass '|classLoader|) class-loader)
            (setf (gethash classname *java-classes-by-bin-name*) klass)
            (setf (gethash (substitute #\. #\/ classname) *java-classes-by-fq-name*) klass))
 
@@ -470,7 +470,7 @@
          class)
     (close classfile-stream)))
 
-(defun classload (classname)
+(defun classload (classname &optional (class-loader nil))
   (let ((classname (coerce classname 'string)))
     (assert (not (find #\. classname)))
     (assert (> (length classname) 0))
@@ -483,7 +483,7 @@
                   (when *debug-load*
                     (format t "~&; LOADING ~A~%" classname))
                   (if classfile-stream
-                      (%classload-from-stream classname classfile-stream)
+                      (%classload-from-stream classname classfile-stream class-loader)
                       nil))
                 nil))))))
 
@@ -631,6 +631,8 @@
   (handler-case
 
       (let ((boot-class-loader (make-instance '|java/lang/ClassLoader|)))
+
+        (setf *boot-class-loader* boot-class-loader)
 
         (dolist (p '(("byte" . "B") ("char" . "C") ("int" . "I")
                      ("short" . "S") ("long" . "J") ("double" . "D")
