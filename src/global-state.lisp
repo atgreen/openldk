@@ -70,6 +70,8 @@
 (defvar *debug-x* nil)
 (defvar *debug-unmuffle* nil)
 
+(defvar *boot-class-loader* nil)
+
 (defun %get-java-class-by-bin-name (bin-name &optional fail-ok)
   (let ((bin-name (if (stringp bin-name)
                       bin-name
