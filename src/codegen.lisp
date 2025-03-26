@@ -183,7 +183,7 @@
                  :code `(handler-case
                             (let ((value2 ,(code (codegen (value2 insn) context)))
                                   (value1 ,(code (codegen (value1 insn) context))))
-                              (unsigned-to-signed-integer (logand (floor (/ value1 value2)) #xFFFFFFFFFFFFFFFF)))
+                              (unsigned-to-signed-long (logand (floor (/ value1 value2)) #xFFFFFFFFFFFFFFFF)))
                           (division-by-zero (e)
                             (error (%lisp-condition (%make-throwable '|java/lang/ArithmeticException|)))))
                  :expression-type :LONG))
@@ -437,10 +437,11 @@
   (with-slots (arrayref index value) insn
     (make-instance '<expression>
                    :insn insn
-                   :code (list 'let (list (list 'value (code (codegen value context)))
-                                          (list 'index (code (codegen index context)))
-                                          (list 'arrayref (code (codegen arrayref context))))
-                               (list 'setf (list 'jaref 'arrayref 'index) (list 'code-char 'value))))))
+                   :code `(let ((value ,(code (codegen value context)))
+                                (index ,(code (codegen index context)))
+                                (arrayref ,(code (codegen arrayref context))))
+;;                            (format t "~&castore[~A] = ~A in ~A~%" index (code-char value) arrayref)
+                            (setf (jaref arrayref index) (code-char value))))))
 
 (defmethod codegen ((insn ir-checkcast) context)
   (declare (ignore context))
