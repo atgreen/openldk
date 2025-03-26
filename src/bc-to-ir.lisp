@@ -745,6 +745,28 @@
         (push value1 (stack context)))
       (list (make-instance 'ir-nop :address pc-start)))))
 
+(define-bytecode-transpiler :DUP_X2 (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
+      (let* ((value1 (pop (stack context))))
+        (if (find (var-type value1) '(:DOUBLE :LONG))
+            ;; Category-2: ..., val2, val1 (cat2) => ..., val1, val2, val1
+            (let ((value2 (pop (stack context))))
+              (push value1 (stack context))
+              (push value2 (stack context))
+              (push value1 (stack context)))
+            ;; Category-1: ..., val3, val2, val1 => ..., val1, val3, val2, val1
+            (let ((value2 (pop (stack context)))
+                  (value3 (pop (stack context))))
+              (push value1 (stack context))
+              (push value3 (stack context))
+              (push value2 (stack context))
+              (push value1 (stack context)))))
+      (list (make-instance 'ir-nop :address pc-start)))))
+
 (define-bytecode-transpiler :DUP2_X1 (context code)
   (if (find (var-type (car (stack context))) '(:DOUBLE :LONG))
       (:DUP_X1 context code)
@@ -762,7 +784,7 @@
             (push value1 (stack context)))
           (list (make-instance 'ir-nop :address pc-start))))))
 
-(define-bytecode-transpiler :DUP_X2 (context code)
+(define-bytecode-transpiler :DUP2_X2 (context code)
   (declare (ignore code))
   (with-slots (pc) context
     (let ((pc-start pc))
