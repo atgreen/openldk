@@ -213,12 +213,21 @@ and its implementation."
   ;; Do some more math if this is not true.
   (assert (eq org.shirakumo.precise-time:precise-time-units-per-second
               1000000000))
-  (multiple-value-bind (universal-time nanoseconds)
-      (org.shirakumo.precise-time:get-precise-time)
-    (+ (* (local-time:timestamp-to-unix
-           (local-time:universal-to-timestamp universal-time))
-          1000)
-       (truncate nanoseconds 1000000))))
+  (unwind-protect
+       (progn
+         (when *debug-trace*
+           (format t "~&~V@A trace: entering java/lang/System.currentTimeMillis()~%" (incf *call-nesting-level* 1) "*"))
+         (multiple-value-bind (universal-time nanoseconds)
+             (org.shirakumo.precise-time:get-precise-time)
+           (let ((res (+ (* (local-time:timestamp-to-unix
+                             (local-time:universal-to-timestamp universal-time))
+                            1000)
+                         (truncate nanoseconds 1000000))))
+             (when *debug-trace*
+               (format t "~&~V@A trace: java/lang/System.currentTimeMillis() = ~A~%" *call-nesting-level* "*" res))
+             res)))
+    (when *debug-trace*
+      (incf *call-nesting-level* -1))))
 
 (defun |java/lang/System.nanoTime()| ()
   ;; Do some more math if this is not true.
