@@ -105,102 +105,64 @@
   (with-slots (arrayref index value) insn
     (make-instance '<expression>
                    :insn insn
-                   :code `(handler-case
-                              (let ((value ,(code (codegen value context)))
-                                    (index ,(code (codegen index context)))
-                                    (arrayref ,(code (codegen arrayref context))))
-                                ;; (format t "~&aastore: index ~A into array size ~A: ~A~%" index (length arrayref) arrayref)
-                                (setf (jaref arrayref index) value))
-                            (sb-int:invalid-array-index-error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
-                            (error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|))))))))
+                   :code `(let ((value ,(code (codegen value context)))
+                                (index ,(code (codegen index context)))
+                                (arrayref ,(code (codegen arrayref context))))
+                            (setf (jaref arrayref index) value)))))
 
 (defmethod codegen ((insn ir-iastore) context)
   (with-slots (arrayref index value) insn
     (make-instance '<expression>
                    :insn insn
-                   :code `(handler-case
-                              (let ((value ,(code (codegen value context)))
-                                    (index ,(code (codegen index context)))
-                                    (arrayref ,(code (codegen arrayref context))))
-                                (setf (jaref arrayref index) value))
-                            (sb-int:invalid-array-index-error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
-                            (error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|))))))))
+                   :code `(let ((value ,(code (codegen value context)))
+                                (index ,(code (codegen index context)))
+                                (arrayref ,(code (codegen arrayref context))))
+                            (setf (jaref arrayref index) value)))))
 
 (defmethod codegen ((insn ir-lastore) context)
   (with-slots (arrayref index value) insn
     (make-instance '<expression>
                    :insn insn
-                   :code `(handler-case
-                              (let ((value ,(code (codegen value context)))
-                                    (index ,(code (codegen index context)))
-                                    (arrayref ,(code (codegen arrayref context))))
-                                ;; (format t "~&lastore: storing ~A to index ~A into array size ~A: ~A~%" value index (length arrayref) arrayref)
-                                (setf (jaref arrayref index) value))
-                            (sb-int:invalid-array-index-error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
-                            (error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|))))))))
+                   :code `(let ((value ,(code (codegen value context)))
+                                (index ,(code (codegen index context)))
+                                (arrayref ,(code (codegen arrayref context))))
+                            (setf (jaref arrayref index) value)))))
 
 (defmethod codegen ((insn ir-fastore) context)
   (with-slots (arrayref index value) insn
     (make-instance '<expression>
                    :insn insn
-                   :code `(handler-case
-                              (let ((value ,(code (codegen value context)))
-                                    (index ,(code (codegen index context)))
-                                    (arrayref ,(code (codegen arrayref context))))
-                                (setf (jaref arrayref index) value))
-                            (sb-int:invalid-array-index-error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
-                            (error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|))))))))
+                   :code `(let ((value ,(code (codegen value context)))
+                                (index ,(code (codegen index context)))
+                                (arrayref ,(code (codegen arrayref context))))
+                            (setf (jaref arrayref index) value)))))
 
 (defmethod codegen ((insn ir-sastore) context)
   (with-slots (arrayref index value) insn
     (make-instance '<expression>
                    :insn insn
-                   :code `(handler-case
-                              (let ((value ,(code (codegen value context)))
-                                    (index ,(code (codegen index context)))
-                                    (arrayref ,(code (codegen arrayref context))))
-                                (setf (jaref arrayref index) value))
-                            (sb-int:invalid-array-index-error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
-                            (error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|))))))))
+                   :code `(let ((value ,(code (codegen value context)))
+                                (index ,(code (codegen index context)))
+                                (arrayref ,(code (codegen arrayref context))))
+                            (setf (jaref arrayref index) value)))))
 
 (defmethod codegen ((insn ir-bastore) context)
   (with-slots (arrayref index value) insn
     (make-instance '<expression>
                    :insn insn
-                   :code `(handler-case
-                              (let ((value ,(code (codegen value context)))
-                                    (index ,(code (codegen index context)))
-                                    (arrayref ,(code (codegen arrayref context))))
-                                ;; (format t "~&STORED ~A at ~A in ~A~%" value index arrayref)
-                                (setf (jaref arrayref index) value))
-                            (sb-int:invalid-array-index-error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
-                            (error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|))))))))
+                   :code `(let ((value ,(code (codegen value context)))
+                                (index ,(code (codegen index context)))
+                                (arrayref ,(code (codegen arrayref context))))
+                            (setf (jaref arrayref index) value)))))
 
 (defmethod codegen ((insn ir-dastore) context)
   (with-slots (arrayref index value) insn
     (make-instance '<expression>
                    :insn insn
-                   :code `(handler-case
-                              (let ((value ,(code (codegen value context)))
-                                    (index ,(code (codegen index context)))
-                                    (arrayref ,(code (codegen arrayref context))))
-                                (setf (jaref arrayref index) value))
-                            (sb-int:invalid-array-index-error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
-                            (error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|))))))))
+                   :code `(let ((value ,(code (codegen value context)))
+                                (index ,(code (codegen index context)))
+                                (arrayref ,(code (codegen arrayref context))))
+                            (setf (jaref arrayref index) value)))))
 
 (defmethod codegen ((insn ir-idiv) context)
   ;; FIXME - handle all weird conditions
@@ -399,103 +361,75 @@
   (with-slots (index arrayref) insn
     (make-instance '<expression>
                    :insn insn
-                   :code `(handler-case
-                              (let ((index ,(code (codegen index context)))
-                                    (arrayref ,(code (codegen arrayref context))))
-                                (let ((c (jaref arrayref index)))
-                                  (typecase c
-                                    (character (char-code c))
-                                    (integer c))))
-                            (sb-int:invalid-array-index-error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
-                            (error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|)))))
+                   :code `(let ((index ,(code (codegen index context)))
+                                (arrayref ,(code (codegen arrayref context))))
+                            (let ((c (jaref arrayref index)))
+                              (typecase c
+                                (character (char-code c))
+                                (integer c))))
                    :expression-type :CHAR)))
 
 (defmethod codegen ((insn ir-iaload) context)
   (with-slots (index arrayref) insn
     (make-instance '<expression>
                    :insn insn
-                   :code `(handler-case
-                              (let ((index ,(code (codegen index context)))
-                                    (arrayref ,(code (codegen arrayref context))))
-                                (jaref arrayref index))
-                            (sb-int:invalid-array-index-error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
-                            (error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|)))))
+                   :code `(let ((index ,(code (codegen index context)))
+                                (arrayref ,(code (codegen arrayref context))))
+                            (jaref arrayref index))
                    :expression-type :INTEGER)))
+
+(defmethod codegen ((insn ir-saload) context)
+  (with-slots (index arrayref) insn
+    (make-instance '<expression>
+                   :insn insn
+                   :code `(let ((index ,(code (codegen index context)))
+                                (arrayref ,(code (codegen arrayref context))))
+                            (jaref arrayref index))
+                   :expression-type :SHORT)))
 
 (defmethod codegen ((insn ir-laload) context)
   (with-slots (index arrayref) insn
     (make-instance '<expression>
                    :insn insn
-                   :code `(handler-case
-                              (let ((index ,(code (codegen index context)))
-                                    (arrayref ,(code (codegen arrayref context))))
-                                ;; (format t "~&laload: index ~A into array size ~A: ~A~%" index (length arrayref) arrayref)
-                                (jaref arrayref index))
-                            (sb-int:invalid-array-index-error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
-                            (error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|)))))
+                   :code `(let ((index ,(code (codegen index context)))
+                                (arrayref ,(code (codegen arrayref context))))
+                            (jaref arrayref index))
                    :expression-type :LONG)))
 
 (defmethod codegen ((insn ir-baload) context)
   (with-slots (index arrayref) insn
     (make-instance '<expression>
                    :insn insn
-                   :code `(handler-case
-                              (let ((index ,(code (codegen index context)))
-                                    (arrayref ,(code (codegen arrayref context))))
-                                (jaref arrayref index))
-                            (sb-int:invalid-array-index-error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
-                            (error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|)))))
+                   :code `(let ((index ,(code (codegen index context)))
+                                (arrayref ,(code (codegen arrayref context))))
+                            (jaref arrayref index))
                    :expression-type :BYTE)))
 
 (defmethod codegen ((insn ir-daload) context)
   (with-slots (index arrayref) insn
     (make-instance '<expression>
                    :insn insn
-                   :code `(handler-case
-                              (let ((index ,(code (codegen index context)))
-                                    (arrayref ,(code (codegen arrayref context))))
-                                (jaref arrayref index))
-                            (sb-int:invalid-array-index-error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
-                            (error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|)))))
+                   :code `(let ((index ,(code (codegen index context)))
+                                (arrayref ,(code (codegen arrayref context))))
+                            (jaref arrayref index))
                    :expression-type :DOUBLE)))
 
 (defmethod codegen ((insn ir-faload) context)
   (with-slots (index arrayref) insn
     (make-instance '<expression>
                    :insn insn
-                   :code `(handler-case
-                              (let ((index ,(code (codegen index context)))
-                                    (arrayref ,(code (codegen arrayref context))))
-                                (jaref arrayref index))
-                            (sb-int:invalid-array-index-error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
-                            (error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|)))))
+                   :code `(let ((index ,(code (codegen index context)))
+                                (arrayref ,(code (codegen arrayref context))))
+                            (jaref arrayref index))
                    :expression-type :FLOAT)))
 
 (defmethod codegen ((insn ir-aaload) context)
   (with-slots (index arrayref) insn
     (make-instance '<expression>
                    :insn insn
-                   :code `(handler-case
-                              (let ((index ,(code (codegen index context)))
-                                    (arrayref ,(code (codegen arrayref context))))
-                                ;; (format t "~&aaload: index ~A into array size ~A: ~A~%" index (length arrayref) arrayref)
-                                (jaref arrayref index))
-                            (sb-int:invalid-array-index-error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|))))
-                            (error (e)
-                              (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|)))))
+                   :code `(let ((index ,(code (codegen index context)))
+                                (arrayref ,(code (codegen arrayref context))))
+                            (jaref arrayref index))
                    :expression-type :REFERENCE)))
 
 (defmethod codegen ((insn ir-castore) context)
