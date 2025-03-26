@@ -209,10 +209,27 @@ and its implementation."
     (when *debug-trace*
       (incf *call-nesting-level* -1))))
 
-(defmethod |java/lang/System.currentTimeMillis()| ()
-	;;; FIXME: this probably isn't right.
-  (floor (* (get-internal-real-time) 1000)
-				 internal-time-units-per-second))
+(defun |java/lang/System.currentTimeMillis()| ()
+  ;; Do some more math if this is not true.
+  (assert (eq org.shirakumo.precise-time:precise-time-units-per-second
+              1000000000))
+  (multiple-value-bind (universal-time nanoseconds)
+      (org.shirakumo.precise-time:get-precise-time)
+    (+ (* (local-time:timestamp-to-unix
+           (local-time:universal-to-timestamp universal-time))
+          1000)
+       (truncate nanoseconds 1000000))))
+
+(defun |java/lang/System.nanoTime()| ()
+  ;; Do some more math if this is not true.
+  (assert (eq org.shirakumo.precise-time:precise-time-units-per-second
+              1000000000))
+  (multiple-value-bind (universal-time nanoseconds)
+      (org.shirakumo.precise-time:get-precise-time)
+    (+ (* (local-time:timestamp-to-unix
+           (local-time:universal-to-timestamp universal-time))
+          1000000000)
+       nanoseconds)))
 
 (defmethod |java/lang/System.arraycopy(Ljava/lang/Object;ILjava/lang/Object;II)| (source_arr sourcePos dest_arr destPos len)
 	(dotimes (i len)
@@ -956,14 +973,6 @@ user.variant
                  (setf (jaref jenvs (+ i 1))
                        (make-java-array :initial-contents (flexi-streams:string-to-octets (subseq kv (1+ p)) :external-format :utf-8)))))
       jenvs)))
-
-(defun |java/lang/System.nanoTime()| ()
-  ;; Do some more math if this is not true.
-  (assert (eq org.shirakumo.precise-time:precise-time-units-per-second
-              1000000000))
-  (multiple-value-bind (universal-time nanoseconds)
-      (org.shirakumo.precise-time:get-precise-time)
-    (+ (* universal-time 1000000000) nanoseconds)))
 
 (defun |java/lang/System.identityHashCode(Ljava/lang/Object;)| (objref)
   ;; Hash down the 64-bit SXHASH to 32-bits.
