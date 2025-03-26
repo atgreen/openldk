@@ -259,7 +259,20 @@
                                                           ,(car lisp-code)
                                                        (incf *call-nesting-level* -1)))
                                      lisp-code))
-
+               (array-checked-lisp-code (if (needs-array-bounds-check *context*)
+                                            `((handler-bind
+                                                  ((sb-int:invalid-array-index-error
+                                                     (lambda (e)
+                                                       (error (openldk::%lisp-condition
+                                                               (openldk::%make-throwable
+                                                                'openldk::|java/lang/ArrayIndexOutOfBoundsException|)))))
+                                                   (type-error
+                                                     (lambda (e)
+                                                       (error (openldk::%lisp-condition
+                                                               (openldk::%make-throwable
+                                                                'openldk::|java/lang/NullPointerException|))))))
+                                                ,(car traced-lisp-code)))
+                                            traced-lisp-code))
                (definition-code
                  (let ((parameter-count (count-parameters (slot-value method 'descriptor))))
                    (let ((args (if (static-p method)
@@ -312,7 +325,7 @@
                                                                                      do (if (eq ph t) (incf i) (incf i 2)))
                                                                                (loop for x from parameter-count upto (1+ max-locals)
                                                                                      collect (list (intern (format nil "local-~A" (incf i)) :openldk)))))))
-                                                traced-lisp-code)))))))))
+                                                array-checked-lisp-code)))))))))
           (%eval definition-code))))))
 
 (defun %clinit (class)

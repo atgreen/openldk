@@ -60,6 +60,7 @@
     (let ((pc-start pc))
       (incf pc)
       (push pc (aref (next-insn-list context) pc-start))
+      (setf (needs-array-bounds-check context) t)
       (list (make-instance ir-class
                            :address pc-start
                            :value (pop (stack context))
@@ -403,6 +404,7 @@
            (var (make-stack-variable context pc-start :CHAR)))
       (incf pc)
       (push pc (aref (next-insn-list context) pc-start))
+      (setf (needs-array-bounds-check context) t)
       (let ((code
              (list (make-instance 'ir-assign
                                   :address pc-start
@@ -421,6 +423,7 @@
            (var (make-stack-variable context pc-start :INTEGER)))
       (incf pc)
       (push pc (aref (next-insn-list context) pc-start))
+      (setf (needs-array-bounds-check context) t)
       (let ((code
              (list (make-instance 'ir-assign
                                   :address pc-start
@@ -439,11 +442,12 @@
            (var (make-stack-variable context pc-start :SHORT)))
       (incf pc)
       (push pc (aref (next-insn-list context) pc-start))
+      (setf (needs-array-bounds-check context) t)
       (let ((code
              (list (make-instance 'ir-assign
                                   :address pc-start
                                   :lvalue var
-                                  :rvalue (make-instance 'ir-iaload
+                                  :rvalue (make-instance 'ir-saload
                                                          :address pc-start
                                                          :index (pop (stack context))
                                                          :arrayref (pop (stack context)))))))
@@ -457,6 +461,7 @@
            (var (make-stack-variable context pc-start :LONG)))
       (incf pc)
       (push pc (aref (next-insn-list context) pc-start))
+      (setf (needs-array-bounds-check context) t)
       (let ((code
              (list (make-instance 'ir-assign
                                   :address pc-start
@@ -475,6 +480,7 @@
            (var (make-stack-variable context pc-start :BYTE)))
       (incf pc)
       (push pc (aref (next-insn-list context) pc-start))
+      (setf (needs-array-bounds-check context) t)
       (let ((code
              (list (make-instance 'ir-assign
                                   :address pc-start
@@ -493,6 +499,7 @@
            (var (make-stack-variable context pc-start :FLOAT)))
       (incf pc)
       (push pc (aref (next-insn-list context) pc-start))
+      (setf (needs-array-bounds-check context) t)
       (let ((code
              (list (make-instance 'ir-assign
                                   :address pc-start
@@ -511,6 +518,7 @@
            (var (make-stack-variable context pc-start :DOUBLE)))
       (incf pc)
       (push pc (aref (next-insn-list context) pc-start))
+      (setf (needs-array-bounds-check context) t)
       (let ((code
              (list (make-instance 'ir-assign
                                   :address pc-start
@@ -529,6 +537,7 @@
            (var (make-stack-variable context pc-start :REFERENCE)))
       (incf pc)
       (push pc (aref (next-insn-list context) pc-start))
+      (setf (needs-array-bounds-check context) t)
       (let ((code
              (list (make-instance 'ir-assign
                                   :address pc-start

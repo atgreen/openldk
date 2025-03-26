@@ -168,6 +168,9 @@
 (defclass/std ir-iaload (ir-array-index)
   ())
 
+(defclass/std ir-saload (ir-array-index)
+  ())
+
 (defclass/std ir-laload (ir-array-index)
   ())
 

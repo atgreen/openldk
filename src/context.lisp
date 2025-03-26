@@ -68,6 +68,7 @@
    (single-assignment-table
     :std (make-hash-table :test #'equal))
    (pc :std 0)
+   (needs-array-bounds-check :std nil)
    (stack :std (list (make-instance '<stack-bottom-marker>)))))
 
 (defparameter +stack-bottom-address+ -99)
