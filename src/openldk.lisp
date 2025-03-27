@@ -368,7 +368,7 @@
     ((string= descriptor "B")
      0)
     ((string= descriptor "C")
-     #\0)
+     0)
     ((string= descriptor "Z")
      0)
     (t nil)))
