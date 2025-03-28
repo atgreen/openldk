@@ -153,12 +153,9 @@ and its implementation."
     ((equal type 'bit) "Z")
     ((stringp type) (if (eq 1 (length type)) type (format nil "L~A;" type)))
     (t
-     (format t "TYPE-TO-DESCRIPTOR what is ~A ?~%" type)
-     (sb-debug:print-backtrace)
      (format nil "Ljava/lang/Object;"))))
 
 (defun %get-array-ldk-class-from-name (cname)
-  (format t "%get-array-ldk-class-from-name ~A~%" cname)
   (let* ((ldk-class (%get-ldk-class-by-bin-name cname t)))
     (if ldk-class
         ldk-class
@@ -397,7 +394,6 @@ and its implementation."
         0)))
 
 (defmethod |getComponentType()| ((class |java/lang/Class|))
-  (format t "GCT ~A~%" class)
   (let ((cn (lstring (slot-value class '|name|))))
     (if (eq #\[ (char cn 0))
         (let ((ct (%bin-type-name-to-class (subseq cn 1))))
@@ -565,6 +561,7 @@ and its implementation."
                                                 f))
                                 (when (super lclass)
                                   (get-fields (%get-ldk-class-by-bin-name (super lclass) t)))))))
+
              (make-java-array
               :component-class (%get-java-class-by-fq-name "java.lang.reflect.Field")
               :initial-contents (coerce (get-fields lclass) 'vector)))))
@@ -752,10 +749,10 @@ user.variant
 (defun |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedExceptionAction;Ljava/security/AccessControlContext;)| (action context)
   (declare (ignore context))
   ;; FIXME
-  (|run()| action))
+  (let ((result (|run()| action)))
+    result))
 
 (defmethod |isAssignableFrom(Ljava/lang/Class;)| ((this |java/lang/Class|) other)
-  (format t "~&ISASSIGNABLEFROM ~A ~A~%" this other)
   (if (equal this other)
       1
       (let ((this-ldk-class (%get-ldk-class-by-fq-name (lstring (slot-value this '|name|)) t))
