@@ -194,13 +194,11 @@
        (progn
          (let* ((obj-end (position #\; bin-type-name))
                 (res (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring (subseq bin-type-name 1 obj-end)) nil nil nil)))
-           (format t "BIN-TYPE-NAME-TO-CLASS ~A = ~A~%" bin-type-name res)
            res)))
 
       ((char= ch #\[)
        (let ((res (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
                    (jstring bin-type-name) nil nil nil)))
-         (format t "BIN-TYPE-NAME-TO-CLASS ~A = ~A~%" bin-type-name res)
          res)))))
 
 (defun %get-return-type (descriptor)
