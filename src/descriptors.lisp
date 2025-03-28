@@ -208,7 +208,6 @@
 
 (defun %get-parameter-types (descriptor)
   "Parse the Java method descriptor and return a list of parameter types as strings."
-  (format t "GET-PARAMETER-TYPES ~A~%" descriptor)
   (let ((param-list nil)
         (index 0)
         (descriptor (subseq descriptor (position #\( descriptor) (position #\) descriptor))))
