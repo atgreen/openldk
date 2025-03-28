@@ -44,13 +44,17 @@
 
 (defun jstring (value)
   (let ((s (make-instance '|java/lang/String|)))
-    (setf (slot-value s '|value|) (make-java-array :initial-contents value))
+    (setf (slot-value s '|value|) (make-java-array :component-class
+                                                   (or (%get-java-class-by-bin-name "char" t) :early-placeholder)
+                                                   :initial-contents value))
     (setf (slot-value s '|hash|) 0)
     s))
 
 (defun ijstring (value)
   (let ((s (make-instance '|java/lang/String|)))
-    (setf (slot-value s '|value|) (make-java-array :initial-contents value))
+    (setf (slot-value s '|value|) (make-java-array :component-class
+                                                   (or (%get-java-class-by-bin-name "char" t) :early-placeholder)
+                                                   :initial-contents value))
     (setf (slot-value s '|hash|) 0)
     (|intern()| s)))
 

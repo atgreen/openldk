@@ -127,9 +127,7 @@
   (let ((classname (emit (aref cp (slot-value v 'index)) cp)))
     (if (eq (aref classname 0) #\[)
         (make-instance 'ir-class
-                       :class (if (eq (aref classname 1) #\L)
-                                  (%get-array-ldk-class-from-name "[Ljava/lang/Object;")
-                                  (%get-array-ldk-class-from-name classname)))
+                       :class (%get-array-ldk-class-from-name classname))
         (make-instance 'ir-class :class (classload classname)))))
 
 (defmethod get-stack-jtype ((v constant-class-reference))
@@ -341,10 +339,14 @@ stream."
            (read-buffer attributes-length))
           ("RuntimeVisibleAnnotations"
            (setf (gethash "RuntimeVisibleAnnotations" attributes)
-                 (make-java-array :initial-contents (read-buffer attributes-length))))
+                 (make-java-array :component-class
+                                  (or (%get-java-class-by-bin-name "byte" t) :early-byte-placeholder)
+                                  #| (%get-java-class-by-fq-name "byte") |# :initial-contents (read-buffer attributes-length))))
           ("AnnotationDefault"
            (setf (gethash "AnnotationDefault" attributes)
-                 (make-java-array :initial-contents (read-buffer attributes-length))))
+                 (make-java-array :component-class
+                                  (or (%get-java-class-by-bin-name "byte" t) :early-byte-placeholder)
+                                  #| (%get-java-class-by-fq-name "byte") |# :initial-contents (read-buffer attributes-length))))
           ("StackMapTable"
            (read-buffer attributes-length))
           ("SourceFile"

@@ -1626,7 +1626,7 @@
           (list (make-instance 'ir-assign
                                :address pc-start
                                :lvalue var
-                               :rvalue (make-instance 'ir-new-array :address pc-start :class class :size size))))))))
+                               :rvalue (make-instance 'ir-new-array :address pc-start :component-class (java-class (ir-class-class class)) :size size))))))))
 
 (define-bytecode-transpiler :MULTIANEWARRAY (context code)
   (with-slots (pc class) context
@@ -1656,16 +1656,24 @@
     (let* ((pc-start pc)
            (var (make-stack-variable context pc-start :ARRAY))
            (size (pop (stack context))))
-      (let ((atype (aref code (incf pc))))
+      (let* ((atype (aref code (incf pc)))
+             (class (case atype
+                      (4 (%get-java-class-by-bin-name "boolean"))
+                      (5 (%get-java-class-by-bin-name "char"))
+                      (6 (%get-java-class-by-bin-name "float"))
+                      (7 (%get-java-class-by-bin-name "double"))
+                      (8 (%get-java-class-by-bin-name "byte"))
+                      (9 (%get-java-class-by-bin-name "short"))
+                      (10 (%get-java-class-by-bin-name "int"))
+                      (11 (%get-java-class-by-bin-name "long"))
+                      (t (error "internal error")))))
         (incf pc)
         (push pc (aref (next-insn-list context) pc-start))
-        ;; FIXME: just throw away the type?
-        atype
         (push var (stack context))
         (list (make-instance 'ir-assign
                              :address pc-start
                              :lvalue var
-                             :rvalue (make-instance 'ir-new-array :address pc-start :class nil :atype atype :size size)))))))
+                             :rvalue (make-instance 'ir-new-array :address pc-start :component-class class :atype atype :size size)))))))
 
 (define-bytecode-transpiler :POP (context code)
   (declare (ignore code))
