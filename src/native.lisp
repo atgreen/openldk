@@ -608,8 +608,18 @@ and its implementation."
   (cond
     ((typep obj 'java-array)
      (jaref obj l))
+    ((typep obj '|java/lang/Object|)
+     (let* ((field (gethash l field-offset-table))
+            (key (intern (lstring (slot-value field '|name|)) :openldk)))
+       (slot-value obj key)))
     ((null obj)
-     nil)
+     ;; FIXME: check that the field is STATIC
+     (let* ((field (gethash l field-offset-table))
+            (key (intern (lstring (slot-value field '|name|)) :openldk)))
+       (let* ((clazz (slot-value field '|clazz|))
+              (lname (lstring (slot-value clazz '|name|))))
+         (let ((v (slot-value (eval (intern (format nil "+static-~A+" (substitute #\/ #\. lname)) :openldk)) key)))
+           v))))
     (t (error "internal error: unrecognized object type in getObjectVolatile: ~A" obj))))
 
 (defmethod |putObjectVolatile(Ljava/lang/Object;JLjava/lang/Object;)| ((unsafe |sun/misc/Unsafe|) obj l value)
