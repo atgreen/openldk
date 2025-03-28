@@ -181,7 +181,7 @@
     (cond
       ((char= ch #\I) (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "int") nil nil nil))
       ((char= ch #\J) (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "long") nil nil nil))
-      ((char= ch #\S) (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/String") nil nil nil))
+      ((char= ch #\S) (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "short") nil nil nil))
       ((char= ch #\B) (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "byte") nil nil nil))
       ((char= ch #\C) (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "char") nil nil nil))
       ((char= ch #\D) (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "double") nil nil nil))
@@ -194,12 +194,14 @@
        (progn
          (let* ((obj-end (position #\; bin-type-name))
                 (res (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring (subseq bin-type-name 1 obj-end)) nil nil nil)))
+           (format t "BIN-TYPE-NAME-TO-CLASS ~A = ~A~%" bin-type-name res)
            res)))
 
       ((char= ch #\[)
-       (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
-        (jstring bin-type-name) nil nil nil)))))
-
+       (let ((res (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
+                   (jstring bin-type-name) nil nil nil)))
+         (format t "BIN-TYPE-NAME-TO-CLASS ~A = ~A~%" bin-type-name res)
+         res)))))
 
 (defun %get-return-type (descriptor)
   (let* ((return-type-descriptor
@@ -207,7 +209,8 @@
     (%bin-type-name-to-class return-type-descriptor)))
 
 (defun %get-parameter-types (descriptor)
- "Parse the Java method descriptor and return a list of parameter types as strings."
+  "Parse the Java method descriptor and return a list of parameter types as strings."
+  (format t "GET-PARAMETER-TYPES ~A~%" descriptor)
   (let ((param-list nil)
         (index 0)
         (descriptor (subseq descriptor (position #\( descriptor) (position #\) descriptor))))
@@ -239,8 +242,10 @@
                     (when (and (< index (length descriptor)) (char= (char descriptor index) #\L))
                       (setf index (position #\; descriptor :start index)))
                     (incf index)
+                    (format t "~&    array ~A~%" (substitute #\. #\/ (subseq descriptor start index)))
                     (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
-                           (jstring (format nil "[~A" (substitute #\. #\/ (subseq descriptor start index)))) nil nil nil) param-list)))
+                           (jstring (substitute #\. #\/ (subseq descriptor start index))) nil nil nil)
+                          param-list)))
 
                  (t (incf index)))))
     (coerce (nreverse param-list) 'vector))) ; Reverse the list before returning it, since we used push

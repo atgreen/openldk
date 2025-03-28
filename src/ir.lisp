@@ -111,7 +111,7 @@
   ())
 
 (defclass/std ir-array-literal (ir-literal)
-  ())
+  ((component-class)))
 
 (defclass/std ir-iastore (ir-xastore)
   ())
@@ -470,11 +470,13 @@
   ((class :with)))
 
 (defclass/std ir-new-array (ir-new)
-  ((size)
+  ((component-class)
+   (size)
    (atype)))
 
 (defclass/std ir-multi-new-array (ir-new)
-  ((dimensions)
+  ((component-class)
+   (dimensions)
    (sizes)
    (atype)))
 

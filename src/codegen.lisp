@@ -64,7 +64,8 @@
   (declare (ignore context))
   (make-instance '<expression>
                  :insn insn
-                 :code `(make-java-array :initial-contents (vector ,@(coerce (slot-value insn 'value) 'list)))
+                 :code `(make-java-array :component-class ,(component-class insn)
+                                         :initial-contents (vector ,@(coerce (slot-value insn 'value) 'list)))
                  :expression-type (slot-value insn 'type)))
 
 (defmethod codegen ((insn ir-int-literal) context)
@@ -1090,6 +1091,7 @@
                    :code `(progn
                             ;; Create the array with the determined initial element
                             (make-java-array :size ,(code (codegen (size insn) context))
+                                             :component-class ,(component-class insn)
                                              :initial-element ,init-element))
                    :expression-type :ARRAY)))
 
@@ -1097,6 +1099,7 @@
   (if (null dimensions)
       nil
       (make-java-array :size (car dimensions)
+                       :component-class :multi-array-placeholder
                        :initial-contents
                        (loop repeat (car dimensions)
                              collect (%make-multi-array (cdr dimensions))))))
@@ -1159,12 +1162,9 @@
 (defmethod codegen ((insn ir-static-member) context)
   (declare (ignore context))
   (with-slots (class member-name) insn
-    (let ((expr (make-instance '<expression>
-                               :insn insn
-                               :code (list 'slot-value
-                                           (intern (format nil "+static-~A+" (slot-value (slot-value class 'class) 'name)) :openldk)
-                                           (list 'quote (intern member-name :openldk))))))
-      expr)))
+    (make-instance '<expression>
+                   :insn insn
+                   :code `(slot-value ,(intern (format nil "+static-~A+" (slot-value (slot-value class 'class) 'name)) :openldk) (quote ,(intern member-name :openldk))))))
 
 (define-condition java-lang-throwable (error)
   ((throwable :initarg :throwable :reader throwable)))

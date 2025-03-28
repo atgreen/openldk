@@ -87,7 +87,7 @@
                      fq-name
                      (coerce (java-array-data fq-name) 'string))))
     (assert (stringp fq-name))
-    (assert (not (find #\. fq-name)))
+    (assert (not (find #\/ fq-name)))
     (unless fail-ok
       (assert (gethash fq-name *java-classes-by-fq-name*)))
     (gethash fq-name *java-classes-by-fq-name*)))

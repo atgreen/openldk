@@ -103,3 +103,4 @@ slynk, ghcr.io/ocicl/slynk@sha256:94a927f09f1aadd797c301dcef6c8cd2a9789a29326bbb
 file-attributes, ghcr.io/ocicl/file-attributes@sha256:ab2f00d3ba0a28c441aaa04175ce58d34913ec8bdb64ec7da36454ec8313d24c, file-attributes-20240820-07150b9/file-attributes.asd
 precise-time, ghcr.io/ocicl/precise-time@sha256:ab27ad93d2e78094ee9f95d760adb1efdbe5abd955fab20f3f9a024c3f3cedda, precise-time-20250124-08b7009/precise-time.asd
 cl-murmurhash, ghcr.io/ocicl/cl-murmurhash@sha256:cf21eb7af128c36416f40e842e622bb2f04c09803587333a1cfa489a0c0d1525, cl-murmurhash-20240503-5433f5e/cl-murmurhash.asd
+asdf-package-system, ghcr.io/ocicl/asdf-package-system@sha256:dfacc260786f4e9e2aa13a797a7b326b58e08ea5db778421a9985b9c67362df1, asdf-package-system-20240503-61776f2/asdf-package-system.asd

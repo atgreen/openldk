@@ -90,7 +90,9 @@
         (when (and (< 9 (length name))
                    (string= (subseq name 0 9) "META-INF/"))
           (push (jstring name) meta-entries)))
-      (make-java-array :initial-contents meta-entries))))
+      (make-java-array
+       :component-class (%get-java-class-by-bin-name "java/lang/String")
+       :initial-contents meta-entries))))
 
 (defmethod |<init>(Ljava/io/InputStream;Z)| ((this |java/util/jar/JarInputStream|) is verify)
   (with-slots (|in|) this

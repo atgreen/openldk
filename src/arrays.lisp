@@ -38,23 +38,24 @@
 (in-package :openldk)
 
 (defstruct (java-array (:constructor make-java-array-default))
-  (class nil :type t)
+  (component-class nil :type t)
   (data #() :type vector))
 
-(defun make-java-array (&key class (size 0) initial-element initial-contents)
+(defun make-java-array (&key component-class (size 0) initial-element initial-contents)
+  (assert component-class)
   (cond
     ;; If initial-contents is provided, use it
     (initial-contents
      (let ((contents-length (length initial-contents)))
        (make-java-array-default
-        :class class
+        :component-class component-class
         :data (if (zerop contents-length)
                   (make-array size :initial-element (or initial-element nil))
                   (make-array contents-length :initial-contents initial-contents)))))
     ;; Otherwise use size and initial-element
     (t
      (make-java-array-default
-      :class class
+      :component-class component-class
       :data (make-array size :initial-element (or initial-element nil))))))
 
 (defun jaref (array index)

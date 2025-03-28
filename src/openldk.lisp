@@ -133,14 +133,15 @@
                       (and (typep rvalue 'ir-new-array)
                            (%get-constant-int (size rvalue) context))))
             do (let* ((rvalue (slot-value insn 'rvalue))
+                      (component-class (component-class rvalue))
                       (init-element
                         (case (atype rvalue)
                           ;; Determine the initial element based on the array type
-                          (4 0)        ; Integer
+                          (4 0)        ; Byte
                           (5 #\Null)   ; Character
                           (6 0.0)      ; Single-precision float
                           (7 0.0d0)    ; Double-precision float
-                          ((8 9 10 11) 0) ; Other integer types (assuming default to 0)
+                          ((8 9 10 11) 0) ; Byte/Short/Int/Long (default to 0)
                           (t nil))))   ; Default to nil for unknown types
                  (let* ((pc (1+ i))
                         (values (loop for array-index from 0 below (%get-constant-int (size rvalue) context)
@@ -165,6 +166,7 @@
                    (setf (slot-value insn 'rvalue)
                          (make-instance 'ir-array-literal
                                         :address (address insn)
+                                        :component-class component-class
                                         :value array)))
                  (assert (typep (aref code-array (1- i)) 'ir-nop))))
     (values (coerce code-array 'list) changed)))
@@ -268,6 +270,8 @@
                                                                 'openldk::|java/lang/ArrayIndexOutOfBoundsException|)))))
                                                    (type-error
                                                      (lambda (e)
+                                                       (format t "TYPE-ERROR: ~A~%" e)
+                                                       (sb-debug:print-backtrace)
                                                        (error (openldk::%lisp-condition
                                                                (openldk::%make-throwable
                                                                 'openldk::|java/lang/NullPointerException|))))))
@@ -296,8 +300,8 @@
                                               (if (not (static-p method)) (intern "this" :openldk) ""))))
                                 (when (not (static-p method))
                                   (list (list 'setf '*force-this-to-be-used* (intern "this" :openldk))
-                                        ))
-;;                                        (list 'describe (intern "this" :openldk))))
+;;                                        ))
+                                        (list 'describe (intern "this" :openldk))))
                                 (let ((i 0)
                                       (pc -1))
                                   (list (format nil "bridge=~A" (bridge-p method))
@@ -601,7 +605,9 @@
                           (make-instance 'dir-classpath-entry :dir cpe))))
 
   (let* ((class (classload (substitute #\/ #\. mainclass)))
-         (argv (make-java-array :initial-contents (mapcar #'jstring args))))
+         (argv (make-java-array
+                :component-class (%get-java-class-by-bin-name "java/lang/String")
+                :initial-contents (mapcar #'jstring args))))
 
     (assert (or class (error "Can't load ~A" mainclass)))
     (%clinit class)

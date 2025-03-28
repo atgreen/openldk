@@ -152,9 +152,13 @@ and its implementation."
     ((equal type 'standard-char) "C")
     ((equal type 'bit) "Z")
     ((stringp type) (if (eq 1 (length type)) type (format nil "L~A;" type)))
-    (t (format nil "Ljava/lang/Object;"))))
+    (t
+     (format t "TYPE-TO-DESCRIPTOR what is ~A ?~%" type)
+     (sb-debug:print-backtrace)
+     (format nil "Ljava/lang/Object;"))))
 
 (defun %get-array-ldk-class-from-name (cname)
+  (format t "%get-array-ldk-class-from-name ~A~%" cname)
   (let* ((ldk-class (%get-ldk-class-by-bin-name cname t)))
     (if ldk-class
         ldk-class
@@ -181,10 +185,13 @@ and its implementation."
        (progn
          (when *debug-trace*
            (format t "~&~V@A trace: java/lang/Object.getClass(~A)" (incf *call-nesting-level* 1) "*" object))
-         (cond
-           ((typep object 'java-array) (java-class (%get-array-ldk-class (array-element-type (java-array-data object)))))
-           (t (let ((jc (%get-java-class-by-bin-name (format nil "~A" (type-of object)) t)))
-                (or jc (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring (format nil "~A" (type-of object))) nil nil nil))))))
+         (let ((c (cond
+                    ((typep object 'java-array)
+                     (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring (format nil "[L~A;" (lstring (slot-value (java-array-component-class object) '|name|)))) nil nil nil))
+                     ; (%get-java-class-by-bin-name (format nil "[~A" (name (%get-array-ldk-class (array-element-type (java-array-data object)))))))
+                    (t (let ((jc (%get-java-class-by-bin-name (format nil "~A" (type-of object)) t)))
+                         (or jc (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring (format nil "~A" (type-of object))) nil nil nil)))))))
+           c))
     (when *debug-trace*
       (incf *call-nesting-level* -1))))
 
@@ -199,7 +206,7 @@ and its implementation."
              (let ((lname (substitute #\/ #\. (lstring name))))
                (or (and (eq (char lname 0) #\[)
                         (or (%get-java-class-by-bin-name lname t)
-                            (java-class (%get-array-ldk-class-from-name (subseq lname 1)))))
+                            (java-class (%get-array-ldk-class-from-name lname))))
                    (and (%get-ldk-class-by-bin-name lname t)
                         (java-class (%get-ldk-class-by-bin-name lname)))
                    (let ((klass (classload lname)))
@@ -390,9 +397,14 @@ and its implementation."
         0)))
 
 (defmethod |getComponentType()| ((class |java/lang/Class|))
+  (format t "GCT ~A~%" class)
   (let ((cn (lstring (slot-value class '|name|))))
-    (when (eq #\[ (char cn 0))
-      (%bin-type-name-to-class (subseq cn 1)))))
+    (if (eq #\[ (char cn 0))
+        (let ((ct (%bin-type-name-to-class (subseq cn 1))))
+          (unless ct
+            (error (format nil "ERROR: can't determine component type for ~A" cn)))
+          ct)
+        nil)))
 
 (defmethod |isPrimitive()| ((class |java/lang/Class|))
   (let ((name-string (lstring (slot-value class '|name|))))
@@ -439,17 +451,28 @@ and its implementation."
 
          ;; Get the lclass for THIS
          (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value this '|name|)))))
-           (make-java-array :initial-contents
-                            (coerce (append (loop for method across (methods lclass)
-                                                  when (str:starts-with? "<init>" (name method))
-                                                    collect (let ((c (make-instance '|java/lang/reflect/Constructor|)))
-                                                              (|<init>(Ljava/lang/Class;[Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B)|
-                                                               c this
-                                                               (make-java-array :initial-contents (%get-parameter-types (descriptor method)))
-                                                               (make-java-array :size 0) (access-flags method) 0 (ijstring (descriptor method))
-                                                               (make-java-array :size 0) (make-java-array :size 0))
-                                                              c)))
-                                    'vector))))
+           (make-java-array
+            :component-class (%get-java-class-by-fq-name "java.lang.reflect.Constructor")
+            :initial-contents
+            (coerce (append (loop for method across (methods lclass)
+                                  when (str:starts-with? "<init>" (name method))
+                                    collect (let ((c (make-instance '|java/lang/reflect/Constructor|)))
+                                              (|<init>(Ljava/lang/Class;[Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B)|
+                                               c this
+                                               (make-java-array :component-class (%get-java-class-by-fq-name "java.lang.Class")
+                                                                :initial-contents (%get-parameter-types (descriptor method)))
+                                               (make-java-array
+                                                :component-class :junk-placeholder
+                                                :size 0)
+                                               (access-flags method) 0 (ijstring (descriptor method))
+                                               (make-java-array
+                                                :component-class :junk-placeholder
+                                                :size 0)
+                                               (make-java-array
+                                                :component-class :junk-placeholder
+                                                :size 0))
+                                              c)))
+                    'vector))))
     (when *debug-trace*
       (incf *call-nesting-level* -1))))
 
@@ -458,7 +481,9 @@ and its implementation."
     (let ((java-classes (mapcar (lambda (name)
                                   (%get-java-class-by-bin-name name))
                                 (inner-classes lclass))))
-    (make-java-array :initial-contents (coerce java-classes 'vector)))))
+      (make-java-array
+       :component-class (%get-java-class-by-fq-name "java.lang.Class")
+       :initial-contents (coerce java-classes 'vector)))))
 
 (defmethod |getDeclaredMethods0(Z)| ((this |java/lang/Class|) arg)
   ;; FIXME
@@ -472,6 +497,7 @@ and its implementation."
          ;; Get the lclass for THIS
          (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value this '|name|)))))
            (make-java-array
+            :component-class (%get-java-class-by-fq-name "java.lang.reflect.Method")
             :initial-contents (coerce (append (loop for method across (methods lclass)
                                                     unless (str:starts-with? "<init>" (name method))
                                                       #|
@@ -491,10 +517,19 @@ and its implementation."
                                                       collect (let ((c (make-instance '|java/lang/reflect/Method|)))
                                                                 (|<init>(Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/Class;Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B[B)|
                                                                  c this (ijstring (name method))
-                                                                 (make-java-array :initial-contents (%get-parameter-types (descriptor method)))
+                                                                 (make-java-array :component-class (%get-java-class-by-fq-name "java.lang.Class")
+                                                                                  :initial-contents (%get-parameter-types (descriptor method)))
                                                                  (%get-return-type (descriptor method))
-                                                                 (make-java-array :size 0) (access-flags method) 0 (ijstring (descriptor method))
-                                                                 (make-java-array :size 5) (make-java-array :size 6)
+                                                                 (make-java-array
+                                                                  :component-class :junk-placeholder
+                                                                  :size 0)
+                                                                 (access-flags method) 0 (ijstring (descriptor method))
+                                                                 (make-java-array
+                                                                  :component-class :junk-placeholder
+                                                                  :size 5)
+                                                                 (make-java-array
+                                                                  :component-class :junk-placeholder
+                                                                  :size 6)
                                                                  (gethash "AnnotationDefault" (attributes method)))
                                                                 c)))
                                       'vector))))
@@ -530,7 +565,9 @@ and its implementation."
                                                 f))
                                 (when (super lclass)
                                   (get-fields (%get-ldk-class-by-bin-name (super lclass) t)))))))
-             (make-java-array :initial-contents (coerce (get-fields lclass) 'vector)))))
+             (make-java-array
+              :component-class (%get-java-class-by-fq-name "java.lang.reflect.Field")
+              :initial-contents (coerce (get-fields lclass) 'vector)))))
     (when *debug-trace*
       (incf *call-nesting-level* -1))))
 
@@ -718,6 +755,7 @@ user.variant
   (|run()| action))
 
 (defmethod |isAssignableFrom(Ljava/lang/Class;)| ((this |java/lang/Class|) other)
+  (format t "~&ISASSIGNABLEFROM ~A ~A~%" this other)
   (if (equal this other)
       1
       (let ((this-ldk-class (%get-ldk-class-by-fq-name (lstring (slot-value this '|name|)) t))
@@ -748,7 +786,7 @@ user.variant
        (slot-value param-object key)))))
 
 (defmethod |clone()| ((array java-array))
-  (make-java-array :initial-contents (copy-seq (java-array-data array))))
+  (make-java-array :component-class (java-array-component-class array) :initial-contents (copy-seq (java-array-data array))))
 
 (defun |sun/reflect/Reflection.getClassAccessFlags(Ljava/lang/Class;)| (class)
   (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value class '|name|)))))
@@ -766,6 +804,7 @@ user.variant
   ;; FIXME: do something different for interfaces?
   (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value class '|name|)))))
     (make-java-array
+     :component-class (%get-java-class-by-fq-name "java.lang.Class")
      :initial-contents
      (coerce (mapcar (lambda (iname) (java-class (gethash iname *ldk-classes-by-bin-name*))) (coerce (interfaces lclass) 'list))
              'vector))))
@@ -783,6 +822,7 @@ user.variant
                      (format nil "<init>~A" (lstring (slot-value constructor '|signature|))))
                     :openldk)
                    (cons obj (coerce (java-array-data params) 'list)))))
+      ; (format t "~&NEWINSTANCE0 ~A = ~A~%" constructor obj)
       obj)))
 
 (defmethod |ensureClassInitialized(Ljava/lang/Class;)| ((unsafe |sun/misc/Unsafe|) class)
@@ -1029,7 +1069,7 @@ user.variant
 (defun |java/lang/reflect/Array.newArray(Ljava/lang/Class;I)| (class size)
   ;; FIXME
   (make-java-array :size size
-                   :class class
+                   :component-class class
                    :initial-element nil))
 
 (defmethod |findLoadedClass0(Ljava/lang/String;)| ((loader |java/lang/ClassLoader|) name)
@@ -1241,7 +1281,9 @@ user.variant
   )
 
 (defun |sun/nio/fs/UnixNativeDispatcher.getcwd()| ()
-  (make-java-array :initial-contents (flexi-streams:string-to-octets (namestring (uiop:getcwd)) :external-format :utf-8)))
+  (make-java-array
+   :component-class (%get-ldk-class-by-fq-name "byte")
+   :initial-contents (flexi-streams:string-to-octets (namestring (uiop:getcwd)) :external-format :utf-8)))
 
 (defmethod |getUTF8At0(Ljava/lang/Object;I)| ((this |sun/reflect/ConstantPool|) cp index)
   (let* ((cp (constant-pool (ldk-class cp)))
@@ -1301,8 +1343,12 @@ user.variant
 (defmethod |lookupAllHostAddr(Ljava/lang/String;)| ((inet4 |java/net/Inet4AddressImpl|) hostname)
   (let (;; FIXME (hostent (sb-bsd-sockets:get-host-by-name (lstring hostname)))
         (inet4addr (make-instance '|java/net/Inet4Address|)))
-    (|<init>(Ljava/lang/String;[B)| inet4addr hostname (make-java-array :initial-contents (coerce (mapcar #'parse-integer (uiop:split-string "127.0.0.1" :separator '(#\.))) 'vector)))
-    (make-java-array :initial-contents (coerce (list inet4addr) 'vector))))
+    (|<init>(Ljava/lang/String;[B)| inet4addr hostname (make-java-array
+                                                        :component-class (%get-java-class-by-fq-name "byte")
+                                                        :initial-contents (coerce (mapcar #'parse-integer (uiop:split-string "127.0.0.1" :separator '(#\.))) 'vector)))
+    (make-java-array
+     :component-class (%get-java-class-by-fq-name "byte")
+     :initial-contents (coerce (list inet4addr) 'vector))))
 
 #|
 (sb-bsd-sockets:host-ent-addresses (sb-bsd-sockets:get-host-by-name "fedora"))
