@@ -244,9 +244,46 @@ and its implementation."
           1000000000)
        nanoseconds)))
 
-(defmethod |java/lang/System.arraycopy(Ljava/lang/Object;ILjava/lang/Object;II)| (source_arr sourcePos dest_arr destPos len)
-	(dotimes (i len)
-		(setf (jaref dest_arr (+ destPos i)) (jaref source_arr (+ sourcePos i)))))
+(defmethod |java/lang/System.arraycopy(Ljava/lang/Object;ILjava/lang/Object;II)| (src-array src-pos dest-array dest-pos length)
+  "Copies LENGTH elements from SRC-ARRAY starting at SRC-POS
+   to DEST-ARRAY starting at DEST-POS.
+   Handles overlapping regions correctly even within the same array."
+  (let ((src-array (java-array-data src-array))
+        (dest-array (java-array-data dest-array)))
+
+    (declare (type array src-array dest-array)
+             (type fixnum src-pos dest-pos length))
+
+    ;; Validate arguments
+    (when (< length 0)
+      (error "Length cannot be negative: ~A" length))
+
+    (when (< src-pos 0)
+      (error "Source position cannot be negative: ~A" src-pos))
+
+    (when (< dest-pos 0)
+      (error "Destination position cannot be negative: ~A" dest-pos))
+
+    (when (> (+ src-pos length) (array-total-size src-array))
+      (error "Source array index out of bounds: size=~A, access=~A"
+             (array-total-size src-array) (+ src-pos length -1)))
+
+    (when (> (+ dest-pos length) (array-total-size dest-array))
+      (error "Destination array index out of bounds: size=~A, access=~A"
+             (array-total-size dest-array) (+ dest-pos length -1)))
+
+    ;; Handle the case when src-array and dest-array are the same and regions overlap
+    (if (and (eq src-array dest-array)
+             (> dest-pos src-pos)
+             (< dest-pos (+ src-pos length)))
+        ;; Copy backwards to avoid overwriting source elements before they're copied
+        (loop for i from (1- length) downto 0 do
+          (setf (row-major-aref dest-array (+ dest-pos i))
+                (row-major-aref src-array (+ src-pos i))))
+        ;; Otherwise, copy forwards
+        (loop for i from 0 below length do
+          (setf (row-major-aref dest-array (+ dest-pos i))
+                (row-major-aref src-array (+ src-pos i)))))))
 
 (defmethod |run()| (arg)
   (declare (ignore arg))
