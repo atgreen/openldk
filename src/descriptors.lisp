@@ -239,7 +239,6 @@
                     (when (and (< index (length descriptor)) (char= (char descriptor index) #\L))
                       (setf index (position #\; descriptor :start index)))
                     (incf index)
-                    (format t "~&    array ~A~%" (substitute #\. #\/ (subseq descriptor start index)))
                     (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
                            (jstring (substitute #\. #\/ (subseq descriptor start index))) nil nil nil)
                           param-list)))
