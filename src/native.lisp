@@ -517,7 +517,7 @@ and its implementation."
                                                                                   :initial-contents (%get-parameter-types (descriptor method)))
                                                                  (%get-return-type (descriptor method))
                                                                  (make-java-array
-                                                                  :component-class :junk-placeholder
+                                                                  :component-class (%get-java-class-by-fq-name "java.lang.Class")
                                                                   :size 0)
                                                                  (access-flags method) 0 (ijstring (descriptor method))
                                                                  (make-java-array
