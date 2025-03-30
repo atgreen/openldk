@@ -446,15 +446,21 @@
 
 (defmethod codegen ((insn ir-checkcast) context)
   (declare (ignore context))
-  ;; FIXME: the array test can be done at compiletime
-  (with-slots (class) insn
+  (with-slots (classname) insn
     (make-instance '<expression>
                    :insn insn
-                   :code `(let ((objref ,(code (codegen (objref insn) context))))
-                            (when objref
-                              (unless (or (typep objref 'openldk::java-array)
-                                          (typep objref (quote ,(intern (slot-value insn 'classname) :openldk))))
-                                (error (%lisp-condition (%make-throwable '|java/lang/ClassCastException|))))))
+                   :code (if (eq (char classname 0) #\[)
+                             `(let ((objref ,(code (codegen (objref insn) context))))
+                                (when objref
+                                  (unless (and (typep objref 'java-array)
+                                               (|isAssignableFrom(Ljava/lang/Class;)|
+                                                (java-array-component-class objref)
+                                                (%bin-type-name-to-class ,(subseq classname 1))))
+                                    (error (%lisp-condition (%make-throwable '|java/lang/ClassCastException|))))))
+                             `(let ((objref ,(code (codegen (objref insn) context))))
+                                (when objref
+                                  (unless (typep objref (quote ,(intern (slot-value insn 'classname) :openldk)))
+                                    (error (%lisp-condition (%make-throwable '|java/lang/ClassCastException|)))))))
                    :expression-type nil)))
 
 (defmethod codegen ((insn ir-class) context)
