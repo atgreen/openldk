@@ -40,7 +40,8 @@
 (defvar interned-string-table (make-hash-table :test #'equal))
 
 (defun lstring (string)
-  (coerce (java-array-data (slot-value string '|value|)) 'string))
+  (when string
+    (coerce (java-array-data (slot-value string '|value|)) 'string)))
 
 (defun jstring (value)
   (let ((s (make-instance '|java/lang/String|)))
