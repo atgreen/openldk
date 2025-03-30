@@ -147,3 +147,6 @@
 
 (defclass |java/net/SocketOptions| (|java/lang/Object|)
   ())
+
+(defclass |sun/management/VMManagementImpl| (|java/lang/Object|)
+  ())
