@@ -336,7 +336,10 @@ stream."
           ("RuntimeInvisibleParameterAnnotations"
            (read-buffer attributes-length))
           ("RuntimeVisibleParameterAnnotations"
-           (read-buffer attributes-length))
+           (setf (gethash "RuntimeVisibleParameterAnnotations" attributes)
+                 (make-java-array :component-class
+                                  (or (%get-java-class-by-bin-name "byte" t) :early-byte-placeholder)
+                                  #| (%get-java-class-by-fq-name "byte") |# :initial-contents (read-buffer attributes-length))))
           ("RuntimeVisibleAnnotations"
            (setf (gethash "RuntimeVisibleAnnotations" attributes)
                  (make-java-array :component-class
