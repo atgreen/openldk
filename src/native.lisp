@@ -705,7 +705,8 @@ and its implementation."
   nil)
 
 (defun |java/lang/System.initProperties(Ljava/util/Properties;)| (props)
-  (dolist (prop `(("java.specification.version" . "1.8")
+  (dolist (prop `(("log4j2.disable.jmx" . "true")
+                  ("java.specification.version" . "1.8")
                   ("java.specification.name" . "Java Platform API Specification")
                   ("java.specification.vendor" . "Oracle Corporation")
                   ("java.version" . "8.0")
@@ -1441,9 +1442,19 @@ user.variant
          ;; Allocate a single pool for demonstration
          (mp-mxbean (make-instance '|sun/management/MemoryPoolImpl|)))
 
-    ;; Initialize it with a name like "SBCL Eden Space"
-    (|<init>(Ljava/lang/String;)| mp-mxbean (jstring "SBCL Heap"))
+    (|<init>(Ljava/lang/String;ZJJ)|
+     mp-mxbean (jstring "SBCL Heap")
+     t                               ;; isHeap = true
+     100000000                       ;; usageThreshold -- FIXME
+     100000000)                      ;; gcThreshold -- FIXME
 
     ;; Return it as a Java array of the interface type
     (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/management/MemoryPoolMXBean")
                      :initial-contents (list mp-mxbean))))
+
+(defun |jdk/internal/platform/CgroupMetrics.isUseContainerSupport()| ()
+  0)
+
+(defmethod |getStartupTime()| ((this |sun/management/VMManagementImpl|))
+  ;; FIXME
+  555)
