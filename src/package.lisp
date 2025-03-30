@@ -40,4 +40,4 @@
   (:shadow "PI")
   (:local-nicknames
 	 (#:cli #:whereiseveryone.command-line-args))
-  (:export :main-wrapper))
+  (:export :initialize :main-wrapper))
