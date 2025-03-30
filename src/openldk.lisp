@@ -635,8 +635,7 @@
   |#
       (main-command))
 
-(defun make-image ()
-
+(defun initialize ()
   (ensure-JAVA_HOME)
 
   (let ((classpath
@@ -727,6 +726,8 @@
       ;; (|printStackTrace()| (slot-value c '|objref|))
       (format t "~&~A~%" (slot-value cause '|backtrace|)))))
 
-  (setf *debug-load* nil)
+  (setf *debug-load* nil))
 
+(defun make-image ()
+  (initialize)
   (sb-ext:save-lisp-and-die "openldk" :executable t :save-runtime-options t :toplevel #'main-wrapper))
