@@ -489,21 +489,26 @@ and its implementation."
             :initial-contents
             (coerce (append (loop for method across (methods lclass)
                                   when (str:starts-with? "<init>" (name method))
+                                    #|
+                                    Class<?>[] parameterTypes,
+                                    Class<?>[] checkedExceptions,
+                                    int modifiers,
+                                    int slot,
+                                    String signature,
+                                    byte[] annotations,
+                                    byte[] parameterAnnotations
+                                    |#
                                     collect (let ((c (make-instance '|java/lang/reflect/Constructor|)))
                                               (|<init>(Ljava/lang/Class;[Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B)|
                                                c this
                                                (make-java-array :component-class (%get-java-class-by-fq-name "java.lang.Class")
                                                                 :initial-contents (%get-parameter-types (descriptor method)))
                                                (make-java-array
-                                                :component-class :junk-placeholder
+                                                :component-class (%get-java-class-by-fq-name "java.lang.Class")
                                                 :size 0)
                                                (access-flags method) 0 (ijstring (descriptor method))
-                                               (make-java-array
-                                                :component-class :junk-placeholder
-                                                :size 0)
-                                               (make-java-array
-                                                :component-class :junk-placeholder
-                                                :size 0))
+                                               (gethash "RuntimeVisibleAnnotations" (attributes method))
+                                               (gethash "RuntimeVisibleParameterAnnotations" (attributes method)))
                                               c)))
                     'vector))))
     (when *debug-trace*
@@ -557,12 +562,8 @@ and its implementation."
                                                                   :component-class (%get-java-class-by-fq-name "java.lang.Class")
                                                                   :size 0)
                                                                  (access-flags method) 0 (ijstring (descriptor method))
-                                                                 (make-java-array
-                                                                  :component-class :junk-placeholder
-                                                                  :size 5)
-                                                                 (make-java-array
-                                                                  :component-class :junk-placeholder
-                                                                  :size 6)
+                                                                 (gethash "RuntimeVisibleAnnotations" (attributes method))
+                                                                 (gethash "RuntimeVisibleParameterAnnotations" (attributes method))
                                                                  (gethash "AnnotationDefault" (attributes method)))
                                                                 c)))
                                       'vector))))
@@ -802,14 +803,17 @@ user.variant
 (defmethod |isAssignableFrom(Ljava/lang/Class;)| ((this |java/lang/Class|) other)
   (if (equal this other)
       1
-      (let ((this-ldk-class (%get-ldk-class-by-fq-name (lstring (slot-value this '|name|)) t))
-            (other-ldk-class (%get-ldk-class-by-fq-name (lstring (slot-value other '|name|)) t)))
-        (if (and this-ldk-class
-                 other-ldk-class
-                 (closer-mop:subclassp (find-class (intern (name other-ldk-class) :openldk))
-                                       (find-class (intern (name this-ldk-class) :openldk))))
-            1
-            0))))
+      (if (or (eq (|isPrimitive()| this) 1) (eq (|isPrimitive()| other) 1))
+          0
+          (let ((this-ldk-class (%get-ldk-class-by-fq-name (lstring (slot-value this '|name|)) t))
+                (other-ldk-class (%get-ldk-class-by-fq-name (lstring (slot-value other '|name|)) t)))
+            (if (and this-ldk-class
+
+                     other-ldk-class
+                     (closer-mop:subclassp (find-class (intern (name other-ldk-class) :openldk))
+                                           (find-class (intern (name this-ldk-class) :openldk))))
+                1
+                0)))))
 
 (defun |java/lang/System.setIn0(Ljava/io/InputStream;)| (in-stream)
   (setf (slot-value |+static-java/lang/System+| '|in|) in-stream))
