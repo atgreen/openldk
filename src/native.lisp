@@ -1425,3 +1425,25 @@ user.variant
 ;; FIXME -- am I picking up the wrong static method?  Found with log4j.
 (defun |sun/util/calendar/BaseCalendar.getDayOfWeekDateOnOrBefore(JI)| (l i)
   (|sun/util/calendar/AbstractCalendar.getDayOfWeekDateOnOrBefore(JI)| l i))
+
+(defun |sun/management/MemoryImpl.getMemoryManagers0()| ()
+  (let* ((mm-mxbean-class (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
+                           (jstring "sun/management/MemoryManagerImpl") nil nil nil))
+         (mm-mxbean (make-instance '|sun/management/MemoryManagerImpl|)))
+    (|<init>(Ljava/lang/String;)| mm-mxbean (jstring "sbcl-heap-manager"))
+    (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/management/MemoryManagerMXBean")
+                     :initial-contents (list mm-mxbean))))
+
+(defun |sun/management/MemoryImpl.getMemoryPools0()| ()
+  (let* ((mp-mxbean-class (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
+                           (jstring "sun/management/MemoryPoolImpl") nil nil nil))
+
+         ;; Allocate a single pool for demonstration
+         (mp-mxbean (make-instance '|sun/management/MemoryPoolImpl|)))
+
+    ;; Initialize it with a name like "SBCL Eden Space"
+    (|<init>(Ljava/lang/String;)| mp-mxbean (jstring "SBCL Heap"))
+
+    ;; Return it as a Java array of the interface type
+    (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/management/MemoryPoolMXBean")
+                     :initial-contents (list mp-mxbean))))
