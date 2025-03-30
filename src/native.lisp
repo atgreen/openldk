@@ -498,17 +498,21 @@ and its implementation."
                                     byte[] annotations,
                                     byte[] parameterAnnotations
                                     |#
-                                    collect (let ((c (make-instance '|java/lang/reflect/Constructor|)))
+                                    collect (let ((c (make-instance '|java/lang/reflect/Constructor|))
+                                                  (pt (%get-parameter-types (descriptor method))))
                                               (|<init>(Ljava/lang/Class;[Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B)|
                                                c this
                                                (make-java-array :component-class (%get-java-class-by-fq-name "java.lang.Class")
-                                                                :initial-contents (%get-parameter-types (descriptor method)))
+                                                                :initial-contents pt)
                                                (make-java-array
                                                 :component-class (%get-java-class-by-fq-name "java.lang.Class")
                                                 :size 0)
                                                (access-flags method) 0 (ijstring (descriptor method))
                                                (gethash "RuntimeVisibleAnnotations" (attributes method))
-                                               (gethash "RuntimeVisibleParameterAnnotations" (attributes method)))
+                                               (or (gethash "RuntimeVisibleParameterAnnotations" (attributes method))
+                                                   (make-java-array
+                                                    :component-class (%get-java-class-by-fq-name "byte")
+                                                    :initial-contents (cons (length pt) (make-list (* 2 (length pt)) :initial-element 0)))))
                                               c)))
                     'vector))))
     (when *debug-trace*
