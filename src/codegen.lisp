@@ -877,7 +877,9 @@
 
 (defun %instanceof-array (objref typename)
   ;; FIXME - this isn't following any of the array instanceof rules
-  (typep objref 'java-array))
+  (if (typep objref 'java-array)
+      1
+      0))
 
 (defmethod codegen ((insn ir-instanceof) context)
   (with-slots (class objref) insn
