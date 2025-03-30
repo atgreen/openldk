@@ -140,6 +140,10 @@ bytecode and generates something like the following:
 
 ### Testing
 
+As of Mar 30, 2025, log4j is starting to function correctly.  See
+[cl-log4j](https://github.com/atgreen/cl-log4j) for an example of how
+to wrap a Java library for Common Lisp usage.
+
 As of Feb 22, 2025, OpenLDK can start up `javac`.
 
 ```
