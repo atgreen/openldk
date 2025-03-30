@@ -378,7 +378,7 @@ and its implementation."
         (setf *current-thread* thread)
         (setf (slot-value thread '|priority|) 1)
         (|add(Ljava/lang/Thread;)| thread-group thread)
-        (|<init>(Ljava/lang/ThreadGroup;Ljava/lang/Runnable;Ljava/lang/String;J)| thread thread-group nil (jstring "Init-Thread") 0)
+        (|<init>(Ljava/lang/ThreadGroup;Ljava/lang/Runnable;Ljava/lang/String;J)| thread thread-group nil (jstring "main") 0)
         thread)))
 
 (defmethod |setPriority0(I)| ((thread |java/lang/Thread|) priority)
