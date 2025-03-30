@@ -726,6 +726,8 @@
       ;; (|printStackTrace()| (slot-value c '|objref|))
       (format t "~&~A~%" (slot-value cause '|backtrace|)))))
 
+  (%clinit (%get-ldk-class-by-bin-name "sun/misc/Launcher"))
+
   (setf *debug-load* nil))
 
 (defun make-image ()
