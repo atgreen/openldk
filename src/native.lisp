@@ -849,8 +849,10 @@ user.variant
     (access-flags lclass)))
 
 (defmethod |getModifiers()| ((class |java/lang/Class|))
-  (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value class '|name|)))))
-    (access-flags lclass)))
+  (if (eq (|isArray()| class) 1)
+      0
+      (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value class '|name|)))))
+        (access-flags lclass))))
 
 (defmethod |getSuperclass()| ((class |java/lang/Class|))
   (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value class '|name|)))))
