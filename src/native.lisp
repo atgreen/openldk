@@ -1458,3 +1458,7 @@ user.variant
 (defmethod |getStartupTime()| ((this |sun/management/VMManagementImpl|))
   ;; FIXME
   555)
+
+(defmethod |read0()| ((this |java/io/FileInputStream|))
+  (let ((in-stream (slot-value this '|fd|)))
+    (read-byte in-stream nil nil)))
