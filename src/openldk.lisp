@@ -635,7 +635,10 @@
   |#
       (main-command))
 
-(defun initialize ()
+(defun initialize (&optional (property-alist (list)))
+
+  (assert (typep property-alist 'list))
+
   (ensure-JAVA_HOME)
 
   (let ((classpath
@@ -707,6 +710,11 @@
         (let ((props (make-instance '|java/util/Properties|)))
           (|<init>()| props)
           (setf (slot-value |+static-java/lang/System+| '|props|) props))
+
+        ;; Add user-provided properties...
+        (dolist (prop property-alist)
+          (assert (typep prop 'list))
+          (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring (car prop)) (ijstring (cdr prop))))
 
         (|java/lang/System.initializeSystemClass()|)
 
