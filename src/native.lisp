@@ -128,6 +128,7 @@ and its implementation."
   (%remove-elements-with-substrings
    frames
    '("sun/reflect/NativeMethodAccessorImpl.invoke0"
+     "%RESOLVE-INVOKEDYNAMIC"
      "METHOD invoke"
      "#<java/lang/reflect/Method "
      "#<sun/reflect/NativeMethodAccessorImpl ")))
