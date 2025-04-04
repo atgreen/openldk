@@ -600,7 +600,7 @@ and its implementation."
                                                      (setf cn (subseq cn 1 (1- (length cn)))))
                                                    (or (%get-java-class-by-bin-name cn t)
                                                        (let ((njc (make-instance '|java/lang/Class|)))
-                                                         (setf (slot-value njc '|name|) (ijstring (substitute #\/ #\. cn)))
+                                                         (setf (slot-value njc '|name|) (ijstring (substitute #\. #\/ cn)))
                                                          (setf (gethash (substitute #\. #\/ cn) *java-classes-by-fq-name*) njc)
                                                          (setf (gethash cn *java-classes-by-bin-name*) njc))))
                                                  (access-flags field) nil nil nil)
