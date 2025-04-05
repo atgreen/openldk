@@ -133,6 +133,7 @@ and its implementation."
      "#<java/lang/reflect/Method "
      "#<sun/reflect/NativeMethodAccessorImpl ")))
 
+
 (defun |sun/reflect/Reflection.getCallerClass(I)| (index)
   ;; FIXME: we don't need the whole backtrace
   (let* ((backtrace (%remove-invoke-frames (%remove-adjacent-repeats (sb-debug:list-backtrace)))))
@@ -1491,16 +1492,10 @@ user.variant
 (defun |java/lang/invoke/MethodHandleNatives.resolve(Ljava/lang/invoke/MemberName;Ljava/lang/Class;)| (member-name klass)
   (declare (ignore klass))
   ;; FIXME
-  (print "==========================")
-  (describe (%get-ldk-class-by-fq-name
-             (substitute #\. #\/
-                         (lstring (slot-value (slot-value member-name '|clazz|) '|name|)))))
-  (describe member-name)
   (let ((method (find-method-in-class
                  (%get-ldk-class-by-fq-name (lstring (slot-value (slot-value member-name '|clazz|) '|name|)))
                  (lstring (slot-value member-name '|name|)))))
-    (setf (slot-value member-name '|flags|) (logior (slot-value member-name '|flags|) (slot-value method 'ACCESS-FLAGS)))
-    (describe method))
+    (setf (slot-value member-name '|flags|) (logior (slot-value member-name '|flags|) (slot-value method 'ACCESS-FLAGS))))
   member-name)
 
 (defun |java/lang/invoke/MethodHandleNatives.getMemberVMInfo(Ljava/lang/invoke/MemberName;)| (member-name)
@@ -1510,17 +1505,34 @@ user.variant
                      :initial-contents (list o member-name))))
 
 (defun |java/lang/invoke/MethodHandleNatives.init(Ljava/lang/invoke/MemberName;Ljava/lang/Object;)| (member-name objref)
-  (format t "METHODHANDLENATIVES.INIT  ~A  ~A~%" member-name objref)
   (setf (slot-value member-name '|clazz|) (slot-value objref '|clazz|))
   (setf (slot-value member-name '|name|) (slot-value objref '|name|))
 
   ;; This must be a method
   (assert (typep objref '|java/lang/reflect/Method|))
 
+  #|
+  See https://github.com/openjdk/jdk8u/blob/b10963f0e8db961c6122e092372c5dc56e1a755e/hotspot/src/share/vm/prims/methodHandles.cpp
+  and...
+        static final int
+                MN_IS_METHOD           = 0x00010000, // method (not constructor)
+                MN_IS_CONSTRUCTOR      = 0x00020000, // constructor
+                MN_IS_FIELD            = 0x00040000, // field
+                MN_IS_TYPE             = 0x00080000, // nested type
+                MN_CALLER_SENSITIVE    = 0x00100000, // @CallerSensitive annotation detected
+                MN_REFERENCE_KIND_SHIFT = 24, // refKind
+                MN_REFERENCE_KIND_MASK = 0x0F000000 >> MN_REFERENCE_KIND_SHIFT,
+                // The SEARCH_* bits are not for MN.flags but for the matchFlags argument of MHN.getMembers:
+                MN_SEARCH_SUPER CLASSES = 0x00100000,
+                MN_SEARCH_INTERFACES   = 0x00200000;
+  |#
+
   ;; We only handle static methods right now
   (if (not (eq 0 (logand #x8 (slot-value objref '|modifiers|))))
-      (setf (slot-value member-name '|flags|) (logior (ash 6 24) (slot-value objref '|modifiers|)))
-      (setf (slot-value member-name '|flags|) (slot-value objref '|modifiers|)))
+      (setf (slot-value member-name '|flags|) (logior #x10000 (ash 6 24) (slot-value objref '|modifiers|)))
+      (setf (slot-value member-name '|flags|) (logior #x10000 (slot-value objref '|modifiers|)))))
 
-  (describe member-name)
-  (describe objref))
+(defmethod |defineAnonymousClass(Ljava/lang/Class;[B[Ljava/lang/Object;)|
+    ((unsafe |sun/misc/Unsafe|) class-name data cp-patches)
+  (let ((stream (make-instance 'byte-array-input-stream :array data :start 0 :end (java-array-length data))))
+    (java-class (%classload-from-stream (format nil "~A" (gensym "anonymous-class-")) stream *boot-class-loader*))))
