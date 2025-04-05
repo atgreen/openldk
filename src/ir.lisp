@@ -104,6 +104,12 @@
 (defclass/std ir-null-literal (ir-literal)
   ())
 
+(defclass/std ir-object-literal (ir-literal)
+  ())
+
+(defclass/std ir-method-handle (ir-literal)
+  ((reference-index)))
+
 (defclass/std ir-string-literal (ir-literal)
   ())
 
@@ -427,6 +433,12 @@
 (defclass/std ir-call-virtual-method (ir-call)
   ((method-name)
    (args)))
+
+(defclass/std ir-call-dynamic-method (ir-call)
+  ((method-name)
+   (method-type)
+   (args)
+   (bootstrap-method-name)))
 
 (defclass/std ir-call-static-method (ir-call-virtual-method)
   ((class :with)))
