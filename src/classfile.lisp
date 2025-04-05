@@ -84,12 +84,10 @@
 
 (defmethod emit ((cmt constant-method-type) cp)
   (classload "java/lang/invoke/MethodType")
-  (format t "CMT: ~A~%" (emit (aref cp (descriptor-index cmt)) cp))
   (let ((mt (|java/lang/invoke/MethodType.methodType(Ljava/lang/Class;[Ljava/lang/Class;)|
              (%get-java-class-by-bin-name "java/lang/Void")
              (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Class")
                               :size 0))))
-    (format t "CMT2: ~A~%" mt)
     (make-instance 'ir-object-literal
                    :value mt)))
 
