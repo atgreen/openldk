@@ -1480,6 +1480,7 @@
                         call)))))))))
 
 (define-bytecode-transpiler :INVOKEDYNAMIC (context code)
+  (assert (classload "java/lang/invoke/MethodType"))
   (with-slots (pc class is-clinit-p) context
     (let ((context-class class)
           (pc-start pc))
@@ -1487,20 +1488,66 @@
         (let* ((index (+ (* (aref code (incf pc)) 256)
                          (aref code (incf pc))))
                (call-site-specifier (aref constant-pool index)))
-          (format t "~&CSS: ~A~%" call-site-specifier)
-          (format t "~&CSS: ~A~%" (bootstrap-method-attr-index call-site-specifier))
-          (format t "~&CSS: ~A~%" (aref constant-pool (bootstrap-method-attr-index call-site-specifier)))
+          ;; Skip two reserved bytes
           (incf pc 3)
-          (let ((bootstrap-method (nth (bootstrap-method-attr-index call-site-specifier)
-                                       (gethash "BootstrapMethods" (attributes class)))))
-            (format t "~&CSS: ~A~%" bootstrap-method)
-            (format t "~&CSS: ~A~%" (aref constant-pool (method-ref bootstrap-method)))
-            (dolist (a (method-args bootstrap-method))
-              (format t "~&    arg: ~A~%" (aref constant-pool a)))
-            (format t "~&CSS: ~A~%" (emit (aref constant-pool (reference-index (aref constant-pool (method-ref bootstrap-method)))) constant-pool)))))
-      (list (make-instance 'ir-call-dynamic
-                           :address pc-start
-                           :class (java-class context-class))))))
+
+          ;; Lookup the BootstrapMethod
+          (let* ((bootstrap-method
+                   (nth (bootstrap-method-attr-index call-site-specifier)
+                        (gethash "BootstrapMethods" (attributes class))))
+;                 (j1 (format t "DI1: ~A~%" bootstrap-method))
+                 (bsm-method-handle
+                   (aref constant-pool (method-ref bootstrap-method)))
+                 (j2 (format t "DI2: ~A~%" bsm-method-handle))
+                 (name-and-type
+                   (aref constant-pool
+                         (slot-value call-site-specifier 'name-and-type-index)))
+;                 (j3 (format t "DI3: ~A~%" (emit name-and-type constant-pool)))
+                 (method-name
+                   (slot-value (aref constant-pool
+                                     (slot-value name-and-type 'name-index))
+                               'value))
+;                 (j4 (format t "DI4: ~A~%" method-name))
+                 (method-type
+                   (let ((mt (|java/lang/invoke/MethodType.fromMethodDescriptorString(Ljava/lang/String;Ljava/lang/ClassLoader;)|
+                              (jstring (emit (aref constant-pool (slot-value name-and-type 'type-descriptor-index)) constant-pool))
+                              nil)))
+                     (make-instance 'ir-object-literal
+                                    :value mt)))
+;                 (j6 (format t "DI6: ~A~%" method-type))
+                 (descriptor
+                   (slot-value (aref constant-pool
+                                     (slot-value name-and-type 'type-descriptor-index))
+                               'value))
+;                 (j5 (format t "DI5: ~A~%" descriptor))
+                 (parameter-count (count-parameters descriptor))
+                 (return-type (get-return-type descriptor))
+                 (bootstrap-method-name (emit-static-method-reference (aref constant-pool (reference-index bsm-method-handle)) constant-pool))
+;                 (j6 (format t "DI6: ~A~%" bootstrap-method-name))
+
+                 )
+
+            ;; Emit the dynamic call
+            (list
+             (let* ((call (make-instance 'ir-call-dynamic-method
+                                         :address pc-start
+                                         :bootstrap-method-name bootstrap-method-name
+                                         :method-name method-name
+                                         :return-type return-type
+                                         :args (cons
+                                                method-type
+                                                (mapcar (lambda (arg)
+                                                          (emit (aref constant-pool arg) constant-pool))
+                                                        (method-args bootstrap-method))))))
+;               (format t "INVOKEDYNAMIC args = ~A~%" (mapcar (lambda (a) (value a)) (args call)))
+               (if (eq return-type :VOID)
+                   call
+                   (let ((var (make-stack-variable context pc-start return-type)))
+                     (push var (stack context))
+                     (make-instance 'ir-assign
+                                    :address pc-start
+                                    :lvalue var
+                                    :rvalue call)))))))))))
 
 (define-bytecode-transpiler :IRETURN (context code)
   (declare (ignore code))
