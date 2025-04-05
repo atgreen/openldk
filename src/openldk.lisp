@@ -441,6 +441,7 @@
        (let* ((classname-symbol (intern classname :openldk))
               (class
                 (let ((c (read-classfile classfile-stream)))
+                  (setf (name c) classname)
                   (setf (gethash classname *ldk-classes-by-bin-name*) c)
                   (setf (gethash (substitute #\. #\/ classname) *ldk-classes-by-fq-name*) c)
                   c))
