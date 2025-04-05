@@ -890,6 +890,12 @@ user.variant
     (assert lclass)
     (%clinit lclass)))
 
+(defmethod |shouldBeInitialized(Ljava/lang/Class;)| ((unsafe |sun/misc/Unsafe|) class)
+  (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value class '|name|)))))
+    (if (initialized-p lclass)
+        1
+        0)))
+
 (defvar %unsafe-memory-table (make-hash-table))
 
 (defmethod |allocateMemory(J)| ((unsafe |sun/misc/Unsafe|) size)
@@ -1463,3 +1469,58 @@ user.variant
 (defmethod |read0()| ((this |java/io/FileInputStream|))
   (let ((in-stream (slot-value this '|fd|)))
     (read-byte in-stream nil nil)))
+
+(defun |java/lang/invoke/MethodHandleNatives.registerNatives()| ()
+  ;; FIXME
+  )
+
+(defun |java/lang/invoke/MethodHandleNatives.getConstant(I)| (i)
+  0
+  )
+
+(defun |java/lang/invoke/MethodHandleNatives.getNamedCon(I[Ljava/lang/Object;)| (which objarray)
+  ;; FIXME
+  (assert (eq which 0))
+  0)
+
+(defun find-method-in-class (class name)
+  (find-if (lambda (m)
+             (string= (slot-value m 'name) name))
+           (coerce (slot-value class 'methods) 'list)))
+
+(defun |java/lang/invoke/MethodHandleNatives.resolve(Ljava/lang/invoke/MemberName;Ljava/lang/Class;)| (member-name klass)
+  (declare (ignore klass))
+  ;; FIXME
+  (print "==========================")
+  (describe (%get-ldk-class-by-fq-name
+             (substitute #\. #\/
+                         (lstring (slot-value (slot-value member-name '|clazz|) '|name|)))))
+  (describe member-name)
+  (let ((method (find-method-in-class
+                 (%get-ldk-class-by-fq-name (lstring (slot-value (slot-value member-name '|clazz|) '|name|)))
+                 (lstring (slot-value member-name '|name|)))))
+    (setf (slot-value member-name '|flags|) (logior (slot-value member-name '|flags|) (slot-value method 'ACCESS-FLAGS)))
+    (describe method))
+  member-name)
+
+(defun |java/lang/invoke/MethodHandleNatives.getMemberVMInfo(Ljava/lang/invoke/MemberName;)| (member-name)
+  (let ((o (make-instance '|java/lang/Long|)))
+    (setf (slot-value o '|value|) -31337)
+    (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Object")
+                     :initial-contents (list o member-name))))
+
+(defun |java/lang/invoke/MethodHandleNatives.init(Ljava/lang/invoke/MemberName;Ljava/lang/Object;)| (member-name objref)
+  (format t "METHODHANDLENATIVES.INIT  ~A  ~A~%" member-name objref)
+  (setf (slot-value member-name '|clazz|) (slot-value objref '|clazz|))
+  (setf (slot-value member-name '|name|) (slot-value objref '|name|))
+
+  ;; This must be a method
+  (assert (typep objref '|java/lang/reflect/Method|))
+
+  ;; We only handle static methods right now
+  (if (not (eq 0 (logand #x8 (slot-value objref '|modifiers|))))
+      (setf (slot-value member-name '|flags|) (logior (ash 6 24) (slot-value objref '|modifiers|)))
+      (setf (slot-value member-name '|flags|) (slot-value objref '|modifiers|)))
+
+  (describe member-name)
+  (describe objref))
