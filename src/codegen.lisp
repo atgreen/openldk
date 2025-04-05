@@ -445,11 +445,11 @@
                             (setf (jaref arrayref index) (code-char value))))))
 
 (defmethod codegen ((insn ir-checkcast) context)
-  (declare (ignore context))
   (with-slots (classname) insn
     (make-instance '<expression>
                    :insn insn
-                   :code (if (eq (char classname 0) #\[)
+                   :code (progn
+                           (if (eq (char classname 0) #\[)
                              `(let ((objref ,(code (codegen (objref insn) context))))
                                 (when objref
                                   (unless (and (typep objref 'java-array)
@@ -460,7 +460,7 @@
                              `(let ((objref ,(code (codegen (objref insn) context))))
                                 (when objref
                                   (unless (typep objref (quote ,(intern (slot-value insn 'classname) :openldk)))
-                                    (error (%lisp-condition (%make-throwable '|java/lang/ClassCastException|)))))))
+                                    (error (%lisp-condition (%make-throwable '|java/lang/ClassCastException|))))))))
                    :expression-type nil)))
 
 (defmethod codegen ((insn ir-class) context)
@@ -1033,12 +1033,38 @@
                                         ((eq nargs 0)
                                          (error "internal error"))
                                         ((eq nargs 1)
-                                         ;; FIXME: handle long/double
                                          (list (intern (format nil "~A" method-name) :openldk) (code (codegen (car args) context))))
                                         (t
                                          `(funcall (function ,(intern (format nil "~A" method-name) :openldk))
                                                    ,@(mapcar (lambda (a) (code (codegen a context))) args))))))
                            call))))
+
+(defparameter *invokedynamic-cache* (make-hash-table :test #'equal))
+
+(defun %resolve-invokedynamic (method-name bootstrap-method-name address fname &rest args)
+  (let* ((key (list bootstrap-method-name address))
+         (cached (gethash key *invokedynamic-cache*)))
+    (if cached
+        cached
+        (let ((resolved (apply bootstrap-method-name
+                               (append (list (|java/lang/invoke/MethodHandles.lookup()|) fname)
+                                       args))))
+          (setf (gethash key *invokedynamic-cache*) resolved)
+          resolved))))
+
+(defmethod codegen ((insn ir-call-dynamic-method) context)
+  (with-slots (method-name args bootstrap-method-name address) insn
+    (let ((constant-pool (constant-pool (<context>-class context))))
+      (make-instance '<expression>
+                     :insn insn
+                     :code (let ((fname
+                                   (jstring (emit (aref constant-pool (reference-index (third args))) constant-pool))))
+                             `(let ((args (mapcar (lambda (a) (value a)) ',args))
+                                    (funcall (%resolve-invokedynamic ',(intern method-name :openldk)
+                                                                     ',(intern bootstrap-method-name :openldk)
+                                                                     ,address
+                                                                     ,fname
+                                                                     ,@(mapcar (lambda (a) (code (codegen a context))) args))))))))))
 
 (defmethod codegen ((insn ir-clinit) context)
   (with-slots (class) insn
