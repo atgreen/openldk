@@ -40,6 +40,8 @@
 ;; This will get redefined when we load the .class file
 (defclass/std |java/lang/invoke/MethodHandle| (|java/lang/Object|)
   ())
+(defclass/std |java/lang/invoke/DirectMethodHandle| (|java/lang/invoke/MethodHandle|)
+  ())
 
-(defclass/std |com/moxielogic/OpenLDK/MethodHandle| (|java/lang/invoke/MethodHandle| constant-method-handle)
+(defclass/std |com/moxielogic/OpenLDK/MethodHandle| (|java/lang/invoke/DirectMethodHandle| constant-method-handle)
   ())
