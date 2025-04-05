@@ -64,10 +64,34 @@
 
 (define-print-object/std constant-method-handle)
 
+(defmethod emit ((cmh constant-method-handle) cp)
+  (assert (classload "java/lang/invoke/MethodHandles$Lookup"))
+  (let* ((m (aref cp (reference-index cmh)))
+         (refc (java-class (ir-class-class (emit (aref cp (class-index m)) cp))))
+         (name (jstring (emit-name (aref cp (method-descriptor-index m)) cp)))
+         (type (|java/lang/invoke/MethodType.fromMethodDescriptorString(Ljava/lang/String;Ljava/lang/ClassLoader;)|
+                (jstring (emit-type (aref cp ( method-descriptor-index m)) cp)) nil)))
+    (make-instance 'ir-method-handle
+                   :reference-index (reference-index cmh)
+                   :value `(let ((lookup (|java/lang/invoke/MethodHandles.lookup()|)))
+                             (|findStatic(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)|
+                              lookup ,refc ,name ,type)))))
+
 (defclass/std constant-method-type ()
   ((descriptor-index)))
 
 (define-print-object/std constant-method-type)
+
+(defmethod emit ((cmt constant-method-type) cp)
+  (classload "java/lang/invoke/MethodType")
+  (format t "CMT: ~A~%" (emit (aref cp (descriptor-index cmt)) cp))
+  (let ((mt (|java/lang/invoke/MethodType.methodType(Ljava/lang/Class;[Ljava/lang/Class;)|
+             (%get-java-class-by-bin-name "java/lang/Void")
+             (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Class")
+                              :size 0))))
+    (format t "CMT2: ~A~%" mt)
+    (make-instance 'ir-object-literal
+                   :value mt)))
 
 (defclass/std constant-field-reference ()
   ((class-index
@@ -147,12 +171,13 @@
 (defmethod emit-type ((v constant-name-and-type-descriptor) cp)
   (format nil "~A" (emit (aref cp (slot-value v 'type-descriptor-index)) cp)))
 
-#|
-(defmethod emit ((v constant-method-reference) cp)
+(defun emit-static-method-reference (v cp)
+  (let ((klass (ir-class-class (emit (aref cp (slot-value v 'class-index)) cp))))
+    (classload (name klass)))
   (format nil "~A.~A"
-          (emit (aref cp (slot-value v 'class-index)) cp)
-          (emit (aref cp (slot-value v 'method-descriptor-index)) cp)))
-|#
+          (name (ir-class-class (emit (aref cp (slot-value v 'class-index)) cp)))
+          (lispize-method-name (emit (aref cp (slot-value v 'method-descriptor-index)) cp))))
+
 (defmethod emit ((v constant-method-reference) cp)
   (format nil "~A"
           (emit (aref cp (slot-value v 'method-descriptor-index)) cp)))
@@ -339,17 +364,17 @@ stream."
            (setf (gethash "RuntimeVisibleParameterAnnotations" attributes)
                  (make-java-array :component-class
                                   (or (%get-java-class-by-bin-name "byte" t) :early-byte-placeholder)
-                                  #| (%get-java-class-by-fq-name "byte") |# :initial-contents (read-buffer attributes-length))))
+                                  :initial-contents (read-buffer attributes-length))))
           ("RuntimeVisibleAnnotations"
            (setf (gethash "RuntimeVisibleAnnotations" attributes)
                  (make-java-array :component-class
                                   (or (%get-java-class-by-bin-name "byte" t) :early-byte-placeholder)
-                                  #| (%get-java-class-by-fq-name "byte") |# :initial-contents (read-buffer attributes-length))))
+                                  :initial-contents (read-buffer attributes-length))))
           ("AnnotationDefault"
            (setf (gethash "AnnotationDefault" attributes)
                  (make-java-array :component-class
                                   (or (%get-java-class-by-bin-name "byte" t) :early-byte-placeholder)
-                                  #| (%get-java-class-by-fq-name "byte") |# :initial-contents (read-buffer attributes-length))))
+                                  :initial-contents (read-buffer attributes-length))))
           ("StackMapTable"
            (read-buffer attributes-length))
           ("SourceFile"
@@ -448,7 +473,7 @@ stream."
                                 (15
                                  (let ((reference-kind (read-u1))
                                        (reference-index (read-u2)))
-                                   (make-instance '|com/moxielogic/OpenLDK/MethodHandle|
+                                   (make-instance 'constant-method-handle
                                                   :reference-kind reference-kind
                                                   :reference-index reference-index)))
                                 (16
