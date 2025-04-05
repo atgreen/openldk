@@ -1183,15 +1183,14 @@
 
 (defmethod codegen ((insn ir-member) context)
   (with-slots (objref member-name) insn
-    (let ((expr (make-instance '<expression>
-                               :insn insn
-                               :code (list 'slot-value
-                                           (list 'let (list (list 'objref (code (codegen objref context))))
-                                                 (list 'when (list 'null 'objref) (list 'error
-                                                                                        (format nil "Null Pointer Exception ~A" (slot-value insn 'address))))
-                                                 'objref)
-                                           (list 'quote (intern member-name :openldk))))))
-      expr)))
+    (make-instance '<expression>
+                   :insn insn
+                   :code `(slot-value
+                           (let ((objref ,(code (codegen objref context))))
+                             (when (null objref)
+			       (error (format nil "Null Pointer Exception ~A" ,(slot-value insn 'address))))
+                             objref)
+                           (quote ,(intern member-name :openldk))))))
 
 (defmethod codegen ((insn ir-static-member) context)
   (declare (ignore context))
