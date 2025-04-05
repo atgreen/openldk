@@ -1498,7 +1498,7 @@
 ;                 (j1 (format t "DI1: ~A~%" bootstrap-method))
                  (bsm-method-handle
                    (aref constant-pool (method-ref bootstrap-method)))
-                 (j2 (format t "DI2: ~A~%" bsm-method-handle))
+;                 (j2 (format t "DI2: ~A~%" bsm-method-handle))
                  (name-and-type
                    (aref constant-pool
                          (slot-value call-site-specifier 'name-and-type-index)))
