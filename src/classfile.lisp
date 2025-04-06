@@ -330,7 +330,9 @@ stream."
                                   :exceptions exceptions
                                   :attributes code-attributes))))
           ("ConstantValue"
-           (read-buffer attributes-length))
+           (assert (eq 2 attributes-length))
+           (setf (gethash "ConstantValue" attributes)
+                 (read-u2)))
           ("Deprecated"
            (read-buffer attributes-length))
           ("EnclosingMethod"
