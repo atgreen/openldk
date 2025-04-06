@@ -391,7 +391,10 @@
                            (map 'list
                                 (lambda (f)
                                   (list (intern (slot-value f 'name) :openldk)
-                                        :initform (initform-from-descriptor (slot-value f 'descriptor))
+                                        :initform (let ((cf (gethash "ConstantValue" (slot-value f 'attributes))))
+                                                    (if cf
+                                                        (value (emit (aref (constant-pool class) cf) (constant-pool class)))
+                                                        (initform-from-descriptor (slot-value f 'descriptor))))
                                         :allocation
                                         (if (eq 0 (logand 8 (slot-value f 'access-flags))) :instance :class)))
                                 fields))
