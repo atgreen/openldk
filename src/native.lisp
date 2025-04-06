@@ -427,8 +427,7 @@ and its implementation."
 (defmethod |isArray()| ((class |java/lang/Class|))
   ;; FIXME
   (let ((name-string (lstring (slot-value class '|name|))))
-    (if (or (eq #\[ (char name-string 0))
-            (string= name-string "java.util.Arrays"))
+    (if (eq #\[ (char name-string 0))
         1
         0)))
 
