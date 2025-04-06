@@ -320,7 +320,7 @@ and its implementation."
 
 (defmethod |objectFieldOffset(Ljava/lang/reflect/Field;)| ((unsafe |sun/misc/Unsafe|) field)
   (declare (ignore unsafe))
-  (let ((offset (sxhash field)))
+  (let ((offset (cl-murmurhash:murmurhash (sxhash field))))
     (setf (gethash offset field-offset-table) field)
     offset))
 
