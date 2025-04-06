@@ -442,11 +442,14 @@
 (defun %classload-from-stream (classname classfile-stream class-loader)
   (unwind-protect
        (let* ((classname-symbol (intern classname :openldk))
+              (fq-classname (cl-ppcre:regex-replace-all "\\.anonymous-class"
+                                                        (substitute #\. #\/ classname)
+                                                        "/anonymous-class"))
               (class
                 (let ((c (read-classfile classfile-stream)))
                   (setf (name c) classname)
                   (setf (gethash classname *ldk-classes-by-bin-name*) c)
-                  (setf (gethash (substitute #\. #\/ classname) *ldk-classes-by-fq-name*) c)
+                  (setf (gethash fq-classname *ldk-classes-by-fq-name*) c)
                   c))
               (super (let ((super (slot-value class 'super)))
                        (when super (classload super))))
@@ -455,7 +458,7 @@
                               (mapcar (lambda (i) (classload i)) (coerce interfaces 'list))))))
          (let ((klass (or (%get-java-class-by-bin-name classname t)
                           (let ((klass (make-instance '|java/lang/Class|))
-                                (cname (jstring (substitute #\. #\/ classname))))
+                                (cname (jstring fq-classname)))
                             (with-slots (|name| |classLoader|) klass
                               (setf |name| cname)
                               (setf |classLoader| class-loader))
@@ -463,7 +466,7 @@
            (setf (java-class class) klass)
            (setf (slot-value klass '|classLoader|) class-loader)
            (setf (gethash classname *java-classes-by-bin-name*) klass)
-           (setf (gethash (substitute #\. #\/ classname) *java-classes-by-fq-name*) klass))
+           (setf (gethash fq-classname *java-classes-by-fq-name*) klass))
 
          (let ((code (emit-<class> class)))
            (%eval code))
