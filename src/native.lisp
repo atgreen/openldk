@@ -1538,14 +1538,40 @@ user.variant
                 // The SEARCH_* bits are not for MN.flags but for the matchFlags argument of MHN.getMembers:
                 MN_SEARCH_SUPER CLASSES = 0x00100000,
                 MN_SEARCH_INTERFACES   = 0x00200000;
+
+  Also of note:
+
+            REF_NONE                    = 0,  // null value
+            REF_getField                = 1,
+            REF_getStatic               = 2,
+            REF_putField                = 3,
+            REF_putStatic               = 4,
+            REF_invokeVirtual           = 5,
+            REF_invokeStatic            = 6,
+            REF_invokeSpecial           = 7,
+            REF_newInvokeSpecial        = 8,
+            REF_invokeInterface         = 9,
+            REF_LIMIT                  = 10;
   |#
 
-  ;; We only handle static methods right now
-  (if (not (eq 0 (logand #x8 (slot-value objref '|modifiers|))))
-      (setf (slot-value member-name '|flags|) (logior #x10000 (ash 6 24) (slot-value objref '|modifiers|)))
-      (setf (slot-value member-name '|flags|) (logior #x10000 (slot-value objref '|modifiers|)))))
+  (format t "MHN.INIT ~A ~A~%" member-name objref)
+  (cond
+    ((not (eq 0 (logand #x8 (slot-value objref '|modifiers|))))
+     ;; Static method
+     (setf (slot-value member-name '|flags|) (logior #x10000 (ash 6 24) (slot-value objref '|modifiers|)))
+     (format t "STATIC ~A~%" (slot-value member-name '|flags|)))
+    (t
+     ;; Any other method
+     (setf (slot-value member-name '|flags|) (logior #x10000 (ash 5 24) (slot-value objref '|modifiers|)))
+     (format t "METHOD ~A~%" (slot-value member-name '|flags|)))))
 
 (defmethod |defineAnonymousClass(Ljava/lang/Class;[B[Ljava/lang/Object;)|
-    ((unsafe |sun/misc/Unsafe|) class-name data cp-patches)
+    ((unsafe |sun/misc/Unsafe|) clazz data cp-patches)
   (let ((stream (make-instance 'byte-array-input-stream :array data :start 0 :end (java-array-length data))))
-    (java-class (%classload-from-stream (format nil "~A" (gensym "anonymous-class-")) stream *boot-class-loader*))))
+    (java-class (%classload-from-stream (format nil "~A/~A" (substitute #\/ #\. (lstring (slot-value clazz '|name|))) (gensym "anonymous-class-")) stream *boot-class-loader*))))
+
+(defun |java/lang/invoke/MethodHandleNatives.objectFieldOffset(Ljava/lang/invoke/MemberName;)| (member-name)
+  (declare (ignore unsafe))
+  (let ((offset (cl-murmurhash:murmurhash (sxhash member-name))))
+    (setf (gethash offset field-offset-table) member-name)
+    offset))
