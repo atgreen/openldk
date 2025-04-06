@@ -1494,14 +1494,28 @@ user.variant
   (let ((method (find-method-in-class
                  (%get-ldk-class-by-fq-name (lstring (slot-value (slot-value member-name '|clazz|) '|name|)))
                  (lstring (slot-value member-name '|name|)))))
-    (setf (slot-value member-name '|flags|) (logior (slot-value member-name '|flags|) (slot-value method 'ACCESS-FLAGS))))
+    (when method
+      (setf (slot-value member-name '|flags|) (logior (slot-value member-name '|flags|) (slot-value method 'access-flags)))))
   member-name)
 
 (defun |java/lang/invoke/MethodHandleNatives.getMemberVMInfo(Ljava/lang/invoke/MemberName;)| (member-name)
-  (let ((o (make-instance '|java/lang/Long|)))
-    (setf (slot-value o '|value|) -31337)
+  (let ((o (make-instance '|java/lang/Long|))
+        (vm-target member-name)
+        (flags (slot-value member-name '|flags|)))
+    (cond
+      ((eq (logand flags #x40000) #x40000)
+       ;; Field
+       (setf vm-target (slot-value member-name '|type|))
+       (setf (slot-value o '|value|) 31337))
+      ((and (eq (logand flags #x10000) #x10000)
+            (eq (logand flags (ash 6 24)) (ash 6 24)))
+       ;; Static Method
+       (setf (slot-value o '|value|) -31337))
+      (t
+       ;; Other Method
+       (setf (slot-value o '|value|) 31337)))
     (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Object")
-                     :initial-contents (list o member-name))))
+                     :initial-contents (list o vm-target))))
 
 (defun |java/lang/invoke/MethodHandleNatives.init(Ljava/lang/invoke/MemberName;Ljava/lang/Object;)| (member-name objref)
   (setf (slot-value member-name '|clazz|) (slot-value objref '|clazz|))
