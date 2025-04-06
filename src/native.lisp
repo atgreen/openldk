@@ -320,7 +320,7 @@ and its implementation."
 
 (defmethod |objectFieldOffset(Ljava/lang/reflect/Field;)| ((unsafe |sun/misc/Unsafe|) field)
   (declare (ignore unsafe))
-  (let ((offset (cl-murmurhash:murmurhash (sxhash field))))
+  (let ((offset (unsigned-to-signed-integer (cl-murmurhash:murmurhash (sxhash field)))))
     (setf (gethash offset field-offset-table) field)
     offset))
 
@@ -521,9 +521,12 @@ and its implementation."
 
 (defmethod |getDeclaredClasses0()| ((this |java/lang/Class|))
   (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value this '|name|)))))
-    (let ((java-classes (mapcar (lambda (name)
-                                  (%get-java-class-by-bin-name name))
-                                (inner-classes lclass))))
+    ;; FIXME: need to get all inner classes
+    (let ((java-classes
+            (loop for iclass in (inner-classes lclass)
+                  for c = (%get-java-class-by-bin-name (value iclass) t)
+                  when c
+                    collect c)))
       (make-java-array
        :component-class (%get-java-class-by-fq-name "java.lang.Class")
        :initial-contents (coerce java-classes 'vector)))))
@@ -1572,6 +1575,16 @@ user.variant
 
 (defun |java/lang/invoke/MethodHandleNatives.objectFieldOffset(Ljava/lang/invoke/MemberName;)| (member-name)
   (declare (ignore unsafe))
-  (let ((offset (cl-murmurhash:murmurhash (sxhash member-name))))
+  (let ((offset (unsigned-to-signed-integer (cl-murmurhash:murmurhash (sxhash member-name)))))
     (setf (gethash offset field-offset-table) member-name)
     offset))
+
+(defun |java/lang/invoke/MethodHandleNatives.getMembers(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Class;I[Ljava/lang/invoke/MemberName;)|
+    (c1 s1 s2 i1 c2 i2 mn-array)
+  ;; FIXME
+  (format t "TODO: java/lang/invoke/MethodHandleNatives.getMembers")
+  0)
+
+(defmethod |getProtectionDomain0()| ((clazz |java/lang/Class|))
+  ;; FIXME
+  nil)
