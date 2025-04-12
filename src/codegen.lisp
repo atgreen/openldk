@@ -35,6 +35,7 @@
 ;;; library, but you are not obligated to do so.  If you do not wish
 ;;; to do so, delete this exception statement from your version.
 
+
 (in-package :openldk)
 
 (defclass/std <expression> ()
@@ -44,7 +45,7 @@
 
 (defmethod print-object ((expr <expression>) out)
   (print-unreadable-object (expr out :type t)
-    (format out "{~A : ~A}" (slot-value expr 'insn) (slot-value expr 'code))))
+    (format out "{~A : ~A}" (insn expr) (code expr))))
 
 (defun trace-insn (insn code)
   (if *debug-x*
@@ -1091,16 +1092,14 @@
       expr)))
 
 (defmethod codegen ((insn ir-monitorenter) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (list 'monitor-enter (code (codegen (slot-value insn 'objref) context))))))
-    expr))
+  (make-instance '<expression>
+                 :insn insn
+                 :code `(monitor-enter ,(code (codegen (slot-value insn 'objref) context)))))
 
 (defmethod codegen ((insn ir-monitorexit) context)
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (list 'monitor-exit (code (codegen (slot-value insn 'objref) context))))))
-    expr))
+  (make-instance '<expression>
+                 :insn insn
+                 :code `(monitor-exit ,(code (codegen (slot-value insn 'objref) context)))))
 
 (defmethod codegen ((insn ir-new) context)
   (with-slots (class) insn
@@ -1214,10 +1213,9 @@
 
 (defmethod codegen ((insn ir-return) context)
   (declare (ignore context))
-  (let ((expr (make-instance '<expression>
-                             :insn insn
-                             :code (list 'return))))
-    expr))
+  (make-instance '<expression>
+                 :insn insn
+                 :code `(return)))
 
 (defmethod codegen ((insn ir-return-value) context)
   (make-instance '<expression>
