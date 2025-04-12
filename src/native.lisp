@@ -1580,10 +1580,28 @@ user.variant
     offset))
 
 (defun |java/lang/invoke/MethodHandleNatives.getMembers(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Class;I[Ljava/lang/invoke/MemberName;)|
-    (c1 s1 s2 i1 c2 i2 mn-array)
+    (defc match-name match-sig match-flags caller skip results)
   ;; FIXME
-  (format t "TODO: java/lang/invoke/MethodHandleNatives.getMembers")
-  0)
+  (assert (null match-name))
+  (assert (null match-sig))
+  (assert (eq match-flags 65536)) ;; methods only
+  (assert (null caller))
+  (let ((ldk-class (%get-ldk-class-by-fq-name (lstring (slot-value defc '|name|))))
+        (class-loader (|getClassLoader()| defc)))
+    (loop for mn across (java-array-data results)
+          for index from 0
+          for method = (aref (methods ldk-class) index)
+          do (if (eq skip 0)
+                 (progn
+                   (|init(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Object;I)|
+                    mn defc (jstring (name method))
+                    (|java/lang/invoke/MethodType.fromMethodDescriptorString(Ljava/lang/String;Ljava/lang/ClassLoader;)|
+                     (jstring (descriptor method)) class-loader)
+                    (+ (access-flags method)
+                       (if (static-p method) (ash 6 24) (ash 5 24))
+                       (if (string= "<init>" (name method)) 131072 65536))))
+                 (incf skip -1)))
+    (- (length (coerce (methods ldk-class) 'list)) skip)))
 
 (defmethod |getProtectionDomain0()| ((clazz |java/lang/Class|))
   ;; FIXME
