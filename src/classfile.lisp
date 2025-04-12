@@ -83,13 +83,15 @@
 (define-print-object/std constant-method-type)
 
 (defmethod emit ((cmt constant-method-type) cp)
-  (classload "java/lang/invoke/MethodType")
-  (let ((mt (|java/lang/invoke/MethodType.methodType(Ljava/lang/Class;[Ljava/lang/Class;)|
-             (%get-java-class-by-bin-name "java/lang/Void")
-             (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Class")
-                              :size 0))))
+  (assert (classload "java/lang/invoke/MethodType"))
+  (let ((descriptor (emit (aref cp (descriptor-index cmt)) cp)))
+    (let ((mt (|java/lang/invoke/MethodType.methodType(Ljava/lang/Class;[Ljava/lang/Class;)|
+               (%get-return-type descriptor)
+               (make-java-array
+                :component-class (%get-java-class-by-bin-name "java/lang/Class")
+                :initial-contents (%get-parameter-types descriptor)))))
     (make-instance 'ir-object-literal
-                   :value mt)))
+                   :value mt))))
 
 (defclass/std constant-field-reference ()
   ((class-index
