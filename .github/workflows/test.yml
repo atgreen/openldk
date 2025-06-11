@@ -41,10 +41,19 @@ jobs:
           brew install sbcl ocicl dejagnu
           ocicl setup >> ~/.sbclrc
 
-      - name: Install dependencies
-        run: |
-          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-          ocicl install
+      - uses: actions/cache@v4
+        with:
+          path: |
+            systems
+            ~/.cache/common-lisp
+          key: ${{ runner.os }}-ocicl-${{ hashFiles('systems.csv') }}
+          restore-keys: |
+            ${{ runner.os }}-ocicl-
+
+#      - name: Install dependencies
+#        run: |
+#          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+#          ocicl install
 
       - name: Build
         run: |
