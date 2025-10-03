@@ -61,7 +61,7 @@
 
 (defun lispize-method-name (name)
   "Return a Lisp symbol name derived from Java method NAME."
-  (subseq name 0 (1+ (position #\) name))))
+  (take (1+ (position #\) name)) name))
 
 (defun make-exception-handler-table (context)
   "Build a hashtable of handler PCs keyed by handler start for CONTEXT."
@@ -203,8 +203,19 @@
           (format t "; compiling ~A.~A~%" class-name (lispize-method-name (format nil "~A~A" (name method) (descriptor method))))
           (force-output))
         (if (static-p method)
-            (setf (fn-name *context*) (format nil "~A.~A" (slot-value class 'name) (lispize-method-name (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor)))))
-            (setf (fn-name *context*) (format nil "~A" (lispize-method-name (format nil "~A~A" (slot-value method 'name) (slot-value method 'descriptor))))))
+            (setf (fn-name *context*)
+                  (format nil "~A.~A"
+                          (slot-value class 'name)
+                          (lispize-method-name
+                           (format nil "~A~A"
+                                   (slot-value method 'name)
+                                   (slot-value method 'descriptor)))))
+            (setf (fn-name *context*)
+                  (format nil "~A"
+                          (lispize-method-name
+                           (format nil "~A~A"
+                                   (slot-value method 'name)
+                                   (slot-value method 'descriptor))))))
         (let* ((exception-handler-table (make-exception-handler-table *context*))
                (ir-code-0
                  (setf (ir-code *context*)
@@ -313,29 +324,38 @@
                                       (pc -1))
                                   (list (format nil "bridge=~A" (bridge-p method))
                                         (append (list 'let (if (static-p method)
-                                                               (append (list (list '|condition-cache|))
-                                                                       (remove-duplicates
-                                                                        (loop for var in (stack-variables *context*)
-                                                                              unless (gethash var (single-assignment-table *context*))
-                                                                                collect (list (intern (format nil "s{~{~A~^,~}}" (sort (copy-list (var-numbers var)) #'<)) :openldk)))
-                                                                        :test #'equal)
-                                                                       (loop for ph in parameter-hints
-                                                                             collect (list (intern (format nil "local-~A" i) :openldk) (intern (format nil "arg~A" (incf pc)) :openldk))
-                                                                             do (if (eq ph t) (incf i) (incf i 2)))
-                                                                       (loop for pc from (- parameter-count 2) upto max-locals
-                                                                             collect (list (intern (format nil "local-~A" (1- (incf i))) :openldk))))
-                                                               (append (list (list '|condition-cache|))
-                                                                       (remove-duplicates
-                                                                        (loop for var in (stack-variables *context*)
-                                                                              unless (gethash var (single-assignment-table *context*))
-                                                                                collect (list (intern (format nil "s{~{~A~^,~}}" (sort (copy-list (var-numbers var)) #'<)) :openldk)))
-                                                                        :test #'equal)
-                                                                       (append (list (list (intern "local-0" :openldk) (intern "this" :openldk)))
-                                                                               (loop for ph in parameter-hints
-                                                                                     collect (list (intern (format nil "local-~A" (1+ i)) :openldk) (intern (format nil "arg~A" (1+ (incf pc))) :openldk))
-                                                                                     do (if (eq ph t) (incf i) (incf i 2)))
-                                                                               (loop for x from parameter-count upto (1+ max-locals)
-                                                                                     collect (list (intern (format nil "local-~A" (incf i)) :openldk)))))))
+                                        (append
+                                         (list (list '|condition-cache|))
+                                         (remove-duplicates
+                                          (loop for var in (stack-variables *context*)
+                                                unless (gethash var (single-assignment-table *context*))
+                                                  collect (list (intern (format nil "s{~{~A~^,~}}"
+                                                                                (sort (copy-list (var-numbers var)) #'<))
+                                                                       :openldk)))
+                                          :test #'equal)
+                                         (loop for ph in parameter-hints
+                                               collect (list (intern (format nil "local-~A" i) :openldk)
+                                                             (intern (format nil "arg~A" (incf pc)) :openldk))
+                                               do (if (eq ph t) (incf i) (incf i 2)))
+                                         (loop for pc from (- parameter-count 2) upto max-locals
+                                               collect (list (intern (format nil "local-~A" (1- (incf i))) :openldk))))
+                                        (append
+                                         (list (list '|condition-cache|))
+                                         (remove-duplicates
+                                          (loop for var in (stack-variables *context*)
+                                                unless (gethash var (single-assignment-table *context*))
+                                                  collect (list (intern (format nil "s{~{~A~^,~}}"
+                                                                                (sort (copy-list (var-numbers var)) #'<))
+                                                                       :openldk)))
+                                          :test #'equal)
+                                         (append
+                                          (list (list (intern "local-0" :openldk) (intern "this" :openldk)))
+                                          (loop for ph in parameter-hints
+                                                collect (list (intern (format nil "local-~A" (1+ i)) :openldk)
+                                                              (intern (format nil "arg~A" (1+ (incf pc))) :openldk))
+                                                do (if (eq ph t) (incf i) (incf i 2)))
+                                          (loop for x from parameter-count upto (1+ max-locals)
+                                                collect (list (intern (format nil "local-~A" (incf i)) :openldk)))))))
                                                 array-checked-lisp-code)))))))))
           (%eval definition-code))))))
 
@@ -425,11 +445,24 @@
                                          (progn
                                            (setf (gethash (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) done-method-table) t)
                                            (if (static-p m)
-                                               (list 'defun (intern (format nil "~A.~A" (slot-value class 'name) (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor)))) :openldk)
+                                               (list 'defun
+                                                     (intern (format nil "~A.~A"
+                                                                     (slot-value class 'name)
+                                                                     (lispize-method-name
+                                                                      (format nil "~A~A"
+                                                                              (slot-value m 'name)
+                                                                              (slot-value m 'descriptor))))
+                                                             :openldk)
                                                      (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
                                                            collect (intern (format nil "arg~A" i) :openldk))
                                                      (list '%compile-method (slot-value class 'name) (incf method-index))
-                                                     (cons (intern (format nil "~A.~A" (slot-value class 'name) (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor)))) :openldk)
+                                                     (cons (intern (format nil "~A.~A"
+                                                                           (slot-value class 'name)
+                                                                           (lispize-method-name
+                                                                            (format nil "~A~A"
+                                                                                    (slot-value m 'name)
+                                                                                    (slot-value m 'descriptor))))
+                                                                   :openldk)
                                                            (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
                                                                  collect (intern (format nil "arg~A" i) :openldk))))
                                                (list 'defmethod (intern (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) :openldk)

@@ -46,20 +46,15 @@
 (defun make-java-array (&key component-class (size 0) initial-element initial-contents)
   "Construct a Java-style array wrapper with COMPONENT-CLASS and DATA built from SIZE/INITIAL-ELEMENT or INITIAL-CONTENTS."
   (assert component-class)
-  (cond
-    ;; If initial-contents is provided, use it
-    (initial-contents
-     (let ((contents-length (length initial-contents)))
-       (make-java-array-default
-        :component-class component-class
-        :data (if (zerop contents-length)
-                  (make-array size :initial-element initial-element)
-                  (make-array contents-length :initial-contents initial-contents)))))
-    ;; Otherwise use size and initial-element
-    (t
-     (make-java-array-default
-      :component-class component-class
-      :data (make-array size :initial-element initial-element))))))
+  (if initial-contents
+      (let* ((contents-length (length initial-contents))
+             (data (if (zerop contents-length)
+                       (make-array size :initial-element initial-element)
+                       (make-array contents-length :initial-contents initial-contents))))
+        (make-java-array-default :component-class component-class :data data))
+      (make-java-array-default
+       :component-class component-class
+       :data (make-array size :initial-element initial-element))))
 
 (defun jaref (array index)
   "Java-style array access for ARRAY at INDEX."

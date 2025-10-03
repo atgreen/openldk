@@ -39,7 +39,7 @@
 
 (in-package :openldk)
 
-(defvar interned-string-table (make-hash-table :test #'equal))
+(defvar *interned-string-table* (make-hash-table :test #'equal))
 
 (defun lstring (string)
   "Extract a Lisp string from a |java/lang/String| object."
@@ -66,15 +66,15 @@
 
 (defmethod |intern()| ((str |java/lang/String|))
   (let ((lisp-string (lstring str)))
-    (let ((istr (gethash lisp-string interned-string-table)))
+    (let ((istr (gethash lisp-string *interned-string-table*)))
       (or istr
-          (let ((istr (setf (gethash lisp-string interned-string-table) str)))
+          (let ((istr (setf (gethash lisp-string *interned-string-table*) str)))
             istr)))))
 
 (defmethod |intern()| ((str string))
-  (let ((istr (gethash str interned-string-table)))
+  (let ((istr (gethash str *interned-string-table*)))
     (or istr
-        (let ((istr (setf (gethash str interned-string-table) (jstring str))))
+        (let ((istr (setf (gethash str *interned-string-table*) (jstring str))))
           istr))))
 
 (defmethod |toString()| (str)
