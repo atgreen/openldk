@@ -58,9 +58,10 @@
         (let ((class-name (slot-value (slot-value *context* 'class) 'name))
               (fn-name (slot-value *context* 'fn-name))
               (dt (make-hash-table)))
-          (let ((ffn-name (substitute #\. #\/ (if (alexandria:starts-with-subseq class-name fn-name)
-                                                  fn-name
-                                                  (format nil "~A~A" class-name fn-name)))))
+          (let ((ffn-name (map 'string (lambda (c) (if (char= c #\/) #\. c))
+                               (if (alexandria:starts-with-subseq class-name fn-name)
+                                   fn-name
+                                   (format nil "~A~A" class-name fn-name)))))
             (let* ((namestring (format nil "~A~A~A.dot" *dump-dir*
                                        (uiop:directory-separator-for-host)
                                        ffn-name))

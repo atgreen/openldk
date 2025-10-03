@@ -1,4 +1,5 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
+;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 ;;;
 ;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
@@ -40,6 +41,7 @@
 (defvar *block-counter* 0)
 
 (defun generate-id ()
+  "Generate a unique ID for a basic block by incrementing the global block counter."
   (incf *block-counter*))
 
 (defclass/std <basic-block> ()
@@ -92,7 +94,7 @@ The dominance set is represented as an `fset:set` of <basic-block> objects.")
     (format stream "<<TABLE BORDER=\"0\" CELLBORDER=\"0\" CELLSPACING=\"0\">")
     (format stream "<TR><TD ALIGN=\"LEFT\">\"~A DOMINATORS: ~{~A ~}\"</TD></TR>~%"
             (id bloc)
-            (sort (mapcar (lambda (b) (id b)) (fset:convert 'list (dominators bloc))) #'>))
+            (sort (mapcar #'id (fset:convert 'list (dominators bloc))) #'>))
     (dolist (i (code bloc))
       (format stream "<TR><TD ALIGN=\"LEFT\">\"~A\"</TD></TR>~%" (dot-dump-string i)))
     (format stream "</TABLE>>];~%")
@@ -106,12 +108,14 @@ The dominance set is represented as an `fset:set` of <basic-block> objects.")
 (defvar *instruction-exceptions* (make-hash-table))
 
 (defmacro define-instruction-exceptions (opcode exceptions)
+  "Define which exceptions a particular opcode can throw."
   `(setf (gethash ,opcode *instruction-exceptions*) ,exceptions))
 
 (define-instruction-exceptions :IDIV
     '("java/lang/ArithmeticException" "java/lang/Exception" "java/lang/Throwable"))
 
 (defun opcode-throws-p (opcode throwable)
+  "Check if OPCODE can throw the specified THROWABLE exception."
   (let ((throwables (gethash opcode *instruction-exceptions*)))
     (find throwable throwables :test #'string=)))
 
@@ -155,23 +159,22 @@ The dominance set is represented as an `fset:set` of <basic-block> objects.")
     (setf (exception-table *context*) (merge-exception-entries (exception-table *context*)))
 
     ;; Handle all of the exception table entries
-    (let ((exception-table (exception-table *context*)))
-      (when exception-table
-        (loop for i from 0 below (length exception-table)
-              for ete = (aref exception-table i)
-              do (setf (gethash (start-pc ete) block-starts) t)
-              do (setf (gethash (end-pc ete) block-starts) t)
-              do (setf (gethash (end-pc ete) (try-end-table *context*)) t)
-              do (setf (gethash (handler-pc ete) block-starts) t))))
+    (alexandria:when-let ((exception-table (exception-table *context*)))
+      (loop for i from 0 below (length exception-table)
+            for ete = (aref exception-table i)
+            do (setf (gethash (start-pc ete) block-starts) t)
+            do (setf (gethash (end-pc ete) block-starts) t)
+            do (setf (gethash (end-pc ete) (try-end-table *context*)) t)
+            do (setf (gethash (handler-pc ete) block-starts) t)))
 
     ;; Handle all jump and branch targets
     (let ((code (bytecode *context*))
           (pc 0))
       (loop
         while (< pc (length code))
-        do (let* ((opcode (aref +opcodes+ (aref code pc)))
+        do (let* ((opcode (aref *opcodes* (aref code pc)))
                   (targets (let ((next-insn-list (aref (next-insn-list *context*) pc)))
-                             (if (or (eq opcode :GOTO) (> (length next-insn-list) 1))
+                             (if (or (eql opcode :GOTO) (> (length next-insn-list) 1))
                                  next-insn-list
                                  nil))))
              (incf pc (aref (insn-size *context*) pc))
@@ -257,28 +260,26 @@ The dominance set is represented as an `fset:set` of <basic-block> objects.")
                                      block))))
       (dolist (block blocks)
         ;; Make connections between basic blocks.
-        (let* ((opcode (aref +opcodes+ (aref (bytecode *context*) (floor (address (first (code block)))))))
+        (let* ((opcode (aref *opcodes* (aref (bytecode *context*) (floor (address (first (code block)))))))
                (targets (aref (next-insn-list *context*) (floor (address (first (code block)))))))
           (setf (fall-through-address block) (gethash (fall-through-address block) block-by-address))
           (dolist (target targets)
-            (let ((target-block (gethash (floor target) block-by-address)))
-              (when target-block
-                (fset:adjoinf (successors block) target-block)
-                (fset:adjoinf (predecessors target-block) block)))))
+            (alexandria:when-let ((target-block (gethash (floor target) block-by-address)))
+              (fset:adjoinf (successors block) target-block)
+              (fset:adjoinf (predecessors target-block) block))))
 
         ;; Reverse all of the code back into normal order.
         (setf (code block) (nreverse (code block))))
 
       ;; Let's create try blocks
-      (let ((exception-table (exception-table *context*)))
-        (when exception-table
-          (loop for i from 0 below (length exception-table)
-                for ete = (aref exception-table i)
-                for start-block = (gethash (start-pc ete) block-by-address)
-                for end-block = (gethash (end-pc ete) block-by-address)
-                for handler = (gethash (handler-pc ete) block-by-address)
-                do (push end-block (exception-end-blocks start-block))
-                do (push (cons (catch-type ete) handler) (try-catch start-block)))))
+      (alexandria:when-let ((exception-table (exception-table *context*)))
+        (loop for i from 0 below (length exception-table)
+              for ete = (aref exception-table i)
+              for start-block = (gethash (start-pc ete) block-by-address)
+              for end-block = (gethash (end-pc ete) block-by-address)
+              for handler = (gethash (handler-pc ete) block-by-address)
+              do (push end-block (exception-end-blocks start-block))
+              do (push (cons (catch-type ete) handler) (try-catch start-block))))
 
       ;; Compute dominance sets for all blocks.
       (compute-dominance blocks (gethash 0 block-by-address))
@@ -293,9 +294,8 @@ The dominance set is represented as an `fset:set` of <basic-block> objects.")
                            (loop for successor in (fset:convert 'list (successors block))
                                  for merge-point = (find-merge-point successor dominator seen-table)
                                  when merge-point
-                                   do (progn
-                                        (setf (end-of-handler? block) t)
-                                        (return-from find-merge-point merge-point)))
+                                   do (setf (end-of-handler? block) t)
+                                   and return merge-point)
                            block))
                      nil))
                (remove-goto (block target-address seen-table)
@@ -306,16 +306,17 @@ The dominance set is represented as an `fset:set` of <basic-block> objects.")
                      (when (and (eq (type-of last-insn) 'ir-goto)
                                 (eq target-address (slot-value last-insn 'offset)))
                        ;; Replace the goto with a nop
-                       (setf (code block) (append (butlast (code block)) (list (make-instance 'ir-stop-marker :address (address last-insn)))))))
+                       (setf (code block)
+                             (serapeum:append1 (butlast (code block))
+                                               (make-instance 'ir-stop-marker :address (address last-insn))))))
                    (fset:do-set (b (successors block))
                      (remove-goto b target-address seen-table))
-                   (dolist (b (mapcar (lambda (tc) (rest tc)) (try-catch block)))
+                   (dolist (b (mapcar #'rest (try-catch block)))
                      (remove-goto b target-address seen-table)))))
         (dolist (block blocks)
           (dolist (handler-type-block (try-catch block))
-            (let ((merge-point (find-merge-point (rest handler-type-block) (rest handler-type-block) (make-hash-table :test #'equal))))
-              (when merge-point
-                (setf (try-exit-block block) merge-point))))))
+            (alexandria:when-let ((merge-point (find-merge-point (rest handler-type-block) (rest handler-type-block) (make-hash-table :test #'equal))))
+              (setf (try-exit-block block) merge-point)))))
                 ; (remove-goto block (address merge-point) (make-hash-table))))))
 
 
