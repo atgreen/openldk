@@ -82,7 +82,7 @@
 
 (defmethod |getEntry(Ljava/lang/String;)| ((this |java/util/zip/ZipFile|) name)
   ; (format t "GET-ENTRY: ~A in ~A~%" (lstring name) (slot-value this '|jzfile|))
-  (alexandria:when-let (ze (zip:get-zipfile-entry (lstring name) (slot-value this '|jzfile|)))
+  (when-let (ze (zip:get-zipfile-entry (lstring name) (slot-value this '|jzfile|)))
     (let ((entry (make-instance '|java/util/zip/ZipEntry|)))
       (|<init>(Ljava/lang/String;)| entry name)
       entry)))

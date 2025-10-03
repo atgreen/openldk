@@ -1299,7 +1299,7 @@
               ;; Wrap the block's code in HANDLER-CASE
               ;; Pull any branch target out of the HANDLER-CASE first.
               (setf lisp-code
-                    (if (str:starts-with? "branch-target-" (format nil "~A" (car lisp-code)))
+                    (if (starts-with? "branch-target-" (format nil "~A" (car lisp-code)))
                         (let ((bt (car lisp-code))
                               (lisp-code (cdr lisp-code)))
                           `(,bt

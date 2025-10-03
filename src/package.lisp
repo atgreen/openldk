@@ -45,10 +45,15 @@
   (:import-from #:alexandria
     #:when-let
     #:if-let
-    #:starts-with-subseq)
+    #:starts-with-subseq
+    #:eswitch
+    #:read-file-into-byte-vector)
   (:import-from #:serapeum
     #:take
     #:lastcar
     #:append1)
+  (:import-from #:str
+    #:starts-with?
+    #:ends-with?)
   (:documentation "OpenLDK core package")
   (:export :initialize :main-wrapper))

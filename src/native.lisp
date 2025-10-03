@@ -79,15 +79,15 @@
   (let ((caller-string (format nil "~A" caller-list)))
     (let ((dot-position (position #\. caller-string)))
       (cond
-        ((str:starts-with? "(%clinit-" caller-string)
+        ((starts-with? "(%clinit-" caller-string)
          (subseq caller-string 9 (1- (length caller-string))))
-        ((str:starts-with? "((METHOD" caller-string)
+        ((starts-with? "((METHOD" caller-string)
          (format nil "~A" (type-of (cadr caller-list))))
-        ((str:starts-with? "((LAMBDA " caller-string)
+        ((starts-with? "((LAMBDA " caller-string)
          (substitute #\/ #\. (format nil "~A" (type-of (cadr caller-list)))))
-        ((str:starts-with? "((LABELS CLINIT IN %CLINIT" caller-string)
+        ((starts-with? "((LABELS CLINIT IN %CLINIT" caller-string)
          (name (cadr caller-list)))
-        ((str:starts-with? "(%CLINIT " caller-string)
+        ((starts-with? "(%CLINIT " caller-string)
          (name (cadr caller-list)))
         (dot-position
          (subseq caller-string 1 dot-position))
@@ -499,7 +499,7 @@ and its implementation."
             :component-class (%get-java-class-by-fq-name "java.lang.reflect.Constructor")
             :initial-contents
             (coerce (append (loop for method across (methods lclass)
-                                  when (str:starts-with? "<init>" (name method))
+                                  when (starts-with? "<init>" (name method))
                                     #|
                                     Class<?>[] parameterTypes,
                                     Class<?>[] checkedExceptions,
@@ -555,7 +555,7 @@ and its implementation."
            (make-java-array
             :component-class (%get-java-class-by-fq-name "java.lang.reflect.Method")
             :initial-contents (coerce (append (loop for method across (methods lclass)
-                                                    unless (str:starts-with? "<init>" (name method))
+                                                    unless (starts-with? "<init>" (name method))
                                                       #|
                                                       Method(Class<?> declaringClass,
                                                       String name,
