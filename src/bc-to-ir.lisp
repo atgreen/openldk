@@ -2,6 +2,8 @@
 ;;;
 ;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
+;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+;;;
 ;;; This file is part of OpenLDK.
 
 ;;; OpenLDK is free software; you can redistribute it and/or modify it
@@ -1521,10 +1523,9 @@
 ;                 (j5 (format t "DI5: ~A~%" descriptor))
                  (parameter-count (count-parameters descriptor))
                  (return-type (get-return-type descriptor))
-                 (bootstrap-method-name (emit-static-method-reference (aref constant-pool (reference-index bsm-method-handle)) constant-pool))
+                 (bootstrap-method-name (emit-static-method-reference (aref constant-pool (reference-index bsm-method-handle)) constant-pool)))
 ;                 (j6 (format t "DI6: ~A~%" bootstrap-method-name))
 
-                 )
 
             ;; Emit the dynamic call
             (list
@@ -1588,7 +1589,7 @@
   (with-slots (pc class) context
     (let* ((pc-start pc))
       (with-slots (constant-pool) class
-				(let* ((index (+ (* (aref code (incf pc)) 256)
+            (let* ((index (+ (* (aref code (incf pc)) 256)
                          (aref code (incf pc))))
                (var (make-stack-variable context pc-start (get-stack-jtype (aref constant-pool index)))))
           (incf pc)

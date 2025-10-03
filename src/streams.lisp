@@ -2,6 +2,8 @@
 ;;;
 ;;; Copyright (C) 2025  Anthony Green <green@moxielogic.com>
 ;;;
+;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+;;;
 ;;; This file is part of OpenLDK.
 
 ;;; OpenLDK is free software; you can redistribute it and/or modify it
@@ -45,8 +47,8 @@
 (defmethod trivial-gray-streams:stream-read-byte ((stream <java-input-stream>))
   (unwind-protect
        (progn
-         (when *debug-trace*
-           (format t "~&~V@A trace: <java-input-stream> stream-read-byte(~A)" (incf *call-nesting-level* 1) "*" stream))
+        (when *debug-trace*
+          (format t "~&~V@A trace: <java-input-stream> stream-read-byte(~A)" (incf *call-nesting-level*) "*" stream))
          (let ((java-stream (java-stream stream)))
            (let ((byte (|read()| java-stream)))
              (incf (pos stream))
@@ -58,8 +60,8 @@
 (defmethod trivial-gray-streams:stream-read-sequence ((stream <java-input-stream>) sequence start end &key)
   (unwind-protect
        (progn
-         (when *debug-trace*
-           (format t "~&~V@A trace: <java-input-stream> stream-read-sequence(~A ~A ~A ~A)" (incf *call-nesting-level* 1) "*" stream sequence start end))
+        (when *debug-trace*
+          (format t "~&~V@A trace: <java-input-stream> stream-read-sequence(~A ~A ~A ~A)" (incf *call-nesting-level*) "*" stream sequence start end))
          (let ((java-stream (java-stream stream)))
            (let* ((buffer (make-java-array :component-class (%get-java-class-by-bin-name "byte" t) :size (- end start)))
                   (bytes-read (|readBytes([BII)| java-stream buffer 0 (- end start))))
@@ -92,10 +94,10 @@
       (progn
         (when *debug-trace*
           (format t "~&~V@A trace: <java-input-stream> stream-listen(~A)"
-                  (incf *call-nesting-level* 1) "*" stream))
+                  (incf *call-nesting-level*) "*" stream))
         (let* ((java-stream (java-stream stream))
                (available (|available(Ljava/io/InputStream;)| java-stream)))
-          (if (plusp available) t nil)))
+          (plusp available)))
     (incf *call-nesting-level* -1)))
 
 (defmethod trivial-gray-streams:stream-clear-input ((stream <java-input-stream>))
@@ -104,7 +106,7 @@
       (progn
         (when *debug-trace*
           (format t "~&~V@A trace: <java-input-stream> stream-clear-input(~A)"
-                  (incf *call-nesting-level* 1) "*" stream))
+                  (incf *call-nesting-level*) "*" stream))
         (let* ((java-stream (java-stream stream))
                (available (|available(Ljava/io/InputStream;)| java-stream)))
           (when (plusp available)

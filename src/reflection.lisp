@@ -2,6 +2,8 @@
 ;;;
 ;;; Copyright (C) 2025  Anthony Green <green@moxielogic.com>
 ;;;
+;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+;;;
 ;;; This file is part of OpenLDK.
 
 ;;; OpenLDK is free software; you can redistribute it and/or modify it

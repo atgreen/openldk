@@ -2,6 +2,8 @@
 ;;;
 ;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
+;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+;;;
 ;;; This file is part of OpenLDK.
 
 ;;; OpenLDK is free software; you can redistribute it and/or modify it
@@ -38,15 +40,18 @@
 (in-package :openldk)
 
 (defclass classpath-entry ()
-  ())
+  ()
+  (:documentation "Abstract base for classpath locations."))
 
 (defclass jar-classpath-entry (classpath-entry)
   ((jarfile :initarg :jarfile)
    (zipfile :initform nil)
-   (zipfile-entries)))
+   (zipfile-entries))
+  (:documentation "Classpath entry backed by a JAR/ZIP file."))
 
 (defclass dir-classpath-entry (classpath-entry)
-  ((dir :initarg :dir)))
+  ((dir :initarg :dir))
+  (:documentation "Classpath entry for a directory tree."))
 
 ;; Modify the :around method to establish the restart at the right time
 (defmethod open-java-classfile :around ((cpe jar-classpath-entry) classname)

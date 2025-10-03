@@ -2,6 +2,8 @@
 ;;;
 ;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
+;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+;;;
 ;;; This file is part of OpenLDK.
 
 ;;; OpenLDK is free software; you can redistribute it and/or modify it
@@ -48,26 +50,26 @@
   :serial t
   :components ((:file "src/package")
                (:file "src/global-state")
-							 (:file "src/debug")
-							 (:file "src/monitor")
-							 (:file "src/context")
-							 (:file "src/bootstrap")
+               (:file "src/debug")
+               (:file "src/monitor")
+               (:file "src/context")
+               (:file "src/bootstrap")
                (:file "src/strings")
                (:file "src/arrays")
                (:file "src/math")
-							 (:file "src/opcodes")
-							 (:file "src/ir")
-							 (:file "src/bc-to-ir")
-							 (:file "src/classpath")
-							 (:file "src/basic-block")
-							 (:file "src/codegen")
-							 (:file "src/descriptors")
-							 (:file "src/classfile")
-							 (:file "src/native")
+               (:file "src/opcodes")
+               (:file "src/ir")
+               (:file "src/bc-to-ir")
+               (:file "src/classpath")
+               (:file "src/basic-block")
+               (:file "src/codegen")
+               (:file "src/descriptors")
+               (:file "src/classfile")
+               (:file "src/native")
                (:file "src/streams")
                (:file "src/zip")
                (:file "src/reflection")
-							 (:file "src/openldk"))
+               (:file "src/openldk"))
   :around-compile
   "(lambda (thunk)
      (cl-annot:enable-annot-syntax)

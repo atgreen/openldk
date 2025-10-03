@@ -2,6 +2,8 @@
 ;;;
 ;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
+;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+;;;
 ;;; This file is part of OpenLDK.
 
 ;;; OpenLDK is free software; you can redistribute it and/or modify it
@@ -50,8 +52,8 @@
     :doc "An array of lists of possible next instruction offsets for
  the corresponding instruction in BYTECODE.")
    (exception-table)
-	 (block-address-table
-		:doc "A hashtable mapping addresses to blocks")
+   (block-address-table
+    :doc "A hashtable mapping addresses to blocks")
    (fn-name)
    (blocks)
    (ir-code)

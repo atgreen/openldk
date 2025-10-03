@@ -2,6 +2,8 @@
 ;;;
 ;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
+;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+;;;
 ;;; This file is part of OpenLDK.
 
 ;;; OpenLDK is free software; you can redistribute it and/or modify it
@@ -50,7 +52,7 @@
 
 (defmethod initialize-instance :after ((ir ir-node) &key)
   (assert (or (typep ir '<stack-bottom-marker>)
-              (not (eq (slot-value ir 'address ) +stack-bottom-address+)))))
+              (not (eq (slot-value ir 'address) +stack-bottom-address+)))))
 
 (defmethod dot-dump-string ((node ir-node))
   (format nil "~3A: ~A" (address node) (class-name (class-of node))))
@@ -475,8 +477,8 @@
 
 (defclass/std ir-if (ir-node)
   ((condition :with)
-	 (branch-if-true)
-	 (branch-if-false)))
+   (branch-if-true)
+   (branch-if-false)))
 
 (defclass/std ir-new (ir-node)
   ((class :with)))

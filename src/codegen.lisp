@@ -2,6 +2,8 @@
 ;;;
 ;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
+;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+;;;
 ;;; This file is part of OpenLDK.
 
 ;;; OpenLDK is free software; you can redistribute it and/or modify it
@@ -1186,8 +1188,8 @@
                    :insn insn
                    :code `(slot-value
                            (let ((objref ,(code (codegen objref context))))
-                             (when (null objref)
-			       (error (format nil "Null Pointer Exception ~A" ,(slot-value insn 'address))))
+                           (when (null objref)
+                             (error (format nil "Null Pointer Exception ~A" ,(slot-value insn 'address))))
                              objref)
                            (quote ,(intern member-name :openldk))))))
 
