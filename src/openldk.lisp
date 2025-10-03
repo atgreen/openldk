@@ -437,8 +437,14 @@
                 (with-slots (name super methods) class
                   (remove nil (map 'list
                                    (lambda (m)
-                                     (if (or (native-p m) (null (gethash "Code" (attributes m)))
-                                             (and (bridge-p m) (gethash (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) done-method-table)))
+                                     (if (or (native-p m)
+                                             (null (gethash "Code" (attributes m)))
+                                             (and (bridge-p m)
+                                                  (gethash (lispize-method-name
+                                                            (format nil "~A~A"
+                                                                    (slot-value m 'name)
+                                                                    (slot-value m 'descriptor)))
+                                                           done-method-table)))
                                          (progn
                                            (incf method-index)
                                            nil)
