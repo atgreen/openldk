@@ -678,15 +678,20 @@
 
 (defun main-wrapper ()
   "Main entry point into OpenLDK. Process command line errors here."
-  #|
-  (let ((backtrace nil))
-    (handler-bind ((error
-                     (lambda (condition)
-                       (format *error-output* "~&*** Caught ERROR: ~A~%" condition)
-                       #+sbcl (sb-debug:backtrace)
-  (uiop:quit 1))))
-  |#
-      (main-command))
+  (handler-case
+      (main-command)
+    (cli:wrong-number-of-args (condition)
+      (declare (ignore condition))
+      (format *error-output* "~%Usage: openldk MAINCLASS [ARGS...] [--classpath PATH] [--dump-dir DIR]~%~%")
+      (format *error-output* "MAINCLASS: The class with the static main method to execute~%")
+      (format *error-output* "ARGS:      Java program command line arguments~%")
+      (format *error-output* "~%Options:~%")
+      (format *error-output* "  --classpath PATH  The classpath from which classes are loaded~%")
+      (format *error-output* "  --dump-dir DIR    Directory for internal debug info~%~%")
+      (uiop:quit 1))
+    (error (condition)
+      (format *error-output* "~&Error: ~A~%" condition)
+      (uiop:quit 1))))
 
 (defun initialize (&optional (property-alist (list)))
 
