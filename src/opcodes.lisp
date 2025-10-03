@@ -39,7 +39,7 @@
 
 (in-package :openldk)
 
-(defparameter +opcodes+
+(defvar *opcodes*
   #(:NOP
     :ACONST_NULL
     :ICONST_M1

@@ -222,13 +222,13 @@
                        (let ((code (apply #'append
                                           (loop
                                             while (and (< (pc *context*) length))
-                                            for no-record-stack-state? = (find (aref +opcodes+ (aref code (pc *context*))) '(:GOTO))
+                                            for no-record-stack-state? = (find (aref *opcodes* (aref code (pc *context*))) '(:GOTO))
                                             for result = (progn
                                                            (let ((stk (gethash (pc *context*) (stack-state-table *context*))))
                                                              (when stk
                                                                (setf (stack *context*) (car stk))))
                                                            (when *debug-bytecode*
-                                                             (format t "~&; c[~A] ~A ~@<~A~:@>" (pc *context*) (aref +opcodes+ (aref code (pc *context*))) (stack *context*)))
+                                                             (format t "~&; c[~A] ~A ~@<~A~:@>" (pc *context*) (aref *opcodes* (aref code (pc *context*))) (stack *context*)))
                                                            (let* ((pc-start (pc *context*)))
                                                              (if (gethash pc-start exception-handler-table)
                                                                  (let ((var (make-stack-variable *context* pc-start :REFERENCE)))
@@ -242,10 +242,10 @@
                                                                                      (setf address (+ address 0.1)))
                                                                                    insn)
                                                                                  (funcall
-                                                                                  (aref +opcodes+ (aref code (pc *context*)))
+                                                                                  (aref *opcodes* (aref code (pc *context*)))
                                                                                   *context* code))))
                                                                  (funcall
-                                                                  (aref +opcodes+ (aref code (pc *context*)))
+                                                                  (aref *opcodes* (aref code (pc *context*)))
                                                                   *context* code))))
                                             unless no-record-stack-state?
                                               do (%record-stack-state (pc *context*) *context*)

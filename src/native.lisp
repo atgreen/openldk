@@ -570,29 +570,41 @@ and its implementation."
                                                       byte[] annotationDefault)
                                                       |#
 
-                                                      collect (let ((c (make-instance '|java/lang/reflect/Method|))
-                                                                    (pt (%get-parameter-types (descriptor method))))
-                                                                (|<init>(Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/Class;Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B[B)|
-                                                                 c
-                                                                 this
-                                                                 (ijstring (name method))
-                                                                 (make-java-array
-                                                                  :component-class
-                                                                  (%get-java-class-by-fq-name "java.lang.Class")
-                                                                  :initial-contents pt)
-                                                                 (%get-return-type (descriptor method))
-                                                                 (make-java-array
-                                                                  :component-class
-                                                                  (%get-java-class-by-fq-name "java.lang.Class")
-                                                                  :size 0)
-                                                                 (access-flags method) 0 (ijstring (descriptor method))
-                                                                 (gethash "RuntimeVisibleAnnotations" (attributes method))
-                                                                 (or (gethash "RuntimeVisibleParameterAnnotations" (attributes method))
-                                                                     (make-java-array
-                                                                      :component-class (%get-java-class-by-fq-name "byte")
-                                                                      :initial-contents (cons (length pt) (make-list (* 2 (length pt)) :initial-element 0))))
-                                                                 (gethash "AnnotationDefault" (attributes method)))
-                                                                c)))
+                                                      collect
+                                                      (let ((c (make-instance
+                                                                '|java/lang/reflect/Method|))
+                                                            (pt (%get-parameter-types
+                                                                 (descriptor method))))
+                                                        (let ((init-fn
+                                                               (function
+                                                                |<init>(Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/Class;Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B[B)|))) ; lint:suppress
+                                                          (funcall init-fn c this
+                                                                   (ijstring (name method))
+                                                                   (make-java-array
+                                                                    :component-class
+                                                                    (%get-java-class-by-fq-name "java.lang.Class")
+                                                                    :initial-contents pt)
+                                                                   (%get-return-type (descriptor method))
+                                                                   (make-java-array
+                                                                    :component-class
+                                                                    (%get-java-class-by-fq-name "java.lang.Class")
+                                                                    :size 0)
+                                                                   (access-flags method) 0
+                                                                   (ijstring (descriptor method))
+                                                                   (gethash "RuntimeVisibleAnnotations"
+                                                                            (attributes method))
+                                                                   (or (gethash "RuntimeVisibleParameterAnnotations"
+                                                                                (attributes method))
+                                                                       (make-java-array
+                                                                        :component-class
+                                                                        (%get-java-class-by-fq-name "byte")
+                                                                        :initial-contents
+                                                                        (cons (length pt)
+                                                                              (make-list (* 2 (length pt))
+                                                                                         :initial-element 0))))
+                                                                   (gethash "AnnotationDefault"
+                                                                            (attributes method)))
+                                                          c))))
                                       'vector))))
          (when *debug-trace*
            (incf *call-nesting-level* -1))))
@@ -1408,7 +1420,8 @@ user.variant
                                :end (+ offset length))))
     (java-class (%classload-from-stream (substitute #\/ #\. (lstring class-name)) stream class-loader))))
 
-(defmethod |defineClass(Ljava/lang/String;[BIILjava/lang/ClassLoader;Ljava/security/ProtectionDomain;)| ((unsafe |sun/misc/Unsafe|) class-name data offset length class-loader protection-domain)
+(defmethod |defineClass(Ljava/lang/String;[BIILjava/lang/ClassLoader;Ljava/security/ProtectionDomain;)|
+    ((unsafe |sun/misc/Unsafe|) class-name data offset length class-loader protection-domain)
   (declare (ignore protection-domain))
   ;; FIXME
   (let ((stream (make-instance 'byte-array-input-stream :array data :start offset :end (+ offset length))))
