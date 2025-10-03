@@ -80,7 +80,7 @@
 
 (defun get-return-type (name)
   (let ((return-type-descriptor
-          (subseq name (1+ (position #\)name)))))
+          (subseq name (1+ (position #\) name)))))
     (cdr (assoc (char return-type-descriptor 0)
                 '((#\I . :INTEGER)
                   (#\J . :LONG)
@@ -106,8 +106,8 @@
   (let ((param-hints nil)
         (index 0)
         (descriptor (subseq mdescriptor
-                            (1+ (position #\(mdescriptor))
-                            (position #\)mdescriptor))))
+                            (1+ (position #\( mdescriptor))
+                            (position #\) mdescriptor))))
     (loop
       while (< index (length descriptor))
       do (let ((ch (char descriptor index)))
@@ -150,7 +150,7 @@
 as strings."
   (let ((param-list nil)
         (index 0)
-        (descriptor (subseq descriptor (position #\(descriptor) (position #\)descriptor))))
+        (descriptor (subseq descriptor (position #\( descriptor) (position #\) descriptor))))
     (loop while (< index (length descriptor))
           do (let ((ch (char descriptor index)))
                (cond
@@ -210,7 +210,7 @@ as strings."
 
 (defun %get-return-type (descriptor)
   (let* ((return-type-descriptor
-           (subseq descriptor (1+ (position #\)descriptor)))))
+           (subseq descriptor (1+ (position #\) descriptor)))))
     (%bin-type-name-to-class return-type-descriptor)))
 
 (defun %get-parameter-types (descriptor)
@@ -219,8 +219,8 @@ as strings."
   (let ((param-list nil)
         (index 0)
         (descriptor (subseq descriptor
-                            (position #\(descriptor)
-                            (position #\)descriptor))))
+                            (position #\( descriptor)
+                            (position #\) descriptor))))
     (loop while (< index (length descriptor))
           do (let ((ch (char descriptor index)))
                (cond
