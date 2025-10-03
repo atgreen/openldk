@@ -97,4 +97,4 @@
             (pathname-utils:parse-native-namestring filename))))
     (setf *context* (cadr v))
     (setf *ldk-classes-by-bin-name* (caddr v))
-    (car v)))
+    (first v)))
