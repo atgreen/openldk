@@ -33,13 +33,13 @@ characters into commit strings, but properly formatted text.
    - Identify which files need modification
 
 2. **While making changes:**
-   - Lint after each significant change
-   - Run `make` to verify compilation
+   - Lint after each significant change using `~/git/ocicl/ocicl lint openldk.asd`
+   - Run `make` to verify compilation (requires `JAVA_HOME=/usr/lib/jvm/temurin-8-jdk/jre/`)
    - Test relevant functionality
 
 3. **Before committing:**
-   - Final lint check with `ocicl lint openldk.asd`
-   - Verify `make` succeeds
+   - Final lint check with `~/git/ocicl/ocicl lint openldk.asd`
+   - Verify `JAVA_HOME=/usr/lib/jvm/temurin-8-jdk/jre/ make` succeeds
    - Ensure all tests still pass (if applicable)
    - Write a descriptive multi-line commit message
 
