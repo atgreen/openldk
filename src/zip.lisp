@@ -82,18 +82,17 @@
 
 (defmethod |getEntry(Ljava/lang/String;)| ((this |java/util/zip/ZipFile|) name)
   ; (format t "GET-ENTRY: ~A in ~A~%" (lstring name) (slot-value this '|jzfile|))
-  (let ((ze (zip:get-zipfile-entry (lstring name) (slot-value this '|jzfile|))))
-    (when ze
-      (let ((entry (make-instance '|java/util/zip/ZipEntry|)))
-        (|<init>(Ljava/lang/String;)| entry name)
-        entry))))
+  (alexandria:when-let (ze (zip:get-zipfile-entry (lstring name) (slot-value this '|jzfile|)))
+    (let ((entry (make-instance '|java/util/zip/ZipEntry|)))
+      (|<init>(Ljava/lang/String;)| entry name)
+      entry)))
 
 (defmethod |getMetaInfEntryNames()| ((this |java/util/jar/JarFile|))
   (with-slots (|jzfile|) this
     (let ((meta-entries (list)))
       (zip:do-zipfile-entries (name entry |jzfile|)
         (when (and (< 9 (length name))
-                   (string= (subseq name 0 9) "META-INF/"))
+                   (string= (take 9 name) "META-INF/"))
           (push (jstring name) meta-entries)))
       (make-java-array
        :component-class (%get-java-class-by-bin-name "java/lang/String")

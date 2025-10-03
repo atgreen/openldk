@@ -73,7 +73,7 @@
    (needs-array-bounds-check :std nil)
    (stack :std (list (make-instance '<stack-bottom-marker>)))))
 
-(defparameter +stack-bottom-address+ -99)
+(defconstant +stack-bottom-address+ -99)
 
 (defmethod flag-stack-usage ((context <context>))
   (setf (slot-value context 'uses-stack-p) t))

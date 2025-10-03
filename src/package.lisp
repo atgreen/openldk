@@ -42,5 +42,13 @@
   (:shadow "PI")
   (:local-nicknames
    (#:cli #:whereiseveryone.command-line-args))
+  (:import-from #:alexandria
+    #:when-let
+    #:if-let
+    #:starts-with-subseq)
+  (:import-from #:serapeum
+    #:take
+    #:lastcar
+    #:append1)
   (:documentation "OpenLDK core package")
   (:export :initialize :main-wrapper))

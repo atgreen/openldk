@@ -185,13 +185,19 @@ and its implementation."
   (unwind-protect
        (progn
          (when *debug-trace*
-           (format t "~&~V@A trace: java/lang/Object.getClass(~A)" (incf *call-nesting-level* 1) "*" object))
+           (format t "~&~V@A trace: java/lang/Object.getClass(~A)"
+                   (incf *call-nesting-level* 1) "*" object))
          (let ((c (cond
                     ((typep object 'java-array)
-                     (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring (format nil "[L~A;" (lstring (slot-value (java-array-component-class object) '|name|)))) nil nil nil))
-                     ; (%get-java-class-by-bin-name (format nil "[~A" (name (%get-array-ldk-class (array-element-type (java-array-data object)))))))
-                    (t (let ((jc (%get-java-class-by-bin-name (format nil "~A" (type-of object)) t)))
-                         (or jc (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring (format nil "~A" (type-of object))) nil nil nil)))))))
+                     (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
+                      (jstring (format nil "[L~A;"
+                                       (lstring (slot-value (java-array-component-class object) '|name|))))
+                      nil nil nil))
+                    (t
+                     (let ((jc (%get-java-class-by-bin-name (format nil "~A" (type-of object)) t)))
+                       (or jc
+                           (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
+                            (jstring (format nil "~A" (type-of object))) nil nil nil)))))))
            c))
     (when *debug-trace*
       (incf *call-nesting-level* -1))))
@@ -318,12 +324,12 @@ and its implementation."
 (defmethod |java/util/TimeZone.getSystemGMTOffsetID()| ()
   (jstring (local-time:format-timestring nil (local-time:now) :format '(:gmt-offset))))
 
-(defvar field-offset-table (make-hash-table :test #'equal))
+(defvar *field-offset-table* (make-hash-table :test #'equal))
 
 (defmethod |objectFieldOffset(Ljava/lang/reflect/Field;)| ((unsafe |sun/misc/Unsafe|) field)
   (declare (ignore unsafe))
   (let ((offset (unsigned-to-signed-integer (cl-murmurhash:murmurhash (sxhash field)))))
-    (setf (gethash offset field-offset-table) field)
+    (setf (gethash offset *field-offset-table*) field)
     offset))
 
 (defun |java/lang/Class$Atomic.objectFieldOffset([Ljava/lang/reflect/Field;Ljava/lang/String;)| (field name)
@@ -340,7 +346,7 @@ and its implementation."
 (defmethod |staticFieldOffset(Ljava/lang/reflect/Field;)| ((unsafe |sun/misc/Unsafe|) field)
   (declare (ignore unsafe))
   (let ((offset (sxhash field)))
-    (setf (gethash offset field-offset-table) field)
+    (setf (gethash offset *field-offset-table*) field)
     offset))
 
 (defun %stringize-array (array)
@@ -636,7 +642,7 @@ and its implementation."
            1)
          0))
     (t
-     (let* ((field (gethash field-id field-offset-table))
+    (let* ((field (gethash field-id *field-offset-table*))
             (key (intern (lstring (slot-value field '|name|)) :openldk)))
        (if (equal (slot-value obj key) expected-value)
            (progn
@@ -646,7 +652,7 @@ and its implementation."
 
 (defmethod |compareAndSwapInt(Ljava/lang/Object;JII)| ((unsafe |sun/misc/Unsafe|) obj field-id expected-value new-value)
   ;; FIXME: use atomics package
-  (let* ((field (gethash field-id field-offset-table))
+  (let* ((field (gethash field-id *field-offset-table*))
          (key (intern (lstring (slot-value field '|name|)) :openldk)))
     (if (equal (slot-value obj key) expected-value)
         (progn
@@ -663,12 +669,12 @@ and its implementation."
     ((typep obj 'java-array)
      (jaref obj l))
     ((typep obj '|java/lang/Object|)
-     (let* ((field (gethash l field-offset-table))
+    (let* ((field (gethash l *field-offset-table*))
             (key (intern (lstring (slot-value field '|name|)) :openldk)))
        (slot-value obj key)))
     ((null obj)
      ;; FIXME: check that the field is STATIC
-     (let* ((field (gethash l field-offset-table))
+    (let* ((field (gethash l *field-offset-table*))
             (key (intern (lstring (slot-value field '|name|)) :openldk)))
        (let* ((clazz (slot-value field '|clazz|))
               (lname (lstring (slot-value clazz '|name|))))
@@ -688,7 +694,7 @@ and its implementation."
     ((typep obj 'java-array)
      (jaref obj l))
     ((typep obj '|java/lang/Object|)
-     (let* ((field (gethash l field-offset-table))
+    (let* ((field (gethash l *field-offset-table*))
             (key (intern (lstring (slot-value field '|name|)) :openldk)))
        (slot-value obj key)))
     (t (error "internal error: unrecognized object type in getLongVolatile: ~A" obj))))
@@ -699,7 +705,7 @@ and its implementation."
     ((typep obj 'java-array)
      (setf (jaref obj l) value))
     ((typep obj '|java/lang/Object|)
-     (let* ((field (gethash l field-offset-table))
+    (let* ((field (gethash l *field-offset-table*))
             (key (intern (lstring (slot-value field '|name|)) :openldk)))
        (setf (slot-value obj key) value)))
     (t (error "internal error: unrecognized object type in putObjectVolatile: ~A" obj))))
@@ -848,7 +854,7 @@ user.variant
     ((typep param-object 'java-array)
      (jaref param-object param-long))
     (t
-     (let* ((field (gethash param-long field-offset-table))
+    (let* ((field (gethash param-long *field-offset-table*))
             (key (intern (lstring (slot-value field '|name|)) :openldk)))
        (slot-value param-object key)))))
 
@@ -905,12 +911,12 @@ user.variant
         1
         0)))
 
-(defvar %unsafe-memory-table (make-hash-table))
+(defvar *unsafe-memory-table* (make-hash-table))
 
 (defmethod |allocateMemory(J)| ((unsafe |sun/misc/Unsafe|) size)
   (let* ((mem (sb-alien:make-alien sb-alien:char size))
          (ptr (sb-sys:sap-int (sb-alien:alien-sap mem))))
-    (setf (gethash ptr %unsafe-memory-table) mem)
+    (setf (gethash ptr *unsafe-memory-table*) mem)
     ptr))
 
 (defmethod |putLong(JJ)| ((unsafe |sun/misc/Unsafe|) address value)
@@ -920,7 +926,7 @@ user.variant
   (sb-sys:sap-ref-8 (sb-sys:int-sap address) 0))
 
 (defmethod |freeMemory(J)| ((unsafe |sun/misc/Unsafe|) address)
-  (sb-alien:free-alien (gethash address %unsafe-memory-table)))
+  (sb-alien:free-alien (gethash address *unsafe-memory-table*)))
 
 (defun |java/lang/System.mapLibraryName(Ljava/lang/String;)| (library-name)
   #+LINUX (jstring (format nil "lib~A.so" (lstring library-name)))
@@ -1196,25 +1202,25 @@ user.variant
 
 (defmethod |getInt(Ljava/lang/Object;J)|((unsafe |sun/misc/Unsafe|) objref ptr)
   (declare (ignore unsafe))
-  (let* ((field (gethash ptr field-offset-table))
+  (let* ((field (gethash ptr *field-offset-table*))
          (key (intern (lstring (slot-value field '|name|)) :openldk)))
     (slot-value objref key)))
 
 (defmethod |putLong(Ljava/lang/Object;JJ)|((unsafe |sun/misc/Unsafe|) objref ptr value)
   (declare (ignore unsafe))
-  (let* ((field (gethash ptr field-offset-table))
+  (let* ((field (gethash ptr *field-offset-table*))
          (key (intern (lstring (slot-value field '|name|)) :openldk)))
     (setf (slot-value objref key) value)))
 
 (defmethod |putInt(Ljava/lang/Object;JI)|((unsafe |sun/misc/Unsafe|) objref ptr value)
   (declare (ignore unsafe))
-  (let* ((field (gethash ptr field-offset-table))
+  (let* ((field (gethash ptr *field-offset-table*))
          (key (intern (lstring (slot-value field '|name|)) :openldk)))
     (setf (slot-value objref key) value)))
 
 (defmethod |getLong(Ljava/lang/Object;J)|((unsafe |sun/misc/Unsafe|) objref ptr)
   (declare (ignore unsafe))
-  (let* ((field (gethash ptr field-offset-table))
+  (let* ((field (gethash ptr *field-offset-table*))
          (key (intern (lstring (slot-value field '|name|)) :openldk)))
     (slot-value objref key)))
 
@@ -1344,7 +1350,7 @@ user.variant
 
 (defmethod |copyMemory(Ljava/lang/Object;JLjava/lang/Object;JJ)| ((unsafe |sun/misc/Unsafe|) source source-offset dest dest-offset length)
   (assert (null source))
-  (let ((sap (sb-alien:alien-sap (gethash source-offset %unsafe-memory-table)))
+  (let ((sap (sb-alien:alien-sap (gethash source-offset *unsafe-memory-table*)))
         (bytes-read 0))
     (loop for i below length
           do (let ((offset-sap (sb-sys:sap+ sap i)))
@@ -1584,7 +1590,7 @@ user.variant
 (defun |java/lang/invoke/MethodHandleNatives.objectFieldOffset(Ljava/lang/invoke/MemberName;)| (member-name)
   (declare (ignore unsafe))
   (let ((offset (unsigned-to-signed-integer (cl-murmurhash:murmurhash (sxhash member-name)))))
-    (setf (gethash offset field-offset-table) member-name)
+    (setf (gethash offset *field-offset-table*) member-name)
     offset))
 
 (defun |java/lang/invoke/MethodHandleNatives.getMembers(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Class;I[Ljava/lang/invoke/MemberName;)|

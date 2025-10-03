@@ -75,6 +75,7 @@
      (cl-annot:enable-annot-syntax)
      (funcall thunk))"
   :depends-on (:cl-annot :whereiseveryone.command-line-args :flexi-streams
+               :alexandria :serapeum
                :zip :str :defclass-std :fast-io :bitio :pathname-utils
                :cl-store :trivial-backtrace :fset :bordeaux-threads
                :float-features :local-time :closer-mop :slynk
