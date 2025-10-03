@@ -42,6 +42,7 @@
 (defvar *block-counter* 0)
 
 (defun generate-id ()
+  "Generate a fresh basic block identifier."
   (incf *block-counter*))
 
 (defclass/std <basic-block> ()

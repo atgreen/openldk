@@ -75,6 +75,7 @@
 (defvar *boot-class-loader* nil)
 
 (defun %get-java-class-by-bin-name (bin-name &optional fail-ok)
+  "Look up a Java class by its binary name BIN-NAME. When FAIL-OK is non-NIL, return NIL instead of asserting."
   (let ((bin-name (if (stringp bin-name)
                       bin-name
                       (coerce (java-array-data bin-name) 'string))))
@@ -85,6 +86,7 @@
     (gethash bin-name *java-classes-by-bin-name*)))
 
 (defun %get-java-class-by-fq-name (fq-name &optional fail-ok)
+  "Look up a Java class by its fully-qualified Java name FQ-NAME. When FAIL-OK is non-NIL, return NIL instead of asserting."
   (let ((fq-name (if (stringp fq-name)
                      fq-name
                      (coerce (java-array-data fq-name) 'string))))
@@ -95,6 +97,7 @@
     (gethash fq-name *java-classes-by-fq-name*)))
 
 (defun %get-ldk-class-by-bin-name (bin-name &optional fail-ok)
+  "Look up an LDK class by its binary name BIN-NAME. When FAIL-OK is non-NIL, return NIL instead of asserting."
   (let ((bin-name (if (stringp bin-name)
                       bin-name
                       (coerce (java-array-data bin-name) 'string))))
@@ -105,6 +108,7 @@
     (gethash bin-name *ldk-classes-by-bin-name*)))
 
 (defun %get-ldk-class-by-fq-name (fq-name &optional fail-ok)
+  "Look up an LDK class by its fully-qualified Java name FQ-NAME. When FAIL-OK is non-NIL, return NIL instead of asserting."
   (let ((fq-name (if (stringp fq-name)
                      fq-name
                      (coerce (java-array-data fq-name) 'string))))

@@ -151,7 +151,7 @@
 
 (defmethod emit ((v constant-class-reference) cp)
   (let ((classname (emit (aref cp (slot-value v 'index)) cp)))
-    (if (eq (aref classname 0) #\[)
+    (if (char= (aref classname 0) #\[)
         (make-instance 'ir-class
                        :class (%get-array-ldk-class-from-name classname))
         (make-instance 'ir-class :class (classload classname)))))
@@ -174,6 +174,7 @@
   (format nil "~A" (emit (aref cp (slot-value v 'type-descriptor-index)) cp)))
 
 (defun emit-static-method-reference (v cp)
+  "Return the string name of a static method reference V using constant pool CP."
   (let ((klass (ir-class-class (emit (aref cp (slot-value v 'class-index)) cp))))
     (classload (name klass)))
   (format nil "~A.~A"
@@ -231,19 +232,24 @@
 (define-print-object/std <method>)
 
 (defun interface-p (class)
-  (not (eq 0 (logand #x200 (slot-value class 'access-flags)))))
+  "True if CLASS has the interface access flag."
+  (not (zerop (logand #x200 (slot-value class 'access-flags)))))
 
 (defun native-p (method)
-  (not (eq 0 (logand #x100 (slot-value method 'access-flags)))))
+  "True if METHOD has the native access flag."
+  (not (zerop (logand #x100 (slot-value method 'access-flags)))))
 
 (defun static-p (method)
-  (not (eq 0 (logand #x8 (slot-value method 'access-flags)))))
+  "True if METHOD has the static access flag."
+  (not (zerop (logand #x8 (slot-value method 'access-flags)))))
 
 (defun abstract-p (method)
-  (not (eq 0 (logand #x400 (slot-value method 'access-flags)))))
+  "True if METHOD has the abstract access flag."
+  (not (zerop (logand #x400 (slot-value method 'access-flags)))))
 
 (defun bridge-p (method)
-  (not (eq 0 (logand #x40 (access-flags method)))))
+  "True if METHOD has the bridge access flag."
+  (not (zerop (logand #x40 (access-flags method)))))
 
 (defmethod print-object ((method <method>) out)
   (print-unreadable-object (method out :type t)
@@ -257,15 +263,19 @@
    (attributes)))
 
 (defmacro read-u2 ()
+  "Read an unsigned 2-byte big-endian integer from BITIO."
   `(bitio:read-integer bitio :num-bytes 2 :byte-endian :be :unsignedp t))
 
 (defmacro read-u4 ()
+  "Read an unsigned 4-byte big-endian integer from BITIO."
   `(bitio:read-integer bitio :num-bytes 4 :byte-endian :be :unsignedp t))
 
 (defmacro read-u8 ()
+  "Read an unsigned 8-byte big-endian integer from BITIO."
   `(bitio:read-integer bitio :num-bytes 8 :byte-endian :be :unsignedp t))
 
 (defmacro read-buffer (size)
+  "Read SIZE bytes into a (unsigned-byte 8) array from BITIO."
   `(let ((buf (make-array ,size :element-type '(unsigned-byte 8))))
      (bitio:read-bytes bitio buf :bit-endian :be :bits-per-byte 8)
      buf))
@@ -282,6 +292,7 @@
       (format out "(~A:~A]->~A" start-pc end-pc handler-pc))))
 
 (defun read-exceptions (bitio cp count)
+  "Read COUNT exception table entries from BITIO using constant pool CP."
   (if (> count 0)
       (let ((exceptions (make-array count)))
         (dotimes (i count)
@@ -291,7 +302,7 @@
                                :end-pc (read-u2)
                                :handler-pc (read-u2)
                                :catch-type (let ((i (read-u2)))
-                                             (if (eq i 0)
+                                             (if (zerop i)
                                                  nil
                                                  (emit-name (aref cp i) cp))))))
         exceptions)
@@ -334,7 +345,7 @@ stream."
                                   :exceptions exceptions
                                   :attributes code-attributes))))
           ("ConstantValue"
-           (assert (eq 2 attributes-length))
+           (assert (= 2 attributes-length))
            (setf (gethash "ConstantValue" attributes)
                  (read-u2)))
           ("Deprecated"
@@ -404,6 +415,7 @@ stream."
     result))
 
 (defun read-classfile (fin)
+  "Parse a classfile from binary input stream FIN and return a <class>."
   (let ((class (make-instance '<class>)))
     (with-slots (methods fields super interfaces) class
       (fast-io:with-fast-input (fin-fast nil fin)
@@ -499,13 +511,13 @@ stream."
                     (setf interfaces (make-array interface-count)))
                   (setf (slot-value class 'name) (slot-value (aref constant-pool (slot-value (aref constant-pool this-class) 'index)) 'value))
                   (setf (slot-value class 'access-flags) access-flags)
-                  (if (> super-class 0)
-                      (setf super
-                            (let ((super (slot-value (aref constant-pool (slot-value (aref constant-pool super-class) 'index)) 'value)))
-                              (if (and (not (eq 0 (logand #x200 access-flags)))
-                                       (string= super "java/lang/Object"))
-                                  nil
-                                  super))))
+                  (when (> super-class 0)
+                    (setf super
+                          (let ((super (slot-value (aref constant-pool (slot-value (aref constant-pool super-class) 'index)) 'value)))
+                            (if (and (not (zerop (logand #x200 access-flags)))
+                                     (string= super "java/lang/Object"))
+                                nil
+                                super))))
 
                   (dotimes (i interface-count)
                     (let ((interface (read-u2)))

@@ -44,6 +44,7 @@
   (data #() :type vector))
 
 (defun make-java-array (&key component-class (size 0) initial-element initial-contents)
+  "Construct a Java-style array wrapper with COMPONENT-CLASS and DATA built from SIZE/INITIAL-ELEMENT or INITIAL-CONTENTS."
   (assert component-class)
   (cond
     ;; If initial-contents is provided, use it
@@ -52,24 +53,28 @@
        (make-java-array-default
         :component-class component-class
         :data (if (zerop contents-length)
-                  (make-array size :initial-element (or initial-element nil))
+                  (make-array size :initial-element initial-element)
                   (make-array contents-length :initial-contents initial-contents)))))
     ;; Otherwise use size and initial-element
     (t
      (make-java-array-default
       :component-class component-class
-      :data (make-array size :initial-element (or initial-element nil))))))
+      :data (make-array size :initial-element initial-element))))))
 
 (defun jaref (array index)
+  "Java-style array access for ARRAY at INDEX."
   (aref (java-array-data array) index))
 
 (defun (setf jaref) (new-value array index)
+  "Setter for JAVA array element at INDEX."
   (setf (aref (java-array-data array) index) new-value))
 
 (defun java-array-length (array)
+  "Return the logical length of the Java-style ARRAY."
   (length (java-array-data array)))
 
 (defun |java/lang/reflect/Array.getLength(Ljava/lang/Object;)| (obj)
+  "java.lang.reflect.Array.getLength implementation."
   (length (java-array-data obj)))
 
 (defmethod |length()| ((array java-array))
