@@ -2,6 +2,8 @@
 ;;;
 ;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
+;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+;;;
 ;;; This file is part of OpenLDK.
 
 ;;; OpenLDK is free software; you can redistribute it and/or modify it
@@ -45,9 +47,11 @@
   t)
 
 (defun dump-classes ()
-	(dump-hashtable *ldk-classes-by-bin-name*))
+  "Dump known loaded classes to standard output."
+  (dump-hashtable *ldk-classes-by-bin-name*))
 
 (defun dump-method-dot (blocks)
+  "Write a Graphviz .dot file describing BLOCKS when *DUMP-DIR* is set."
   (handler-case
       (when *dump-dir*
         (let ((class-name (slot-value (slot-value *context* 'class) 'name))
@@ -67,11 +71,10 @@
                 (dolist (b blocks)
                   (dump-dot b dt stream))
                 (format stream "}~%"))))))
-    (error (e)
-      )))
+    (error (e) (declare (ignore e)) nil)))
 
 (defun dump (id obj)
-  "Dump OBJ, *CONTEXT* and *LDK-CLASSES-BY-BIN-NAME* to disk in *DUMP-DIR*/[current-class]/ID."
+  "Dump OBJ, *CONTEXT* and *LDK-CLASSES-BY-BIN-NAME* under *DUMP-DIR*/[current-class]/ID."
   (when *dump-dir*
     (let ((class-name (slot-value (slot-value *context* 'class) 'name))
           (fn-name (slot-value *context* 'fn-name)))

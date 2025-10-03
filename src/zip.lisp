@@ -2,6 +2,8 @@
 ;;;
 ;;; Copyright (C) 2025  Anthony Green <green@moxielogic.com>
 ;;;
+;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+;;;
 ;;; This file is part of OpenLDK.
 
 ;;; OpenLDK is free software; you can redistribute it and/or modify it
@@ -51,23 +53,26 @@
 ;; These two classes get redefined when we read their classfiles.
 
 (defclass |java/util/zip/ZipFile| ()
-  ())
+  ()
+  (:documentation "Stub for java.util.zip.ZipFile; populated at runtime."))
 
 (defclass |java/util/jar/JarFile| ()
-  ())
+  ()
+  (:documentation "Stub for java.util.jar.JarFile; populated at runtime."))
 
 (defclass |java/util/jar/JarInputStream| ()
-  ())
+  ()
+  (:documentation "Stub for java.util.jar.JarInputStream; populated at runtime."))
 
 
 (defun |java/util/zip/ZipFile.<clinit>()| ()
-  )
+  "Class initializer for ZipFile (no-op stub).")
 
 (defun |<init>| ()
-  )
+  "Default constructor stub (no-op).")
 
 (defmethod |<init>(Ljava/io/File;I)| ((this |java/util/zip/ZipFile|) file mode)
-  (assert (eq mode 1)) ; only support read for now
+  (assert (= mode 1)) ; only support read for now
   (with-slots (|name| |jzfile|) this
     (setf |name| (|getPath()| file))
     (setf |jzfile| (zip:open-zipfile (lstring |name|)))))
@@ -129,11 +134,12 @@
 
 (defclass/std <buffer-input-stream> (|java/io/InputStream|)
   ((buf)
-   (pos :std 0)))
+   (pos :std 0))
+  (:documentation "Simple in-memory input stream for byte buffers."))
 
 (defmethod |read()| ((bis <buffer-input-stream>))
   (with-slots (pos buf) bis
-    (if (eq pos (length buf))
+    (if (= pos (length buf))
         -1
         (let ((byte (aref buf pos)))
           (incf (slot-value bis 'pos))
@@ -210,6 +216,7 @@
      #xB40BBE37 #xC30C8EA1 #x5A05DF1B #x2D02EF8D)))
 
 (defun |java/util/zip/CRC32.updateBytes(I[BII)| (crc array offset length)
+  "Update CRC32 value CRC with bytes from ARRAY starting at OFFSET for LENGTH bytes."
   (setf crc (logxor crc #xffffffff))
   (dotimes (n length)
     (let ((i (logand #xff (logxor crc (jaref array (+ offset n))))))

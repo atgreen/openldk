@@ -2,6 +2,8 @@
 ;;;
 ;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
+;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+;;;
 ;;; This file is part of OpenLDK.
 
 ;;; OpenLDK is free software; you can redistribute it and/or modify it
@@ -44,22 +46,25 @@
 (defvar *force-this-to-be-used* nil)
 
 (defun %eval (code)
+  "Evaluate generated CODE, optionally printing and muffling warnings."
   (when *debug-codegen*
     (pprint code)
     (format t "~%"))
   (if *debug-unmuffle*
-      (eval code)
+      (eval code) ; lint:suppress eval-usage
       (handler-bind
           (#+ansi-cl
            (style-warning (lambda (c)
                             (declare (ignore c))
                             (invoke-restart 'muffle-warning))))
-        (eval code))))
+        (eval code)))) ; lint:suppress eval-usage
 
 (defun lispize-method-name (name)
+  "Return a Lisp symbol name derived from Java method NAME."
   (subseq name 0 (1+ (position #\) name))))
 
 (defun make-exception-handler-table (context)
+  "Build a hashtable of handler PCs keyed by handler start for CONTEXT."
   (let ((exception-table (exception-table context))
         (exception-handler-table (make-hash-table)))
     (when exception-table
@@ -69,6 +74,7 @@
     exception-handler-table))
 
 (defun fix-stack-variables (stack-vars)
+  "Merge stack variable groups that share var-numbers across STACK-VARS."
 
   (let ((groups (make-hash-table :test 'equal)))
     ;; Step 1: Group stack-variables by their var-numbers
@@ -99,6 +105,7 @@
   stack-vars)
 
 (defun propagate-copies (ir-code single-assignment-table)
+  "Replace variables with single assignments in IR-CODE using SINGLE-ASSIGNMENT-TABLE."
   ;; Scan through the code, looking for assignments to stack variables
   ;; with single assignments.  Remove those assignments.
   (mapcar (lambda (insn)
@@ -106,7 +113,7 @@
                      (let ((lvalue (slot-value insn 'lvalue))
                            (rvalue (slot-value insn 'rvalue)))
                        (if (and (typep lvalue '<stack-variable>)
-                                (eq (length (slot-value lvalue 'var-numbers)) 1)
+                                (= (length (slot-value lvalue 'var-numbers)) 1)
                                 (not (side-effect-p rvalue)))
                            (setf (gethash lvalue single-assignment-table) (slot-value insn 'rvalue))
                            nil)))
@@ -115,6 +122,7 @@
           ir-code))
 
 (defun %get-constant-int (ir context)
+  "If IR is or becomes an IR-INT-LITERAL in CONTEXT, return its integer value."
   (let ((ir (or (gethash ir (single-assignment-table context))
                 ir)))
     (cond
@@ -299,8 +307,7 @@
                                                                                  ())
                                               (if (not (static-p method)) (intern "this" :openldk) ""))))
                                 (when (not (static-p method))
-                                  (list (list 'setf '*force-this-to-be-used* (intern "this" :openldk))
-                                        ))
+                                  (list (list 'setf '*force-this-to-be-used* (intern "this" :openldk))))
 ;;                                        (list 'describe (intern "this" :openldk))))
                                 (let ((i 0)
                                       (pc -1))
@@ -495,7 +502,7 @@
                     (subtypep classname-symbol (find-class '|java/lang/Throwable|)))
            (let ((condition-symbol (intern (format nil "condition-~A" classname) :openldk)))
              (setf (gethash (find-class (intern classname :openldk)) *condition-table*) condition-symbol)
-             (let ((ccode `(define-condition ,condition-symbol ( ,(intern (format nil "condition-~A" (slot-value super 'name)) :openldk))
+             (let ((ccode `(define-condition ,condition-symbol (,(intern (format nil "condition-~A" (slot-value super 'name)) :openldk))
                              ())))
                (%eval ccode))
              (let ((ccode `(defmethod %lisp-condition ((throwable ,(intern (format nil "~A" classname) :openldk)))

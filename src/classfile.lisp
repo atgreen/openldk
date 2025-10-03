@@ -2,6 +2,8 @@
 ;;;
 ;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
+;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+;;;
 ;;; This file is part of OpenLDK.
 
 ;;; OpenLDK is free software; you can redistribute it and/or modify it
@@ -70,7 +72,7 @@
          (refc (java-class (ir-class-class (emit (aref cp (class-index m)) cp))))
          (name (jstring (emit-name (aref cp (method-descriptor-index m)) cp)))
          (type (|java/lang/invoke/MethodType.fromMethodDescriptorString(Ljava/lang/String;Ljava/lang/ClassLoader;)|
-                (jstring (emit-type (aref cp ( method-descriptor-index m)) cp)) nil)))
+                (jstring (emit-type (aref cp (method-descriptor-index m)) cp)) nil)))
     (make-instance 'ir-method-handle
                    :reference-index (reference-index cmh)
                    :value `(let ((lookup (|java/lang/invoke/MethodHandles.lookup()|)))
@@ -95,18 +97,18 @@
 
 (defclass/std constant-field-reference ()
   ((class-index
-		name-and-type-descriptor-index)))
+    name-and-type-descriptor-index)))
 
 (defclass/std constant-method-reference ()
   ((class-index
-		method-descriptor-index)))
+    method-descriptor-index)))
 
 (defclass/std constant-interface-method-reference (constant-method-reference)
   ())
 
 (defclass/std constant-name-and-type-descriptor ()
   ((name-index
-		type-descriptor-index)))
+    type-descriptor-index)))
 
 (defmethod emit ((v constant-string-reference) cp)
   (make-instance 'ir-string-literal
@@ -188,17 +190,17 @@
 
 (defclass/std <class> ()
   ((initialized-p
-		name
-		super
+    name
+    super
     interfaces
-		constant-pool
+    constant-pool
     raw-constant-pool
-		access-flags
-		fields
-		methods
+    access-flags
+    fields
+    methods
     inner-classes
     attributes
-		java-class)))
+    java-class)))
 
 (defclass/std <inner-class> ()
   ((inner-class-info-index
@@ -212,10 +214,10 @@
 
 (defclass/std <field> ()
   ((class :with)
-	 (name)
-	 (descriptor)
-	 (access-flags :std 0)
-	 (attributes)))
+   (name)
+   (descriptor)
+   (access-flags :std 0)
+   (attributes)))
 
 (defclass/std <method> (<field>)
   ())
@@ -487,8 +489,7 @@ stream."
                                        (name-and-type-index (read-u2)))
                                    (make-instance 'constant-invoke-dynamic
                                                   :bootstrap-method-attr-index bootstrap-method-attr-index
-                                                  :name-and-type-index name-and-type-index)))
-                                )))))
+                                                  :name-and-type-index name-and-type-index))))))))
 
                 (let* ((access-flags (read-u2))
                        (this-class (read-u2))

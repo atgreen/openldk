@@ -2,6 +2,8 @@
 ;;;
 ;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
+;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+;;;
 ;;; This file is part of OpenLDK.
 
 ;;; OpenLDK is free software; you can redistribute it and/or modify it
@@ -362,7 +364,7 @@ and its implementation."
 
 (defmethod |java/lang/Thread.registerNatives()| ()
   ;; FIXME: What does this do??
-  )
+  nil)
 
 ;;; The current |java/lang/Thread| object.
 (defvar *current-thread* nil)
@@ -385,7 +387,8 @@ and its implementation."
 
 (defmethod |setPriority0(I)| ((thread |java/lang/Thread|) priority)
   ;; FIXME
-  )
+  (declare (ignore thread priority))
+  nil)
 
 (defmethod |isAlive()| ((thread |java/lang/Thread|))
   ;; FIXME
@@ -397,11 +400,12 @@ and its implementation."
 
 (defmethod |start0()| ((thread |java/lang/Thread|))
   ;; FIXME
-  )
+  (declare (ignore thread))
+  nil)
 
 (defun |sun/misc/Unsafe.registerNatives()| ()
   ;; FIXME
-  )
+  nil)
 
 (defmethod |hashCode()| (obj)
   (|java/lang/System.identityHashCode(Ljava/lang/Object;)| obj))
@@ -620,7 +624,7 @@ and its implementation."
 
 (defun |sun/misc/VM.initialize()| ()
   ;; FIXME
-  )
+  nil)
 
 (defmethod |compareAndSwapObject(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)| ((unsafe |sun/misc/Unsafe|) obj field-id expected-value new-value)
   ;; FIXME
@@ -794,10 +798,12 @@ user.variant
 |#
 
 (defun |java/io/FileDescriptor.initIDs()| ()
-  )
+  "Initialize file descriptor native IDs (no-op)."
+  nil)
 
 (defun |sun/nio/ch/IOUtil.initIDs()| ()
-  )
+  "Initialize NIO IOUtil native IDs (no-op)."
+  nil)
 
 (defmethod |run()| (arg)
   (declare (ignore arg))
@@ -928,7 +934,7 @@ user.variant
   (when *debug-trace*
     (format t "FIXME: ~A loading ~A~%" loader library-name))
   (setf (slot-value loader '|loaded|) 1)
-  )
+  nil)
 
 (defmethod |sun/misc/Signal.findSignal(Ljava/lang/String;)| (signal-name)
   (let ((sname (lstring signal-name)))
@@ -948,7 +954,7 @@ user.variant
 (defmethod |notifyAll()| ((objref |java/lang/Object|))
   (declare (ignore objref))
   ;; FIXME
-  )
+  nil)
 
 (defun |sun/misc/URLClassPath.getLookupCacheURLs(Ljava/lang/ClassLoader;)| (class-loader)
   (declare (ignore class-loader))
@@ -1066,11 +1072,11 @@ user.variant
 
 (defun |java/net/InetAddress.init()| ()
   ;; FIXME
-  )
+  nil)
 
 (defun |java/io/ObjectStreamClass.initNative()| ()
   ;; FIXME
-  )
+  nil)
 
 (defmethod |java/lang/System.gc()| ()
   (trivial-garbage:gc))
@@ -1098,11 +1104,12 @@ user.variant
 
 (defun |java/lang/Thread.yield()| ()
   ;; FIXME
-  )
+  nil)
 
 (defmethod |notify()| ((objref |java/lang/Object|))
   ;; FIXME
-  )
+  (declare (ignore objref))
+  nil)
 
 (defun |java/util/concurrent/atomic/AtomicLong.VMSupportsCS8()| ()
   0)
@@ -1156,7 +1163,7 @@ user.variant
 
 (defun |java/io/UnixFileSystem.initIDs()| ()
   ;; FIXME
-  )
+  nil)
 
 (defun |java/util/LinkedHashMap.hash(Ljava/lang/Object;)| (obj)
   ;; FIXME: the compiler should not generate calls to LinkedHashMap.hash.
@@ -1176,7 +1183,7 @@ user.variant
 
 (defun |sun/misc/Perf.registerNatives()| ()
   ;; FIXME
-  )
+  nil)
 
 (defmethod |createLong(Ljava/lang/String;IIJ)| (perf name variability units value)
   (classload "java/nio/DirectByteBuffer")
@@ -1240,7 +1247,7 @@ user.variant
 
 (defun |java/lang/Shutdown.beforeHalt()| ()
   ;; FIXME
-  )
+  nil)
 
 (defun |java/lang/Shutdown.halt0(I)| (status)
   (uiop:quit status t))
@@ -1252,32 +1259,32 @@ user.variant
 
 (defun |java/awt/image/ColorModel.initIDs()| ()
   ;; FIXME
-  )
+  nil)
 
 (defun |java/net/InetAddressImplFactory.isIPv6Supported()| ()
   0)
 
 (defun |java/awt/image/IndexColorModel.initIDs()| ()
   ;; FIXME
-  )
+  nil)
 
 (defun |java/awt/image/Raster.initIDs()| ()
   ;; FIXME
-  )
+  nil)
 
 (defun |java/awt/image/SampleModel.initIDs()| ()
   ;; FIXME
-  )
+  nil)
 
 (defun |java/util/zip/Deflater.initIDs()| ()
   ;; FIXME
-  )
+  nil)
 
 (defun |java/util/zip/Inflater.initIDs()| ()
   ;; FIXME
-  )
+  nil)
 
-(defun |java/security/SystemConfigurator.getSystemFIPSEnabled()| ( )
+(defun |java/security/SystemConfigurator.getSystemFIPSEnabled()| ()
   0)
 
 (defun |java/lang/Package.getSystemPackage0(Ljava/lang/String;)| (name)
@@ -1286,7 +1293,7 @@ user.variant
 (defun |java/util/zip/Inflater.init(Z)| (v)
   (declare (ignore v))
   ;; FIXME
-  )
+  nil)
 
 (defun |java/lang/Thread.holdsLock(Ljava/lang/Object;)| (objref)
   (let ((monitor (%get-monitor objref))
@@ -1298,10 +1305,10 @@ user.variant
   0)
 
 (defun |sun/nio/ch/FileChannelImpl.initIDs()| ()
-  )
+  nil)
 
 (defun |sun/nio/ch/NativeThread.init()| ()
-  )
+  nil)
 
 (defun |sun/nio/ch/NativeThread.current()| ()
   -1)
@@ -1314,7 +1321,7 @@ user.variant
 
 (defun |sun/nio/ch/FileDispatcherImpl.init()| ()
   ;; FIXME
-  )
+  nil)
 
 (defun |sun/nio/ch/FileDispatcherImpl.read0(Ljava/io/FileDescriptor;JI)| (fd ptr length)
   (let ((in-stream fd)
@@ -1333,7 +1340,7 @@ user.variant
            (ignore len)
            (ignore size))
   ;; FIXME
-  )
+  nil)
 
 (defmethod |copyMemory(Ljava/lang/Object;JLjava/lang/Object;JJ)| ((unsafe |sun/misc/Unsafe|) source source-offset dest dest-offset length)
   (assert (null source))
@@ -1347,7 +1354,7 @@ user.variant
 
 (defun |sun/nio/fs/UnixNativeDispatcher.init()| ()
   ;; FIXME
-  )
+  nil)
 
 (defun |sun/nio/fs/UnixNativeDispatcher.getcwd()| ()
   (make-java-array
@@ -1425,7 +1432,7 @@ user.variant
 
 (defun |java/net/Inet4Address.init()| ()
   ;; FIXME
-  )
+  nil)
 
 (defmethod |getOption(I)| ((this |java/net/SocketOptions|) option-id)
   (declare (ignore this)
@@ -1475,11 +1482,9 @@ user.variant
 
 (defun |java/lang/invoke/MethodHandleNatives.registerNatives()| ()
   ;; FIXME
-  )
+  nil)
 
-(defun |java/lang/invoke/MethodHandleNatives.getConstant(I)| (i)
-  0
-  )
+(defun |java/lang/invoke/MethodHandleNatives.getConstant(I)| (i) 0)
 
 (defun |java/lang/invoke/MethodHandleNatives.getNamedCon(I[Ljava/lang/Object;)| (which objarray)
   ;; FIXME
