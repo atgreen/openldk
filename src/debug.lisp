@@ -40,6 +40,7 @@
 (in-package :openldk)
 
 (defun dump-hashtable (ht)
+  "Print the contents of hashtable HT to standard output."
   (when ht
     (maphash (lambda (k v)
                (format t "~&~A: ~A~%" k v))

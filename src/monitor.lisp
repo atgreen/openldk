@@ -48,6 +48,7 @@
 (defvar *monitors* (make-hash-table))
 
 (defun %get-monitor (object)
+  "Return (and cache) the monitor object associated with OBJECT."
   ;; FIXME: This grows forever!!
   (or (gethash object *monitors*)
       (let ((monitor (make-instance '<java-monitor>)))
@@ -55,6 +56,7 @@
         monitor)))
 
 (defun monitor-enter (object)
+  "Enter the monitor for OBJECT, acquiring its mutex."
   (when object
     (let* ((monitor (%get-monitor object))
            (mutex (mutex monitor))
@@ -69,6 +71,7 @@
                   (recursion-count monitor) 1)))))))
 
 (defun monitor-exit (object)
+  "Exit the monitor for OBJECT, releasing its mutex."
   (when object
     (let* ((monitor (%get-monitor object))
            (mutex (mutex monitor))

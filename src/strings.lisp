@@ -42,10 +42,12 @@
 (defvar interned-string-table (make-hash-table :test #'equal))
 
 (defun lstring (string)
+  "Extract a Lisp string from a |java/lang/String| object."
   (when string
     (coerce (java-array-data (slot-value string '|value|)) 'string)))
 
 (defun jstring (value)
+  "Construct a |java/lang/String| from a Lisp string VALUE."
   (let ((s (make-instance '|java/lang/String|)))
     (setf (slot-value s '|value|) (make-java-array :component-class
                                                    (or (%get-java-class-by-bin-name "char" t) :early-placeholder)
@@ -54,6 +56,7 @@
     s))
 
 (defun ijstring (value)
+  "Construct and intern a |java/lang/String| from Lisp string VALUE."
   (let ((s (make-instance '|java/lang/String|)))
     (setf (slot-value s '|value|) (make-java-array :component-class
                                                    (or (%get-java-class-by-bin-name "char" t) :early-placeholder)

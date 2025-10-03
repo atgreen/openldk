@@ -1484,11 +1484,14 @@ user.variant
   ;; FIXME
   nil)
 
-(defun |java/lang/invoke/MethodHandleNatives.getConstant(I)| (i) 0)
+(defun |java/lang/invoke/MethodHandleNatives.getConstant(I)| (i)
+  (declare (ignore i))
+  0)
 
 (defun |java/lang/invoke/MethodHandleNatives.getNamedCon(I[Ljava/lang/Object;)| (which objarray)
   ;; FIXME
-  (assert (eq which 0))
+  (declare (ignore objarray))
+  (assert (zerop which))
   0)
 
 (defun find-method-in-class (class name)

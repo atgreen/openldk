@@ -60,7 +60,8 @@
    (|hash| :initform NIL :allocation :instance)
    (|serialVersionUID| :initform NIL :allocation :class)
    (|serialPersistentFields| :initform NIL :allocation :class)
-   (CASE_INSENSITIVE_ORDER :initform NIL :allocation :class)))
+   (CASE_INSENSITIVE_ORDER :initform NIL :allocation :class))
+  (:documentation "Stub for java.lang.String"))
 
 (defclass |java/lang/Class| (|java/lang/Object|)
   ((ANNOTATION :initform 0 :allocation :class)
@@ -83,47 +84,60 @@
    (|enumConstantDirectory| :initform nil :allocation :instance)
    (|annotationData| :initform nil :allocation :instance)
    (|annotationType| :initform nil :allocation :instance)
-   (|classValueMap| :initform nil :allocation :instance)))
+   (|classValueMap| :initform nil :allocation :instance))
+  (:documentation "Stub for java.lang.Class"))
 
 (defmethod print-object ((s |java/lang/String|) out)
   (print-unreadable-object (s out :type t)
     (format out "~S" (slot-value s '|value|))))
 
 (defclass |java/io/UnixFileSystem| (|java/lang/Object|)
-  ())
+  ()
+  (:documentation "Stub for java.io.UnixFileSystem"))
 
 (defclass |java/lang/Runtime| (|java/lang/Object|)
-  ())
+  ()
+  (:documentation "Stub for java.lang.Runtime"))
 
 (defclass |sun/misc/Unsafe| (|java/lang/Object|)
-  ())
+  ()
+  (:documentation "Stub for sun.misc.Unsafe"))
 
 (defclass |java/lang/ClassLoader| (|java/lang/Object|)
-  ())
+  ()
+  (:documentation "Stub for java.lang.ClassLoader"))
 
 (defclass |java/io/InputStream| (|java/lang/Object|)
-  ())
+  ()
+  (:documentation "Stub for java.io.InputStream"))
 
 (defclass |java/io/FileInputStream| (|java/io/InputStream|)
-  ())
+  ()
+  (:documentation "Stub for java.io.FileInputStream"))
 
 (defclass |java/io/OutputStream| (|java/lang/Object|)
-  ())
+  ()
+  (:documentation "Stub for java.io.OutputStream"))
 
 (defclass |java/io/FileOutputStream| (|java/io/OutputStream|)
-  ())
+  ()
+  (:documentation "Stub for java.io.FileOutputStream"))
 
 (defclass |java/io/RandomAccessFile| (|java/lang/Object|)
-  ())
+  ()
+  (:documentation "Stub for java.io.RandomAccessFile"))
 
 (defclass |java/lang/Thread| (|java/lang/Object|)
-  ())
+  ()
+  (:documentation "Stub for java.lang.Thread"))
 
 (defclass |java/lang/Throwable| (|java/lang/Object|)
-  ())
+  ()
+  (:documentation "Stub for java.lang.Throwable"))
 
 (defclass |sun/reflect/ConstantPool| (|java/lang/Object|)
-  ())
+  ()
+  (:documentation "Stub for sun.reflect.ConstantPool"))
 
 (defmethod %lisp-condition ((throwable |java/lang/Throwable|))
   (error (format nil "Missing %lisp-condition implementation for ~A." throwable)))
@@ -136,19 +150,25 @@
   ())
 
 (defclass |java/lang/Throwable| (|java/lang/Object|)
-  ())
+  ()
+  (:documentation "Stub for java.lang.Throwable"))
 
 (defclass |java/lang/Exception| (|java/lang/Throwable|)
-  ())
+  ()
+  (:documentation "Stub for java.lang.Exception"))
 
 (defclass |java/lang/ArithmeticException| (|java/lang/RuntimeException|)
-  ())
+  ()
+  (:documentation "Stub for java.lang.ArithmeticException"))
 
 (defclass |java/net/Inet4AddressImpl| (|java/lang/Object|)
-  ())
+  ()
+  (:documentation "Stub for java.net.Inet4AddressImpl"))
 
 (defclass |java/net/SocketOptions| (|java/lang/Object|)
-  ())
+  ()
+  (:documentation "Stub for java.net.SocketOptions"))
 
 (defclass |sun/management/VMManagementImpl| (|java/lang/Object|)
-  ())
+  ()
+  (:documentation "Stub for sun.management.VMManagementImpl"))
