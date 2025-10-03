@@ -76,11 +76,11 @@
       (setf zipfile (zip:open-zipfile jarfile))
       (setf zipfile-entries (zip:zipfile-entries zipfile)))
     ;; Look up the class file in the zipfile entries
-    (alexandria:when-let (ze (gethash (format nil "~A.class" classname) zipfile-entries))
+    (when-let (ze (gethash (format nil "~A.class" classname) zipfile-entries))
       ;; Create an in-memory input stream for the class file contents
       (let ((result (flexi-streams:make-in-memory-input-stream (zip:zipfile-entry-contents ze))))
         ;; Add the package to the *PACKAGE* hashtable if it doesn't already exist
-        (alexandria:when-let (last-slash-position (position #\/ classname :from-end t))
+        (when-let (last-slash-position (position #\/ classname :from-end t))
           (let ((package-name (take (1+ last-slash-position) classname)))
             (unless (gethash package-name *packages*)
               (setf (gethash package-name *packages*) (jstring jarfile)))))
@@ -93,10 +93,10 @@
     (let ((fqn (format nil "~A~A~A.class" dir (uiop:directory-separator-for-host) classname)))
       (when (uiop:file-exists-p fqn)
         ;; Read into memory and return an in-memory input stream
-        (let* ((bytes (alexandria:read-file-into-byte-vector fqn))
+        (let* ((bytes (read-file-into-byte-vector fqn))
                (result (flexi-streams:make-in-memory-input-stream bytes)))
           ;; Add this package to the *PACKAGE* hashtable.
-          (alexandria:when-let (last-slash-position (position #\/ classname :from-end t))
+          (when-let (last-slash-position (position #\/ classname :from-end t))
             (let ((package-name (take (1+ last-slash-position) classname)))
               (unless (gethash package-name *packages*)
                 (setf (gethash package-name *packages*) (jstring fqn)))))

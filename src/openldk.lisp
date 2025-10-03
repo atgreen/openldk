@@ -653,7 +653,7 @@
 
   (setf *classpath*
         (loop for cpe in (split-sequence:split-sequence (uiop:inter-directory-separator) classpath)
-              collect (if (str:ends-with? ".jar" cpe)
+              collect (if (ends-with? ".jar" cpe)
                           (make-instance 'jar-classpath-entry :jarfile cpe)
                           (make-instance 'dir-classpath-entry :dir cpe))))
 
@@ -707,7 +707,7 @@
 
     (setf *classpath*
           (loop for cpe in (split-sequence:split-sequence (uiop:inter-directory-separator) classpath)
-                collect (if (str:ends-with? ".jar" cpe)
+                collect (if (ends-with? ".jar" cpe)
                             (make-instance 'jar-classpath-entry :jarfile cpe)
                             (make-instance 'dir-classpath-entry :dir cpe)))))
 

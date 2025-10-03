@@ -316,7 +316,7 @@ stream."
       (let* ((name-index (read-u2))
              (name (slot-value (aref constant-pool name-index) 'value))
              (attributes-length (read-u4)))
-        (alexandria:eswitch (name :test 'string=)
+        (eswitch (name :test 'string=)
           ("BootstrapMethods"
            (let ((num-bootstrap-methods (read-u2)))
              (setf (gethash "BootstrapMethods" attributes)
