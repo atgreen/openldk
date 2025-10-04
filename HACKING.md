@@ -107,6 +107,41 @@ Exception handlers are integrated into control flow:
 - `u` - unmuffle the Lisp compiler
 - `x` - trace opcode execution (use with `t`)
 
+### Debugging Techniques
+
+#### Inspecting Generated Lisp Code
+
+When debugging unexpected behavior, especially with comparisons or type issues,
+**always examine the generated Lisp code** using `LDK_DEBUG=c`:
+
+```bash
+LDK_DEBUG=c ./openldk ClassName 2>&1 | grep -A 50 "compiling MethodName"
+```
+
+**Example - Float_2 LCMP Bug:**
+Looking at generated code revealed that long comparison used `EQ` (object identity)
+instead of `=` (numeric equality). This caused comparisons like
+`computed_long == Long.MAX_VALUE` to fail because Common Lisp creates different
+objects for the same large number (9223372036854775807).
+
+```lisp
+;; WRONG - uses EQ (object identity)
+(cond ((eq value1 value2) 0)
+      ((> value1 value2) 1)
+      (t -1))
+
+;; CORRECT - uses = (numeric equality)
+(cond ((= value1 value2) 0)
+      ((> value1 value2) 1)
+      (t -1))
+```
+
+**Key Insight**: When Java primitives behave unexpectedly, check if the generated
+Lisp code uses appropriate comparison/conversion functions. Common issues:
+- Using `EQ` instead of `=` or `EQL` for numbers
+- Missing `unsigned-to-signed-integer`/`unsigned-to-signed-long` conversions
+- Incorrect type coercion between FLOAT and DOUBLE
+
 ## Reference Sources
 
 - **JDK 8 Source**: `~/git/jdk` - Use this to understand correct Java semantics
