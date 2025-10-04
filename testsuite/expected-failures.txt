@@ -2,7 +2,6 @@ FAIL: aaa/ni.java execution test
 FAIL: gcj/bytearray.java execution test
 FAIL: gcj/err4.java execution test
 FAIL: gcj/ExtraClassLoader.java execution test
-FAIL: gcj/Float_2.java execution test
 FAIL: gcj/G19990303_02.java execution test
 FAIL: gcj/initexc.java execution test
 FAIL: gcj/InvokeInterface.java execution test
@@ -11,7 +10,6 @@ FAIL: gcj/invokethrow.java execution test
 FAIL: gcj/LargeFile.java execution test
 FAIL: gcj/md5test.java execution test
 FAIL: gcj/N19990310_5.java execution test
-FAIL: gcj/negzero.java execution test
 FAIL: gcj/newarray_overflow.java execution test
 FAIL: gcj/PR141.java execution test
 FAIL: gcj/pr21785.java execution test
