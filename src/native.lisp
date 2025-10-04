@@ -381,15 +381,25 @@ and its implementation."
   (error "internal error"))
 
 (defmethod |java/lang/Thread.currentThread()| ()
-  (or *current-thread*
-      (let ((thread (make-instance '|java/lang/Thread|))
-            (thread-group (make-instance '|java/lang/ThreadGroup|)))
-        (|<init>()| thread-group)
-        (setf *current-thread* thread)
-        (setf (slot-value thread '|priority|) 1)
-        (|add(Ljava/lang/Thread;)| thread-group thread)
-        (|<init>(Ljava/lang/ThreadGroup;Ljava/lang/Runnable;Ljava/lang/String;J)| thread thread-group nil (jstring "main") 0)
-        thread)))
+  "Return the Java Thread object for the current Lisp thread."
+  ;; Check if current Lisp thread has an associated Java Thread
+  (let* ((current-lisp-thread (bordeaux-threads:current-thread))
+         (java-thread (gethash current-lisp-thread *lisp-to-java-threads*)))
+    (or java-thread
+        ;; Fallback to main thread (for compatibility)
+        *current-thread*
+        ;; Create main thread if it doesn't exist
+        (let ((thread (make-instance '|java/lang/Thread|))
+              (thread-group (make-instance '|java/lang/ThreadGroup|)))
+          (|<init>()| thread-group)
+          (setf *current-thread* thread)
+          ;; Register main thread in our mappings
+          (setf (gethash current-lisp-thread *lisp-to-java-threads*) thread)
+          (setf (slot-value thread '|priority|) 1)
+          (|add(Ljava/lang/Thread;)| thread-group thread)
+          (|<init>(Ljava/lang/ThreadGroup;Ljava/lang/Runnable;Ljava/lang/String;J)|
+           thread thread-group nil (jstring "main") 0)
+          thread))))
 
 (defmethod |setPriority0(I)| ((thread |java/lang/Thread|) priority)
   ;; FIXME
@@ -1105,7 +1115,28 @@ user.variant
   (trivial-garbage:gc))
 
 (defun |java/lang/Thread.sleep(J)| (milliseconds)
-  (sleep (/ milliseconds 1000.0)))
+  "Sleep for the specified milliseconds, checking for interruption."
+  ;; Get current thread
+  (let* ((current-lisp-thread (bordeaux-threads:current-thread))
+         (current-java-thread (gethash current-lisp-thread *lisp-to-java-threads*)))
+    ;; Check if interrupted before sleeping
+    (when (and current-java-thread
+               (gethash current-java-thread *thread-interrupted*))
+      ;; Clear interrupt flag and throw InterruptedException
+      (setf (gethash current-java-thread *thread-interrupted*) nil)
+      (let ((exc (make-instance '|java/lang/InterruptedException|)))
+        (|<init>()| exc)
+        (error (%lisp-condition exc))))
+    ;; Sleep (this can be interrupted by interrupt0)
+    (sleep (/ milliseconds 1000.0))
+    ;; Check if interrupted after sleeping
+    (when (and current-java-thread
+               (gethash current-java-thread *thread-interrupted*))
+      ;; Clear interrupt flag and throw InterruptedException
+      (setf (gethash current-java-thread *thread-interrupted*) nil)
+      (let ((exc (make-instance '|java/lang/InterruptedException|)))
+        (|<init>()| exc)
+        (error (%lisp-condition exc))))))
 
 (defun |java/lang/ProcessEnvironment.environ()| ()
   ;; FIXME: don't force utf-8 encoding
@@ -1129,14 +1160,39 @@ user.variant
   ;; FIXME
   nil)
 
+(defmethod |start0()| ((thread |java/lang/Thread|))
+  "Start a new Lisp thread that executes the Thread's run() method."
+  (let ((lisp-thread
+          (bordeaux-threads:make-thread
+           (lambda ()
+             ;; Register this Lisp thread with the Java Thread
+             (setf (gethash (bordeaux-threads:current-thread) *lisp-to-java-threads*) thread)
+             ;; Call the Thread's run() method
+             (handler-case
+                 (|run()| thread)
+               (error (e)
+                 (format *error-output* "~&Thread ~A terminated with error: ~A~%" thread e))))
+           :name (format nil "Java-Thread-~A" (slot-value thread '|name|)))))
+    ;; Store the Lisp thread in our mapping
+    (setf (gethash thread *java-threads*) lisp-thread)))
+
 (defmethod |interrupt0()| ((thread |java/lang/Thread|))
-  ;; The Java code already sets the interrupted field to true.
-  ;; This native method would normally inform the VM to interrupt
-  ;; any blocking operations (wait, sleep, join), but for now we
-  ;; just return. This is sufficient for pr22211 test case.
-  ;; FIXME: Implement proper thread interruption for blocking operations
-  (declare (ignore thread))
-  nil)
+  "Interrupt the thread by signaling the underlying Lisp thread."
+  ;; In Java 8, the interrupted status is maintained by the VM, not as a field.
+  ;; We maintain it in the *thread-interrupted* hash table.
+  (setf (gethash thread *thread-interrupted*) t)
+  ;; If the thread has an associated Lisp thread, interrupt it.
+  (let ((lisp-thread (gethash thread *java-threads*)))
+    (when lisp-thread
+      ;; Interrupt the Lisp thread to wake it from blocking operations
+      (bordeaux-threads:interrupt-thread
+       lisp-thread
+       (lambda ()
+         ;; Check if interrupted flag is set and throw InterruptedException
+         (when (gethash thread *thread-interrupted*)
+           (let ((exc (make-instance '|java/lang/InterruptedException|)))
+             (|<init>()| exc)
+             (error (%lisp-condition exc)))))))))
 
 (defmethod |notify()| ((objref |java/lang/Object|))
   ;; FIXME

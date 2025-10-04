@@ -74,6 +74,18 @@
 
 (defvar *boot-class-loader* nil)
 
+;; Map Java Thread objects to Lisp (bordeaux) threads
+(defvar *java-threads* (make-hash-table :test #'eq :synchronized t)
+  "Hash table mapping Java Thread objects to bordeaux-threads.")
+
+;; Map Lisp threads to Java Thread objects (for currentThread lookup)
+(defvar *lisp-to-java-threads* (make-hash-table :test #'eq :synchronized t)
+  "Hash table mapping bordeaux-threads to Java Thread objects.")
+
+;; Track interrupted status for each Thread (not a field in Java 8)
+(defvar *thread-interrupted* (make-hash-table :test #'eq :synchronized t)
+  "Hash table tracking interrupted status for each Java Thread object.")
+
 (defun %get-java-class-by-bin-name (bin-name &optional fail-ok)
   "Look up a Java class by its binary name BIN-NAME. When FAIL-OK is non-NIL, return NIL instead of asserting."
   (let ((bin-name (if (stringp bin-name)
