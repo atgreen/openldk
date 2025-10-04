@@ -384,3 +384,50 @@ All test cases now pass:
 1. `c209444` - Fix NaN and Infinity handling in float-to-int conversions
 2. `521169f` - Fix signed integer conversion and add array bounds checking
 3. `ff3482d` - Fix LCMP to use numeric equality and proper Java exception throwing
+
+## Session 4 - Additional XFAIL Fixes (2025-10-04 continued)
+
+### G19990303_02 - NegativeArraySizeException (Commit 64c7a5d)
+
+**Test**: Creates multi-dimensional array with negative size to test exception handling
+
+**Problem**: TYPE-ERROR when trying to create array with -1 size
+```
+TYPE-ERROR: The value -1 is not of type (UNSIGNED-BYTE 44)
+```
+
+**Root Cause**: `%make-multi-array` didn't check for negative dimensions before calling `make-array`
+
+**Fix**: Added negative size check to throw NegativeArraySizeException
+```lisp
+(let ((size (car dimensions)))
+  ;; Check for negative array size
+  (when (< size 0)
+    (let ((exc (make-instance '|java/lang/NegativeArraySizeException|)))
+      (|<init>()| exc)
+      (error (%lisp-condition exc))))
+  (make-java-array :size size ...))
+```
+
+**Result**: G19990303_02 now passes ✓
+
+### Additional Passing Tests
+
+Discovered that several XFAIL tests now pass due to earlier fixes:
+
+1. **err4** - Exception handling test (passes with PR36252 classpath fix)
+2. **N19990310_5** - Basic functionality test (passes with exception fixes)
+3. **PR141** - StreamTokenizer test (passes with Float_2 fixes)
+4. **pr25676** - Negative zero test (passes with floating-point trap disabling)
+
+**Files Modified**:
+- src/codegen.lisp: Added NegativeArraySizeException check to %make-multi-array
+- testsuite/expected-failures.txt: Removed 5 passing tests
+
+**Commits**:
+1. `64c7a5d` - Add NegativeArraySizeException check to multi-array creation
+2. `e89b427` - Remove G19990303_02 from expected failures
+3. `fb8ba23` - Remove err4 and N19990310_5 from expected failures
+4. `a1c3d57` - Remove PR141 and pr25676 from expected failures
+
+**Impact**: 5 more XFAILs fixed! Total session 3+4: 7 XFAIL tests converted to passing
