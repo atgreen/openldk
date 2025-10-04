@@ -845,4 +845,9 @@
 
 (defun make-image ()
   (initialize)
+  ;; Kill all Java threads before saving core (SBCL can't save with threads running)
+  (loop for thread in (bt:all-threads)
+        when (and (not (eq thread (bt:current-thread)))
+                  (search "Java-Thread" (bt:thread-name thread)))
+        do (bt:destroy-thread thread))
   (sb-ext:save-lisp-and-die "openldk" :executable t :save-runtime-options t :toplevel #'main-wrapper))
