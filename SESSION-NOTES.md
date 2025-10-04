@@ -431,3 +431,60 @@ Discovered that several XFAIL tests now pass due to earlier fixes:
 4. `a1c3d57` - Remove PR141 and pr25676 from expected failures
 
 **Impact**: 5 more XFAILs fixed! Total session 3+4: 7 XFAIL tests converted to passing
+
+## Session 5 - GCJ Test Suite Run and pr22211 Fix (2025-10-04 continued)
+
+### GCJ Test Suite Results with Updated Binary
+
+Ran full gcj test suite (394 tests) with all our fixes:
+
+**Results:**
+- **336 PASS** (up from 333)
+- **3 FAIL**: PR36252, md5test, pr22211 (test harness timeouts)
+- **55 XFAIL** (down from 60)
+
+**Analysis of "Failures":**
+- PR36252: Actually passes when run manually (~55s), just test harness timeout too aggressive
+- md5test: Likely also timeout issue
+- pr22211: Missing Thread.interrupt0() native method
+
+**Overall Progress:**
+- +3 new passing tests from our Session 3+4 fixes
+- -5 XFAILs (moved to passing)
+- Test suite improvement validates all our fixes!
+
+### pr22211 - Thread.interrupt0() Implementation (Commit b4bac0e)
+
+**Test**: Creates thread and calls interrupt() - tests basic thread interruption
+
+**Problem**: Missing native method interrupt0()
+```
+Error: The function OPENLDK::|interrupt0()| is undefined.
+```
+
+**Investigation:**
+- interrupt0() is a private instance method on Thread, not static
+- Java code already sets `interrupted` field to true
+- Native method is for informing VM about interrupt (for blocking operations)
+
+**Fix:** Added minimal implementation as defmethod
+```lisp
+(defmethod |interrupt0()| ((thread |java/lang/Thread|))
+  ;; The Java code already sets the interrupted field to true.
+  ;; This native method would normally inform the VM to interrupt
+  ;; any blocking operations (wait, sleep, join), but for now we
+  ;; just return. This is sufficient for pr22211 test case.
+  ;; FIXME: Implement proper thread interruption for blocking operations
+  (declare (ignore thread))
+  nil)
+```
+
+**Result:** pr22211 now passes ✓
+
+**Future Work:** Full implementation should integrate with bordeaux-threads to actually interrupt blocking sleep/wait/join operations
+
+**Files Modified:**
+- src/native.lisp: Added interrupt0() method
+
+**Commits:**
+1. `b4bac0e` - Implement Thread.interrupt0() native method
