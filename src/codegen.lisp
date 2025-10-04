@@ -1160,11 +1160,17 @@
 (defun %make-multi-array (dimensions)
   (if (null dimensions)
       nil
-      (make-java-array :size (car dimensions)
-                       :component-class :multi-array-placeholder
-                       :initial-contents
-                       (loop repeat (car dimensions)
-                             collect (%make-multi-array (cdr dimensions))))))
+      (let ((size (car dimensions)))
+        ;; Check for negative array size
+        (when (< size 0)
+          (let ((exc (make-instance '|java/lang/NegativeArraySizeException|)))
+            (|<init>()| exc)
+            (error (%lisp-condition exc))))
+        (make-java-array :size size
+                         :component-class :multi-array-placeholder
+                         :initial-contents
+                         (loop repeat size
+                               collect (%make-multi-array (cdr dimensions)))))))
 
 (defmethod codegen ((insn ir-multi-new-array) context)
   (let ((init-element
