@@ -45,6 +45,9 @@
 ;; It would be good if we didn't have to do this.
 (defvar *force-this-to-be-used* nil)
 
+(defvar *methods-being-compiled* (make-hash-table :test #'equal)
+  "Hash table tracking methods currently being compiled to prevent re-entrant compilation.")
+
 (defun %eval (code)
   "Evaluate generated CODE, optionally printing and muffling warnings."
   (when *debug-codegen*
@@ -181,8 +184,15 @@
 
 (defun %compile-method (class-name method-index)
   (let* ((class (%get-ldk-class-by-bin-name class-name))
-         (method (aref (slot-value class 'methods) (1- method-index))))
-    (when (gethash "Code" (slot-value method 'attributes)) ; otherwise it is abstract
+         (method (aref (slot-value class 'methods) (1- method-index)))
+         (method-key (format nil "~A.~A~A" class-name (slot-value method 'name) (slot-value method 'descriptor))))
+    ;; Guard against re-entrant compilation of the same method
+    (when (gethash method-key *methods-being-compiled*)
+      (format t "; WARNING: Skipping re-entrant compilation of ~A~%" method-key)
+      (return-from %compile-method nil))
+    (setf (gethash method-key *methods-being-compiled*) t)
+    (unwind-protect
+        (when (gethash "Code" (slot-value method 'attributes)) ; otherwise it is abstract
       (let* ((parameter-hints (gen-parameter-hints (descriptor method)))
              (exception-table (slot-value (gethash "Code" (slot-value method 'attributes)) 'exceptions))
              (code (slot-value (gethash "Code" (slot-value method 'attributes)) 'code))
@@ -362,7 +372,9 @@
                                           (loop for x from parameter-count upto (1+ max-locals)
                                                 collect (list (intern (format nil "local-~A" (incf i)) :openldk)))))))
                                                 array-checked-lisp-code)))))))))
-          (%eval definition-code))))))
+          (%eval definition-code))))
+      ;; Cleanup: remove from compilation tracking
+      (remhash method-key *methods-being-compiled*))))
 
 (defun %clinit (class)
   (let ((class (gethash (name class) *ldk-classes-by-bin-name*)))
@@ -611,16 +623,19 @@
   ;; If classpath isn't set on the command line, then get it
   ;; from the LDK_CLASSPATH environment variable.
   (unless classpath
-    (setf classpath
-          (concatenate 'string
-                       (or (uiop:getenv "CLASSPATH") (uiop:getenv "LDK_CLASSPATH") ".")
-                       ":"
-                       (format nil "~{~A~^:~}"
-                               (mapcar #'namestring
-                                       (directory
-                                        (concatenate 'string
-                                                     (uiop:getenv "JAVA_HOME")
-                                                     "/lib/*.jar")))))))
+    (setf classpath (or (uiop:getenv "CLASSPATH") (uiop:getenv "LDK_CLASSPATH") ".")))
+
+  ;; Always append JAVA_HOME jars to classpath
+  (setf classpath
+        (concatenate 'string
+                     classpath
+                     ":"
+                     (format nil "~{~A~^:~}"
+                             (mapcar #'namestring
+                                     (directory
+                                      (concatenate 'string
+                                                   (uiop:getenv "JAVA_HOME")
+                                                   "/lib/*.jar"))))))
 
   (let ((LDK_DEBUG (uiop:getenv "LDK_DEBUG")))
     (when LDK_DEBUG
