@@ -106,7 +106,7 @@
   (let ((param-hints nil)
         (index 0)
         (descriptor (subseq mdescriptor
-                            (1+ (position #\( mdescriptor))
+                            (1+ (position #\( mdescriptor))  ; lint:suppress
                             (position #\) mdescriptor))))
     (loop
       while (< index (length descriptor))
@@ -150,7 +150,7 @@
 as strings."
   (let ((param-list nil)
         (index 0)
-        (descriptor (subseq descriptor (position #\( descriptor) (position #\) descriptor))))
+        (descriptor (subseq descriptor (position #\( descriptor) (position #\) descriptor))))  ; lint:suppress
     (loop while (< index (length descriptor))
           do (let ((ch (char descriptor index)))
                (cond
@@ -219,7 +219,7 @@ as strings."
   (let ((param-list nil)
         (index 0)
         (descriptor (subseq descriptor
-                            (position #\( descriptor)
+                            (position #\( descriptor)  ; lint:suppress
                             (position #\) descriptor))))
     (loop while (< index (length descriptor))
           do (let ((ch (char descriptor index)))
