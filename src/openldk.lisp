@@ -718,7 +718,20 @@
                        (find-main (gethash (super class) *ldk-classes-by-bin-name*)))))))
       (let ((main-symbol (find-main class)))
         (if main-symbol
-            (%eval (list main-symbol argv))
+            (progn
+              (%eval (list main-symbol argv))
+              ;; Wait for all non-daemon Java threads to complete before exiting
+              (loop
+                (let ((java-threads (loop for java-thread being the hash-values of *lisp-to-java-threads*
+                                          when (not (slot-value java-thread '|daemon|))
+                                            collect java-thread)))
+                  (if java-threads
+                      (sleep 0.1)
+                      (progn
+                        ;; Give threads a moment to flush output buffers
+                        (sleep 0.1)
+                        (finish-output)
+                        (return))))))
             (error "Main method not found in class ~A." (name class)))))))
 
 (defun main-wrapper ()
