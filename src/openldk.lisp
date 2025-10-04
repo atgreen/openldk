@@ -252,6 +252,11 @@
                                             unless (null result)
                                               collect result))))
                          ;; Do stack analysis to merge stack variables
+                         ;; When multiple control flow paths reach the same PC, we need to
+                         ;; unify the stack variables. merge-stacks has side effects - it
+                         ;; mutates the var-numbers slot of stack variables to include the
+                         ;; union of all paths. The return value is discarded; the important
+                         ;; work is the mutation of shared stack-variable objects.
                          (maphash (lambda (k v)
                                     (when (> (length v) 1)
                                       (reduce #'merge-stacks v)))
