@@ -48,30 +48,22 @@ cause compile-time undefined variable warnings, but work correctly at runtime.
 
 ### Stack Variable Merging
 
-**CRITICAL BUG DISCOVERED (2025-01-03)**:
-
-In src/openldk.lisp lines 255-257, stack merging is broken:
+Stack merging relies on **side effects** (src/openldk.lisp lines 260-263):
 
 ```lisp
-;; WRONG - result is discarded!
+;; Discards return value, but side effects are the important part
 (maphash (lambda (k v)
            (when (> (length v) 1)
              (reduce #'merge-stacks v)))
          (stack-state-table *context*))
 ```
 
-Should be:
-```lisp
-;; CORRECT - store the merged result
-(maphash (lambda (k v)
-           (when (> (length v) 1)
-             (setf (gethash k (stack-state-table *context*))
-                   (list (reduce #'merge-stacks v)))))
-         (stack-state-table *context*))
-```
+The `merge-stacks` function (and `merge-stack-variables` it calls) **mutate**
+the `var-numbers` slot of stack-variable objects. Since these objects are
+shared across all references in the IR code, the mutations propagate everywhere.
 
-This bug means stack variables from different control flow paths are never
-actually unified, potentially causing type errors or incorrect code generation.
+This is correct but subtle - the return value of `reduce` is discarded because
+the real work happens via mutation of shared objects.
 
 ### Exception Handling
 

@@ -1941,7 +1941,9 @@
     stack-var1))
 
 (defun merge-stacks (list1 list2)
-  "Merge two lists of stack-variable objects into one."
+  "Merge two lists of stack-variable objects into one.
+Side effect: Mutates both sv1 and sv2 objects to have unified var-numbers.
+Returns a new list, but the important work is the mutation of shared objects."
   (loop for sv1 in list1
         for sv2 in list2
         collect (merge-stack-variables sv1 sv2)))
