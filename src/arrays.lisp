@@ -61,12 +61,13 @@
   (let* ((data (java-array-data array))
          (len (length data)))
     (when (or (< index 0) (>= index len))
-      (format *error-output* "~%Array bounds error: index ~A, length ~A~%" index len)
-      (format *error-output* "Backtrace:~%")
-      (trivial-backtrace:print-backtrace-to-stream *error-output*)
-      (error 'simple-error
-             :format-control "Array index out of bounds: ~A (length ~A)"
-             :format-arguments (list index len)))
+      ;; Throw Java ArrayIndexOutOfBoundsException
+      (let ((exc (make-instance '|java/lang/ArrayIndexOutOfBoundsException|)))
+        ;; Initialize with message
+        (|<init>(Ljava/lang/String;)| exc
+         (make-instance '|java/lang/String|
+                       :data (format nil "~A" index)))
+        (error (%lisp-condition exc))))
     (aref data index)))
 
 (defun (setf jaref) (new-value array index)
@@ -74,12 +75,13 @@
   (let* ((data (java-array-data array))
          (len (length data)))
     (when (or (< index 0) (>= index len))
-      (format *error-output* "~%Array bounds error: index ~A, length ~A~%" index len)
-      (format *error-output* "Backtrace:~%")
-      (trivial-backtrace:print-backtrace-to-stream *error-output*)
-      (error 'simple-error
-             :format-control "Array index out of bounds: ~A (length ~A)"
-             :format-arguments (list index len)))
+      ;; Throw Java ArrayIndexOutOfBoundsException
+      (let ((exc (make-instance '|java/lang/ArrayIndexOutOfBoundsException|)))
+        ;; Initialize with message
+        (|<init>(Ljava/lang/String;)| exc
+         (make-instance '|java/lang/String|
+                       :data (format nil "~A" index)))
+        (error (%lisp-condition exc))))
     (setf (aref data index) new-value)))
 
 (defun java-array-length (array)

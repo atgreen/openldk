@@ -1013,7 +1013,7 @@
                  :code (list 'let (list (list 'value2 (code (codegen (value2 insn) context)))
                                         (list 'value1 (code (codegen (value1 insn) context))))
                              (list 'cond
-                                   (list (list 'eq 'value1 'value2)
+                                   (list (list '= 'value1 'value2)
                                          0)
                                    (list (list '> 'value1 'value2)
                                          1)
