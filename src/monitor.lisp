@@ -43,7 +43,8 @@
   ((mutex :std (bordeaux-threads:make-lock))
    (condition-variable :std (bordeaux-threads:make-condition-variable))
    (owner)
-   (recursion-count :std 0)))
+   (recursion-count :std 0)
+   (wait-set :std nil)))
 
 (defvar *monitors* (make-hash-table))
 
