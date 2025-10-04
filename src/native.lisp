@@ -1129,6 +1129,15 @@ user.variant
   ;; FIXME
   nil)
 
+(defmethod |interrupt0()| ((thread |java/lang/Thread|))
+  ;; The Java code already sets the interrupted field to true.
+  ;; This native method would normally inform the VM to interrupt
+  ;; any blocking operations (wait, sleep, join), but for now we
+  ;; just return. This is sufficient for pr22211 test case.
+  ;; FIXME: Implement proper thread interruption for blocking operations
+  (declare (ignore thread))
+  nil)
+
 (defmethod |notify()| ((objref |java/lang/Object|))
   ;; FIXME
   (declare (ignore objref))
