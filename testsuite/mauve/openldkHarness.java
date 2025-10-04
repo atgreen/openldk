@@ -125,7 +125,8 @@ public class openldkHarness extends gnu.testlet.TestHarness
     public static void main(String[] args) throws Exception {
         Class<?> clazz = Class.forName(args[0]);
         Testlet t = (Testlet) clazz.newInstance();
-        t.test(new openldkHarness(t, false));
-        System.exit(exit_code);
+        openldkHarness harness = new openldkHarness(t, false);
+        t.test(harness);
+        System.exit(harness.exit_code);
     }
 }
