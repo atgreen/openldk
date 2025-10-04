@@ -320,3 +320,67 @@ After Fix (this run):
 1. Investigate static array initialization optimization (high impact)
 2. Continue investigating remaining code failures (subList, etc.)
 3. Run full test suite to see combined impact of all fixes
+
+## Session 3 - Float_2 XFAIL Fix (2025-10-04 continued)
+
+### Float_2 Investigation and Fixes - ✅ **XFAIL NOW PASSING!**
+
+**Initial Problem:**
+Float_2 was an expected failure (XFAIL) testing floating-point to integer conversions
+with NaN and Infinity values. The test was failing with infinite recursion.
+
+**Root Causes Identified and Fixed:**
+
+1. **Missing NaN/Infinity Handling (Commit c209444)**
+   - Problem: Converting NaN or Infinity to int/long caused errors or wrong values
+   - Fix: Added checks in F2I, D2I, F2L, D2L codegen methods
+     - NaN → 0
+     - +Infinity → MAX_VALUE
+     - -Infinity → MIN_VALUE
+   - Used float-features library to detect NaN/Infinity
+   - Disabled SBCL floating-point traps (src/openldk.lisp:702)
+
+2. **Missing Signed Integer Conversion (Commit 521169f)**
+   - Problem: Integer.MIN_VALUE appeared as 2147483648 instead of -2147483648
+   - Fix: Wrapped results with unsigned-to-signed-integer/long functions
+   - Converts Common Lisp's unsigned representation to Java's signed semantics
+
+3. **LCMP Using Object Identity Instead of Numeric Equality (Commit ff3482d)**
+   - Problem: `(long)(1.0/zero) == Long.MAX_VALUE` returned false
+   - Root cause: LCMP used EQ which tests object identity
+   - Large numbers like 9223372036854775807 may be different objects in Lisp
+   - Fix: Changed `EQ` to `=` for proper numeric comparison (src/codegen.lisp:1016)
+
+4. **Array Bounds Checking for Bootstrap Safety (Commit 521169f, ff3482d)**
+   - Problem: Array access errors caused infinite recursion creating ArrayIndexOutOfBoundsException
+   - Fix: Added explicit bounds checking in jaref/setf jaref
+   - Initially used simple-error, then switched to proper Java exceptions after LCMP fix
+   - Calls exception constructor with index as message
+
+**Testing Results:**
+```bash
+$ ./openldk Float_2
+[no output = success!]
+```
+
+All test cases now pass:
+- ✅ NaN conversions (literal and calculated)
+- ✅ +Infinity to MAX_VALUE (literal and calculated, int and long)
+- ✅ -Infinity to MIN_VALUE (literal and calculated, int and long)
+- ✅ Both float and double variants
+
+**Files Modified:**
+- src/openldk.lisp: Disabled floating-point traps
+- src/codegen.lisp: F2I, D2I, F2L, D2L with NaN/Infinity handling; LCMP fix
+- src/arrays.lisp: Array bounds checking with Java exceptions
+
+**Impact:**
+- **Float_2 XFAIL → PASS!** First XFAIL test fixed in this session
+- Proper IEEE 754 compliance for edge cases
+- Better error messages for array bounds violations
+- Foundation for fixing other floating-point related tests
+
+**Commits:**
+1. `c209444` - Fix NaN and Infinity handling in float-to-int conversions
+2. `521169f` - Fix signed integer conversion and add array bounds checking
+3. `ff3482d` - Fix LCMP to use numeric equality and proper Java exception throwing
