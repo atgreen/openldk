@@ -21,28 +21,42 @@
 - ❌ PR36252 - Timeout/hang
 - ⚠️  Thread_Wait - Partial implementation (wait/notify added but has single-CV issue)
 
+## Update - After Object.wait/notify Implementation (Session 7)
+**FIXED (4 of 7):**
+- ✅ Thread_Wait - Now passes! (wait/notify fully implemented)
+- Previous 3 tests remain passing
+
+**REMAINING (3 of 7):**
+- ❌ err1 - NullPointerException not caught
+- ❌ md5test - Timeout/hang
+- ❌ PR36252 - Timeout/hang
+
 ## Session Notes - Object.wait/notify Implementation
 
-**Implemented:**
+**Final Implementation:**
 - Added IllegalMonitorStateException stub class to bootstrap.lisp
 - Fixed make-image to kill Java threads before core save (SBCL limitation)
-- Basic Object.wait(J), notify(), and notifyAll() methods in native.lisp
+- Full Object.wait(J), notify(), and notifyAll() methods in native.lisp
+- Added wait-set slot to <java-monitor> for explicit wait-set tracking
+- Added thread completion waiting logic in main() to wait for non-daemon threads
+- Added output buffer flushing before program exit
 
-**Current Issue:**
-The implementation uses a single condition variable for both:
-1. Monitor entry/exit synchronization
-2. Object.wait/notify signaling
+**Architecture - Single CV with Wait-Set Tracking:**
+The implementation uses a single condition variable (matching JVM ObjectMonitor design) with explicit wait-set list tracking:
+1. Monitor entry/exit: Threads loop on CV while owner != nil
+2. Object.wait/notify: Threads added to wait-set, loop on CV while in wait-set
+3. notify(): Removes thread from wait-set, broadcasts CV
+4. Waiting thread wakes, sees it's not in wait-set, proceeds to re-acquire monitor
 
-This causes a conflict where notify() can wake threads waiting to enter the
-monitor instead of threads in wait(). The fix requires adding a second
-condition variable to <java-monitor> but this causes build failures that
-need investigation. The defclass/std macro or slot initialization may have
-issues with the additional slot.
+**Key Bug Fixes:**
+1. **Stub Override**: Found stub notify/notifyAll methods that were overriding real implementation
+2. **Output Flushing**: Programs exited before thread output flushed - added sleep + finish-output
 
 **Test Results:**
-- Simple wait/notify tests PASS (TestWaitSimple, TestWait0)
-- Thread_Wait.java HANGS when using `this` as the lock object
-- The hang is reproducible and appears to be the CV conflict issue
+- ✅ TestWait0 - PASS (separate lock object)
+- ✅ TestWaitThis - PASS (using 'this' as lock)
+- ✅ Thread_Wait - PASS (GCJ test suite)
+- All wait/notify synchronization working correctly
 
 ## Failure Details
 
