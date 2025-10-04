@@ -488,3 +488,94 @@ Error: The function OPENLDK::|interrupt0()| is undefined.
 
 **Commits:**
 1. `b4bac0e` - Implement Thread.interrupt0() native method
+
+## Session 6 - Full Threading Implementation (2025-10-04 continued)
+
+### Thread Support Investigation
+
+**Discovery:** The minimal interrupt0() stub from Session 5 wasn't sufficient. User requested proper threading implementation with bordeaux-threads.
+
+**Key Finding - Java 8 Thread.interrupted Status:**
+- Examined Java 8 rt.jar Thread.class with javap
+- **Discovered:** Java 8 Thread does NOT have `interrupted` as a field!
+- The interrupted status is VM-managed, accessed via native methods:
+  - `private native boolean isInterrupted(boolean)`
+  - `public static boolean interrupted()`
+  - `private native void interrupt0()`
+- This differs from later Java versions which have it as a field
+
+### Full Threading Implementation (Commit dfddf6a)
+
+**Architecture Design:**
+
+Three thread-safe hash tables in src/global-state.lisp:
+```lisp
+(defvar *java-threads* (make-hash-table :test #'eq :synchronized t))
+(defvar *lisp-to-java-threads* (make-hash-table :test #'eq :synchronized t))
+(defvar *thread-interrupted* (make-hash-table :test #'eq :synchronized t))
+```
+
+**Implementation Details:**
+
+1. **Thread.start0()** - Creates actual concurrent Lisp threads
+   - Uses bordeaux-threads:make-thread
+   - Registers thread in bidirectional mapping
+   - Executes Thread's run() method in background
+   - Proper error handling for thread termination
+
+2. **Thread.interrupt0()** - Sets interrupt flag and signals thread
+   - Sets interrupted flag in *thread-interrupted* hash table
+   - Uses bordeaux-threads:interrupt-thread to wake blocking operations
+   - Lambda checks interrupt flag and throws InterruptedException
+
+3. **Thread.sleep()** - Enhanced to check interrupts
+   - Checks interrupt flag before sleeping
+   - Checks interrupt flag after sleeping
+   - Clears flag and throws InterruptedException when interrupted
+   - Thread-safe using synchronized hash tables
+
+4. **Thread.currentThread()** - Returns correct thread per Lisp thread
+   - Uses *lisp-to-java-threads* to find Java Thread for current Lisp thread
+   - Falls back to main thread for compatibility
+   - Registers main thread in mappings when created
+
+**Thread Safety:**
+- All hash tables use `:synchronized t` for SBCL thread-safe access
+- Each thread primarily modifies its own interrupt status
+- Thread mappings written once at creation, then read-only
+
+**Testing:**
+```bash
+$ cat SimpleThreadTest.java
+# Test creates background thread, both print messages concurrently
+
+$ ./openldk SimpleThreadTest
+Main thread starting
+Starting background thread...
+Main thread sleeping...
+Background thread running!
+Background thread finishing
+Main thread done
+# Perfect concurrent execution! ✓
+```
+
+**Results:**
+- ✅ pr22211 passes (Thread.interrupt() works)
+- ✅ Threads run concurrently in background
+- ✅ Thread interruption properly signals threads
+- ✅ InterruptedException thrown correctly
+- ✅ All hash table accesses are thread-safe
+- ✅ Zero linting issues
+
+**Files Modified:**
+- src/global-state.lisp: Added 3 thread-safe hash tables (+12 lines)
+- src/native.lisp: Implemented full threading (+90 lines, -17 lines)
+
+**Key Technical Details:**
+- Interrupt status stored externally (not as Thread field) due to Java 8 design
+- bordeaux-threads provides portable threading across Lisp implementations
+- Each Java Thread maps to one Lisp thread (bordeaux-threads)
+- Main thread registered lazily when first accessed
+
+**Commits:**
+1. `dfddf6a` - Implement proper Java thread support with bordeaux-threads
