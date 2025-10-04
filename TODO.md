@@ -9,11 +9,13 @@
   - Fix regressions in core functionality
 
 ### Code Quality
+- [x] Fix type comparisons (use typep instead of eq type-of) - DONE 2025-01-03
+- [x] Add stack depth assertion to catch bytecode verification violations - DONE 2025-01-03
 - [ ] Address undefined function warnings from build
-  - `|<init>()|` - called before definition
+  - `|<init>()|` - called before definition (these are expected - methods defined dynamically)
   - `|java/lang/System.initializeSystemClass()|` - undefined
   - `|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)|` - undefined
-- [ ] Fix undefined variable warning: `|+static-java/lang/System+|`
+- [ ] Fix undefined variable warning: `|+static-java/lang/System+|` (compile-time only, works at runtime)
 - [ ] Resolve style warning: `&OPTIONAL` and `&KEY` in same lambda list (main function)
 
 ## Core Features (Missing/Incomplete)
@@ -78,6 +80,13 @@
 ---
 
 ## Completed
+
+### 2025-01-03
+- [x] Create comprehensive HACKING.md with architecture documentation
+- [x] Create TODO.md development roadmap
+- [x] Add clarifying comments to stack merging side-effect behavior
+- [x] Fix type comparison to use typep instead of eq type-of
+- [x] Add assertion to detect stack depth mismatches
 - [x] Fix linting issues throughout codebase
 - [x] Add SPDX license identifiers
 - [x] Remove unnecessary package prefixes
