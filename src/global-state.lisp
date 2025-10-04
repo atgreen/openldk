@@ -46,19 +46,19 @@
 
 ;; These two tables only contain entries for classes that have been
 ;; loaded.
-(defvar *ldk-classes-by-bin-name* (make-hash-table :test #'equal))
-(defvar *ldk-classes-by-fq-name* (make-hash-table :test #'equal))
+(defvar *ldk-classes-by-bin-name* (make-hash-table :test #'equal :synchronized t))
+(defvar *ldk-classes-by-fq-name* (make-hash-table :test #'equal :synchronized t))
 
 ;; These two tables contain java.lang.Class objects, some of which may
 ;; not have been loaded yet.  We will populate them when they are
 ;; loaded.
-(defvar *java-classes-by-bin-name* (make-hash-table :test #'equal))
-(defvar *java-classes-by-fq-name* (make-hash-table :test #'equal))
+(defvar *java-classes-by-bin-name* (make-hash-table :test #'equal :synchronized t))
+(defvar *java-classes-by-fq-name* (make-hash-table :test #'equal :synchronized t))
 
-(defvar *packages* (make-hash-table :test #'equal))
+(defvar *packages* (make-hash-table :test #'equal :synchronized t))
 
 (defvar *context* nil)
-(defvar *condition-table* (make-hash-table))
+(defvar *condition-table* (make-hash-table :synchronized t))
 
 (defvar *call-nesting-level* 0)
 

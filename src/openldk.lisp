@@ -45,8 +45,14 @@
 ;; It would be good if we didn't have to do this.
 (defvar *force-this-to-be-used* nil)
 
-(defvar *methods-being-compiled* (make-hash-table :test #'equal)
-  "Hash table tracking methods currently being compiled to prevent re-entrant compilation.")
+(defvar *methods-being-compiled* (make-hash-table :test #'equal :synchronized t)
+  "Hash table tracking methods currently being compiled. Value is either T (compiling) or :DONE (compiled).")
+
+(defvar *method-compilation-lock* (bt:make-lock "method-compilation-lock")
+  "Lock to ensure atomic check-and-set for method compilation tracking.")
+
+(defvar *method-compilation-cv* (bt:make-condition-variable :name "method-compilation-cv")
+  "Condition variable to signal when a method compilation completes.")
 
 (defun %eval (code)
   "Evaluate generated CODE, optionally printing and muffling warnings."
@@ -186,11 +192,21 @@
   (let* ((class (%get-ldk-class-by-bin-name class-name))
          (method (aref (slot-value class 'methods) (1- method-index)))
          (method-key (format nil "~A.~A~A" class-name (slot-value method 'name) (slot-value method 'descriptor))))
-    ;; Guard against re-entrant compilation of the same method
-    (when (gethash method-key *methods-being-compiled*)
-      (format t "; WARNING: Skipping re-entrant compilation of ~A~%" method-key)
-      (return-from %compile-method nil))
-    (setf (gethash method-key *methods-being-compiled*) t)
+    ;; Use a lock to atomically check if method is being compiled and claim it if not
+    (bt:with-lock-held (*method-compilation-lock*)
+      (loop
+        (let ((status (gethash method-key *methods-being-compiled*)))
+          (cond
+            ((eq status :done)
+             ;; Already compiled by another thread
+             (return-from %compile-method nil))
+            ((eq status t)
+             ;; Another thread is currently compiling - wait for it to finish
+             (bt:condition-wait *method-compilation-cv* *method-compilation-lock*))
+            (t
+             ;; Not being compiled - claim it and proceed
+             (setf (gethash method-key *methods-being-compiled*) t)
+             (return))))))
     (unwind-protect
         (when (gethash "Code" (slot-value method 'attributes)) ; otherwise it is abstract
       (let* ((parameter-hints (gen-parameter-hints (descriptor method)))
@@ -373,8 +389,10 @@
                                                 collect (list (intern (format nil "local-~A" (incf i)) :openldk)))))))
                                                 array-checked-lisp-code)))))))))
           (%eval definition-code))))
-      ;; Cleanup: remove from compilation tracking
-      (remhash method-key *methods-being-compiled*))))
+      ;; Cleanup: mark compilation as done and notify waiting threads
+      (bt:with-lock-held (*method-compilation-lock*)
+        (setf (gethash method-key *methods-being-compiled*) :done)
+        (bt:condition-notify *method-compilation-cv*)))))
 
 (defun %clinit (class)
   (let ((class (gethash (name class) *ldk-classes-by-bin-name*)))
@@ -391,7 +409,13 @@
                                        (slot-value class 'methods))))
                  (when <clinit>-method
                    (setf (initialized-p class) t)
-                   (%eval (list (intern (format nil "~A.<clinit>()" (slot-value class 'name)) :openldk)))))))
+                   (handler-case
+                       (%eval (list (intern (format nil "~A.<clinit>()" (slot-value class 'name)) :openldk)))
+                     (error (e)
+                       ;; Wrap exception in ExceptionInInitializerError
+                       (let ((eiie (make-instance '|java/lang/ExceptionInInitializerError|)))
+                         (|<init>()| eiie)
+                         (error (%lisp-condition eiie)))))))))
       (clinit class))))
 
 (defun open-java-classfile-on-classpath (class)
@@ -687,10 +711,11 @@
 
     ;; The `main` method may be in a superclass of CLASS.  Search for it.
     (labels ((find-main (class)
-               (let ((main-symbol (intern (format nil "~A.main([Ljava/lang/String;)" (name class)) :openldk)))
-                 (if (fboundp main-symbol)
-                     main-symbol
-                     (find-main (gethash (super class) *ldk-classes-by-bin-name*))))))
+               (when class
+                 (let ((main-symbol (intern (format nil "~A.main([Ljava/lang/String;)" (name class)) :openldk)))
+                   (if (fboundp main-symbol)
+                       main-symbol
+                       (find-main (gethash (super class) *ldk-classes-by-bin-name*)))))))
       (let ((main-symbol (find-main class)))
         (if main-symbol
             (%eval (list main-symbol argv))

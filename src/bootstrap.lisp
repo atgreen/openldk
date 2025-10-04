@@ -149,6 +149,10 @@
     (|condition-java/lang/Throwable|)
   ())
 
+(define-condition |condition-java/lang/ExceptionInInitializerError|
+    (|condition-java/lang/Throwable|)
+  ())
+
 (defclass |java/lang/Throwable| (|java/lang/Object|)
   ()
   (:documentation "Stub for java.lang.Throwable"))
@@ -156,6 +160,10 @@
 (defclass |java/lang/Exception| (|java/lang/Throwable|)
   ()
   (:documentation "Stub for java.lang.Exception"))
+
+(defclass |java/lang/ExceptionInInitializerError| (|java/lang/Error|)
+  ()
+  (:documentation "Stub for java.lang.ExceptionInInitializerError"))
 
 (defclass |java/lang/ArithmeticException| (|java/lang/RuntimeException|)
   ()
@@ -172,3 +180,7 @@
 (defclass |sun/management/VMManagementImpl| (|java/lang/Object|)
   ()
   (:documentation "Stub for sun.management.VMManagementImpl"))
+
+;; Stub constructor for ExceptionInInitializerError (needed during class loading)
+(defmethod |<init>()| ((e |java/lang/ExceptionInInitializerError|))
+  e)
