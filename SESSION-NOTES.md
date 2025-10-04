@@ -135,9 +135,31 @@ Exceptions integrated into control flow graph:
 
 All commits passed linting (ocicl lint openldk.asd).
 
+## Test Suite Status (In Progress)
+
+Test suite launched at 21:42, currently running for ~20 minutes.
+
+**Current Results (as of ~22:02):**
+- 380+ PASS (expected passes)
+- 80+ XFAIL (expected failures - known issues)
+- 1 FAIL (unexpected failure):
+  - `gcj/PR36252.java execution test` - TIMEOUT
+    - Test for MS932 (Japanese) character encoding
+    - String constructor with encoding appears to hang/loop
+    - Not in expected-failures.txt, so this is a new issue
+
+**Expected Final Results (from README):**
+- 8,839 expected passes
+- 11 unexpected failures
+- 1,712 expected failures
+- 11 unresolved testcases
+
+Currently at ~470 results out of ~10,500+ expected total.
+Test suite still running through jikestst, then will run mauve (the bulk of tests).
+
 ## Repository State
 
 Branch: master
 Status: 9 commits ahead of origin/master
 Working tree: Clean
-Next: Analyze test results
+Next: Continue monitoring test results, analyze when complete
