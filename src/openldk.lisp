@@ -698,6 +698,8 @@
 
 (defun main-wrapper ()
   "Main entry point into OpenLDK. Process command line errors here."
+  ;; Disable floating-point traps to match Java semantics (NaN/Infinity instead of errors)
+  (sb-int:set-floating-point-modes :traps nil)
   (handler-case
       (main-command)
     (cli:wrong-number-of-args (condition)

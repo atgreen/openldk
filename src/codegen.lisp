@@ -686,17 +686,30 @@
                  :expression-type :FLOAT))
 
 (defmethod codegen ((insn ir-d2i) context)
-  ;; FIXME sign conversion?
   (make-instance '<expression>
                  :insn insn
-                 :code `(logand (floor ,(code (codegen (value insn) context))) #xFFFFFFFF)
-                 :expression-type :DOUBLE))
+                 :code `(let ((value ,(code (codegen (value insn) context))))
+                          (logand
+                           (cond
+                             ((float-features:float-nan-p value) 0)
+                             ((float-features:float-infinity-p value)
+                              (if (plusp value) #x7FFFFFFF #x80000000))
+                             (t (floor value)))
+                           #xFFFFFFFF))
+                 :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-d2l) context)
   (make-instance '<expression>
                  :insn insn
-                 :code (list 'floor (code (codegen (value insn) context)))
-                 :expression-type :DOUBLE))
+                 :code `(let ((value ,(code (codegen (value insn) context))))
+                          (logand
+                           (cond
+                             ((float-features:float-nan-p value) 0)
+                             ((float-features:float-infinity-p value)
+                              (if (plusp value) #x7FFFFFFFFFFFFFFF #x8000000000000000))
+                             (t (floor value)))
+                           #xFFFFFFFFFFFFFFFF))
+                 :expression-type :LONG))
 
 (defmethod codegen ((insn ir-l2f) context)
   (make-instance '<expression>
@@ -768,17 +781,27 @@
 (defmethod codegen ((insn ir-f2i) context)
   (make-instance '<expression>
                  :insn insn
-                 :code (list 'logand
-                             (list 'floor (code (codegen (value insn) context)))
-                             #xFFFFFFFF)
+                 :code `(let ((value ,(code (codegen (value insn) context))))
+                          (logand
+                           (cond
+                             ((float-features:float-nan-p value) 0)
+                             ((float-features:float-infinity-p value)
+                              (if (plusp value) #x7FFFFFFF #x80000000))
+                             (t (floor value)))
+                           #xFFFFFFFF))
                  :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-f2l) context)
   (make-instance '<expression>
                  :insn insn
-                 :code (list 'logand
-                             (list 'floor (code (codegen (value insn) context)))
-                             #xFFFFFFFFFFFFFFFF)
+                 :code `(let ((value ,(code (codegen (value insn) context))))
+                          (logand
+                           (cond
+                             ((float-features:float-nan-p value) 0)
+                             ((float-features:float-infinity-p value)
+                              (if (plusp value) #x7FFFFFFFFFFFFFFF #x8000000000000000))
+                             (t (floor value)))
+                           #xFFFFFFFFFFFFFFFF))
                  :expression-type :LONG))
 
 (defmethod codegen ((insn ir-iinc) context)
