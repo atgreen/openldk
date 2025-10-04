@@ -169,6 +169,14 @@
   ()
   (:documentation "Stub for java.lang.ArithmeticException"))
 
+(define-condition |condition-java/lang/IllegalMonitorStateException|
+    (|condition-java/lang/Exception|)
+  ())
+
+(defclass |java/lang/IllegalMonitorStateException| (|java/lang/Exception|)
+  ()
+  (:documentation "Stub for java.lang.IllegalMonitorStateException"))
+
 (defclass |java/net/Inet4AddressImpl| (|java/lang/Object|)
   ()
   (:documentation "Stub for java.net.Inet4AddressImpl"))
