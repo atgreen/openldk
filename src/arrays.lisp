@@ -58,11 +58,29 @@
 
 (defun jaref (array index)
   "Java-style array access for ARRAY at INDEX."
-  (aref (java-array-data array) index))
+  (let* ((data (java-array-data array))
+         (len (length data)))
+    (when (or (< index 0) (>= index len))
+      (format *error-output* "~%Array bounds error: index ~A, length ~A~%" index len)
+      (format *error-output* "Backtrace:~%")
+      (trivial-backtrace:print-backtrace-to-stream *error-output*)
+      (error 'simple-error
+             :format-control "Array index out of bounds: ~A (length ~A)"
+             :format-arguments (list index len)))
+    (aref data index)))
 
 (defun (setf jaref) (new-value array index)
   "Setter for JAVA array element at INDEX."
-  (setf (aref (java-array-data array) index) new-value))
+  (let* ((data (java-array-data array))
+         (len (length data)))
+    (when (or (< index 0) (>= index len))
+      (format *error-output* "~%Array bounds error: index ~A, length ~A~%" index len)
+      (format *error-output* "Backtrace:~%")
+      (trivial-backtrace:print-backtrace-to-stream *error-output*)
+      (error 'simple-error
+             :format-control "Array index out of bounds: ~A (length ~A)"
+             :format-arguments (list index len)))
+    (setf (aref data index) new-value)))
 
 (defun java-array-length (array)
   "Return the logical length of the Java-style ARRAY."
