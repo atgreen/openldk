@@ -137,16 +137,21 @@ All commits passed linting (ocicl lint openldk.asd).
 
 ## Test Suite Status (In Progress)
 
-Test suite launched at 21:42, currently running for ~20 minutes.
+Test suite launched at 21:42, running for ~25 minutes.
 
-**Current Results (as of ~22:02):**
-- 380+ PASS (expected passes)
-- 80+ XFAIL (expected failures - known issues)
+**Current Results (as of ~22:07):**
+- 684 PASS (expected passes)
+- 106 XFAIL (expected failures - known issues)
 - 1 FAIL (unexpected failure):
   - `gcj/PR36252.java execution test` - TIMEOUT
     - Test for MS932 (Japanese) character encoding
     - String constructor with encoding appears to hang/loop
     - Not in expected-failures.txt, so this is a new issue
+- 282 UNRESOLVED (compilation failures)
+  - **Build System Issue**: `testsuite/mauve/gnu/testlet/config.class` compiled with Java 21 (version 65.0)
+  - Should be Java 8 (version 52.0)
+  - Causing ~280+ mauve tests to fail compilation
+  - Need to recompile config.java with correct Java version
 
 **Expected Final Results (from README):**
 - 8,839 expected passes
@@ -154,12 +159,17 @@ Test suite launched at 21:42, currently running for ~20 minutes.
 - 1,712 expected failures
 - 11 unresolved testcases
 
-Currently at ~470 results out of ~10,500+ expected total.
-Test suite still running through jikestst, then will run mauve (the bulk of tests).
+Currently at ~1,073 results out of ~10,500+ expected total (~10% complete).
+Test suite now running through mauve tests.
 
 ## Repository State
 
 Branch: master
-Status: 9 commits ahead of origin/master
+Status: 11 commits ahead of origin/master (added 2 commits: SESSION-NOTES update, linting fixes)
 Working tree: Clean
+
+**Latest Commits:**
+- `304bd6f` - Fix linting issues in descriptors.lisp (lint:suppress for #\( character literals)
+- `9243cbc` - Update SESSION-NOTES with test suite progress
+
 Next: Continue monitoring test results, analyze when complete
