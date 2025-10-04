@@ -165,6 +165,10 @@ Core libraries (managed by ocicl):
 
 ## Hacking
 
-The source for JDK8 is found in ~/git/jdk.  Use it as a reference for
-how this is supposed to work.
+See HACKING.md for important notes on this project.
+
+## To Do
+
+See TODO.md for things we need to do.
+
 
