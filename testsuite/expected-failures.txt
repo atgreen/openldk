@@ -8,10 +8,8 @@ FAIL: gcj/invokethrow.java execution test
 FAIL: gcj/LargeFile.java execution test
 FAIL: gcj/N19990310_5.java execution test
 FAIL: gcj/newarray_overflow.java execution test
-FAIL: gcj/PR141.java execution test
 FAIL: gcj/pr21785.java execution test
 FAIL: gcj/PR218.java execution test
-FAIL: gcj/pr22211.java execution test
 FAIL: gcj/pr25676.java execution test
 FAIL: gcj/PR26858.java execution test
 FAIL: gcj/PR27908.java execution test
