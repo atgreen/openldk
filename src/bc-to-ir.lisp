@@ -1944,6 +1944,10 @@
   "Merge two lists of stack-variable objects into one.
 Side effect: Mutates both sv1 and sv2 objects to have unified var-numbers.
 Returns a new list, but the important work is the mutation of shared objects."
+  (assert (= (length list1) (length list2))
+          (list1 list2)
+          "Stack depth mismatch: ~D vs ~D at merge point. This violates Java bytecode verification rules."
+          (length list1) (length list2))
   (loop for sv1 in list1
         for sv2 in list2
         collect (merge-stack-variables sv1 sv2)))
