@@ -247,6 +247,10 @@ Latest run (with build fixes in place):
 
 **Known Failures to Investigate:**
 1. ✅ PR36252 (MS932 encoding) - **FIXED**
+   - **MAJOR IMPACT**: PR36252 timeout was blocking all remaining gcj tests!
+   - Test suite gave up on gcj/ after PR36252 timeouts
+   - Only 1 of 197 gcj tests ran in previous test suite
+   - With fix, all ~196 remaining gcj tests should now run
 2. ⚠️ 3 subList() failures - ArrayList, LinkedList, Vector
    - Root cause: NullPointerException during class loading
    - NPE occurs in java/lang/Class.forName() when loading test class
@@ -276,4 +280,43 @@ Working tree: Modified (untracked test logs)
 7. ✅ Added re-entrant compilation guard (defensive)
 8. ✅ Zero regressions in test suite
 
-**Next: Investigate remaining code failures (subList, etc.)**
+### GCJ Test Suite - COMPLETED ✅
+
+**MAJOR SUCCESS**: PR36252 fix unlocked 393 additional gcj tests!
+
+**Results**:
+```
+Before Fix (old test run):
+- 1 test ran (PR36252 timeout → test suite gave up)
+- 0 PASS
+- 1 FAIL
+
+After Fix (this run):
+- 394 tests ran
+- 333 PASS ✅ (+333 new passing tests!)
+- 1 FAIL (PR36252 in test harness - using old binary)
+- 60 XFAIL (expected failures)
+```
+
+**Impact Analysis**:
+- Our classpath fix unlocked **333 passing tests** that were never running
+- Went from 0% gcj pass rate → 84.5% pass rate (333/394)
+- Only 1 unexpected failure (PR36252 itself, only in test harness)
+- PR36252 passes when run manually with new binary (verified)
+
+**Performance Observations**:
+- Individual tests run quickly (2-10 seconds each)
+- Total suite runtime: ~8 minutes for 394 tests
+- Exception: Tests involving charset initialization (ExtendedCharsets.<clinit>)
+
+**Performance Issue Identified**:
+- Static array initialization uses `:INITIAL-CONTENTS (VECTOR el1 el2 ...)`
+- ExtendedCharsets.<clinit> creates ~152 arrays this way
+- Each array generates inline vector code, creating large codegen
+- PR36252 takes ~55 seconds due to charset initialization
+- **Optimization opportunity**: Use more efficient array initialization strategy
+
+**Next Steps**:
+1. Investigate static array initialization optimization (high impact)
+2. Continue investigating remaining code failures (subList, etc.)
+3. Run full test suite to see combined impact of all fixes
