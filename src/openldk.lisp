@@ -207,16 +207,32 @@
 ;;; ============================================================================
 
 (defun compute-local-definitions (block)
-  "Return a hash table mapping local-index -> list of IR-ASSIGN instructions in BLOCK.
-   Only includes assignments to ir-local-variable and ir-long-local-variable."
-  (let ((defs (make-hash-table :test #'eql)))
+  "Return a hash table mapping local-index -> list of IR-ASSIGN instructions that define
+   stack variables which are then assigned to that local.
+
+   Pattern: We track assignments of form 'local-X = s{Y}' and record the defining
+   assignment 's{Y} = value' (if it exists in this block)."
+  (let ((defs (make-hash-table :test #'eql))
+        ;; First pass: collect stack-var -> definition mapping in this block
+        (stack-defs (make-hash-table :test #'eq)))
     (dolist (insn (slot-value block 'code))
       (when (typep insn 'ir-assign)
         (let ((lvalue (slot-value insn 'lvalue)))
-          (when (or (typep lvalue 'ir-local-variable)
-                    (typep lvalue 'ir-long-local-variable))
-            (let ((idx (slot-value lvalue 'index)))
-              (push insn (gethash idx defs)))))))
+          (when (typep lvalue '<stack-variable>)
+            (setf (gethash lvalue stack-defs) insn)))))
+
+    ;; Second pass: for each 'local-X = s{Y}', record s{Y}'s definition
+    (dolist (insn (slot-value block 'code))
+      (when (typep insn 'ir-assign)
+        (let ((lvalue (slot-value insn 'lvalue))
+              (rvalue (slot-value insn 'rvalue)))
+          (when (and (or (typep lvalue 'ir-local-variable)
+                         (typep lvalue 'ir-long-local-variable))
+                     (typep rvalue '<stack-variable>))
+            (let ((idx (slot-value lvalue 'index))
+                  (stack-def (gethash rvalue stack-defs)))
+              (when stack-def
+                (push stack-def (gethash idx defs))))))))
     defs))
 
 (defun compute-gen-kill-sets (block all-local-defs)
@@ -329,62 +345,51 @@
 
 (defun apply-reaching-definitions (block reaching-in global-table)
   "Apply inter-block local propagation using reaching definitions.
-   For each use of a local in BLOCK:
-   - If exactly ONE definition reaches (from reaching-in set)
-   - And that definition assigns a safe-to-propagate value to a stack variable
-   - Add that mapping to the global-table (enabling cross-block propagation)
 
-   This enables Phase 3 inter-block propagation."
+   Strategy: For each instruction 'local-X = s{Y}' in BLOCK, if exactly ONE
+   stack-variable definition 's{Y} = value' reaches (tracked via reaching-in),
+   and that value is safe (literal or SSA stack-var), add s{Y} -> value
+   to the global table to enable cross-block propagation.
+
+   Pattern:
+     Block A: s{3} = 42         (this is the reaching definition)
+              local-5 = s{3}
+     Block B: local-6 = s{3}    (s{3} = 42 reaches here)
+              x = s{3}           (will be substituted by Phase 2)
+
+   Result: We add s{3} -> 42 to global table for cross-block uses."
   (let ((in-set (gethash block reaching-in (fset:empty-set))))
-    ;; Build a map from local-index -> reaching definitions
-    (let ((local-reaching (make-hash-table :test #'eql)))
+    ;; Build a map from stack-var -> list of reaching definitions
+    (let ((stack-var-reaching (make-hash-table :test #'eq)))
       (fset:do-set (def-insn in-set)
-        (let* ((lvalue (slot-value def-insn 'lvalue))
-               (idx (slot-value lvalue 'index)))
-          (push def-insn (gethash idx local-reaching))))
+        ;; def-insn is a stack-var assignment 's{Y} = value'
+        (let* ((stack-var (slot-value def-insn 'lvalue)))
+          (when (typep stack-var '<stack-variable>)
+            (push def-insn (gethash stack-var stack-var-reaching)))))
 
-      ;; For each use of a local in this block, check if unique def reaches
+      ;; For each instruction in this block that uses a stack-var with reaching def
       (dolist (insn (slot-value block 'code))
-        (let ((local-uses '()))
-          ;; Collect all local variable reads in this instruction
-          (labels ((collect-locals (ir)
-                     (cond
-                       ((typep ir 'ir-local-variable)
-                        (push ir local-uses))
-                       ((typep ir 'ir-long-local-variable)
-                        (push ir local-uses))
-                       ;; Recursively check slots
-                       ((typep ir 'ir-instruction)
-                        (dolist (slot-def (closer-mop:class-slots (class-of ir)))
-                          (let ((slot-name (closer-mop:slot-definition-name slot-def)))
-                            (when (slot-boundp ir slot-name)
-                              (let ((slot-value (slot-value ir slot-name)))
-                                (when (typep slot-value 'ir-instruction)
-                                  (collect-locals slot-value))
-                                (when (listp slot-value)
-                                  (dolist (item slot-value)
-                                    (when (typep item 'ir-instruction)
-                                      (collect-locals item)))))))))))))
-            (collect-locals insn))
-
-          ;; For each local use, check reaching definitions
-          (dolist (local-use local-uses)
-            (let* ((idx (slot-value local-use 'index))
-                   (reaching-defs (gethash idx local-reaching)))
-              ;; Only propagate if exactly ONE definition reaches
-              (when (and reaching-defs
-                         (= (length reaching-defs) 1))
-                (let* ((unique-def (car reaching-defs))
-                       (rvalue (slot-value unique-def 'rvalue))
-                       (def-lvalue (slot-value unique-def 'lvalue)))
-                  ;; Only propagate if the definition assigns to a stack variable
-                  ;; and the rvalue is safe (literal or SSA)
-                  (when (and (typep def-lvalue '<stack-variable>)
-                             (or (typep rvalue 'ir-literal)
-                                 (typep rvalue '<stack-variable>))
-                             (not (side-effect-p rvalue)))
-                    ;; Add to global table for cross-block propagation
-                    (setf (gethash def-lvalue global-table) rvalue))))))))))
+        (when (typep insn 'ir-assign)
+          (let ((lvalue (slot-value insn 'lvalue))
+                (rvalue (slot-value insn 'rvalue)))
+            ;; Pattern: 'local-X = s{Y}' or any use of s{Y}
+            (when (typep rvalue '<stack-variable>)
+              (let ((reaching-defs (gethash rvalue stack-var-reaching)))
+                ;; If exactly one definition of s{Y} reaches here
+                (when (and reaching-defs
+                           (= (length reaching-defs) 1))
+                  (let* ((unique-def (car reaching-defs))
+                         (def-rvalue (slot-value unique-def 'rvalue)))
+                    ;; Dereference the rvalue through global table if it's a stack-var
+                    (let ((ultimate-value (if (typep def-rvalue '<stack-variable>)
+                                             (gethash def-rvalue global-table def-rvalue)
+                                             def-rvalue)))
+                      ;; Add cross-block mapping: s{Y} -> ultimate-value
+                      (when (and ultimate-value
+                                 (or (typep ultimate-value 'ir-literal)
+                                     (typep ultimate-value '<stack-variable>))
+                                 (not (side-effect-p ultimate-value)))
+                        (setf (gethash rvalue global-table) ultimate-value)))))))))))))
 
 (defun can-propagate-p (var rvalue def-insn use-list-table ir-code &key allow-locals)
   "Determine if we can safely propagate VAR's definition (RVALUE) to all use sites.

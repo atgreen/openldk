@@ -82,9 +82,9 @@
 ;; Propagates local variables within basic blocks when no intervening assignments exist.
 (defvar *enable-local-propagation* t)
 
-;; Phase 3: Inter-block local variable propagation via reaching definitions. Disabled initially.
+;; Phase 3: Inter-block local variable propagation via reaching definitions. Enabled for testing.
 ;; Uses dataflow analysis to propagate locals across basic blocks when a unique definition reaches.
-(defvar *enable-reaching-definitions* nil)
+(defvar *enable-reaching-definitions* t)
 
 (defvar *boot-class-loader* nil)
 
