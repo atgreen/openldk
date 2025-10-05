@@ -1,0 +1,29 @@
+(cd testsuite; runtest --tool openldk gcj/gcj.exp)
+WARNING: Couldn't find the global config file.
+Using /home/green/git/openldk/CLEAN-openldk/openldk/testsuite/lib/openldk.exp as tool init file.
+Test run by green on Sat Oct  4 05:32:03 2025
+Native configuration is x86_64-pc-linux-gnu
+
+		=== openldk tests ===
+
+Schedule of variations:
+    unix
+
+Running target unix
+Using /usr/share/dejagnu/baseboards/unix.exp as board description file for target.
+Using /usr/share/dejagnu/config/unix.exp as generic interface file for target.
+WARNING: Couldn't find tool config file for unix, using default.
+WARNING: could not find testsuite; trying ..
+Running /home/green/git/openldk/CLEAN-openldk/openldk/testsuite/gcj/gcj.exp ...
+WARNING: program timed out
+WARNING: program timed out
+WARNING: program timed out
+FAIL: gcj/PR36252.java execution test
+WARNING: program timed out
+
+		=== openldk Summary ===
+
+# of expected passes		333
+# of unexpected failures	1
+# of expected failures		60
+make: *** [Makefile:11: check] Error 1
