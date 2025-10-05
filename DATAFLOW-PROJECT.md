@@ -24,10 +24,22 @@ current architecture and conventions.
 - IR is linearized from bytecode; stack variables (`<stack-variable>`) are SSA-
   like and immutable after creation.
 - `build-def-use-chains` exists and powers a copy propagation pass that:
-  - Operates on flat IR prior to basic block construction.
-  - Propagates only from `<stack-variable>` and `ir-literal` definitions.
-  - Explicitly avoids propagating through `ir-local-variable` (mutable locals).
+  - Runs on flat IR (pre–basic block construction).
+  - Propagates only from `<stack-variable>` (SSA) and `ir-literal` definitions.
+  - Never propagates locals (`ir-local-variable`, `ir-long-local-variable`).
+  - Dead-code elimination is not performed here (conservative).
 - Basic blocks and dominance are computed after the current propagation.
+
+## Phase Status
+
+- Phase 1 COMPLETE (commit 2f45281): corrected copy propagation so it never
+  propagates locals and only propagates literals and SSA stack variables.
+  This removed the root cause of earlier bootstrap regressions.
+  - Behavior now:
+    - OK: `s{n} = literal`, `s{n} = s{m}` (propagate)
+    - NOT OK: `s{n} = local-k` (do not propagate)
+    - NOT DONE: dead-code removal within this pass (to avoid surprises)
+  - Pipeline unchanged: pass remains on flat IR prior to block building.
 
 ## Definitions and Invariants
 
@@ -89,10 +101,9 @@ Intervening Assignment Check (pseudo‑code)
 ```
 
 Integration Points
-- Add `:allow-locals` option to the propagation routine invoked per block.
-- Only set `:allow-locals t` for the per‑block pass; keep the pre‑block pass as
-  is to handle the global stack‑var/literal cases.
-- Keep existing `side-effect-p` gate.
+- Add a per‑block propagation pass that allows locals when proven safe.
+- Optionally guard with a small feature flag during bake‑in.
+- Keep `side-effect-p` as the safety gate for expressions.
 
 Pipeline Changes
 - `%compile-method` order becomes:
@@ -107,6 +118,8 @@ Pipeline Changes
 Testing
 - Add micro tests where locals are copied/used within the same block with and
   without intervening assignments, including long/double (2‑slot) locals.
+- Include negative tests that ensure locals are not propagated when an
+  intervening assignment exists.
 
 Risks/Mitigations
 - False positives in intervening check: conservative default returns true
@@ -134,8 +147,8 @@ Data Structures
 - Use existing `<basic-block>`, `predecessors`, `successors`, and `dominators`.
 
 Integration
-- Run after block construction and before codegen, after Phase 2.
-- Keep propagation local to method.
+- Run after block construction and before codegen, following Phase 2.
+- Keep propagation local to the current method.
 
 Testing
 - Craft CFGs with branches/merges; confirm propagation only when unique
@@ -170,10 +183,10 @@ Notes
 
 ## Milestones
 
-- M1: Strengthen literal/stack propagation (Phase 1). Ship.
-- M2: Per‑block local propagation (Phase 2) behind a small feature flag (if
-  desired), default on after bake‑in. Ship.
-- M3: Reaching definitions across blocks (Phase 3). Ship.
+- M1: Strengthen literal/stack propagation (Phase 1). COMPLETE.
+- M2: Per‑block local propagation (Phase 2) behind a small feature flag during
+  bake‑in; default on after validation.
+- M3: Reaching definitions across blocks (Phase 3). Implement and ship.
 - M4: SSA exploration (Phase 4) — design doc + prototype.
 
 ## Performance Expectations

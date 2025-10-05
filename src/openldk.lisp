@@ -622,7 +622,8 @@
                                     (stack-state-table *context*)))
                          (fix-stack-variables (stack-variables *context*))
                          (when *enable-copy-propagation*
-                           (setf code (propagate-copies code (single-assignment-table *context*))))
+                           (setf code (propagate-copies code (single-assignment-table *context*)
+                                                       :allow-locals *enable-local-propagation*)))
                          (loop
                            (multiple-value-bind (new-code changed?)
                                (initialize-arrays code *context*)
@@ -631,19 +632,7 @@
                              (setf code new-code)))
                          code)))
                ;; (sdfdfd (print ir-code-0))
-               (blocks-before-local-prop (build-basic-blocks ir-code-0))
-               ;; Phase 2: Per-block local variable propagation
-               ;; IMPORTANT: Use the SAME substitution table across all blocks so that
-               ;; stack variables assigned in one block can be used in another block
-               (blocks (if *enable-local-propagation*
-                           (progn
-                             (when *debug-propagation*
-                               (format t "~&; Running per-block local propagation~%"))
-                             (dolist (block blocks-before-local-prop)
-                               (setf (code block)
-                                     (propagate-copies (code block) (single-assignment-table *context*) :allow-locals t)))
-                             blocks-before-local-prop)
-                           blocks-before-local-prop))
+               (blocks (build-basic-blocks ir-code-0))
                (lisp-code
                  (list (list 'block nil
                              (append (list 'tagbody)
