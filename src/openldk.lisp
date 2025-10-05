@@ -621,9 +621,6 @@
                                         (reduce #'merge-stacks v)))
                                     (stack-state-table *context*)))
                          (fix-stack-variables (stack-variables *context*))
-                         (when *enable-copy-propagation*
-                           (setf code (propagate-copies code (single-assignment-table *context*)
-                                                       :allow-locals *enable-local-propagation*)))
                          (loop
                            (multiple-value-bind (new-code changed?)
                                (initialize-arrays code *context*)
@@ -632,7 +629,19 @@
                              (setf code new-code)))
                          code)))
                ;; (sdfdfd (print ir-code-0))
-               (blocks (build-basic-blocks ir-code-0))
+               ;; Build basic blocks first for CFG-safe propagation
+               (blocks-before-prop (build-basic-blocks ir-code-0))
+               ;; Per-block propagation with shared substitution table
+               (blocks (if *enable-copy-propagation*
+                           (let ((shared-table (single-assignment-table *context*)))
+                             (mapcar (lambda (block)
+                                       (let ((block-code (slot-value block 'code)))
+                                         (setf (slot-value block 'code)
+                                               (propagate-copies block-code shared-table
+                                                               :allow-locals *enable-local-propagation*))
+                                         block))
+                                     blocks-before-prop))
+                           blocks-before-prop))
                (lisp-code
                  (list (list 'block nil
                              (append (list 'tagbody)
