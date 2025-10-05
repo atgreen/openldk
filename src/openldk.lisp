@@ -271,14 +271,16 @@
       (and (= (length use-list) 1)
            (not (side-effect-p rvalue)))))))
 
-(defun propagate-copies (ir-code single-assignment-table &key allow-locals)
+(defun propagate-copies (ir-code global-table &key allow-locals local-table)
   "Aggressively propagate copies using def-use chains.
 
    When allow-locals is NIL (default, Phase 1):
-   - Only propagates literals and stack variables
+   - Only propagates literals and stack variables into global-table
 
    When allow-locals is T (Phase 2, per-block):
-   - Also propagates local variables after checking for intervening assignments"
+   - Propagates literals/SSA into global-table (safe cross-block)
+   - Propagates local variables into local-table ONLY (intra-block only)
+   - local-table must be provided when allow-locals is T"
   ;; Build dataflow information
   (multiple-value-bind (def-table use-list-table use-def-table)
       (build-def-use-chains ir-code)
@@ -295,10 +297,10 @@
                    (when (can-propagate-p var rvalue def-insn use-list-table ir-code
                                          :allow-locals allow-locals)
                      ;; For local variables, check each use site for intervening assignments
-                     (let ((safe-to-propagate t))
-                       (when (and allow-locals
-                                  (or (typep rvalue 'ir-local-variable)
-                                      (typep rvalue 'ir-long-local-variable)))
+                     (let ((safe-to-propagate t)
+                           (is-local (or (typep rvalue 'ir-local-variable)
+                                        (typep rvalue 'ir-long-local-variable))))
+                       (when (and allow-locals is-local)
                          ;; Check every use site
                          (dolist (use-insn (gethash var use-list-table))
                            (when (has-intervening-assignment-p rvalue def-insn use-insn ir-code)
@@ -310,25 +312,39 @@
                        ;; Only propagate if safe
                        (when safe-to-propagate
                          (when *debug-propagation*
-                           (format t "~&; PROPAGATE: ~A = ~A (type: ~A, uses: ~A)~%"
+                           (format t "~&; PROPAGATE: ~A = ~A (type: ~A, uses: ~A, scope: ~A)~%"
                                    var rvalue (type-of rvalue)
-                                   (length (gethash var use-list-table))))
-                         (setf (gethash var single-assignment-table) rvalue)))))))
+                                   (length (gethash var use-list-table))
+                                   (if is-local "local" "global")))
+                         ;; Put locals in local-table, everything else in global-table
+                         (if is-local
+                             (when local-table
+                               (setf (gethash var local-table) rvalue))
+                             (setf (gethash var global-table) rvalue))))))))
              def-table)
 
-    ;; Second pass: substitute and remove assignments
-    (mapcar (lambda (insn)
-              ;; Substitute in all instructions
-              (let ((new-insn (substitute-in-ir insn single-assignment-table)))
-                ;; If this was an assignment we're propagating, turn it into NOP
-                (if (and (typep new-insn 'ir-assign)
-                         (gethash (slot-value new-insn 'lvalue) single-assignment-table))
-                    (progn
-                      (when *debug-propagation*
-                        (format t "~&; PROPAGATE: Removing assignment ~A~%" insn))
-                      (make-instance 'ir-nop :address (address new-insn)))
-                    new-insn)))
-            ir-code)))
+    ;; Merge both tables for substitution (local overrides global for this block)
+    (let ((combined-table (make-hash-table :test #'eq)))
+      ;; First add global mappings
+      (maphash (lambda (k v) (setf (gethash k combined-table) v)) global-table)
+      ;; Then add local mappings (overrides global if same key)
+      (when local-table
+        (maphash (lambda (k v) (setf (gethash k combined-table) v)) local-table))
+
+      ;; Second pass: substitute and remove assignments
+      (mapcar (lambda (insn)
+                ;; Substitute in all instructions using combined table
+                (let ((new-insn (substitute-in-ir insn combined-table)))
+                  ;; Only remove assignments that are in the GLOBAL table (cross-block safe)
+                  ;; Keep assignments in local-table only (other blocks may need them)
+                  (if (and (typep new-insn 'ir-assign)
+                           (gethash (slot-value new-insn 'lvalue) global-table))
+                      (progn
+                        (when *debug-propagation*
+                          (format t "~&; PROPAGATE: Removing assignment ~A (global scope)~%" insn))
+                        (make-instance 'ir-nop :address (address new-insn)))
+                      new-insn)))
+              ir-code))))
 
 (defun %get-constant-int (ir context)
   "If IR is or becomes an IR-INT-LITERAL in CONTEXT, return its integer value."
@@ -631,14 +647,18 @@
                ;; (sdfdfd (print ir-code-0))
                ;; Build basic blocks first for CFG-safe propagation
                (blocks-before-prop (build-basic-blocks ir-code-0))
-               ;; Per-block propagation with shared substitution table
+               ;; Per-block propagation with separate scopes for locals vs globals
                (blocks (if *enable-copy-propagation*
-                           (let ((shared-table (single-assignment-table *context*)))
+                           (let ((global-table (single-assignment-table *context*)))
                              (mapcar (lambda (block)
-                                       (let ((block-code (slot-value block 'code)))
+                                       (let ((block-code (slot-value block 'code))
+                                             ;; Per-block table for local variables only
+                                             (block-local-table (when *enable-local-propagation*
+                                                                  (make-hash-table :test #'eq))))
                                          (setf (slot-value block 'code)
-                                               (propagate-copies block-code shared-table
-                                                               :allow-locals *enable-local-propagation*))
+                                               (propagate-copies block-code global-table
+                                                               :allow-locals *enable-local-propagation*
+                                                               :local-table block-local-table))
                                          block))
                                      blocks-before-prop))
                            blocks-before-prop))
