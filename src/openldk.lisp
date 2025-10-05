@@ -113,34 +113,64 @@
 
   stack-vars)
 
-(defun count-variable-uses (ir-code)
-  "Count how many times each variable is used (read from) in IR-CODE."
-  (let ((use-counts (make-hash-table :test 'eq)))
-    (labels ((count-in-ir (ir)
+(defun build-def-use-chains (ir-code)
+  "Build def-use and use-def chains for dataflow analysis.
+   Returns (values def-table use-list-table use-def-table)
+   - def-table: variable -> defining instruction
+   - use-list-table: variable -> list of instructions that use it
+   - use-def-table: instruction -> variables it uses"
+  (let ((def-table (make-hash-table :test 'eq))           ; var -> defining insn
+        (use-list-table (make-hash-table :test 'eq))      ; var -> list of using insns
+        (use-def-table (make-hash-table :test 'eq)))      ; insn -> list of vars used
+
+    (labels ((collect-uses (ir insn)
+               "Collect all variables used in IR, associate with INSN"
                (cond
                  ((typep ir '<stack-variable>)
-                  (incf (gethash ir use-counts 0)))
+                  ;; Record that this instruction uses this variable
+                  (push insn (gethash ir use-list-table nil))
+                  (pushnew ir (gethash insn use-def-table nil) :test 'eq))
                  ((typep ir 'ir-node)
-                  ;; Walk all slots that contain IR
+                  ;; Walk all slots
                   (dolist (slot (closer-mop:class-slots (class-of ir)))
-                    (let* ((slot-name (closer-mop:slot-definition-name slot))
-                           (slot-value (and (slot-boundp ir slot-name)
-                                           (slot-value ir slot-name))))
-                      (cond
-                        ((typep slot-value 'ir-node)
-                         (count-in-ir slot-value))
-                        ((listp slot-value)
-                         (dolist (item slot-value)
-                           (when (typep item 'ir-node)
-                             (count-in-ir item)))))))))))
-      ;; Count uses in all instructions, but skip the lvalue of assignments
+                    (let* ((slot-name (closer-mop:slot-definition-name slot)))
+                      (when (slot-boundp ir slot-name)
+                        (let ((slot-value (slot-value ir slot-name)))
+                          (cond
+                            ((typep slot-value 'ir-node)
+                             (collect-uses slot-value insn))
+                            ((listp slot-value)
+                             (dolist (item slot-value)
+                               (when (typep item 'ir-node)
+                                 (collect-uses item insn)))))))))))))
+
+      ;; Build the chains
       (dolist (insn ir-code)
-        (when (typep insn 'ir-assign)
-          ;; Only count the rvalue, not the lvalue (that's a definition, not a use)
-          (count-in-ir (slot-value insn 'rvalue)))
-        (when (and (typep insn 'ir-node) (not (typep insn 'ir-assign)))
-          (count-in-ir insn))))
-    use-counts))
+        (cond
+          ;; Assignments define a variable
+          ((typep insn 'ir-assign)
+           (let ((lvalue (slot-value insn 'lvalue))
+                 (rvalue (slot-value insn 'rvalue)))
+             (when (typep lvalue '<stack-variable>)
+               (setf (gethash lvalue def-table) insn))
+             ;; Collect uses in the rvalue
+             (collect-uses rvalue insn)))
+          ;; Other instructions may use variables
+          ((typep insn 'ir-node)
+           (collect-uses insn insn)))))
+
+    (values def-table use-list-table use-def-table)))
+
+(defun count-variable-uses (ir-code)
+  "Count how many times each variable is used (read from) in IR-CODE."
+  (multiple-value-bind (def-table use-list-table use-def-table)
+      (build-def-use-chains ir-code)
+    (declare (ignore def-table use-def-table))
+    (let ((use-counts (make-hash-table :test 'eq)))
+      (maphash (lambda (var use-list)
+                 (setf (gethash var use-counts) (length use-list)))
+               use-list-table)
+      use-counts)))
 
 (defun substitute-in-ir (ir subst-table)
   "Recursively substitute variables in IR using SUBST-TABLE."
@@ -172,22 +202,48 @@
     ;; Otherwise return as-is
     (t ir)))
 
+(defun can-propagate-p (var rvalue def-insn use-list-table ir-code)
+  "Determine if we can safely propagate VAR's definition (RVALUE) to all use sites.
+   Uses def-use chains for precise analysis."
+  (let ((use-list (gethash var use-list-table)))
+    (and
+     ;; Must be a stack variable
+     (typep var '<stack-variable>)
+     ;; Must have single static assignment (SSA property)
+     (= (length (slot-value var 'var-numbers)) 1)
+     ;; Rvalue must not have side effects
+     (not (side-effect-p rvalue))
+     ;; Can propagate if:
+     ;; 1. Variable is never used (dead code), OR
+     ;; 2. Variable is used exactly once and rvalue is "cheap" (literal, variable, field access), OR
+     ;; 3. Variable is a copy of another variable or literal (always safe to propagate)
+     (or
+      ;; Dead code - never used
+      (null use-list)
+      ;; Used once and cheap to evaluate
+      (and (= (length use-list) 1)
+           (or (typep rvalue 'ir-literal)
+               (typep rvalue '<stack-variable>)
+               (typep rvalue 'ir-local-variable)))
+      ;; Pure copy - safe to propagate even if used multiple times
+      (typep rvalue '<stack-variable>)
+      (typep rvalue 'ir-literal)
+      (typep rvalue 'ir-local-variable)))))
+
 (defun propagate-copies (ir-code single-assignment-table)
-  "Replace variables with single assignments in IR-CODE using SINGLE-ASSIGNMENT-TABLE."
-  ;; Count how many times each variable is used
-  (let ((use-counts (count-variable-uses ir-code)))
+  "Aggressively propagate copies using def-use chains."
+  ;; Build dataflow information
+  (multiple-value-bind (def-table use-list-table use-def-table)
+      (build-def-use-chains ir-code)
+    (declare (ignore use-def-table))
+
     ;; First pass: identify which assignments can be propagated
-    (dolist (insn ir-code)
-      (when (and (typep insn 'ir-assign)
-                 (let ((lvalue (slot-value insn 'lvalue))
-                       (rvalue (slot-value insn 'rvalue)))
-                   (and (typep lvalue '<stack-variable>)
-                        (= (length (slot-value lvalue 'var-numbers)) 1)
-                        (not (side-effect-p rvalue))
-                        ;; Only propagate if used exactly once or never
-                        (<= (gethash lvalue use-counts 0) 1))))
-        (setf (gethash (slot-value insn 'lvalue) single-assignment-table)
-              (slot-value insn 'rvalue))))
+    (maphash (lambda (var def-insn)
+               (when (typep def-insn 'ir-assign)
+                 (let ((rvalue (slot-value def-insn 'rvalue)))
+                   (when (can-propagate-p var rvalue def-insn use-list-table ir-code)
+                     (setf (gethash var single-assignment-table) rvalue)))))
+             def-table)
 
     ;; Second pass: substitute and remove assignments
     (mapcar (lambda (insn)
