@@ -1,5 +1,80 @@
 # Development Session Notes
 
+## Session 9: 2025-10-05 - Array Initialization Optimization and IR Analysis
+
+Investigated performance issues with `aaa/ni` test, specifically slow compilation of methods with large static array initializers like `sun/util/resources/TimeZoneNames.getContents()`.
+
+### Problem Analysis
+
+**Root Cause:** Large static arrays in Java (e.g., timezone name arrays with hundreds of string elements) were causing extremely slow compilation:
+
+1. Java compiler emits repetitive bytecode: `DUP, ICONST, LDC, AASTORE` for each element
+2. OpenLDK's `initialize-arrays()` recognized the pattern and created `ir-array-literal`
+3. **Code explosion**: Generated Lisp code like `(vector (ijstring "str1") (ijstring "str2") ...)` with thousands of elements
+4. SBCL had to compile these massive expressions, taking 60+ seconds
+
+**AOT Compiler Strategies (learned from ecosystem):**
+- Modern AOT compilers (GraalVM, ART) recognize array init patterns and emit bulk copy from constant data
+- Single `memcpy` from read-only section instead of thousands of scalar stores
+- Can even snapshot arrays into image heap at build time
+
+### Implementation Attempts
+
+**Attempt 1: Defer codegen**
+- Changed `initialize-arrays()` to store IR values instead of codegen'd code
+- Moved codegen to the codegen phase
+- Result: Still slow - just moved the problem
+
+**Attempt 2: Extract constants during IR optimization**
+- Tried to extract literal values (strings, numbers) during IR pass
+- Hit class loading order issues causing forward reference errors
+- Abandoned this approach
+
+**Attempt 3: Precompute during codegen**
+- For large arrays (>50 elements), call `ijstring` during codegen to create Java objects
+- Generate: `(copy-seq '#(obj1 obj2 ...))` instead of `(vector (ijstring "s1") ...)`
+- Result: Reduces generated code size but arrays still take time to compile
+
+### Key Insight: Too Many Stack Variables
+
+The real performance bottleneck identified: **Excessive stack variables from SSA-style IR**
+
+Every JVM stack operation creates a new variable:
+```lisp
+(LET ((s{80}) (s{79}) (s{78}) ... (s{52}) (s{51}) ...)  ; Dozens of variables
+  (SETF s{1} local-1)
+  (SETF s{2} (some-operation s{1}))  ; Many used only once
+  ...)
+```
+
+**Current optimizations:**
+- `propagate-copies()` eliminates single-assignment variables
+- Variables are filtered out of declarations if in single-assignment-table
+- But still too many intermediate variables declared
+
+### Files Modified
+
+**src/openldk.lisp:**
+- Modified `initialize-arrays()` to store IR values instead of eagerly codegenning
+- Values are now list of IR nodes, not pre-generated Lisp code
+
+**src/codegen.lisp:**
+- Updated `ir-array-literal` codegen to handle both vectors and IR node lists
+- For large constant arrays (>50), precomputes Java objects and uses `copy-seq`
+- Generates compact code: `(copy-seq '#(precomputed-objects)))`
+
+### Next Steps
+
+**Identified but not yet implemented:**
+1. Better IR optimization passes to reduce variable count before codegen
+2. Dead code elimination for unused stack variables
+3. More aggressive copy propagation
+4. Consider expression substitution to avoid intermediate variables entirely
+
+**Still slow tests:**
+- `aaa/ni` still times out due to `TimeZoneNames.getContents()` compilation
+- Need IR-level optimizations, not just better codegen
+
 ## Session 8: 2025-10-05 - Fix Terminal Bytecode Instruction Handling
 
 Fixed bytecode verification error in `aaa/ni` test caused by incorrect handling of terminal bytecode instructions (ATHROW, RETURN, etc.).
