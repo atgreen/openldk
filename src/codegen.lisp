@@ -1206,9 +1206,9 @@
                     :code (let ((call (list 'destructuring-bind (cons 'method 'next)
                                             (list 'closer-mop:compute-applicable-methods-using-classes
                                                   (list 'function (intern (format nil "~A" method-name) :openldk))
-                                                  ;; FIXME: This should be based on the args list
+                                                  ;; Use find-class at runtime instead of embedding the class object
                                                   (cons 'list
-                                                        (cons (find-class (intern (slot-value class 'name) :openldk))
+                                                        (cons (list 'find-class (list 'quote (intern (slot-value class 'name) :openldk)))
                                                               (loop for a in args collect t))))
                                             (list 'let (list (list 'fn (list 'closer-mop:method-function 'method)))
                                                   (list 'funcall 'fn
