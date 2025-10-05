@@ -39,7 +39,21 @@ current architecture and conventions.
     - OK: `s{n} = literal`, `s{n} = s{m}` (propagate)
     - NOT OK: `s{n} = local-k` (do not propagate)
     - NOT DONE: dead-code removal within this pass (to avoid surprises)
-  - Pipeline unchanged: pass remains on flat IR prior to block building.
+
+- Phase 2 IN PROGRESS (commit 5271683 and follow‑ups): intra‑block local
+  propagation implemented with intervening‑assignment checks, and the
+  propagation architecture simplified to a single pass after block building.
+  - One pass only: build basic blocks, then run propagation per block using a
+    shared substitution table for the whole method (ensures consistency of
+    substitutions across blocks while analysis remains intra‑block).
+  - Intervening writes detection:
+    - blocks propagation on `ir-assign` to the same `ir-local-variable` (or
+      `ir-long-local-variable`), and on `ir-iinc` to the same local index.
+  - Cross‑block behavior:
+    - Only literals and SSA stack variables are safe to propagate across blocks.
+    - Local substitutions are validated intra‑block; the shared substitution
+      table is used to keep eliminated assignments consistent, but Phase 2 does
+      not attempt inter‑block local reasoning.
 
 ## Definitions and Invariants
 
@@ -109,11 +123,11 @@ Pipeline Changes
 - `%compile-method` order becomes:
   1) Build flat IR
   2) Merge stacks + fix stack variables
-  3) Flat IR propagation (stack vars + literals)
-  4) Array initialization folding (fixpoint)
-  5) Build basic blocks
-  6) New: Per‑block propagation with locals enabled
-  7) Codegen blocks
+  3) Array initialization folding (fixpoint)
+  4) Build basic blocks
+  5) Single propagation pass per basic block with a SHARED substitution table
+     (literals + SSA always; locals only when allowed and proven safe)
+  6) Codegen blocks
 
 Testing
 - Add micro tests where locals are copied/used within the same block with and
@@ -147,8 +161,10 @@ Data Structures
 - Use existing `<basic-block>`, `predecessors`, `successors`, and `dominators`.
 
 Integration
-- Run after block construction and before codegen, following Phase 2.
-- Keep propagation local to the current method.
+- Run once after block construction and before codegen.
+- Use one shared substitution table for the entire method so that removed
+  assignments are consistently substituted wherever they are used.
+- Analysis scope remains intra‑block; no inter‑block local reasoning.
 
 Testing
 - Craft CFGs with branches/merges; confirm propagation only when unique
@@ -184,10 +200,20 @@ Notes
 ## Milestones
 
 - M1: Strengthen literal/stack propagation (Phase 1). COMPLETE.
-- M2: Per‑block local propagation (Phase 2) behind a small feature flag during
-  bake‑in; default on after validation.
+- M2: Intra‑block local propagation via a single post‑block pass with shared
+  substitution table. Bake‑in with feature flag and DF tests. IN PROGRESS.
 - M3: Reaching definitions across blocks (Phase 3). Implement and ship.
 - M4: SSA exploration (Phase 4) — design doc + prototype.
+
+## Test Coverage
+
+- New DataFlow suite (df.exp) under `testsuite/df` with focused cases:
+  - DF_SSA_Literals_OK: literals and SSA propagation sanity.
+  - DF_LocalCopyReassignSource: intervening write to source local blocks prop.
+  - DF_LocalCopyIfBranch: conditional reassignment blocks prop as needed.
+  - DF_IIncIntervening: `iinc` acts as a write; must block propagation.
+  - DF_LongLocalIntervening: long local reassignment blocks propagation.
+  - LocalPropPositive/Negative/Long/IINC: additional spot checks for bake‑in.
 
 ## Performance Expectations
 
