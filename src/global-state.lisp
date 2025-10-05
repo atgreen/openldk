@@ -73,6 +73,11 @@
 (defvar *debug-trace-args* nil)
 (defvar *debug-x* nil)
 (defvar *debug-unmuffle* nil)
+(defvar *debug-propagation* nil)
+
+;; Experimental: basic copy/constant propagation over IR. Disabled by default
+;; due to recent regressions. Flip to T to re-enable.
+(defvar *enable-copy-propagation* t)
 
 (defvar *boot-class-loader* nil)
 

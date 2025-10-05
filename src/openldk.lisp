@@ -240,11 +240,18 @@
       (build-def-use-chains ir-code)
     (declare (ignore use-def-table))
 
+    (when *debug-propagation*
+      (format t "~&; PROPAGATE: Processing ~A instructions~%" (length ir-code)))
+
     ;; First pass: identify which assignments can be propagated
     (maphash (lambda (var def-insn)
                (when (typep def-insn 'ir-assign)
                  (let ((rvalue (slot-value def-insn 'rvalue)))
                    (when (can-propagate-p var rvalue def-insn use-list-table ir-code)
+                     (when *debug-propagation*
+                       (format t "~&; PROPAGATE: ~A = ~A (type: ~A, uses: ~A)~%"
+                               var rvalue (type-of rvalue)
+                               (length (gethash var use-list-table))))
                      (setf (gethash var single-assignment-table) rvalue)))))
              def-table)
 
@@ -255,7 +262,10 @@
                 ;; If this was an assignment we're propagating, turn it into NOP
                 (if (and (typep new-insn 'ir-assign)
                          (gethash (slot-value new-insn 'lvalue) single-assignment-table))
-                    (make-instance 'ir-nop :address (address new-insn))
+                    (progn
+                      (when *debug-propagation*
+                        (format t "~&; PROPAGATE: Removing assignment ~A~%" insn))
+                      (make-instance 'ir-nop :address (address new-insn)))
                     new-insn)))
             ir-code)))
 
@@ -550,7 +560,8 @@
                                         (reduce #'merge-stacks v)))
                                     (stack-state-table *context*)))
                          (fix-stack-variables (stack-variables *context*))
-                         (setf code (propagate-copies code (single-assignment-table *context*)))
+                         (when *enable-copy-propagation*
+                           (setf code (propagate-copies code (single-assignment-table *context*))))
                          (loop
                            (multiple-value-bind (new-code changed?)
                                (initialize-arrays code *context*)
@@ -959,7 +970,9 @@
         (when (find #\x LDK_DEBUG)
           (setf *debug-x* t))
         (when (find #\u LDK_DEBUG)
-          (setf *debug-unmuffle* t)))))
+          (setf *debug-unmuffle* t))
+        (when (find #\p LDK_DEBUG)
+          (setf *debug-propagation* t)))))
 
   ;; Reset system properties to fix things that change between
   ;; build-time and run-time.
@@ -1215,6 +1228,46 @@
           (|<init>()| props)
           (setf (slot-value |+static-java/lang/System+| '|props|) props))
 
+        ;; Seed essential system properties needed during early JDK init.
+        ;; Many JDK components assume non-NIL encodings.
+        (dolist (kv `(("file.encoding" . "UTF-8")
+                      ("sun.jnu.encoding" . "UTF-8")
+                      ("sun.stdout.encoding" . "UTF-8")
+                      ("sun.stderr.encoding" . "UTF-8")
+                      ("line.separator" . "\n")
+                      ("file.separator" . "/")
+                      ("path.separator" . ":")
+                      ("os.name" . "Linux")
+                      ("os.arch" . "amd64")
+                      ("os.version" . "")
+                      ("java.io.tmpdir" . "/tmp")))
+          (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring (car kv)) (ijstring (cdr kv))))
+
+        ;; Also set java.home if provided by the environment for code that queries it early.
+        (when-let ((jh (uiop:getenv "JAVA_HOME")))
+          (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring "java.home") (ijstring jh)))
+
+        ;; Populate common user properties
+        (when-let ((cwd (uiop:getcwd)))
+          (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring "user.dir") (ijstring (namestring cwd))))
+        (when-let ((uh (or (uiop:getenv "HOME") "/")))
+          (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring "user.home") (ijstring uh)))
+        (when-let ((un (or (uiop:getenv "USER") (uiop:getenv "LOGNAME") "openldk")))
+          (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring "user.name") (ijstring un)))
+
+        ;; Provide a reasonable sun.boot.class.path early for sun/misc/Launcher
+        ;; based on the jars in $JAVA_HOME/lib.
+        (when-let ((jh (uiop:getenv "JAVA_HOME")))
+          (let* ((boot-jars (directory (concatenate 'string jh "/lib/*.jar")))
+                 (bootcp (format nil "~{~A~^:~}" (mapcar #'namestring boot-jars))))
+            (when (> (length bootcp) 0)
+              (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring "sun.boot.class.path") (ijstring bootcp)))))
+
+        ;; Initialize baseline system properties now so subsequent init paths
+        ;; (e.g., charset setup) do not observe NIL values.
+        (|java/lang/System.initProperties(Ljava/util/Properties;)|
+         (slot-value |+static-java/lang/System+| '|props|))
+
         ;; Add user-provided properties...
         (dolist (prop property-alist)
           (assert (typep prop 'list))
@@ -1234,15 +1287,23 @@
     (|condition-java/lang/Throwable| (c)
       (format t "~&Exception: ~A~%" c)
       (let ((objref (slot-value c '|objref|)))
+        (when (slot-boundp objref '|detailMessage|)
+          (format t "Message: ~A~%" (slot-value objref '|detailMessage|)))
         (when (slot-boundp objref '|backtrace|)
           (format t "~&Backtrace: ~A~%" (slot-value objref '|backtrace|)))
         (let ((cause (slot-value objref '|cause|)))
           (when cause
             (format t "   Caused by: ~A~%" cause)
+            (when (slot-boundp cause '|detailMessage|)
+              (format t "Cause message: ~A~%" (slot-value cause '|detailMessage|)))
             (when (slot-boundp cause '|backtrace|)
               (format t "~&Cause backtrace: ~A~%" (slot-value cause '|backtrace|))))))))
 
-  (%clinit (%get-ldk-class-by-bin-name "sun/misc/Launcher"))
+  ;; Ensure the bootstrap launcher class is present even if earlier steps signalled.
+  (let ((launcher (or (gethash "sun/misc/Launcher" *ldk-classes-by-bin-name*)
+                      (ignore-errors (classload "sun/misc/Launcher")))))
+    (when launcher
+      (%clinit launcher)))
 
   (setf *debug-load* nil))
 

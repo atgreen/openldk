@@ -5,7 +5,7 @@ ifndef JAVA_HOME
 endif
 
 openldk: src/*.lisp *.asd Makefile
-	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))" --eval "(openldk::make-image)"
+	XDG_CACHE_HOME=$(CURDIR)/.cache sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))" --eval "(openldk::make-image)"
 
 check: openldk testsuite/mauve/gnu/testlet/config.class
 	(cd testsuite; runtest --tool openldk $(RUNTESTFLAGS))
@@ -21,4 +21,4 @@ testsuite/mauve/gnu/testlet/config.class: testsuite/mauve/gnu/testlet/config.jav
 	(cd testsuite/mauve; javac gnu/testlet/config.java)
 
 clean:
-	-rm -rf openldk .*~ *~ systems
+	-rm -rf openldk .*~ *~
