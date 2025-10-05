@@ -63,6 +63,8 @@
 (defvar *call-nesting-level* 0)
 
 (defvar *dump-dir* nil)
+(defvar *aot-dir* nil)
+(defvar *aot-class-definitions* nil "Hash table storing class definitions for AOT compilation")
 (defvar *debug-load* nil)
 (defvar *debug-bytecode* nil)
 (defvar *debug-codegen* nil)

@@ -101,3 +101,19 @@
               (unless (gethash package-name *packages*)
                 (setf (gethash package-name *packages*) (jstring fqn)))))
           result)))))
+
+(defun list-jar-classes (jar-entry)
+  "Return a list of all class file names in a JAR file."
+  (with-slots (jarfile zipfile zipfile-entries) jar-entry
+    ;; Ensure the zipfile is open
+    (unless zipfile
+      (setf zipfile (zip:open-zipfile jarfile))
+      (setf zipfile-entries (zip:zipfile-entries zipfile)))
+    ;; Collect all .class files
+    (let ((classes nil))
+      (maphash (lambda (name entry)
+                 (declare (ignore entry))
+                 (when (str:ends-with? ".class" name)
+                   (push name classes)))
+               zipfile-entries)
+      classes)))

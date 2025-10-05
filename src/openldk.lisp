@@ -188,6 +188,129 @@
                  (assert (typep (aref code-array (1- i)) 'ir-nop))))
     (values (coerce code-array 'list) changed)))
 
+(defun %write-aot-method (class-name method-name definition-code)
+  "Write AOT compiled Lisp code to a file in the top-level AOT directory."
+  (when *aot-dir*
+    (let* ((path-parts (split-sequence:split-sequence #\/ class-name))
+           (dir-path (format nil "~A/~{~A~^/~}"
+                           *aot-dir*
+                           (butlast path-parts)))
+           (filename (format nil "~A/~A.lisp"
+                           dir-path
+                           (car (last path-parts))))
+           (method-str (with-output-to-string (s)
+                        (let ((*print-case* :downcase))
+                          (pprint definition-code s)))))
+      (ensure-directories-exist filename)
+      ;; Append to file if it exists (multiple methods per class)
+      (with-open-file (out filename
+                          :direction :output
+                          :if-exists :append
+                          :if-does-not-exist :create)
+        (format out "~%~A~%" method-str)))))
+
+(defun %write-aot-class (class-name class-definition-code)
+  "Store AOT class definitions in memory for later topological sorting and writing."
+  (when *aot-dir*
+    ;; Store the class definition along with its parent class name for sorting
+    (let* ((class (gethash class-name *ldk-classes-by-bin-name*))
+           (parent-name (when class (slot-value class 'super))))
+      (setf (gethash class-name *aot-class-definitions*)
+            (list :code class-definition-code :parent parent-name)))))
+
+(defun %topological-sort-classes (class-defs-hash)
+  "Topologically sort classes so parents come before children."
+  (let ((sorted nil)
+        (visited (make-hash-table :test #'equal))
+        (visiting (make-hash-table :test #'equal)))
+    (labels ((visit (class-name)
+               (cond
+                 ((gethash class-name visited)
+                  ;; Already processed
+                  nil)
+                 ((gethash class-name visiting)
+                  ;; Circular dependency - skip
+                  (format t ";   Warning: Circular dependency detected for ~A~%" class-name)
+                  nil)
+                 (t
+                  (setf (gethash class-name visiting) t)
+                  (let ((class-info (gethash class-name class-defs-hash)))
+                    (when class-info
+                      (let ((parent (getf class-info :parent)))
+                        ;; Visit parent first if it exists and is in our set
+                        (when (and parent (gethash parent class-defs-hash))
+                          (visit parent)))
+                      ;; Now add this class
+                      (push (cons class-name class-info) sorted)
+                      (setf (gethash class-name visited) t)))
+                  (remhash class-name visiting)))))
+      ;; Visit all classes
+      (maphash (lambda (class-name class-info)
+                 (declare (ignore class-info))
+                 (visit class-name))
+               class-defs-hash)
+      (reverse sorted))))
+
+(defun %write-all-aot-classes (aot-dir)
+  "Write all collected class definitions to a single classes.lisp file in topological order."
+  (when (and *aot-class-definitions* (> (hash-table-count *aot-class-definitions*) 0))
+    (let* ((sorted-classes (%topological-sort-classes *aot-class-definitions*))
+           (classes-file (format nil "~A/classes.lisp" aot-dir)))
+      (with-open-file (out classes-file
+                          :direction :output
+                          :if-exists :supersede
+                          :if-does-not-exist :create)
+        (format out ";;;; AOT-compiled class definitions~%")
+        (format out ";;;; Classes are topologically sorted (parents before children)~%~%")
+        (dolist (class-entry sorted-classes)
+          (let ((class-name (car class-entry))
+                (class-code (getf (cdr class-entry) :code)))
+            (format out "~%; Class: ~A~%" class-name)
+            (let ((*print-case* :downcase))
+              (pprint class-code out))
+            (format out "~%~%"))))
+      (format t "; Wrote ~A class definitions to ~A~%"
+              (length sorted-classes) classes-file))))
+
+(defun %generate-aot-asdf-file (aot-dir system-name)
+  "Generate an ASDF system definition file that loads classes.lisp then all method files."
+  (let* ((aot-dir-path (uiop:ensure-directory-pathname aot-dir))
+         (method-files nil))
+    ;; Collect all .lisp files in aot-dir (excluding classes.lisp)
+    (dolist (file (directory (merge-pathnames "**/*.lisp" aot-dir-path)))
+      (let ((filename (file-namestring file)))
+        (unless (string= filename "classes.lisp")
+          (let* ((file-truename (truename file))
+                 (dir-truename (truename aot-dir-path))
+                 (relative-path (uiop:enough-pathname file-truename dir-truename))
+                 ;; Remove .lisp extension and convert to forward slashes
+                 (file-path (substitute #\/ (uiop:directory-separator-for-host)
+                                       (subseq (uiop:native-namestring relative-path) 0
+                                               (- (length (uiop:native-namestring relative-path)) 5)))))
+            (push file-path method-files)))))
+    ;; Generate the ASDF file
+    (let ((asdf-file (format nil "~A/~A.asd" aot-dir system-name)))
+      (with-open-file (out asdf-file
+                          :direction :output
+                          :if-exists :supersede
+                          :if-does-not-exist :create)
+        (format out ";;;; ASDF system definition for AOT-compiled Java classes~%~%")
+        (format out "(defsystem ~S~%" system-name)
+        (format out "  :description \"AOT-compiled Java bytecode to Common Lisp\"~%")
+        (format out "  :serial t~%")
+        (format out "  :components~%")
+        (format out "  (")
+        ;; First, load classes.lisp with all class definitions
+        (format out "~%   ;; Class definitions (topologically sorted)~%")
+        (format out "   (:file \"classes\")~%")
+        ;; Then, load all method definitions
+        (when method-files
+          (format out "~%   ;; Method definitions (loaded after classes)~%")
+          (dolist (method-file (sort method-files #'string<))
+            (format out "   (:file ~S)~%" method-file)))
+        (format out "))~%"))
+      (format t "~%; Generated ASDF file: ~A~%" asdf-file))))
+
 (defun %compile-method (class-name method-index)
   (let* ((class (%get-ldk-class-by-bin-name class-name))
          (method (aref (slot-value class 'methods) (1- method-index)))
@@ -201,8 +324,11 @@
              ;; Already compiled by another thread
              (return-from %compile-method nil))
             ((eq status t)
-             ;; Another thread is currently compiling - wait for it to finish
-             (bt:condition-wait *method-compilation-cv* *method-compilation-lock*))
+             ;; In AOT mode, don't wait - just skip methods being compiled to avoid recursion
+             (if *aot-dir*
+                 (return-from %compile-method nil)
+                 ;; In normal mode, wait for the other thread
+                 (bt:condition-wait *method-compilation-cv* *method-compilation-lock*)))
             (t
              ;; Not being compiled - claim it and proceed
              (setf (gethash method-key *methods-being-compiled*) t)
@@ -388,7 +514,11 @@
                                           (loop for x from parameter-count upto (1+ max-locals)
                                                 collect (list (intern (format nil "local-~A" (incf i)) :openldk)))))))
                                                 array-checked-lisp-code)))))))))
-          (%eval definition-code))))
+          (if *aot-dir*
+              (%write-aot-method class-name
+                               (lispize-method-name (format nil "~A~A" (name method) (descriptor method)))
+                               definition-code)
+              (%eval definition-code)))))
       ;; Cleanup: mark compilation as done and notify waiting threads
       (bt:with-lock-held (*method-compilation-lock*)
         (setf (gethash method-key *methods-being-compiled*) :done)
@@ -556,6 +686,16 @@
            (setf (gethash fq-classname *java-classes-by-fq-name*) klass))
 
          (let ((code (emit-<class> class)))
+           ;; In AOT mode, extract and write class definitions separately
+           (when *aot-dir*
+             ;; Code is a list like (progn (defclass...) (defparameter...) method-stub1 method-stub2 ...)
+             ;; Extract just the defclass and defparameter (elements 2 and 3)
+             (let ((class-defs (if (and (listp code) (eq (first code) 'progn))
+                                   ;; If it's a progn, take the defclass and defparameter (2nd and 3rd elements)
+                                   (list 'progn (second code) (third code))
+                                   ;; Otherwise, just take the first two elements
+                                   (list 'progn (first code) (second code)))))
+               (%write-aot-class classname class-defs)))
            (%eval code))
 
          (dolist (ic (gethash "InnerClasses" (attributes class)))
@@ -626,11 +766,12 @@
       (uiop:quit 1))))
 
 @cli:command
-(defun main (mainclass &optional (args (list)) &key dump-dir classpath)
+(defun main (mainclass &optional (args (list)) &key dump-dir classpath aot)
   (declare
    (cli:parser (list identity) args)
    (cli:parser identity classpath)
-   (cli:parser identity dump-dir))
+   (cli:parser identity dump-dir)
+   (cli:parser identity aot))
   "openldk - copyright (C) 2023-2024 Anthony Green <green@moxielogic.com>
    Distributed under the terms of the GPLv3 + Classpath Exception
 
@@ -640,7 +781,9 @@
 
    CLASSPATH: The classpath from which classes are loaded.
 
-   DUMP-DIR: The directory into which internal debug info is dumped."
+   DUMP-DIR: The directory into which internal debug info is dumped.
+
+   AOT: Ahead-of-time compilation directory (generate Lisp source files)."
 
   (ensure-JAVA_HOME)
 
@@ -694,6 +837,7 @@
     (sleep 10))
 
   (setf *dump-dir* dump-dir)
+  (setf *aot-dir* aot)
 
   (setf *classpath*
         (loop for cpe in (split-sequence:split-sequence (uiop:inter-directory-separator) classpath)
@@ -701,12 +845,118 @@
                           (make-instance 'jar-classpath-entry :jarfile cpe)
                           (make-instance 'dir-classpath-entry :dir cpe))))
 
+  ;; In AOT mode, handle JAR files, directories, or class names
+  (when *aot-dir*
+    (cond
+      ;; Check if it's a JAR file
+      ((and (stringp mainclass) (str:ends-with? ".jar" mainclass))
+       (let* ((jar-path (uiop:parse-native-namestring mainclass))
+              (jar-entry (make-instance 'jar-classpath-entry :jarfile (namestring jar-path)))
+              (class-names nil))
+         (unless (uiop:file-exists-p jar-path)
+           (error "JAR file not found: ~A" mainclass))
+         ;; Initialize AOT class definitions hash table
+         (when aot
+           (setf *aot-class-definitions* (make-hash-table :test #'equal)))
+         ;; Collect class names from JAR
+         (dolist (class-name (list-jar-classes jar-entry))
+           (when (str:ends-with? ".class" class-name)
+             (let ((bin-name (substitute #\/ #\. (subseq class-name 0 (- (length class-name) 6)))))
+               (push bin-name class-names))))
+         ;; Load and compile each class immediately (streaming output)
+         (let ((compiled-classes (make-hash-table :test #'equal)))
+           (dolist (bin-name (reverse class-names))
+             (handler-case
+                 (progn
+                   ;; Load with AOT enabled to write class definitions
+                   (setf *aot-dir* aot)
+                   (classload bin-name)
+                   (setf *aot-dir* nil)
+                   ;; Now compile methods with AOT enabled
+                   (let ((class (gethash bin-name *ldk-classes-by-bin-name*)))
+                     (when (and class (not (gethash bin-name compiled-classes)))
+                       (setf (gethash bin-name compiled-classes) t)
+                       (format t "; Transpiling ~A~%" bin-name)
+                       (force-output)
+                       (setf *aot-dir* aot)
+                       (handler-case
+                           (loop for method-index from 1 to (length (slot-value class 'methods))
+                                 do (handler-case
+                                        (%compile-method bin-name method-index)
+                                      (error (e)
+                                        (format t ";   Warning: Failed to compile method ~A in ~A: ~A~%" method-index bin-name e))))
+                         (sb-kernel::control-stack-exhausted ()
+                           (format t ";   ERROR: Stack exhausted compiling ~A, skipping remaining methods~%" bin-name)))
+                       (setf *aot-dir* nil))))
+               (error (e)
+                 (format t ";   Warning: Failed to process ~A: ~A~%" bin-name e)))))
+         ;; Write all class definitions to classes.lisp and generate ASDF file
+         (when aot
+           (%write-all-aot-classes aot)
+           (%generate-aot-asdf-file aot "aot-compiled")))
+       (return-from main))
+
+      ;; Check if it's a directory
+      ((uiop:directory-exists-p mainclass)
+       ;; Temporarily add directory to classpath and load all .class files recursively
+       (let* ((base-dir (truename (uiop:ensure-directory-pathname mainclass)))
+              (dir-entry (make-instance 'dir-classpath-entry :dir (namestring base-dir)))
+              (class-names nil))
+         (push dir-entry *classpath*)
+         ;; Initialize AOT class definitions hash table
+         (when aot
+           (setf *aot-class-definitions* (make-hash-table :test #'equal)))
+         ;; First pass: collect all class names
+         (dolist (class-file (directory (merge-pathnames "**/*.class" base-dir)))
+           (let* ((relative-path (enough-namestring class-file base-dir))
+                  ;; Convert to binary name: remove .class and use / as separator
+                  (bin-name (substitute #\/ (uiop:directory-separator-for-host)
+                                       (subseq (namestring relative-path) 0 (- (length (namestring relative-path)) 6)))))
+             (push bin-name class-names)))
+         ;; Second pass: load with AOT enabled to write class definitions
+         (setf *aot-dir* aot)
+         (dolist (bin-name (reverse class-names))
+           (format t "; Loading ~A~%" bin-name)
+           (handler-case
+               (classload bin-name)
+             (error (e)
+               (format t ";   Warning: Failed to load ~A: ~A~%" bin-name e))))
+         (setf *aot-dir* nil)
+         ;; Third pass: now eagerly compile methods with AOT enabled
+         (setf *aot-dir* aot)
+         (let ((compiled-classes (make-hash-table :test #'equal)))
+           (dolist (bin-name (reverse class-names))
+             (let ((class (gethash bin-name *ldk-classes-by-bin-name*)))
+               (when (and class (not (gethash bin-name compiled-classes)))
+                 (setf (gethash bin-name compiled-classes) t)
+                 (format t "; AOT compiling ~A~%" bin-name)
+                 (handler-case
+                     (loop for method-index from 1 to (length (slot-value class 'methods))
+                           do (handler-case
+                                  (%compile-method bin-name method-index)
+                                (error (e)
+                                  (format t ";   Warning: Failed to compile method ~A in ~A: ~A~%" method-index bin-name e))))
+                   (sb-kernel::control-stack-exhausted ()
+                     (format t ";   ERROR: Stack exhausted compiling ~A, skipping remaining methods~%" bin-name)))))))
+         ;; Write all class definitions to classes.lisp and generate ASDF file
+         (when aot
+           (%write-all-aot-classes aot)
+           (%generate-aot-asdf-file aot "aot-compiled")))
+       (return-from main))
+
+      ;; Otherwise treat as class name
+      (t
+       (let ((class (classload (substitute #\/ #\. mainclass))))
+         (assert (or class (error "Can't load ~A" mainclass)))
+         (return-from main)))))
+
   (let* ((class (classload (substitute #\/ #\. mainclass)))
          (argv (make-java-array
                 :component-class (%get-java-class-by-bin-name "java/lang/String")
                 :initial-contents (mapcar #'jstring args))))
 
     (assert (or class (error "Can't load ~A" mainclass)))
+
     (%clinit class)
 
     ;; The `main` method may be in a superclass of CLASS.  Search for it.
