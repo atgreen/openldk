@@ -113,22 +113,92 @@
 
   stack-vars)
 
+(defun count-variable-uses (ir-code)
+  "Count how many times each variable is used (read from) in IR-CODE."
+  (let ((use-counts (make-hash-table :test 'eq)))
+    (labels ((count-in-ir (ir)
+               (cond
+                 ((typep ir '<stack-variable>)
+                  (incf (gethash ir use-counts 0)))
+                 ((typep ir 'ir-node)
+                  ;; Walk all slots that contain IR
+                  (dolist (slot (closer-mop:class-slots (class-of ir)))
+                    (let* ((slot-name (closer-mop:slot-definition-name slot))
+                           (slot-value (and (slot-boundp ir slot-name)
+                                           (slot-value ir slot-name))))
+                      (cond
+                        ((typep slot-value 'ir-node)
+                         (count-in-ir slot-value))
+                        ((listp slot-value)
+                         (dolist (item slot-value)
+                           (when (typep item 'ir-node)
+                             (count-in-ir item)))))))))))
+      ;; Count uses in all instructions, but skip the lvalue of assignments
+      (dolist (insn ir-code)
+        (when (typep insn 'ir-assign)
+          ;; Only count the rvalue, not the lvalue (that's a definition, not a use)
+          (count-in-ir (slot-value insn 'rvalue)))
+        (when (and (typep insn 'ir-node) (not (typep insn 'ir-assign)))
+          (count-in-ir insn))))
+    use-counts))
+
+(defun substitute-in-ir (ir subst-table)
+  "Recursively substitute variables in IR using SUBST-TABLE."
+  (cond
+    ;; If this is a variable with a substitution, return the substitution
+    ((and (typep ir '<stack-variable>)
+          (gethash ir subst-table))
+     (gethash ir subst-table))
+    ;; If this is an IR node, recursively substitute in all slots
+    ((typep ir 'ir-node)
+     (dolist (slot (closer-mop:class-slots (class-of ir)))
+       (let* ((slot-name (closer-mop:slot-definition-name slot)))
+         (when (and (slot-boundp ir slot-name)
+                    ;; Don't substitute in the lvalue of an assignment
+                    (not (and (typep ir 'ir-assign) (eq slot-name 'lvalue))))
+           (let ((slot-value (slot-value ir slot-name)))
+             (cond
+               ((typep slot-value 'ir-node)
+                (setf (slot-value ir slot-name)
+                      (substitute-in-ir slot-value subst-table)))
+               ((listp slot-value)
+                (setf (slot-value ir slot-name)
+                      (mapcar (lambda (item)
+                                (if (typep item 'ir-node)
+                                    (substitute-in-ir item subst-table)
+                                    item))
+                              slot-value))))))))
+     ir)
+    ;; Otherwise return as-is
+    (t ir)))
+
 (defun propagate-copies (ir-code single-assignment-table)
   "Replace variables with single assignments in IR-CODE using SINGLE-ASSIGNMENT-TABLE."
-  ;; Scan through the code, looking for assignments to stack variables
-  ;; with single assignments.  Remove those assignments.
-  (mapcar (lambda (insn)
-            (if (and (typep insn 'ir-assign)
-                     (let ((lvalue (slot-value insn 'lvalue))
-                           (rvalue (slot-value insn 'rvalue)))
-                       (if (and (typep lvalue '<stack-variable>)
-                                (= (length (slot-value lvalue 'var-numbers)) 1)
-                                (not (side-effect-p rvalue)))
-                           (setf (gethash lvalue single-assignment-table) (slot-value insn 'rvalue))
-                           nil)))
-                (make-instance 'ir-nop :address (address insn))
-                insn))
-          ir-code))
+  ;; Count how many times each variable is used
+  (let ((use-counts (count-variable-uses ir-code)))
+    ;; First pass: identify which assignments can be propagated
+    (dolist (insn ir-code)
+      (when (and (typep insn 'ir-assign)
+                 (let ((lvalue (slot-value insn 'lvalue))
+                       (rvalue (slot-value insn 'rvalue)))
+                   (and (typep lvalue '<stack-variable>)
+                        (= (length (slot-value lvalue 'var-numbers)) 1)
+                        (not (side-effect-p rvalue))
+                        ;; Only propagate if used exactly once or never
+                        (<= (gethash lvalue use-counts 0) 1))))
+        (setf (gethash (slot-value insn 'lvalue) single-assignment-table)
+              (slot-value insn 'rvalue))))
+
+    ;; Second pass: substitute and remove assignments
+    (mapcar (lambda (insn)
+              ;; Substitute in all instructions
+              (let ((new-insn (substitute-in-ir insn single-assignment-table)))
+                ;; If this was an assignment we're propagating, turn it into NOP
+                (if (and (typep new-insn 'ir-assign)
+                         (gethash (slot-value new-insn 'lvalue) single-assignment-table))
+                    (make-instance 'ir-nop :address (address new-insn))
+                    new-insn)))
+            ir-code)))
 
 (defun %get-constant-int (ir context)
   "If IR is or becomes an IR-INT-LITERAL in CONTEXT, return its integer value."
