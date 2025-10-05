@@ -1,0 +1,67 @@
+load_lib dg.exp
+load_lib openldk.exp
+
+dg-init
+
+set dg-do-what-default run
+
+set testargs ""
+set testname ""
+
+proc openldk_load { classfile } {
+    global testargs
+
+    set timeout 30
+    verbose "load $classfile"
+    set ldkcp [getenv "LDK_CLASSPATH"]
+    setenv "LDK_CLASSPATH" "$ldkcp:.:./df"
+    set classname [string map {".class" ""} $classfile]
+    set result [local_exec "../openldk $classname $testargs" "" "" $timeout]
+    verbose "result = $result"
+    set status [lindex $result 0]
+    set output [lindex $result 1]
+    verbose "STATUS = $status"
+
+    # Check if the test is in the expected failures file
+    if {[is_expected_failure $classname]} {
+        if { $status == 0 } {
+            return [list "xpass" $output]
+        } else {
+            return [list "xfail" $output]
+        }
+    } else {
+        if { $status == 0 } {
+            return [list "pass" $output]
+        } else {
+            return [list "fail" $output]
+        }
+    }
+}
+
+proc openldk-dg-test { prog do_what extra_tool_flags } {
+    global testargs
+    set timeout 5
+
+    verbose "prog $prog" 2
+    verbose "do_what $do_what" 2
+    verbose "extra_tool_flags $extra_tool_flags" 2
+
+    set JAVA_HOME [getenv "JAVA_HOME"]
+    set status [local_exec "$JAVA_HOME/../bin/javac $prog" "" "" $timeout]
+    set classname [string map {".java" ""} $prog]
+    set testargs ""
+
+    return [list "" "$classname.class"]
+}
+
+set tlist [lsort [glob -nocomplain -- df/*.java]]
+
+foreach test $tlist {
+    global testname
+    verbose "Testing $test"
+    set testname "$test"
+    dg-test $test "" ""
+}
+
+dg-finish
+
