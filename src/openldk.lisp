@@ -374,7 +374,7 @@
                        (let ((code (apply #'append
                                           (loop
                                             while (and (< (pc *context*) length))
-                                            for no-record-stack-state? = (find (aref *opcodes* (aref code (pc *context*))) '(:GOTO))
+                                            for no-record-stack-state? = (find (aref *opcodes* (aref code (pc *context*))) '(:GOTO :ATHROW :RETURN :IRETURN :LRETURN :FRETURN :DRETURN :ARETURN))
                                             for result = (progn
                                                            (let ((stk (gethash (pc *context*) (stack-state-table *context*))))
                                                              (when stk
@@ -409,10 +409,14 @@
                          ;; mutates the var-numbers slot of stack variables to include the
                          ;; union of all paths. The return value is discarded; the important
                          ;; work is the mutation of shared stack-variable objects.
-                         (maphash (lambda (k v)
-                                    (when (> (length v) 1)
-                                      (reduce #'merge-stacks v)))
-                                  (stack-state-table *context*))
+                         (handler-bind
+                             ((error (lambda (e)
+                                       (format *error-output* "~&Error in method ~A.~A~A: ~A~%"
+                                               class-name (slot-value method 'name) (slot-value method 'descriptor) e))))
+                           (maphash (lambda (k v)
+                                      (when (> (length v) 1)
+                                        (reduce #'merge-stacks v)))
+                                    (stack-state-table *context*)))
                          (fix-stack-variables (stack-variables *context*))
                          (setf code (propagate-copies code (single-assignment-table *context*)))
                          (loop
