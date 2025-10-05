@@ -207,9 +207,12 @@
    Uses def-use chains for precise analysis.
 
    Propagation is safe when:
-   1. Variable is never used (dead code elimination)
+   1. Variable is never used AND rvalue is pure (dead code elimination)
    2. RValue is a pure value (literal or SSA variable) - always safe
-   3. RValue is side-effect-free and used only once - safe to inline"
+   3. RValue is side-effect-free and used only once - safe to inline
+
+   Note: Local variables (ir-local-variable) are NEVER propagated in Phase 1
+   because they are mutable and require dataflow analysis."
   (declare (ignore def-insn ir-code))  ; Reserved for future phases
   (let ((use-list (gethash var use-list-table)))
     (and
@@ -217,11 +220,11 @@
      (typep var '<stack-variable>)
      ;; Must have single static assignment (SSA property)
      (= (length (slot-value var 'var-numbers)) 1)
+     ;; NEVER propagate local variables (mutable, need dataflow analysis)
+     (not (typep rvalue 'ir-local-variable))
+     (not (typep rvalue 'ir-long-local-variable))
      ;; Decide based on rvalue type and usage
      (or
-      ;; Case 1: Dead code - variable never used
-      (null use-list)
-
       ;; Case 2: Pure values - always safe to propagate
       ;; Literals (constants) can be duplicated without changing semantics
       (typep rvalue 'ir-literal)
