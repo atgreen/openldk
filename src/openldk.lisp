@@ -202,6 +202,101 @@
     ;; Otherwise return as-is
     (t ir)))
 
+;;; ============================================================================
+;;; Phase 3: Reaching Definitions Analysis (Inter-block propagation)
+;;; ============================================================================
+
+(defun compute-local-definitions (block)
+  "Return a hash table mapping local-index -> list of IR-ASSIGN instructions in BLOCK.
+   Only includes assignments to ir-local-variable and ir-long-local-variable."
+  (let ((defs (make-hash-table :test #'eql)))
+    (dolist (insn (slot-value block 'code))
+      (when (typep insn 'ir-assign)
+        (let ((lvalue (slot-value insn 'lvalue)))
+          (when (or (typep lvalue 'ir-local-variable)
+                    (typep lvalue 'ir-long-local-variable))
+            (let ((idx (slot-value lvalue 'index)))
+              (push insn (gethash idx defs)))))))
+    defs))
+
+(defun compute-gen-kill-sets (block all-local-defs)
+  "Compute GEN and KILL sets for reaching definitions analysis.
+   GEN: definitions created in this block
+   KILL: definitions to the same local index created elsewhere
+   Returns (values gen-set kill-set) as fset:sets of instructions."
+  (let ((gen-set (fset:empty-set))
+        (kill-set (fset:empty-set))
+        (block-defs (compute-local-definitions block)))
+
+    ;; For each local index defined in this block
+    (maphash (lambda (idx insns)
+               ;; Add this block's definitions to GEN
+               (dolist (insn insns)
+                 (setf gen-set (fset:with gen-set insn)))
+
+               ;; Add all OTHER blocks' definitions to same index to KILL
+               (let ((all-defs-for-idx (gethash idx all-local-defs)))
+                 (dolist (def all-defs-for-idx)
+                   (unless (member def insns :test #'eq)
+                     (setf kill-set (fset:with kill-set def))))))
+             block-defs)
+
+    (values gen-set kill-set)))
+
+(defun reaching-definitions-fixpoint (blocks)
+  "Compute reaching definitions for all blocks using iterative dataflow analysis.
+   Returns a hash table mapping block -> IN set (fset:set of IR-ASSIGN instructions)."
+
+  ;; First, collect all local definitions across all blocks
+  (let ((all-local-defs (make-hash-table :test #'eql)))
+    (dolist (block blocks)
+      (let ((block-defs (compute-local-definitions block)))
+        (maphash (lambda (idx insns)
+                   (setf (gethash idx all-local-defs)
+                         (append insns (gethash idx all-local-defs))))
+                 block-defs)))
+
+    ;; Compute GEN/KILL for each block
+    (let ((gen-kill (make-hash-table :test #'eq))
+          (in-sets (make-hash-table :test #'eq))
+          (out-sets (make-hash-table :test #'eq)))
+
+      (dolist (block blocks)
+        (multiple-value-bind (gen kill)
+            (compute-gen-kill-sets block all-local-defs)
+          (setf (gethash block gen-kill) (cons gen kill)))
+        (setf (gethash block in-sets) (fset:empty-set))
+        (setf (gethash block out-sets) (fset:empty-set)))
+
+      ;; Iterate to fixpoint
+      (loop
+        (let ((changed nil))
+          (dolist (block blocks)
+            (let* ((gen (car (gethash block gen-kill)))
+                   (kill (cdr (gethash block gen-kill)))
+                   ;; IN[B] = union of OUT[P] for all predecessors P
+                   (new-in (fset:reduce #'fset:union
+                                       (fset:image (lambda (pred)
+                                                    (gethash pred out-sets (fset:empty-set)))
+                                                  (slot-value block 'predecessors))
+                                       :initial-value (fset:empty-set)))
+                   ;; OUT[B] = GEN[B] ∪ (IN[B] - KILL[B])
+                   (new-out (fset:union gen (fset:set-difference new-in kill))))
+
+              (unless (fset:equal? new-in (gethash block in-sets))
+                (setf changed t)
+                (setf (gethash block in-sets) new-in))
+
+              (unless (fset:equal? new-out (gethash block out-sets))
+                (setf changed t)
+                (setf (gethash block out-sets) new-out))))
+
+          (unless changed
+            (return))))
+
+      ;; Return IN sets
+      in-sets)))
+
 (defun has-intervening-assignment-p (local-var def-insn use-insn block-code)
   "Check if LOCAL-VAR is assigned between DEF-INSN and USE-INSN in BLOCK-CODE.
    Uses instruction identity (eq) for precise tracking within a basic block.
@@ -231,6 +326,65 @@
          (return-from has-intervening-assignment-p t))))
     ;; Didn't find use - be conservative
     t))
+
+(defun apply-reaching-definitions (block reaching-in global-table)
+  "Apply inter-block local propagation using reaching definitions.
+   For each use of a local in BLOCK:
+   - If exactly ONE definition reaches (from reaching-in set)
+   - And that definition assigns a safe-to-propagate value to a stack variable
+   - Add that mapping to the global-table (enabling cross-block propagation)
+
+   This enables Phase 3 inter-block propagation."
+  (let ((in-set (gethash block reaching-in (fset:empty-set))))
+    ;; Build a map from local-index -> reaching definitions
+    (let ((local-reaching (make-hash-table :test #'eql)))
+      (fset:do-set (def-insn in-set)
+        (let* ((lvalue (slot-value def-insn 'lvalue))
+               (idx (slot-value lvalue 'index)))
+          (push def-insn (gethash idx local-reaching))))
+
+      ;; For each use of a local in this block, check if unique def reaches
+      (dolist (insn (slot-value block 'code))
+        (let ((local-uses '()))
+          ;; Collect all local variable reads in this instruction
+          (labels ((collect-locals (ir)
+                     (cond
+                       ((typep ir 'ir-local-variable)
+                        (push ir local-uses))
+                       ((typep ir 'ir-long-local-variable)
+                        (push ir local-uses))
+                       ;; Recursively check slots
+                       ((typep ir 'ir-instruction)
+                        (dolist (slot-def (closer-mop:class-slots (class-of ir)))
+                          (let ((slot-name (closer-mop:slot-definition-name slot-def)))
+                            (when (slot-boundp ir slot-name)
+                              (let ((slot-value (slot-value ir slot-name)))
+                                (when (typep slot-value 'ir-instruction)
+                                  (collect-locals slot-value))
+                                (when (listp slot-value)
+                                  (dolist (item slot-value)
+                                    (when (typep item 'ir-instruction)
+                                      (collect-locals item)))))))))))))
+            (collect-locals insn))
+
+          ;; For each local use, check reaching definitions
+          (dolist (local-use local-uses)
+            (let* ((idx (slot-value local-use 'index))
+                   (reaching-defs (gethash idx local-reaching)))
+              ;; Only propagate if exactly ONE definition reaches
+              (when (and reaching-defs
+                         (= (length reaching-defs) 1))
+                (let* ((unique-def (car reaching-defs))
+                       (rvalue (slot-value unique-def 'rvalue))
+                       (def-lvalue (slot-value unique-def 'lvalue)))
+                  ;; Only propagate if the definition assigns to a stack variable
+                  ;; and the rvalue is safe (literal or SSA)
+                  (when (and (typep def-lvalue '<stack-variable>)
+                             (or (typep rvalue 'ir-literal)
+                                 (typep rvalue '<stack-variable>))
+                             (not (side-effect-p rvalue)))
+                    ;; Add to global table for cross-block propagation
+                    (setf (gethash def-lvalue global-table) rvalue))))))))))
 
 (defun can-propagate-p (var rvalue def-insn use-list-table ir-code &key allow-locals)
   "Determine if we can safely propagate VAR's definition (RVALUE) to all use sites.
@@ -647,9 +801,18 @@
                ;; (sdfdfd (print ir-code-0))
                ;; Build basic blocks first for CFG-safe propagation
                (blocks-before-prop (build-basic-blocks ir-code-0))
+               ;; Phase 3: Compute reaching definitions for inter-block propagation
+               (reaching-in (when (and *enable-copy-propagation*
+                                      *enable-reaching-definitions*)
+                              (reaching-definitions-fixpoint blocks-before-prop)))
                ;; Per-block propagation with separate scopes for locals vs globals
                (blocks (if *enable-copy-propagation*
                            (let ((global-table (single-assignment-table *context*)))
+                             ;; Phase 3: Apply reaching definitions before per-block propagation
+                             (when *enable-reaching-definitions*
+                               (dolist (block blocks-before-prop)
+                                 (apply-reaching-definitions block reaching-in global-table)))
+                             ;; Phase 2: Per-block local propagation
                              (mapcar (lambda (block)
                                        (let ((block-code (slot-value block 'code))
                                              ;; Per-block table for local variables only
