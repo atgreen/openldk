@@ -202,60 +202,118 @@
     ;; Otherwise return as-is
     (t ir)))
 
-(defun can-propagate-p (var rvalue def-insn use-list-table ir-code)
+(defun has-intervening-assignment-p (local-var def-insn use-insn block-code)
+  "Check if LOCAL-VAR is assigned between DEF-INSN and USE-INSN in BLOCK-CODE.
+   Uses instruction identity (eq) for precise tracking within a basic block.
+   Detects both explicit assignments (ir-assign) and iinc (ir-iinc).
+   Returns T if there is an intervening assignment, NIL if safe to propagate."
+  (let ((idx (slot-value local-var 'index))
+        (between nil))
+    (dolist (insn block-code)
+      (cond
+        ;; Found the definition - start checking
+        ((eq insn def-insn)
+         (setf between t))
+        ;; Found the use - no intervening assignment
+        ((eq insn use-insn)
+         (return-from has-intervening-assignment-p nil))
+        ;; Between def and use - check for writes to same local
+        ((and between
+              (or
+               ;; Explicit assignment to local variable
+               (and (typep insn 'ir-assign)
+                    (or (typep (slot-value insn 'lvalue) 'ir-local-variable)
+                        (typep (slot-value insn 'lvalue) 'ir-long-local-variable))
+                    (= (slot-value (slot-value insn 'lvalue) 'index) idx))
+               ;; IINC increments a local in place - also a write!
+               (and (typep insn 'ir-iinc)
+                    (= (slot-value insn 'index) idx))))
+         (return-from has-intervening-assignment-p t))))
+    ;; Didn't find use - be conservative
+    t))
+
+(defun can-propagate-p (var rvalue def-insn use-list-table ir-code &key allow-locals)
   "Determine if we can safely propagate VAR's definition (RVALUE) to all use sites.
    Uses def-use chains for precise analysis.
 
    Propagation is safe when:
-   1. Variable is never used AND rvalue is pure (dead code elimination)
-   2. RValue is a pure value (literal or SSA variable) - always safe
-   3. RValue is side-effect-free and used only once - safe to inline
+   1. RValue is a pure value (literal or SSA variable) - always safe
+   2. RValue is side-effect-free and used only once - safe to inline
+   3. RValue is a local variable AND allow-locals=T AND no intervening assignments
 
-   Note: Local variables (ir-local-variable) are NEVER propagated in Phase 1
-   because they are mutable and require dataflow analysis."
-  (declare (ignore def-insn ir-code))  ; Reserved for future phases
+   When allow-locals is NIL (Phase 1):
+   - Only propagates literals and stack variables
+
+   When allow-locals is T (Phase 2, intra-block):
+   - Also propagates local variables if no intervening assignment exists"
   (let ((use-list (gethash var use-list-table)))
     (and
      ;; Must be a stack variable (SSA)
      (typep var '<stack-variable>)
      ;; Must have single static assignment (SSA property)
      (= (length (slot-value var 'var-numbers)) 1)
-     ;; NEVER propagate local variables (mutable, need dataflow analysis)
-     (not (typep rvalue 'ir-local-variable))
-     (not (typep rvalue 'ir-long-local-variable))
-     ;; Decide based on rvalue type and usage
+     ;; Check if we can propagate based on rvalue type
      (or
-      ;; Case 2: Pure values - always safe to propagate
+      ;; Case 1: Pure values - always safe to propagate
       ;; Literals (constants) can be duplicated without changing semantics
       (typep rvalue 'ir-literal)
       ;; Stack variables are SSA - no aliasing, safe to substitute
       (typep rvalue '<stack-variable>)
+
+      ;; Case 2: Local variables - only if allow-locals=T
+      ;; Will be checked for intervening assignments in propagate-copies
+      (and allow-locals
+           (or (typep rvalue 'ir-local-variable)
+               (typep rvalue 'ir-long-local-variable)))
 
       ;; Case 3: Side-effect-free expression used once
       ;; Safe to inline since we're not duplicating computation
       (and (= (length use-list) 1)
            (not (side-effect-p rvalue)))))))
 
-(defun propagate-copies (ir-code single-assignment-table)
-  "Aggressively propagate copies using def-use chains."
+(defun propagate-copies (ir-code single-assignment-table &key allow-locals)
+  "Aggressively propagate copies using def-use chains.
+
+   When allow-locals is NIL (default, Phase 1):
+   - Only propagates literals and stack variables
+
+   When allow-locals is T (Phase 2, per-block):
+   - Also propagates local variables after checking for intervening assignments"
   ;; Build dataflow information
   (multiple-value-bind (def-table use-list-table use-def-table)
       (build-def-use-chains ir-code)
     (declare (ignore use-def-table))
 
     (when *debug-propagation*
-      (format t "~&; PROPAGATE: Processing ~A instructions~%" (length ir-code)))
+      (format t "~&; PROPAGATE: Processing ~A instructions (allow-locals=~A)~%"
+              (length ir-code) allow-locals))
 
     ;; First pass: identify which assignments can be propagated
     (maphash (lambda (var def-insn)
                (when (typep def-insn 'ir-assign)
                  (let ((rvalue (slot-value def-insn 'rvalue)))
-                   (when (can-propagate-p var rvalue def-insn use-list-table ir-code)
-                     (when *debug-propagation*
-                       (format t "~&; PROPAGATE: ~A = ~A (type: ~A, uses: ~A)~%"
-                               var rvalue (type-of rvalue)
-                               (length (gethash var use-list-table))))
-                     (setf (gethash var single-assignment-table) rvalue)))))
+                   (when (can-propagate-p var rvalue def-insn use-list-table ir-code
+                                         :allow-locals allow-locals)
+                     ;; For local variables, check each use site for intervening assignments
+                     (let ((safe-to-propagate t))
+                       (when (and allow-locals
+                                  (or (typep rvalue 'ir-local-variable)
+                                      (typep rvalue 'ir-long-local-variable)))
+                         ;; Check every use site
+                         (dolist (use-insn (gethash var use-list-table))
+                           (when (has-intervening-assignment-p rvalue def-insn use-insn ir-code)
+                             (when *debug-propagation*
+                               (format t "~&; PROPAGATE: SKIP ~A = ~A (intervening assignment)~%"
+                                       var rvalue))
+                             (setf safe-to-propagate nil)
+                             (return))))
+                       ;; Only propagate if safe
+                       (when safe-to-propagate
+                         (when *debug-propagation*
+                           (format t "~&; PROPAGATE: ~A = ~A (type: ~A, uses: ~A)~%"
+                                   var rvalue (type-of rvalue)
+                                   (length (gethash var use-list-table))))
+                         (setf (gethash var single-assignment-table) rvalue)))))))
              def-table)
 
     ;; Second pass: substitute and remove assignments
@@ -573,7 +631,19 @@
                              (setf code new-code)))
                          code)))
                ;; (sdfdfd (print ir-code-0))
-               (blocks (build-basic-blocks ir-code-0))
+               (blocks-before-local-prop (build-basic-blocks ir-code-0))
+               ;; Phase 2: Per-block local variable propagation
+               ;; IMPORTANT: Use the SAME substitution table across all blocks so that
+               ;; stack variables assigned in one block can be used in another block
+               (blocks (if *enable-local-propagation*
+                           (progn
+                             (when *debug-propagation*
+                               (format t "~&; Running per-block local propagation~%"))
+                             (dolist (block blocks-before-local-prop)
+                               (setf (code block)
+                                     (propagate-copies (code block) (single-assignment-table *context*) :allow-locals t)))
+                             blocks-before-local-prop)
+                           blocks-before-local-prop))
                (lisp-code
                  (list (list 'block nil
                              (append (list 'tagbody)
@@ -692,10 +762,18 @@
                    (handler-case
                        (%eval (list (intern (format nil "~A.<clinit>()" (slot-value class 'name)) :openldk)))
                      (error (e)
-                       ;; Wrap exception in ExceptionInInitializerError
-                       (let ((eiie (make-instance '|java/lang/ExceptionInInitializerError|)))
-                         (|<init>()| eiie)
-                         (error (%lisp-condition eiie)))))))))
+                       ;; Wrap exception in ExceptionInInitializerError if classes are loaded
+                       ;; Use ignore-errors to handle case where parent class isn't loaded yet
+                       (let ((eiie (ignore-errors
+                                     (when (and (find-class '|java/lang/ExceptionInInitializerError| nil)
+                                                (find-class '|java/lang/Error| nil))
+                                       (let ((instance (make-instance '|java/lang/ExceptionInInitializerError|)))
+                                         (|<init>()| instance)
+                                         instance)))))
+                         (if eiie
+                             (error (%lisp-condition eiie))
+                             ;; During early bootstrap, just re-signal the original error
+                             (error e)))))))))
       (clinit class))))
 
 (defun open-java-classfile-on-classpath (class)
