@@ -161,25 +161,28 @@
                           ((8 9 10 11) 0) ; Byte/Short/Int/Long (default to 0)
                           (t nil))))   ; Default to nil for unknown types
                  (let* ((pc (1+ i))
-                        (values (loop for array-index from 0 below (%get-constant-int (size rvalue) context)
-                                      collect (progn
-                                                (loop until (not (typep (aref code-array pc) 'ir-nop))
-                                                      do (incf pc))
-                                                (let ((insn (aref code-array pc)))
-                                                  (incf pc)
-                                                  (if (typep insn 'ir-xastore)
-                                                      (code (codegen (value insn) *context*))
-                                                      (return nil))))))
-                        (array (if (zerop (%get-constant-int (size rvalue) context))
-                                   #()
-                                   (if values
-                                       (progn
-                                         (loop for nop-pc from (1+ i) below pc
-                                               do (setf (aref code-array nop-pc) (make-instance 'ir-nop :address (address (aref code-array nop-pc)))))
-                                         (setf changed t)
-                                         values)
-                                       (make-array (%get-constant-int (size rvalue) context)
-                                                   :initial-element init-element)))))
+                        (ir-values (loop for array-index from 0 below (%get-constant-int (size rvalue) context)
+                                         collect (progn
+                                                   (loop until (not (typep (aref code-array pc) 'ir-nop))
+                                                         do (incf pc))
+                                                   (let ((insn (aref code-array pc)))
+                                                     (incf pc)
+                                                     (if (typep insn 'ir-xastore)
+                                                         (value insn)
+                                                         (return nil))))))
+                        (array (cond
+                                 ((zerop (%get-constant-int (size rvalue) context))
+                                  #())
+                                 (ir-values
+                                  ;; Keep IR nodes (will codegen later)
+                                  (loop for nop-pc from (1+ i) below pc
+                                        do (setf (aref code-array nop-pc) (make-instance 'ir-nop :address (address (aref code-array nop-pc)))))
+                                  (setf changed t)
+                                  ir-values)
+                                 (t
+                                  ;; Pattern didn't match - use default initialization
+                                  (make-array (%get-constant-int (size rvalue) context)
+                                              :initial-element init-element)))))
                    (setf (slot-value insn 'rvalue)
                          (make-instance 'ir-array-literal
                                         :address (address insn)

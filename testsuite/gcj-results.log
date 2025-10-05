@@ -1,0 +1,18 @@
+WARNING: Couldn't find the global config file.
+Using ./testsuite/lib/openldk.exp as tool init file.
+Test run by green on Sat Oct  4 07:15:49 2025
+Native configuration is x86_64-pc-linux-gnu
+
+		=== openldk tests ===
+
+Schedule of variations:
+    unix
+
+Running target unix
+Using /usr/share/dejagnu/baseboards/unix.exp as board description file for target.
+Using /usr/share/dejagnu/config/unix.exp as generic interface file for target.
+WARNING: Couldn't find tool config file for unix, using default.
+WARNING: could not find testsuite; trying ..
+
+		=== openldk Summary ===
+

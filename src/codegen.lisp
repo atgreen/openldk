@@ -64,12 +64,45 @@
                  :expression-type (slot-value insn 'type)))
 
 (defmethod codegen ((insn ir-array-literal) context)
-  (declare (ignore context))
-  (make-instance '<expression>
-                 :insn insn
-                 :code `(make-java-array :component-class ,(component-class insn)
-                                         :initial-contents (vector ,@(coerce (slot-value insn 'value) 'list)))
-                 :expression-type (slot-value insn 'type)))
+  (let* ((values (slot-value insn 'value))
+         (size (if (vectorp values) (length values) (length values))))
+    (cond
+      ;; Large constant array - precompute the Java strings NOW and embed reference
+      ((and (vectorp values) (> size 50))
+       (let* ((java-strings (coerce (loop for val across values
+                                          collect (cond
+                                                    ((null val) nil)
+                                                    ((stringp val) (ijstring val))
+                                                    (t val)))
+                                   'vector)))
+         (make-instance '<expression>
+                        :insn insn
+                        ;; Reference the pre-computed vector directly
+                        :code `(make-java-array :component-class ,(component-class insn)
+                                                :initial-contents (copy-seq ',java-strings))
+                        :expression-type (slot-value insn 'type))))
+      ;; Small constant array or vectorp - inline it
+      ((vectorp values)
+       (let ((wrapped-values (loop for val across values
+                                   collect (cond
+                                             ((null val) nil)
+                                             ((stringp val) `(ijstring ,val))
+                                             (t val)))))
+         (make-instance '<expression>
+                        :insn insn
+                        :code `(make-java-array :component-class ,(component-class insn)
+                                                :initial-contents (vector ,@wrapped-values))
+                        :expression-type (slot-value insn 'type))))
+      ;; IR nodes - must codegen each one
+      (t
+       (let ((codegenned-values (mapcar (lambda (ir-val)
+                                          (code (codegen ir-val context)))
+                                        values)))
+         (make-instance '<expression>
+                        :insn insn
+                        :code `(make-java-array :component-class ,(component-class insn)
+                                                :initial-contents (vector ,@codegenned-values))
+                        :expression-type (slot-value insn 'type)))))))
 
 (defmethod codegen ((insn ir-int-literal) context)
   (declare (ignore context))
