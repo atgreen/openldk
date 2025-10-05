@@ -204,31 +204,34 @@
 
 (defun can-propagate-p (var rvalue def-insn use-list-table ir-code)
   "Determine if we can safely propagate VAR's definition (RVALUE) to all use sites.
-   Uses def-use chains for precise analysis."
+   Uses def-use chains for precise analysis.
+
+   Propagation is safe when:
+   1. Variable is never used (dead code elimination)
+   2. RValue is a pure value (literal or SSA variable) - always safe
+   3. RValue is side-effect-free and used only once - safe to inline"
+  (declare (ignore def-insn ir-code))  ; Reserved for future phases
   (let ((use-list (gethash var use-list-table)))
     (and
-     ;; Must be a stack variable
+     ;; Must be a stack variable (SSA)
      (typep var '<stack-variable>)
      ;; Must have single static assignment (SSA property)
      (= (length (slot-value var 'var-numbers)) 1)
-     ;; Rvalue must not have side effects
-     (not (side-effect-p rvalue))
-     ;; Can propagate if:
-     ;; 1. Variable is never used (dead code), OR
-     ;; 2. Variable is used exactly once and rvalue is "cheap" (literal, variable, field access), OR
-     ;; 3. Variable is a copy of another variable or literal (always safe to propagate)
+     ;; Decide based on rvalue type and usage
      (or
-      ;; Dead code - never used
+      ;; Case 1: Dead code - variable never used
       (null use-list)
-      ;; Used once and cheap to evaluate
-      (and (= (length use-list) 1)
-           (or (typep rvalue 'ir-literal)
-               (typep rvalue '<stack-variable>)
-               (typep rvalue 'ir-local-variable)))
-      ;; Pure copy - safe to propagate even if used multiple times
-      (typep rvalue '<stack-variable>)
+
+      ;; Case 2: Pure values - always safe to propagate
+      ;; Literals (constants) can be duplicated without changing semantics
       (typep rvalue 'ir-literal)
-      (typep rvalue 'ir-local-variable)))))
+      ;; Stack variables are SSA - no aliasing, safe to substitute
+      (typep rvalue '<stack-variable>)
+
+      ;; Case 3: Side-effect-free expression used once
+      ;; Safe to inline since we're not duplicating computation
+      (and (= (length use-list) 1)
+           (not (side-effect-p rvalue)))))))
 
 (defun propagate-copies (ir-code single-assignment-table)
   "Aggressively propagate copies using def-use chains."
@@ -1230,10 +1233,14 @@
 
     (|condition-java/lang/Throwable| (c)
       (format t "~&Exception: ~A~%" c)
-      (let ((cause (slot-value (slot-value c '|objref|) '|cause|)))
-      (format t "   Caused by: ~A~%" cause)
-      ;; (|printStackTrace()| (slot-value c '|objref|))
-      (format t "~&~A~%" (slot-value cause '|backtrace|)))))
+      (let ((objref (slot-value c '|objref|)))
+        (when (slot-boundp objref '|backtrace|)
+          (format t "~&Backtrace: ~A~%" (slot-value objref '|backtrace|)))
+        (let ((cause (slot-value objref '|cause|)))
+          (when cause
+            (format t "   Caused by: ~A~%" cause)
+            (when (slot-boundp cause '|backtrace|)
+              (format t "~&Cause backtrace: ~A~%" (slot-value cause '|backtrace|))))))))
 
   (%clinit (%get-ldk-class-by-bin-name "sun/misc/Launcher"))
 
