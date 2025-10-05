@@ -1,4 +1,163 @@
-# Development Session Notes - 2025-01-03
+# Development Session Notes
+
+## Session 7: 2025-10-05 - AOT Transpilation (Work in Progress)
+
+Implemented experimental Ahead-of-Time (AOT) transpilation support that converts Java bytecode to Common Lisp source files. **Note: This is a work-in-progress feature. The focus remains on JIT mode.**
+
+### Implementation Overview
+
+**Core Concept:**
+- Transpile entire JAR files or directories to standalone Lisp source
+- Generate topologically sorted class definitions (parents before children)
+- Output method implementations to separate files
+- Create ASDF system for loading
+
+**Key Features:**
+1. Single `classes.lisp` file with all class definitions
+2. Topological sorting to avoid forward references
+3. Individual method files maintaining package hierarchy
+4. ASDF system generation for easy loading
+
+### Technical Implementation
+
+**New CLI Parameter:**
+```bash
+openldk --aot <output-dir> <jar-file|directory>
+```
+
+**Output Structure:**
+```
+aot-dir/
+├── aot-compiled.asd    # ASDF system file
+├── classes.lisp        # All class definitions (topologically sorted)
+└── *.lisp              # Method files (package hierarchy preserved)
+```
+
+**Topological Sorting Algorithm:**
+- Depth-first traversal of class hierarchy
+- Ensures parent classes defined before children
+- Detects circular dependencies
+- Prevents forward reference issues
+
+**Code Generation Fix (src/codegen.lisp:1211):**
+Changed from embedding class objects to runtime lookup:
+```lisp
+;; Before: (find-class (intern ...))  # Embeds #<standard-class>
+;; After:  (list 'find-class (list 'quote (intern ...)))  # Generates (find-class 'class-name)
+```
+This makes generated code fully serializable and loadable.
+
+### Files Modified
+
+**src/global-state.lisp (+2 lines):**
+- Added `*aot-dir*` variable for output directory
+- Added `*aot-class-definitions*` hash table for collecting classes
+
+**src/classpath.lisp (+16 lines):**
+- Added `list-jar-classes` function to enumerate JAR contents
+
+**src/codegen.lisp (2 lines changed):**
+- Fixed class reference generation for serializable output
+
+**src/openldk.lisp (+262 lines, -8 lines):**
+- `%write-aot-method` - writes method definitions to files
+- `%write-aot-class` - stores class definitions for batch writing
+- `%topological-sort-classes` - sorts classes by dependency
+- `%write-all-aot-classes` - writes all classes to single file
+- `%generate-aot-asdf-file` - creates ASDF system definition
+- Added --aot CLI parameter
+- Modified `%compile-method` to support AOT mode
+- Added JAR and directory transpilation support
+- Modified class loading to extract definitions in AOT mode
+
+**.gitignore (+1 line):**
+- Added `rt` directory to ignore list
+
+### Usage Examples
+
+**Transpile a JAR file:**
+```bash
+openldk --aot /tmp/output test.jar
+# Generates:
+#   /tmp/output/classes.lisp
+#   /tmp/output/Test.lisp
+#   /tmp/output/aot-compiled.asd
+```
+
+**Transpile a directory:**
+```bash
+openldk --aot /tmp/output /path/to/classes
+# Preserves package hierarchy in output
+```
+
+**Generated classes.lisp example:**
+```lisp
+;;;; AOT-compiled class definitions
+;;;; Classes are topologically sorted (parents before children)
+
+; Class: A
+(progn
+ (defclass openldk::a (openldk::|java/lang/Object|)
+           ((openldk::|x| :initform nil :allocation :instance)))
+ (defparameter openldk::|+static-A+| (make-instance 'openldk::a)))
+
+; Class: C
+(progn
+ (defclass openldk::c (openldk::a) nil)  ; Comes after parent A
+ (defparameter openldk::|+static-C+| (make-instance 'openldk::c)))
+```
+
+### Current Limitations (WIP)
+
+- Some classes fail to compile (e.g., missing parent classes)
+- No dependency resolution across JAR boundaries
+- No optimization of generated code
+- ASDF system uses `:serial t` (could be optimized)
+- No incremental transpilation support
+
+### Testing
+
+**Verified non-AOT mode still works:**
+```bash
+$ openldk Test
+1725
+# Exit code: 0 ✓
+```
+
+**Tested AOT transpilation:**
+```bash
+$ openldk --aot /tmp/test-aot test.jar
+; Transpiling Test
+; Wrote 1 class definitions to /tmp/test-aot/classes.lisp
+; Generated ASDF file: /tmp/test-aot/aot-compiled.asd
+
+$ openldk --aot /tmp/test-aot /tmp/test-classes
+; Loading A
+; Loading B
+; Loading C
+; Loading test/foo/Bar
+; Transpiling A
+; Transpiling B
+; Transpiling C
+; Transpiling test/foo/Bar
+; Wrote 4 class definitions to /tmp/test-aot/classes.lisp
+```
+
+### Next Steps (Future Work)
+
+- [ ] Handle missing class dependencies
+- [ ] Add incremental transpilation
+- [ ] Optimize generated code
+- [ ] Support multiple JAR dependencies
+- [ ] Add tests for AOT mode
+- [ ] Document ASDF loading workflow
+
+**Commits:**
+- `a3b27c2` - Add AOT (Ahead-of-Time) transpilation support
+
+---
+
+## Session 6: 2025-01-03 - Threading Implementation
 
 ## Summary
 
