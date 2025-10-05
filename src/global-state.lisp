@@ -75,9 +75,12 @@
 (defvar *debug-unmuffle* nil)
 (defvar *debug-propagation* nil)
 
-;; Experimental: basic copy/constant propagation over IR. Disabled by default
-;; due to recent regressions. Flip to T to re-enable.
+;; Experimental: basic copy/constant propagation over IR. Now enabled in Phase 1.
 (defvar *enable-copy-propagation* t)
+
+;; Phase 2: Intra-block local variable propagation. Enabled for testing.
+;; Propagates local variables within basic blocks when no intervening assignments exist.
+(defvar *enable-local-propagation* t)
 
 (defvar *boot-class-loader* nil)
 
