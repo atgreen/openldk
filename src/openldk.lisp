@@ -113,6 +113,12 @@
 
   stack-vars)
 
+;; Unify all <stack-variable> instances that represent the same logical variable
+;; (i.e., their var-number sets overlap), so downstream passes (like DCE) that
+;; rely on EQ identity will see reads and definitions as the same object.
+;; Removed attempted unify-stack-variables implementation — replaced with
+;; a var-number keyed DCE read-tracking to avoid identity mismatches.
+
 (defun stack-variable-is-live-p (stack-var blocks)
   "Returns T if STACK-VAR has at least one non-dead assignment in BLOCKS."
   (dolist (block blocks)
@@ -127,18 +133,33 @@
   "Remove assignments to stack variables that are never read.
    Only removes assignments where rvalue is a literal or another stack var (no side effects).
    Returns T if any assignments were removed."
-  (let ((changed nil)
-        (read-vars (make-hash-table :test #'eq)))
+  (labels ((sv-key (sv)
+             (let* ((nums (slot-value sv 'var-numbers))
+                    (lst (if (listp nums) (copy-list nums) (list nums))))
+               (format nil "~{~A~^,~}" (sort lst #'<)))))
+    (let ((changed nil)
+          ;; Key reads by var-number set to avoid EQ identity issues
+          (read-keys (make-hash-table :test #'equal)))
 
     ;; First pass: collect ALL stack variables that are read (as rvalues)
     ;; IMPORTANT: Check specific types BEFORE generic ir-node!
     (labels ((collect-reads (ir)
                (cond
                  ((typep ir '<stack-variable>)
-                  (setf (gethash ir read-vars) t))
+                  (when (and *debug-codegen*
+                             (search "HashMap.resize" (fn-name *context*))
+                             (search "s{5}" (format nil "~A" ir)))
+                    (format t "; DCE: Recording read of ~A~%" ir))
+                  (setf (gethash (sv-key ir) read-keys) t))
                  ((typep ir 'ir-assign)
                   ;; Check rvalue for reads
                   (when-let ((rval (slot-value ir 'rvalue)))
+                    (when (and *debug-codegen*
+                               (search "HashMap.resize" (fn-name *context*))
+                               (typep rval '<stack-variable>)
+                               (search "s{5}" (format nil "~A" rval)))
+                      (format t "; DCE: IR-ASSIGN with lvalue=~A reads rvalue=~A~%"
+                              (type-of (slot-value ir 'lvalue)) rval))
                     (collect-reads rval))
                   ;; Check lvalue - for ir-member, the objref is a READ
                   (when-let ((lval (slot-value ir 'lvalue)))
@@ -198,20 +219,21 @@
           (let* ((stack-var (slot-value insn 'lvalue))
                  (rvalue (slot-value insn 'rvalue))
                  ;; Only safe to remove if rvalue has no side effects
+                 ;; IMPORTANT: Don't eliminate assignments from local vars, as propagation
+                 ;; may have already substituted uses of the stack var, making it appear unused.
                  (safe-rvalue? (or (typep rvalue 'ir-literal)
-                                  (typep rvalue '<stack-variable>)
-                                  (typep rvalue 'ir-local-variable)
-                                  (typep rvalue 'ir-long-local-variable))))
+                                  (typep rvalue '<stack-variable>))))
             (when (and safe-rvalue?
-                      (not (gethash stack-var read-vars)))
+                      (not (gethash (sv-key stack-var) read-keys)))
               (when *debug-codegen*
-                (format t "; DCE: Marking dead assignment to ~A (rvalue: ~A, block: ~A)~%"
+                (format t "; DCE: Marking dead assignment to ~A (rvalue: ~A ~S, block: ~A)~%"
                         stack-var
                         (type-of rvalue)
+                        rvalue
                         (id block)))
               (setf (slot-value insn 'dead-p) t)
               (setf changed t))))))
-    changed))
+    changed)))
 
 (defun build-def-use-chains (ir-code)
   "Build def-use and use-def chains for dataflow analysis.
@@ -931,10 +953,10 @@
                                      blocks-before-prop))
                            blocks-before-prop))
                ;; Dead code elimination: remove assignments to stack vars that are never read
-               (blocks-after-dce blocks) #| (let ((blks blocks))
-                                  (when *enable-copy-propagation*
+               (blocks-after-dce (let ((blks blocks))
+                                  (when *enable-dce*
                                     (loop while (eliminate-dead-stack-assignments blks)))
-                                  blks) |#
+                                  blks))
                (lisp-code
                  (list (list 'block nil
                              (append (list 'tagbody)
@@ -1055,6 +1077,10 @@
                    (handler-case
                        (%eval (list (intern (format nil "~A.<clinit>()" (slot-value class 'name)) :openldk)))
                      (error (e)
+                       ;; DEBUG: Print the original exception
+                       (when *debug-codegen*
+                         (format t "~%; DEBUG: <clinit> caught exception in ~A: ~A~%" (slot-value class 'name) e)
+                         (trivial-backtrace:print-backtrace e :output *standard-output*))
                        ;; Wrap exception in ExceptionInInitializerError if classes are loaded
                        ;; Use ignore-errors to handle case where parent class isn't loaded yet
                        (let ((eiie (ignore-errors
@@ -1248,6 +1274,10 @@
                (%eval ccode))
              (let ((ccode `(defmethod %lisp-condition ((throwable ,(intern (format nil "~A" classname) :openldk)))
                              (let ((c (make-condition (quote ,(intern (format nil "condition-~A" classname) :openldk)))))
+                               ;; Debug: print backtrace for Error types
+                               (when (and *debug-codegen* (search "Error" ,classname))
+                                 (format t "~%; DEBUG: Creating ~A~%" ,classname)
+                                 (trivial-backtrace:print-backtrace c :output *standard-output*))
                                (setf (slot-value c '|objref|) throwable)
                                c))))
                (%eval ccode))))
@@ -1347,6 +1377,11 @@
           (setf *debug-unmuffle* t))
         (when (find #\p LDK_DEBUG)
           (setf *debug-propagation* t)))))
+
+  ;; Enable DCE via environment variable LDK_DCE=1 (or any non-empty value)
+  (let ((LDK_DCE (uiop:getenv "LDK_DCE")))
+    (when (and LDK_DCE (plusp (length LDK_DCE)))
+      (setf *enable-dce* t)))
 
   ;; Reset system properties to fix things that change between
   ;; build-time and run-time.
@@ -1531,6 +1566,11 @@
   (assert (typep property-alist 'list))
 
   (ensure-JAVA_HOME)
+
+  ;; Allow build-time control of DCE via environment (since main isn't invoked during image build)
+  (let ((LDK_DCE (uiop:getenv "LDK_DCE")))
+    (when (and LDK_DCE (plusp (length LDK_DCE)))
+      (setf *enable-dce* t)))
 
   (let ((classpath
           (concatenate 'string

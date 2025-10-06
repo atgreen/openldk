@@ -66,7 +66,7 @@
 (defvar *aot-dir* nil)
 (defvar *aot-class-definitions* nil "Hash table storing class definitions for AOT compilation")
 (defvar *debug-load* nil)
-(defvar *debug-bytecode* nil)
+(defvar *debug-bytecode* t)
 (defvar *debug-codegen* t)
 (defvar *debug-slynk* nil)
 (defvar *debug-trace* nil)
@@ -77,6 +77,10 @@
 
 ;; Experimental: basic copy/constant propagation over IR. Now enabled in Phase 1.
 (defvar *enable-copy-propagation* t)
+
+;; Enable/disable dead code elimination (DCE) over IR assignments
+;; Default enabled
+(defvar *enable-dce* t)
 
 ;; Phase 2: Intra-block local variable propagation. Enabled for testing.
 ;; Propagates local variables within basic blocks when no intervening assignments exist.
