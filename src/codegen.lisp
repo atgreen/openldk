@@ -1336,6 +1336,8 @@ Used to consult block-local substitutions in addition to global ones.")
                  (let ((*current-block* basic-block))
                    (cons (intern (format nil "branch-target-~A" (address (car (slot-value basic-block 'code)))))
                          (loop for insn in (slot-value basic-block 'code)
+                               do (when (and *debug-codegen* (slot-value insn 'dead-p))
+                                    (format t "; Skipping dead instruction: ~A~%" (type-of insn)))
                                when (not (slot-value insn 'dead-p))  ; Skip dead instructions
                                  append (let ((expr (codegen insn *context*)))
                                           (when (typep insn 'ir-stop-marker)
