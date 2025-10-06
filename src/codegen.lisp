@@ -1299,8 +1299,21 @@
                                      *call-nesting-level* "*" *call-nesting-level* ,(fn-name *context*))))
                           (return-from ,(intern (slot-value insn 'fn-name) :openldk) result))))
 
+(defvar *current-block* nil
+  "Dynamic variable holding the current <basic-block> during codegen.
+Used to consult block-local substitutions in addition to global ones.")
+
 (defmethod codegen ((insn <stack-variable>) context)
+  ;; First check global substitutions, then block-local
+  ;; This order prevents issues with local variables that may not exist in final code
   (let ((v (gethash insn (single-assignment-table context))))
+    ;; Only check block-local if not in global table
+    (unless v
+      (when (and *current-block*
+                 (slot-boundp *current-block* 'local-substitutions))
+        (let ((local-subs (slot-value *current-block* 'local-substitutions)))
+          (when local-subs
+            (setf v (gethash insn local-subs))))))
     (if v
         (codegen v context)
         (make-instance '<expression>
@@ -1319,13 +1332,15 @@
           (push (list) (emitted-block-scopes *context*)))
         (let* ((stop-emitting-blocks? nil)
                (lisp-code
-                 (cons (intern (format nil "branch-target-~A" (address (car (slot-value basic-block 'code)))))
-                       (loop for insn in (slot-value basic-block 'code)
-                             for expr = (codegen insn *context*)
-                             when (typep insn 'ir-stop-marker)
-                               do (setf stop-emitting-blocks? t)
-                             when expr
-                               collect (trace-insn insn (code expr))))))
+                 ;; Bind *current-block* so codegen can access local substitutions
+                 (let ((*current-block* basic-block))
+                   (cons (intern (format nil "branch-target-~A" (address (car (slot-value basic-block 'code)))))
+                         (loop for insn in (slot-value basic-block 'code)
+                               for expr = (codegen insn *context*)
+                               when (typep insn 'ir-stop-marker)
+                                 do (setf stop-emitting-blocks? t)
+                               when expr
+                                 collect (trace-insn insn (code expr)))))))
           (push basic-block (first (emitted-block-scopes *context*)))
           (pop (slot-value *context* 'blocks))
 

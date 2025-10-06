@@ -113,6 +113,58 @@
 
   stack-vars)
 
+(defun eliminate-dead-stack-assignments (blocks)
+  "Remove assignments to stack variables that are never read.
+   Only removes assignments where rvalue is a literal or another stack var (no side effects).
+   Returns T if any assignments were removed."
+  (let ((changed nil)
+        (read-vars (make-hash-table :test #'eq)))
+
+    ;; First pass: collect ALL stack variables that are read (as rvalues)
+    (labels ((collect-reads (ir)
+               (cond
+                 ((typep ir '<stack-variable>)
+                  (setf (gethash ir read-vars) t))
+                 ((typep ir 'ir-assign)
+                  ;; Only scan rvalue for reads, skip lvalue
+                  (when-let ((rval (slot-value ir 'rvalue)))
+                    (collect-reads rval)))
+                 ((typep ir 'ir-node)
+                  (dolist (slot-def (closer-mop:class-slots (class-of ir)))
+                    (let ((slot-name (closer-mop:slot-definition-name slot-def)))
+                      (when (and (slot-boundp ir slot-name)
+                                 (not (eq slot-name 'address)))
+                        (let ((val (slot-value ir slot-name)))
+                          (cond
+                            ((typep val 'ir-node) (collect-reads val))
+                            ((listp val)
+                             (dolist (item val)
+                               (when (typep item 'ir-node)
+                                 (collect-reads item)))))))))))))
+      (dolist (block blocks)
+        (dolist (insn (slot-value block 'code))
+          (collect-reads insn))))
+
+    ;; Second pass: remove dead assignments
+    (dolist (block blocks)
+      (setf (slot-value block 'code)
+            (remove-if (lambda (insn)
+                        (when (and (typep insn 'ir-assign)
+                                   (typep (slot-value insn 'lvalue) '<stack-variable>))
+                          (let* ((stack-var (slot-value insn 'lvalue))
+                                 (rvalue (slot-value insn 'rvalue))
+                                 ;; Only safe to remove if rvalue has no side effects
+                                 (safe-rvalue? (or (typep rvalue 'ir-literal)
+                                                  (typep rvalue '<stack-variable>)
+                                                  (typep rvalue 'ir-local-variable)
+                                                  (typep rvalue 'ir-long-local-variable))))
+                            (when (and safe-rvalue?
+                                      (not (gethash stack-var read-vars)))
+                              (setf changed t)
+                              t))))  ; remove this instruction
+                      (slot-value block 'code))))
+    changed))
+
 (defun build-def-use-chains (ir-code)
   "Build def-use and use-def chains for dataflow analysis.
    Returns (values def-table use-list-table use-def-table)
@@ -830,11 +882,17 @@
                                          block))
                                      blocks-before-prop))
                            blocks-before-prop))
+               ;; Dead code elimination: remove assignments to stack vars that are never read
+               ;; TODO: Debug why DCE causes NPE
+               (blocks-after-dce blocks) #| (let ((blks blocks))
+                                  (when *enable-copy-propagation*
+                                    (loop while (eliminate-dead-stack-assignments blks)))
+                                  blks) |#
                (lisp-code
                  (list (list 'block nil
                              (append (list 'tagbody)
                                      (mapcan (lambda (x) (if (listp x) x (list x)))
-                                             (loop for block in blocks
+                                             (loop for block in blocks-after-dce
                                                    for code = (codegen-block block block)
                                                    when code
                                                      collect (progn
