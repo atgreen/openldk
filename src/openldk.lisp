@@ -121,6 +121,7 @@
         (read-vars (make-hash-table :test #'eq)))
 
     ;; First pass: collect ALL stack variables that are read (as rvalues)
+    ;; IMPORTANT: Check specific types BEFORE generic ir-node!
     (labels ((collect-reads (ir)
                (cond
                  ((typep ir '<stack-variable>)
@@ -134,11 +135,39 @@
                     (when (and (typep lval 'ir-member)
                                (slot-boundp lval 'objref))
                       (collect-reads (slot-value lval 'objref)))))
+                 ;; Explicit handling for array access patterns (before generic ir-node)
+                 ((typep ir 'ir-xastore)
+                  ;; Array stores read: arrayref, index, value
+                  (when (slot-boundp ir 'arrayref)
+                    (collect-reads (slot-value ir 'arrayref)))
+                  (when (slot-boundp ir 'index)
+                    (collect-reads (slot-value ir 'index)))
+                  (when (slot-boundp ir 'value)
+                    (collect-reads (slot-value ir 'value))))
+                 ((typep ir 'ir-aaload)
+                  ;; Array loads read: arrayref, index
+                  (when (slot-boundp ir 'arrayref)
+                    (collect-reads (slot-value ir 'arrayref)))
+                  (when (slot-boundp ir 'index)
+                    (collect-reads (slot-value ir 'index))))
+                 ;; Explicit handling for method calls (before generic ir-node)
+                 ((typep ir 'ir-call-special-method)
+                  ;; Special methods (constructors, super): read all args including objref
+                  (when (slot-boundp ir 'args)
+                    (dolist (arg (slot-value ir 'args))
+                      (collect-reads arg))))
+                 ((typep ir 'ir-call-virtual-method)
+                  ;; Virtual methods (includes static as subclass): args[0] is objref for virtual
+                  (when (slot-boundp ir 'args)
+                    (dolist (arg (slot-value ir 'args))
+                      (collect-reads arg))))
+                 ;; Generic fallback for other ir-node types (MUST BE LAST)
                  ((typep ir 'ir-node)
                   (dolist (slot-def (closer-mop:class-slots (class-of ir)))
                     (let ((slot-name (closer-mop:slot-definition-name slot-def)))
                       (when (and (slot-boundp ir slot-name)
-                                 (not (eq slot-name 'address)))
+                                 (not (eq slot-name 'address))
+                                 (not (eq slot-name 'dead-p)))  ; Skip dead-p slot
                         (let ((val (slot-value ir slot-name)))
                           (cond
                             ((typep val 'ir-node) (collect-reads val))
@@ -166,7 +195,10 @@
             (when (and safe-rvalue?
                       (not (gethash stack-var read-vars)))
               (when *debug-codegen*
-                (format t "; DCE: Marking dead assignment to ~A~%" stack-var))
+                (format t "; DCE: Marking dead assignment to ~A (rvalue: ~A, block: ~A)~%"
+                        stack-var
+                        (type-of rvalue)
+                        (id block)))
               (setf (slot-value insn 'dead-p) t)
               (setf changed t))))))
     changed))
@@ -889,10 +921,14 @@
                                      blocks-before-prop))
                            blocks-before-prop))
                ;; Dead code elimination: remove assignments to stack vars that are never read
-               (blocks-after-dce (let ((blks blocks))
+               ;; TODO: DCE incompatible with Phase 1 propagation - Phase 1 substitutes
+               ;; stack vars during IR generation, so method args contain local-vars directly
+               ;; instead of stack vars. DCE then marks stack vars as dead (correctly), but
+               ;; they're still in LET bindings. Need to filter LET bindings first.
+               (blocks-after-dce blocks) #| (let ((blks blocks))
                                   (when *enable-copy-propagation*
                                     (loop while (eliminate-dead-stack-assignments blks)))
-                                  blks))
+                                  blks) |#
                (lisp-code
                  (list (list 'block nil
                              (append (list 'tagbody)
