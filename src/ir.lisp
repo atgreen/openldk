@@ -40,7 +40,9 @@
 (in-package :openldk)
 
 (defclass/std ir-node ()
-  ((address :std -1)))
+  ((address :std -1)
+   (dead-p :std nil
+           :doc "T if this instruction has been eliminated by DCE.")))
 
 (defmethod side-effect-p ((node ir-node))
   (declare (ignore node))

@@ -1336,11 +1336,13 @@ Used to consult block-local substitutions in addition to global ones.")
                  (let ((*current-block* basic-block))
                    (cons (intern (format nil "branch-target-~A" (address (car (slot-value basic-block 'code)))))
                          (loop for insn in (slot-value basic-block 'code)
-                               for expr = (codegen insn *context*)
-                               when (typep insn 'ir-stop-marker)
-                                 do (setf stop-emitting-blocks? t)
-                               when expr
-                                 collect (trace-insn insn (code expr)))))))
+                               when (not (slot-value insn 'dead-p))  ; Skip dead instructions
+                                 append (let ((expr (codegen insn *context*)))
+                                          (when (typep insn 'ir-stop-marker)
+                                            (setf stop-emitting-blocks? t))
+                                          (if expr
+                                              (list (trace-insn insn (code expr)))
+                                              nil)))))))
           (push basic-block (first (emitted-block-scopes *context*)))
           (pop (slot-value *context* 'blocks))
 

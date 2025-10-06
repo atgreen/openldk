@@ -126,9 +126,14 @@
                  ((typep ir '<stack-variable>)
                   (setf (gethash ir read-vars) t))
                  ((typep ir 'ir-assign)
-                  ;; Only scan rvalue for reads, skip lvalue
+                  ;; Check rvalue for reads
                   (when-let ((rval (slot-value ir 'rvalue)))
-                    (collect-reads rval)))
+                    (collect-reads rval))
+                  ;; Check lvalue - for ir-member, the objref is a READ
+                  (when-let ((lval (slot-value ir 'lvalue)))
+                    (when (and (typep lval 'ir-member)
+                               (slot-boundp lval 'objref))
+                      (collect-reads (slot-value lval 'objref)))))
                  ((typep ir 'ir-node)
                   (dolist (slot-def (closer-mop:class-slots (class-of ir)))
                     (let ((slot-name (closer-mop:slot-definition-name slot-def)))
@@ -145,24 +150,25 @@
         (dolist (insn (slot-value block 'code))
           (collect-reads insn))))
 
-    ;; Second pass: remove dead assignments
+    ;; Second pass: mark dead assignments (skip already-dead instructions)
     (dolist (block blocks)
-      (setf (slot-value block 'code)
-            (remove-if (lambda (insn)
-                        (when (and (typep insn 'ir-assign)
-                                   (typep (slot-value insn 'lvalue) '<stack-variable>))
-                          (let* ((stack-var (slot-value insn 'lvalue))
-                                 (rvalue (slot-value insn 'rvalue))
-                                 ;; Only safe to remove if rvalue has no side effects
-                                 (safe-rvalue? (or (typep rvalue 'ir-literal)
-                                                  (typep rvalue '<stack-variable>)
-                                                  (typep rvalue 'ir-local-variable)
-                                                  (typep rvalue 'ir-long-local-variable))))
-                            (when (and safe-rvalue?
-                                      (not (gethash stack-var read-vars)))
-                              (setf changed t)
-                              t))))  ; remove this instruction
-                      (slot-value block 'code))))
+      (dolist (insn (slot-value block 'code))
+        (when (and (typep insn 'ir-assign)
+                   (typep (slot-value insn 'lvalue) '<stack-variable>)
+                   (not (slot-value insn 'dead-p)))  ; Don't re-process dead instructions
+          (let* ((stack-var (slot-value insn 'lvalue))
+                 (rvalue (slot-value insn 'rvalue))
+                 ;; Only safe to remove if rvalue has no side effects
+                 (safe-rvalue? (or (typep rvalue 'ir-literal)
+                                  (typep rvalue '<stack-variable>)
+                                  (typep rvalue 'ir-local-variable)
+                                  (typep rvalue 'ir-long-local-variable))))
+            (when (and safe-rvalue?
+                      (not (gethash stack-var read-vars)))
+              (when *debug-codegen*
+                (format t "; DCE: Marking dead assignment to ~A~%" stack-var))
+              (setf (slot-value insn 'dead-p) t)
+              (setf changed t))))))
     changed))
 
 (defun build-def-use-chains (ir-code)
@@ -883,11 +889,10 @@
                                      blocks-before-prop))
                            blocks-before-prop))
                ;; Dead code elimination: remove assignments to stack vars that are never read
-               ;; TODO: Debug why DCE causes NPE
-               (blocks-after-dce blocks) #| (let ((blks blocks))
+               (blocks-after-dce (let ((blks blocks))
                                   (when *enable-copy-propagation*
                                     (loop while (eliminate-dead-stack-assignments blks)))
-                                  blks) |#
+                                  blks))
                (lisp-code
                  (list (list 'block nil
                              (append (list 'tagbody)
