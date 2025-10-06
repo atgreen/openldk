@@ -67,7 +67,7 @@
 (defvar *aot-class-definitions* nil "Hash table storing class definitions for AOT compilation")
 (defvar *debug-load* nil)
 (defvar *debug-bytecode* nil)
-(defvar *debug-codegen* nil)
+(defvar *debug-codegen* t)
 (defvar *debug-slynk* nil)
 (defvar *debug-trace* nil)
 (defvar *debug-trace-args* nil)
@@ -82,9 +82,9 @@
 ;; Propagates local variables within basic blocks when no intervening assignments exist.
 (defvar *enable-local-propagation* t)
 
-;; Phase 3: Inter-block local variable propagation via reaching definitions. Enabled for testing.
+;; Phase 3: Inter-block local variable propagation via reaching definitions. Disabled temporarily for debugging.
 ;; Uses dataflow analysis to propagate locals across basic blocks when a unique definition reaches.
-(defvar *enable-reaching-definitions* t)
+(defvar *enable-reaching-definitions* nil)
 
 (defvar *boot-class-loader* nil)
 

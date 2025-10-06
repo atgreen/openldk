@@ -69,6 +69,10 @@ The dominance set is represented as an `fset:set` of <basic-block> objects.")
     :doc "True if this block's code has already been emitted.")
    (try-catch
     :doc "A list of conses of handler type and handler block.")
+   (local-substitutions
+    :std nil
+    :doc "Hash table of block-local variable substitutions (stack-var -> value).
+Combined with global substitutions during codegen for this block only.")
    (finally
     :doc "A list of finally blocks for each try-finally starting here.")
    (end-of-handler?
