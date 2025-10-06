@@ -113,6 +113,16 @@
 
   stack-vars)
 
+(defun stack-variable-is-live-p (stack-var blocks)
+  "Returns T if STACK-VAR has at least one non-dead assignment in BLOCKS."
+  (dolist (block blocks)
+    (dolist (insn (slot-value block 'code))
+      (when (and (typep insn 'ir-assign)
+                 (eq (slot-value insn 'lvalue) stack-var)
+                 (not (slot-value insn 'dead-p)))
+        (return-from stack-variable-is-live-p t))))
+  nil)
+
 (defun eliminate-dead-stack-assignments (blocks)
   "Remove assignments to stack variables that are never read.
    Only removes assignments where rvalue is a literal or another stack var (no side effects).
@@ -921,10 +931,6 @@
                                      blocks-before-prop))
                            blocks-before-prop))
                ;; Dead code elimination: remove assignments to stack vars that are never read
-               ;; TODO: DCE incompatible with Phase 1 propagation - Phase 1 substitutes
-               ;; stack vars during IR generation, so method args contain local-vars directly
-               ;; instead of stack vars. DCE then marks stack vars as dead (correctly), but
-               ;; they're still in LET bindings. Need to filter LET bindings first.
                (blocks-after-dce blocks) #| (let ((blks blocks))
                                   (when *enable-copy-propagation*
                                     (loop while (eliminate-dead-stack-assignments blks)))
@@ -990,7 +996,8 @@
                                          (list (list '|condition-cache|))
                                          (remove-duplicates
                                           (loop for var in (stack-variables *context*)
-                                                unless (gethash var (single-assignment-table *context*))
+                                                unless (or (gethash var (single-assignment-table *context*))
+                                                          (not (stack-variable-is-live-p var blocks-after-dce)))
                                                   collect (list (intern (format nil "s{~{~A~^,~}}"
                                                                                 (sort (copy-list (var-numbers var)) #'<))
                                                                        :openldk)))
@@ -1005,7 +1012,8 @@
                                          (list (list '|condition-cache|))
                                          (remove-duplicates
                                           (loop for var in (stack-variables *context*)
-                                                unless (gethash var (single-assignment-table *context*))
+                                                unless (or (gethash var (single-assignment-table *context*))
+                                                          (not (stack-variable-is-live-p var blocks-after-dce)))
                                                   collect (list (intern (format nil "s{~{~A~^,~}}"
                                                                                 (sort (copy-list (var-numbers var)) #'<))
                                                                        :openldk)))
