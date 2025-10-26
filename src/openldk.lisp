@@ -1122,6 +1122,24 @@
      0)
     (t nil)))
 
+(defun mangle-field-name (name)
+  "Mangle Java field names that conflict with Common Lisp constants/special symbols."
+  (let ((upcase-name (string-upcase name)))
+    ;; Check if this would conflict with CL constants or special symbols
+    (if (member upcase-name
+                '("T" "NIL" "CLASS" "METHOD" "PACKAGE" "TYPE"
+                  "IF" "QUOTE" "LAMBDA" "BLOCK" "RETURN-FROM"
+                  "CATCH" "THROW" "UNWIND-PROTECT" "TAGBODY" "GO"
+                  "LET" "LET*" "SETQ" "PROGN" "PROG1" "PROG2"
+                  "FUNCTION" "EVAL-WHEN" "LOAD-TIME-VALUE" "LOCALLY"
+                  "MACROLET" "MULTIPLE-VALUE-CALL" "MULTIPLE-VALUE-PROG1"
+                  "PROGV" "SETF" "THE" "SYMBOL-MACROLET" "DECLARE")
+                :test #'string=)
+        ;; Mangle by appending "$" suffix
+        (concatenate 'string name "$")
+        ;; No conflict, return as-is
+        name)))
+
 (defun emit-<class> (class)
   (let ((defclass-code (with-slots (name super interfaces fields) class
                          (list
@@ -1135,7 +1153,7 @@
                                (list))
                            (map 'list
                                 (lambda (f)
-                                  (list (intern (slot-value f 'name) :openldk)
+                                  (list (intern (mangle-field-name (slot-value f 'name)) :openldk)
                                         :initform (let ((cf (gethash "ConstantValue" (slot-value f 'attributes))))
                                                     (if cf
                                                         (value (emit (aref (constant-pool class) cf) (constant-pool class)))

@@ -65,8 +65,7 @@
       (let ((exc (make-instance '|java/lang/ArrayIndexOutOfBoundsException|)))
         ;; Initialize with message
         (|<init>(Ljava/lang/String;)| exc
-         (make-instance '|java/lang/String|
-                       :data (format nil "~A" index)))
+         (jstring (format nil "~A" index)))
         (error (%lisp-condition exc))))
     (aref data index)))
 
@@ -79,8 +78,7 @@
       (let ((exc (make-instance '|java/lang/ArrayIndexOutOfBoundsException|)))
         ;; Initialize with message
         (|<init>(Ljava/lang/String;)| exc
-         (make-instance '|java/lang/String|
-                       :data (format nil "~A" index)))
+         (jstring (format nil "~A" index)))
         (error (%lisp-condition exc))))
     (setf (aref data index) new-value)))
 

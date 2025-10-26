@@ -1,4 +1,4 @@
-# OpenLDK: Enum/Universe Debug Notes (javac AIOOBE)
+# OpenLDK: Enum/Universe Debug Notes (javac AIOOBE) - RESOLVED
 
 ## Goal
 
@@ -8,17 +8,31 @@
 - Confirm whether the failure is due to math/bit-iteration, or an
   undersized enum "universe" array returned by reflection/values().
 
-## Key Findings (confirmed with trace-args)
+## RESOLUTION - Bug Fixed (Oct 26, 2025)
 
-- The failure is consistently:
-  - `AIOOBE: jaref index=63 length=61 compclass=com.sun.tools.javac.main.Option`
-- With source-enabled tracing, we see:
-  - `TRACE Option.values() length=61`
-  - `TRACE getEnumConstantsShared(com.sun.tools.javac.main.Option) length=61`
-- `javap -verbose` on the JDK 8 tools.jar shows 62 enum constants
-  (ACC_ENUM) in `Option.class` → expected dense `Option[]` length is 62.
-- Therefore, the “61” is coming from our runtime’s enum universe and
-  values() array (undersized by 1), not from a math/shift bug.
+**ROOT CAUSE**: Bug in LUSHR (unsigned long right shift) instruction codegen
+
+**Location**: `src/codegen.lisp:1038` in `ir-lushr` method
+
+**The Bug**: Copy-paste error where `value2` (shift amount) was used twice:
+```lisp
+; WRONG - shifts the shift amount instead of the value!
+(ash (logand ,(code (codegen (value2 insn) context)) #xFFFFFFFFFFFFFFFF)
+```
+
+**The Fix**: Use `value1` (the value to shift) instead:
+```lisp
+; CORRECT - shifts the actual value
+(ash (logand ,(code (codegen (value1 insn) context)) #xFFFFFFFFFFFFFFFF)
+```
+
+**Impact**: This broke RegularEnumSet's bit mask creation. When EnumSet.allOf()
+tried to create a mask for 61 elements using `~0L >>> 3`, it was actually
+shifting 3 instead of ~0L, resulting in bit 63 being incorrectly set in the
+bit vector. This caused the iterator to try accessing index 63 in a 61-element array.
+
+**Verification**: After fix, javac no longer throws ArrayIndexOutOfBoundsException
+when iterating Option enum constants.
 
 ## Hypothesis
 
