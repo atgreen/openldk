@@ -1297,12 +1297,34 @@ user.variant
 
 (defmethod |canonicalize0(Ljava/lang/String;)| ((ufs |java/io/UnixFileSystem|) filename)
   (declare (ignore ufs))
-  (jstring (namestring (uiop:parse-unix-namestring (lstring filename)))))
+  (let ((path-str (lstring filename)))
+    (when *debug-trace*
+      (format t "~&DEBUG: canonicalize0 called with: ~S~%" path-str))
+    (handler-case
+        (let ((result (jstring (namestring (truename path-str)))))
+          (when *debug-trace*
+            (format t "~&DEBUG: canonicalize0 truename succeeded: ~S -> ~S~%"
+                    path-str (lstring result)))
+          result)
+      (error (e)
+        (when *debug-trace*
+          (format t "~&DEBUG: canonicalize0 truename failed: ~S error: ~A~%"
+                  path-str e))
+        ;; If file doesn't exist, manually resolve to absolute path
+        (let* ((pathname (uiop:parse-unix-namestring path-str))
+               (absolute-path (if (uiop:absolute-pathname-p pathname)
+                                  pathname
+                                  (merge-pathnames pathname (uiop:getcwd))))
+               (result (jstring (uiop:native-namestring absolute-path))))
+          (when *debug-trace*
+            (format t "~&DEBUG: canonicalize0 fallback: ~S -> ~S~%"
+                    path-str (lstring result)))
+          result)))))
 
 (defmethod |getLastModifiedTime(Ljava/io/File;)| ((ufs |java/io/UnixFileSystem|) file)
   (declare (ignore ufs))
   (* (org.shirakumo.file-attributes:modification-time
-      (lstring (|getName()| file)))
+      (lstring (slot-value file '|path|)))
      1000))
 
 (defun |sun/misc/Perf.registerNatives()| ()
