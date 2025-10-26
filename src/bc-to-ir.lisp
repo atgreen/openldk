@@ -1735,9 +1735,9 @@
   (with-slots (pc) context
     (incf pc)
     (push pc (aref (next-insn-list context) (1- pc)))
-    (when (find (var-type (car (stack context))) '(:LONG :DOUBLE))
-      (pop (stack context)))
-    (pop (stack context))
+    (let ((top (pop (stack context))))
+      (unless (and top (find (var-type top) '(:LONG :DOUBLE)))
+        (pop (stack context))))
     (list (make-instance 'ir-nop :address (1- pc)))))
 
 (define-bytecode-transpiler :GETFIELD (context code)
