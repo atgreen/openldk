@@ -915,7 +915,7 @@
                                                class-name (slot-value method 'name) (slot-value method 'descriptor) e))))
                            (maphash (lambda (k v)
                                       (when (> (length v) 1)
-                                        (reduce #'merge-stacks v)))
+                                        (reduce (lambda (list1 list2) (merge-stacks list1 list2 k)) v)))
                                     (stack-state-table *context*)))
                          (fix-stack-variables (stack-variables *context*))
                          (loop
