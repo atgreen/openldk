@@ -1035,7 +1035,7 @@
   (make-instance '<expression>
                  :insn insn
                  :code `(let ((shift-amount (logand ,(code (codegen (value2 insn) context)) #x3F)))
-                          (%long-to-signed (logand (ash (logand ,(code (codegen (value2 insn) context)) #xFFFFFFFFFFFFFFFF)
+                          (%long-to-signed (logand (ash (logand ,(code (codegen (value1 insn) context)) #xFFFFFFFFFFFFFFFF)
                                                        (- shift-amount))
                                                   #xFFFFFFFFFFFFFFFF)))
                  :expression-type :LONG))
@@ -1257,14 +1257,14 @@
                            (when (null objref)
                              (error (format nil "Null Pointer Exception ~A" ,(slot-value insn 'address))))
                              objref)
-                           (quote ,(intern member-name :openldk))))))
+                           (quote ,(intern (mangle-field-name member-name) :openldk))))))
 
 (defmethod codegen ((insn ir-static-member) context)
   (declare (ignore context))
   (with-slots (class member-name) insn
     (make-instance '<expression>
                    :insn insn
-                   :code `(slot-value ,(intern (format nil "+static-~A+" (slot-value (slot-value class 'class) 'name)) :openldk) (quote ,(intern member-name :openldk))))))
+                   :code `(slot-value ,(intern (format nil "+static-~A+" (slot-value (slot-value class 'class) 'name)) :openldk) (quote ,(intern (mangle-field-name member-name) :openldk))))))
 
 (define-condition java-lang-throwable (error)
   ((throwable :initarg :throwable :reader throwable)))
