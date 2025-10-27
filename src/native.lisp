@@ -1036,6 +1036,12 @@ user.variant
         (|<init>(Ljava/lang/String;)| fnf filename)
         (error (%lisp-condition fnf))))))
 
+(defmethod |length()| ((raf |java/io/RandomAccessFile|))
+  (file-length (slot-value raf '|fd|)))
+
+(defmethod |getFilePointer()| ((raf |java/io/RandomAccessFile|))
+  (file-position (slot-value raf '|fd|)))
+
 (defmethod |open0(Ljava/lang/String;)| ((fis |java/io/FileInputStream|) filename)
   (handler-case
       (setf (slot-value fis '|fd|) (open (lstring filename)
