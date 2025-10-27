@@ -335,10 +335,10 @@ and its implementation."
   (float-features:double-float-bits (coerce double 'double-float)))
 
 (defmethod |java/lang/Double.longBitsToDouble(J)| (long-bits)
-  (float-features:bits-double-float long-bits))
+  (float-features:bits-double-float (ldb (byte 64 0) long-bits)))
 
 (defmethod |java/lang/Float.intBitsToFloat(I)| (int-bits)
-  (float-features:bits-single-float int-bits))
+  (float-features:bits-single-float (ldb (byte 32 0) int-bits)))
 
 (defmethod |java/util/TimeZone.getSystemTimeZoneID(Ljava/lang/String;)| (arg)
   (jstring (local-time:format-timestring nil (local-time:now) :format '(:timezone))))

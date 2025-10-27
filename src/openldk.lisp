@@ -1576,8 +1576,50 @@
       (format *error-output* "  --dump-dir DIR    Directory for internal debug info~%~%")
       (uiop:quit 1))
     (error (condition)
-      (format *error-output* "~&Error: ~A~%" condition)
+      (cond
+        ((typep condition '|condition-java/lang/Throwable|)
+         (let ((throwable (and (slot-boundp condition '|objref|)
+                               (slot-value condition '|objref|))))
+           (if (typep throwable '|java/lang/Throwable|)
+               (progn
+                 (format *error-output* "~&Unhandled Java exception:~%")
+                 (%print-java-stack-trace throwable :stream *error-output*)
+                 (finish-output *error-output*))
+               (format *error-output* "~&Unhandled Java condition: ~A~%" condition))))
+        (t
+         (format *error-output* "~&Error: ~A~%" condition)))
       (uiop:quit 1))))
+
+(defun %java-string (value)
+  (cond
+    ((null value) "")
+    ((typep value '|java/lang/String|) (lstring value))
+    ((stringp value) value)
+    (t (format nil "~A" value))))
+
+(defun %print-java-stack-trace (throwable &key (stream *error-output*) (indent 0) (prefix nil) (visited (make-hash-table :test #'eq)))
+  (when throwable
+    (unless (gethash throwable visited)
+      (setf (gethash throwable visited) t)
+      (let* ((indent-str (make-string indent :initial-element #\space))
+             (header (%java-string (|toString()| throwable))))
+        (if prefix
+            (format stream "~&~A~A~A~%" indent-str prefix header)
+            (format stream "~&~A~A~%" indent-str header))
+        (when (and (slot-boundp throwable '|backtrace|)
+                   (slot-value throwable '|backtrace|))
+          (let ((depth (|getStackTraceDepth()| throwable)))
+            (dotimes (i depth)
+              (let* ((ste (|getStackTraceElement(I)| throwable i))
+                     (line (%java-string (|toString()| ste))))
+                (format stream "~&~A    at ~A~%" indent-str line))))))
+      (when (and (slot-boundp throwable '|cause|)
+                 (slot-value throwable '|cause|))
+        (%print-java-stack-trace (slot-value throwable '|cause|)
+                                 :stream stream
+                                 :indent indent
+                                 :prefix "Caused by: "
+                                 :visited visited)))))
 
 (defun initialize (&optional (property-alist (list)))
 
@@ -1717,20 +1759,16 @@
           (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil)))
 
     (|condition-java/lang/Throwable| (c)
-      (format t "~&Exception: ~A~%" c)
-      (let ((objref (slot-value c '|objref|)))
-        (when (slot-boundp objref '|detailMessage|)
-          (format t "Message: ~A~%" (slot-value objref '|detailMessage|)))
-        (when (slot-boundp objref '|backtrace|)
-          (format t "~&Backtrace: ~A~%" (slot-value objref '|backtrace|)))
-        (let ((cause (slot-value objref '|cause|)))
-          (when cause
-            (format t "   Caused by: ~A~%" cause)
-            (when (slot-boundp cause '|detailMessage|)
-              (format t "Cause message: ~A~%" (slot-value cause '|detailMessage|)))
-            (when (slot-boundp cause '|backtrace|)
-              (format t "~&Cause backtrace: ~A~%" (slot-value cause '|backtrace|))))))))
-
+      (let ((throwable (when (slot-boundp c '|objref|)
+                         (slot-value c '|objref|))))
+        (cond
+          ((typep throwable '|java/lang/Throwable|)
+           (format *error-output* "~&Unhandled Java exception:~%")
+           (%print-java-stack-trace throwable :stream *error-output*)
+           (finish-output *error-output*))
+          (t
+           (format *error-output* "~&Unhandled Java condition: ~A~%" c)))))
+    )
   ;; Ensure the bootstrap launcher class is present even if earlier steps signalled.
   (let ((launcher (or (gethash "sun/misc/Launcher" *ldk-classes-by-bin-name*)
                       (ignore-errors (classload "sun/misc/Launcher")))))
