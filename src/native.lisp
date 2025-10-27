@@ -337,6 +337,9 @@ and its implementation."
 (defmethod |java/lang/Double.longBitsToDouble(J)| (long-bits)
   (float-features:bits-double-float long-bits))
 
+(defmethod |java/lang/Float.intBitsToFloat(I)| (int-bits)
+  (float-features:bits-single-float int-bits))
+
 (defmethod |java/util/TimeZone.getSystemTimeZoneID(Ljava/lang/String;)| (arg)
   (jstring (local-time:format-timestring nil (local-time:now) :format '(:timezone))))
 
@@ -1049,6 +1052,16 @@ user.variant
 (defmethod |seek0(J)| ((raf |java/io/RandomAccessFile|) position)
   (file-position (slot-value raf '|fd|) position))
 
+(defmethod |readBytes([BII)| ((raf |java/io/RandomAccessFile|) byte-array offset length)
+  (let ((in-stream (slot-value raf '|fd|))
+        (bytes-read 0))
+    (loop for i from offset below (+ offset length)
+          for byte = (read-byte in-stream nil nil) ; Read a byte, return NIL on EOF
+          while byte
+          do (setf (jaref byte-array i) byte)
+             (incf bytes-read))  ; Count bytes read
+    bytes-read))
+
 (defmethod |open0(Ljava/lang/String;)| ((fis |java/io/FileInputStream|) filename)
   (handler-case
       (setf (slot-value fis '|fd|) (open (lstring filename)
@@ -1138,6 +1151,19 @@ user.variant
 (defmethod |getLength(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
   (with-open-file (stream (lstring (slot-value file '|path|)) :element-type '(unsigned-byte 8))
     (file-length stream)))
+
+(defmethod |list(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
+  (handler-case
+      (let* ((path (lstring (slot-value file '|path|)))
+             (dir (uiop:directory-files (uiop:ensure-directory-pathname path)))
+             (files (mapcar (lambda (p) (jstring (file-namestring p))) dir)))
+        (when files
+          (make-java-array
+           :component-class (%get-java-class-by-bin-name "java/lang/String")
+           :initial-contents files)))
+    (error (e)
+      (declare (ignore e))
+      nil)))
 
 (defun |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedAction;Ljava/security/AccessControlContext;)| (action context)
   (declare (ignore context))

@@ -1236,16 +1236,21 @@
   (with-slots (class method-name args) insn
      (make-instance '<expression>
                     :insn insn
-                    :code (let ((call (list 'destructuring-bind (cons 'method 'next)
-                                            (list 'closer-mop:compute-applicable-methods-using-classes
-                                                  (list 'function (intern (format nil "~A" method-name) :openldk))
-                                                  ;; Use find-class at runtime instead of embedding the class object
-                                                  (cons 'list
-                                                        (cons (list 'find-class (list 'quote (intern (slot-value class 'name) :openldk)))
-                                                              (loop for a in args collect t))))
-                                            (list 'let (list (list 'fn (list 'closer-mop:method-function 'method)))
-                                                  (list 'funcall 'fn
-                                                        (cons 'list (mapcar (lambda (a) (code (codegen a context))) args)) 'next)))))
+                    :code (let ((call (list 'let (list (list 'methods
+                                                             (list 'closer-mop:compute-applicable-methods-using-classes
+                                                                   (list 'function (intern (format nil "~A" method-name) :openldk))
+                                                                   ;; Use find-class at runtime instead of embedding the class object
+                                                                   (cons 'list
+                                                                         (cons (list 'find-class (list 'quote (intern (slot-value class 'name) :openldk)))
+                                                                               (loop for a in args collect t))))))
+                                            (list 'if (list 'null 'methods)
+                                                  (list 'error (format nil "No applicable methods found for ~A on class ~A with ~D args"
+                                                                       method-name (slot-value class 'name) (length args)))
+                                                  (list 'destructuring-bind (cons 'method 'next)
+                                                        'methods
+                                                        (list 'let (list (list 'fn (list 'closer-mop:method-function 'method)))
+                                                              (list 'funcall 'fn
+                                                                    (cons 'list (mapcar (lambda (a) (code (codegen a context))) args)) 'next)))))))
                             call))))
 
 (defmethod codegen ((insn ir-member) context)
