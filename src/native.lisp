@@ -1042,6 +1042,13 @@ user.variant
 (defmethod |getFilePointer()| ((raf |java/io/RandomAccessFile|))
   (file-position (slot-value raf '|fd|)))
 
+(defmethod |read0()| ((raf |java/io/RandomAccessFile|))
+  (let ((byte (read-byte (slot-value raf '|fd|) nil nil)))
+    (if byte byte -1)))
+
+(defmethod |seek0(J)| ((raf |java/io/RandomAccessFile|) position)
+  (file-position (slot-value raf '|fd|) position))
+
 (defmethod |open0(Ljava/lang/String;)| ((fis |java/io/FileInputStream|) filename)
   (handler-case
       (setf (slot-value fis '|fd|) (open (lstring filename)
