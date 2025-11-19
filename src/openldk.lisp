@@ -72,6 +72,47 @@
   "Return a Lisp symbol name derived from Java method NAME."
   (take (1+ (position #\) name)) name))
 
+(defun invoke-special (method-symbol owner-symbol args)
+  "Invoke METHOD-SYMBOL on ARGS using Java invokespecial semantics.
+OWNER-SYMBOL designates the declaring class of the target method.
+This bypasses overriding methods on subclasses while still honouring
+the normal call-next-method chain for the owner's superclasses."
+  (let* ((gf (symbol-function method-symbol))
+         (owner-class (find-class owner-symbol))
+         (class-list (cons owner-class
+                           (loop repeat (max 0 (1- (length args)))
+                                 collect (find-class 't))))
+         (methods (closer-mop:compute-applicable-methods-using-classes gf class-list)))
+    (unless methods
+      (error "No applicable methods found for ~A on declaring class ~A with ~D args"
+             method-symbol owner-symbol (length args)))
+    (when (and *debug-set-enclosing-type*
+               (search "setEnclosingType" (symbol-name method-symbol)))
+      (format t "~&[invoke-special] target=~A owner=~A classes=~S~%"
+              method-symbol owner-symbol class-list)
+      (format t "                 methods=~S~%"
+              (mapcar #'closer-mop:method-specializers methods))
+      (format t "                 qualifiers=~S~%"
+              (mapcar #'closer-mop::method-qualifiers methods)))
+    (let ((method (or (find owner-class methods
+                            :key (lambda (m)
+                                   (when (null (closer-mop::method-qualifiers m))
+                                     (first (closer-mop:method-specializers m))))
+                            :test #'eq :from-end t)
+                     (find owner-class methods
+                           :key (lambda (m)
+                                  (first (closer-mop:method-specializers m)))
+                           :test #'eq))))
+      (unless method
+        (when *debug-set-enclosing-type*
+          (format t "~&[invoke-special] fallback for ~A on ~A; methods=~S~%"
+                  method-symbol owner-symbol
+                  (mapcar #'closer-mop:method-specializers methods)))
+        (setf method (first methods)))
+      (let* ((tail (member method methods :test #'eq))
+             (next (rest tail)))
+        (funcall (closer-mop:method-function method) args next)))))
+
 (defun make-exception-handler-table (context)
   "Build a hashtable of handler PCs keyed by handler start for CONTEXT."
   (let ((exception-table (exception-table context))

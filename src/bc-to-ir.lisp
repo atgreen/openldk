@@ -1523,7 +1523,8 @@
 ;                 (j5 (format t "DI5: ~A~%" descriptor))
                  (parameter-count (count-parameters descriptor))
                  (return-type (get-return-type descriptor))
-                 (bootstrap-method-name (emit-static-method-reference (aref constant-pool (reference-index bsm-method-handle)) constant-pool)))
+                 (bootstrap-method-name (emit-static-method-reference (aref constant-pool (reference-index bsm-method-handle)) constant-pool))
+                 (dynamic-args (reverse (loop repeat parameter-count collect (pop (stack context))))))
 ;                 (j6 (format t "DI6: ~A~%" bootstrap-method-name))
 
 
@@ -1534,6 +1535,7 @@
                                          :bootstrap-method-name bootstrap-method-name
                                          :method-name method-name
                                          :return-type return-type
+                                         :dynamic-args dynamic-args
                                          :args (cons
                                                 method-type
                                                 (mapcar (lambda (arg)

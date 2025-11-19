@@ -442,6 +442,7 @@
   ((method-name)
    (method-type)
    (args)
+   (dynamic-args)
    (bootstrap-method-name)))
 
 (defclass/std ir-call-static-method (ir-call-virtual-method)

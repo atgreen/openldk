@@ -1116,18 +1116,21 @@
           resolved))))
 
 (defmethod codegen ((insn ir-call-dynamic-method) context)
-  (with-slots (method-name args bootstrap-method-name address) insn
+  (with-slots (method-name args dynamic-args bootstrap-method-name address) insn
     (let ((constant-pool (constant-pool (<context>-class context))))
       (make-instance '<expression>
                      :insn insn
-                     :code (let ((fname
-                                   (jstring (emit (aref constant-pool (reference-index (third args))) constant-pool))))
-                             `(let ((args (mapcar (lambda (a) (value a)) ',args))
-                                    (funcall (%resolve-invokedynamic ',(intern method-name :openldk)
-                                                                     ',(intern bootstrap-method-name :openldk)
-                                                                     ,address
-                                                                     ,fname
-                                                                     ,@(mapcar (lambda (a) (code (codegen a context))) args))))))))))
+                     :code (let ((fname (jstring method-name)))
+                             `(let ((callsite (%resolve-invokedynamic ',(intern method-name :openldk)
+                                                                      ',(intern bootstrap-method-name :openldk)
+                                                                      ,address
+                                                                      ,fname
+                                                                      ,@(mapcar (lambda (a) (code (codegen a context))) args))))
+                                (let ((target (|java/lang/invoke/CallSite.getTarget()| callsite)))
+                                  (|java/lang/invoke/MethodHandle.invokeWithArguments([Ljava/lang/Object;)|
+                                   target
+                                   (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Object")
+                                                    :initial-contents (list ,@(mapcar (lambda (a) (code (codegen a context))) dynamic-args)))))))))))
 
 (defmethod codegen ((insn ir-clinit) context)
   (with-slots (class) insn
@@ -1234,24 +1237,13 @@
 
 (defmethod codegen ((insn ir-call-special-method) context)
   (with-slots (class method-name args) insn
-     (make-instance '<expression>
-                    :insn insn
-                    :code (let ((call (list 'let (list (list 'methods
-                                                             (list 'closer-mop:compute-applicable-methods-using-classes
-                                                                   (list 'function (intern (format nil "~A" method-name) :openldk))
-                                                                   ;; Use find-class at runtime instead of embedding the class object
-                                                                   (cons 'list
-                                                                         (cons (list 'find-class (list 'quote (intern (slot-value class 'name) :openldk)))
-                                                                               (loop for a in args collect t))))))
-                                            (list 'if (list 'null 'methods)
-                                                  (list 'error (format nil "No applicable methods found for ~A on class ~A with ~D args"
-                                                                       method-name (slot-value class 'name) (length args)))
-                                                  (list 'destructuring-bind (cons 'method 'next)
-                                                        'methods
-                                                        (list 'let (list (list 'fn (list 'closer-mop:method-function 'method)))
-                                                              (list 'funcall 'fn
-                                                                    (cons 'list (mapcar (lambda (a) (code (codegen a context))) args)) 'next)))))))
-                            call))))
+    (let* ((method-symbol (intern (format nil "~A" method-name) :openldk))
+           (owner-symbol (intern (slot-value class 'name) :openldk))
+           (arg-code (mapcar (lambda (a) (code (codegen a context))) args)))
+      (make-instance '<expression>
+                     :insn insn
+                     :code `(openldk::invoke-special ',method-symbol ',owner-symbol
+                                                     (list ,@arg-code))))))
 
 (defmethod codegen ((insn ir-member) context)
   (with-slots (objref member-name) insn
