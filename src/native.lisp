@@ -84,7 +84,8 @@
 
 (defun |java/lang/Class.desiredAssertionStatus0(Ljava/lang/Class;)| (class)
   (declare (ignore class))
-  nil)
+  ;; Return 0 (false) to disable assertions
+  0)
 
 (defun |java/lang/Class.getSecurityManager()| ()
   (classload "java/lang/SecurityManager")
