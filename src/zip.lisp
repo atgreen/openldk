@@ -64,6 +64,10 @@
   ()
   (:documentation "Stub for java.util.jar.JarInputStream; populated at runtime."))
 
+(defclass |java/util/zip/ZipFile$1| ()
+  ()
+  (:documentation "Stub for ZipFile's JavaUtilZipFileAccess bridge class."))
+
 
 (defun |java/util/zip/ZipFile.<clinit>()| ()
   "Class initializer for ZipFile (no-op stub).")
@@ -126,6 +130,32 @@
 
 (defmethod |getName()| ((this |java/util/zip/ZipFile|))
   (slot-value this '|name|))
+
+(defun %zip-manifest-count (jar-file)
+  "Return the number of META-INF/MANIFEST.MF entries within JAR-FILE."
+  (with-slots (|jzfile|) jar-file
+    (let ((count 0))
+      (zip:do-zipfile-entries (entry-name entry |jzfile|)
+        (declare (ignore entry))
+        (when (string-equal entry-name "META-INF/MANIFEST.MF")
+          (incf count)))
+      count)))
+
+(defmethod |getManifestNum(Ljava/util/jar/JarFile;)| ((this |java/util/zip/ZipFile$1|) jar-file)
+  (declare (ignore this))
+  (%zip-manifest-count jar-file))
+
+(defmethod |getManifestNum(Ljava/util/jar/JarFile;)| ((this t) jar-file)
+  (declare (ignore this))
+  (%zip-manifest-count jar-file))
+
+(defmethod |startsWithLocHeader(Ljava/util/zip/ZipFile;)| ((this |java/util/zip/ZipFile$1|) zip-file)
+  (declare (ignore this))
+  (not (null (slot-value zip-file '|jzfile|))))
+
+(defmethod |startsWithLocHeader(Ljava/util/zip/ZipFile;)| ((this t) zip-file)
+  (declare (ignore this))
+  (not (null (slot-value zip-file '|jzfile|))))
 
 (defmethod |close()| ((this |java/util/zip/ZipFile|))
   (with-slots (|name| |jzfile|) this
