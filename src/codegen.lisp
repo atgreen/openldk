@@ -1126,8 +1126,8 @@
                                                                       ,address
                                                                       ,fname
                                                                       ,@(mapcar (lambda (a) (code (codegen a context))) args))))
-                                (let ((target (|java/lang/invoke/CallSite.getTarget()| callsite)))
-                                  (|java/lang/invoke/MethodHandle.invokeWithArguments([Ljava/lang/Object;)|
+                                (let ((target (|getTarget()| callsite)))
+                                  (|invokeWithArguments([Ljava/lang/Object;)|
                                    target
                                    (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Object")
                                                     :initial-contents (list ,@(mapcar (lambda (a) (code (codegen a context))) dynamic-args)))))))))))
@@ -1222,7 +1222,8 @@
                    :insn insn
                    :code `(progn
                             ;; Create the multi-dimensional array with the determined initial element
-                            (%make-multi-array (list ,@(mapcar (lambda (c) (code (codegen c context))) (sizes insn)))))
+                            ;; Reverse sizes because bytecode pops dimensions in reverse order
+                            (%make-multi-array (list ,@(mapcar (lambda (c) (code (codegen c context))) (reverse (sizes insn))))))
                    :expression-type :ARRAY)))
 
 (defmethod codegen ((insn ir-nop) context)
