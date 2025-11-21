@@ -44,7 +44,9 @@
 (defun lstring (string)
   "Extract a Lisp string from a |java/lang/String| object."
   (when string
-    (coerce (java-array-data (slot-value string '|value|)) 'string)))
+    (let ((value (slot-value string '|value|)))
+      (when value
+        (coerce (java-array-data value) 'string)))))
 
 (defun jstring (value)
   "Construct a |java/lang/String| from a Lisp string VALUE."

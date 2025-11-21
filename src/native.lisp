@@ -1285,9 +1285,10 @@ user.variant
             (list method object args)))
   (unwind-protect
        (progn
-         (dotimes (i (length (java-array-data args)))
-           (when (typep (jaref args i) '|java/lang/Integer|)
-             (setf (jaref args i) (slot-value (jaref args i) '|value|))))
+         (when args
+           (dotimes (i (length (java-array-data args)))
+             (when (typep (jaref args i) '|java/lang/Integer|)
+               (setf (jaref args i) (slot-value (jaref args i) '|value|)))))
          (let ((result (apply (intern
                                (lispize-method-name
                                 (concatenate 'string
@@ -1297,8 +1298,8 @@ user.variant
                                              (lstring (slot-value method '|signature|))))
                                :openldk)
                               (if (eq 0 (logand #x8 (slot-value method '|modifiers|)))
-                                  (cons object (coerce (java-array-data args) 'list)) ; non-static method
-                                  (coerce (java-array-data args) 'list))))) ; static method
+                                  (cons object (if args (coerce (java-array-data args) 'list) nil)) ; non-static method
+                                  (if args (coerce (java-array-data args) 'list) nil))))) ; static method
            (when *debug-trace*
              (format t "~&~V@A trace: result = ~A~%"
                      *call-nesting-level* "*" result))
@@ -1864,7 +1865,15 @@ user.variant
              ;; Class names from Class.getName() use . separator, but we need /
              (class-name (substitute #\/ #\. class-name-raw))
              (method-name (lstring name))
-             (method-type (lstring (|toMethodDescriptorString()| type)))
+             ;; type can be either a String (descriptor) or a MethodType
+             (method-type (if (typep type '|java/lang/String|)
+                              ;; It's already a string descriptor
+                              (lstring type)
+                              ;; It's a MethodType, build descriptor from rtype/ptypes
+                              (let ((rtype (slot-value type '|rtype|))
+                                    (ptypes (when (slot-exists-p type '|ptypes|)
+                                              (slot-value type '|ptypes|))))
+                                (%build-method-descriptor rtype ptypes))))
              ;; Check if it's a static method (REF_invokeStatic = 6, shifted left by 24 bits)
              (ref-kind (ash (logand flags #x0F000000) -24))
              (is-static (= ref-kind 6)))
@@ -1874,11 +1883,8 @@ user.variant
                (lisp-method-name (intern (lispize-method-name full-method-sig) :openldk)))
 
           ;; Invoke the method
-          (if is-static
-              ;; Static method: call directly with args
-              (apply lisp-method-name method-handle args)
-              ;; Instance method: first arg is 'this', rest are actual args
-              (apply lisp-method-name method-handle args)))))))
+          ;; For LambdaForm methods, always pass the MethodHandle as first arg
+          (apply lisp-method-name method-handle args))))))
 
 (defun |java/lang/invoke/MethodHandles.lookup()| ()
   "Return a basic MethodHandles.Lookup instance. We intentionally relax access checks for now."
