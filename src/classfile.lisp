@@ -76,7 +76,7 @@
     (make-instance 'ir-method-handle
                    :reference-index (reference-index cmh)
                    :value `(let ((lookup (|java/lang/invoke/MethodHandles.lookup()|)))
-                             (|findStatic(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)|
+                             (|java/lang/invoke/MethodHandles$Lookup.findStatic(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)|
                               lookup ,refc ,name ,type)))))
 
 (defclass/std constant-method-type ()

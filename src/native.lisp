@@ -1671,6 +1671,62 @@ user.variant
   (let ((in-stream (slot-value this '|fd|)))
     (read-byte in-stream nil nil)))
 
+(defun %class->descriptor-string (class)
+  "Return a JVM type descriptor fragment for the given java.lang.Class."
+  (let* ((raw-name (and (slot-exists-p class '|name|)
+                        (slot-boundp class '|name|)
+                        (slot-value class '|name|)))
+         (name (and raw-name (lstring raw-name))))
+    (cond
+      ((null name) (error "Missing class name for descriptor ~A" class))
+      ((string= name "void") "V")
+      ((string= name "boolean") "Z")
+      ((string= name "byte") "B")
+      ((string= name "char") "C")
+      ((string= name "short") "S")
+      ((string= name "int") "I")
+      ((string= name "long") "J")
+      ((string= name "float") "F")
+      ((string= name "double") "D")
+      ;; Array names are already descriptor-shaped, except '.' vs '/'
+      ((char= (char name 0) #\[)
+       (substitute #\/ #\. name))
+      (t
+       (format nil "L~A;" (substitute #\/ #\. name))))))
+
+(defun %build-method-descriptor (rtype ptypes-array)
+  (let* ((params (map 'list #'%class->descriptor-string
+                      (or (and ptypes-array (java-array-data ptypes-array))
+                          #())))
+         (ret (%class->descriptor-string rtype)))
+    (format nil "(~{~A~})~A" params ret)))
+
+(defun %make-simple-method-type (rtype ptypes-array)
+  "Construct a minimal MethodType instance backed by R T and PTYPES-ARRAY."
+  (let* ((mt (make-instance '|java/lang/invoke/MethodType|))
+         (descriptor (%build-method-descriptor rtype ptypes-array)))
+    (setf (slot-value mt '|rtype|) rtype)
+    (when (slot-exists-p mt '|ptypes|)
+      (setf (slot-value mt '|ptypes|) ptypes-array))
+    (when (slot-exists-p mt '|methodDescriptor|)
+      (setf (slot-value mt '|methodDescriptor|) (jstring descriptor)))
+    mt))
+
+(defun |java/lang/invoke/MethodType.methodType(Ljava/lang/Class;)| (rtype)
+  (%make-simple-method-type
+   rtype
+   (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Class")
+                    :initial-contents '())))
+
+(defun |java/lang/invoke/MethodType.methodType(Ljava/lang/Class;Ljava/lang/Class;)| (rtype p0)
+  (%make-simple-method-type
+   rtype
+   (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Class")
+                    :initial-contents (list p0))))
+
+(defun |java/lang/invoke/MethodType.methodType(Ljava/lang/Class;[Ljava/lang/Class;)| (rtype ptypes)
+  (%make-simple-method-type rtype ptypes))
+
 (defun |java/lang/invoke/MethodHandleNatives.registerNatives()| ()
   ;; FIXME
   nil)
@@ -1771,6 +1827,95 @@ user.variant
     ((unsafe |sun/misc/Unsafe|) clazz data cp-patches)
   (let ((stream (make-instance 'byte-array-input-stream :array data :start 0 :end (java-array-length data))))
     (java-class (%classload-from-stream (format nil "~A/~A" (substitute #\/ #\. (lstring (slot-value clazz '|name|))) (gensym "anonymous-class-")) stream *boot-class-loader*))))
+
+(defun %invoke-polymorphic-signature (method-handle &rest args)
+  "Invoke a MethodHandle's target method with the given arguments.
+   The first argument is the MethodHandle, the rest are passed to the target."
+  ;; Extract the target MemberName from the MethodHandle
+  (let* ((form (when (and (slot-exists-p method-handle '|form|)
+                          (slot-boundp method-handle '|form|))
+                 (slot-value method-handle '|form|)))
+         (vmentry (when (and form
+                             (slot-exists-p form '|vmentry|)
+                             (slot-boundp form '|vmentry|))
+                    (slot-value form '|vmentry|))))
+    (unless vmentry
+      (error "MethodHandle.invokeExact: no vmentry found in ~A" method-handle))
+
+    ;; Extract method information from the MemberName
+    (let* ((clazz (when (and (slot-exists-p vmentry '|clazz|)
+                            (slot-boundp vmentry '|clazz|))
+                   (slot-value vmentry '|clazz|)))
+           (name (when (and (slot-exists-p vmentry '|name|)
+                           (slot-boundp vmentry '|name|))
+                  (slot-value vmentry '|name|)))
+           (type (when (and (slot-exists-p vmentry '|type$|)
+                           (slot-boundp vmentry '|type$|))
+                  (slot-value vmentry '|type$|)))
+           (flags (when (and (slot-exists-p vmentry '|flags|)
+                            (slot-boundp vmentry '|flags|))
+                   (slot-value vmentry '|flags|))))
+
+      (unless (and clazz name type)
+        (error "MethodHandle.invokeExact: incomplete MemberName ~A" vmentry))
+
+      ;; Get the class name and method name as strings
+      (let* ((class-name-raw (lstring (slot-value clazz '|name|)))
+             ;; Class names from Class.getName() use . separator, but we need /
+             (class-name (substitute #\/ #\. class-name-raw))
+             (method-name (lstring name))
+             (method-type (lstring (|toMethodDescriptorString()| type)))
+             ;; Check if it's a static method (REF_invokeStatic = 6, shifted left by 24 bits)
+             (ref-kind (ash (logand flags #x0F000000) -24))
+             (is-static (= ref-kind 6)))
+
+        ;; Construct the lispized method name: class.method(descriptor)
+        (let* ((full-method-sig (format nil "~A.~A~A" class-name method-name method-type))
+               (lisp-method-name (intern (lispize-method-name full-method-sig) :openldk)))
+
+          ;; Invoke the method
+          (if is-static
+              ;; Static method: call directly with args
+              (apply lisp-method-name method-handle args)
+              ;; Instance method: first arg is 'this', rest are actual args
+              (apply lisp-method-name method-handle args)))))))
+
+(defun |java/lang/invoke/MethodHandles.lookup()| ()
+  "Return a basic MethodHandles.Lookup instance. We intentionally relax access checks for now."
+  (classload "java/lang/invoke/MethodHandles$Lookup")
+  (make-instance '|java/lang/invoke/MethodHandles$Lookup|))
+
+(defun %build-member-name-for-static (klass name method-type)
+  (classload "java/lang/invoke/MemberName")
+  (let* ((mn (make-instance '|java/lang/invoke/MemberName|))
+         ;; MN_IS_METHOD | REF_invokeStatic << 24 | ACC_STATIC
+         (flags (logior #x10000 (ash 6 24) #x0008)))
+    (when (slot-exists-p mn '|clazz|)
+      (setf (slot-value mn '|clazz|) klass))
+    (when (slot-exists-p mn '|name|)
+      (setf (slot-value mn '|name|) name))
+    (when (slot-exists-p mn '|type$|)
+      (setf (slot-value mn '|type$|) method-type))
+    (when (slot-exists-p mn '|type|)
+      (setf (slot-value mn '|type|) method-type))
+    (when (slot-exists-p mn '|flags|)
+      (setf (slot-value mn '|flags|) flags))
+    mn))
+
+(defun |java/lang/invoke/MethodHandles$Lookup.findStatic(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)| (lookup klass name method-type)
+  "Simplified MethodHandles$Lookup.findStatic that builds a callable MethodHandle
+backed by a MemberName and LambdaForm."
+  (declare (ignore lookup))
+  (classload "java/lang/invoke/LambdaForm")
+  (let* ((member (%build-member-name-for-static klass name method-type))
+         (lf (make-instance '|java/lang/invoke/LambdaForm|))
+         (mh (make-instance '|java/lang/invoke/MethodHandle|)))
+    (setf (slot-value lf '|vmentry|) member)
+    (when (slot-exists-p mh '|type|)
+      (setf (slot-value mh '|type|) method-type))
+    (when (slot-exists-p mh '|form|)
+      (setf (slot-value mh '|form|) lf))
+    mh))
 
 (defun |java/lang/invoke/MethodHandleNatives.objectFieldOffset(Ljava/lang/invoke/MemberName;)| (member-name)
   (declare (ignore unsafe))
