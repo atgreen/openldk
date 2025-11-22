@@ -1922,19 +1922,22 @@ user.variant
     mn))
 
 (defun |java/lang/invoke/MethodHandles$Lookup.findStatic(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)| (lookup klass name method-type)
-  "Simplified MethodHandles$Lookup.findStatic that builds a callable MethodHandle
-backed by a MemberName and LambdaForm."
+  "Create a DirectMethodHandle for static method invocation.
+   DirectMethodHandle is required by LambdaMetafactory for lambda expressions."
   (declare (ignore lookup))
+  (classload "java/lang/invoke/DirectMethodHandle")
   (classload "java/lang/invoke/LambdaForm")
   (let* ((member (%build-member-name-for-static klass name method-type))
          (lf (make-instance '|java/lang/invoke/LambdaForm|))
-         (mh (make-instance '|java/lang/invoke/MethodHandle|)))
-  (setf (slot-value lf '|vmentry|) member)
-  (when (slot-exists-p mh '|type|)
-    (setf (slot-value mh '|type|) method-type))
-  (when (slot-exists-p mh '|form|)
-    (setf (slot-value mh '|form|) lf))
-  mh))
+         (mh (make-instance '|java/lang/invoke/DirectMethodHandle|)))
+    (setf (slot-value lf '|vmentry|) member)
+    (when (slot-exists-p mh '|type|)
+      (setf (slot-value mh '|type|) method-type))
+    (when (slot-exists-p mh '|form|)
+      (setf (slot-value mh '|form|) lf))
+    (when (slot-exists-p mh '|member|)
+      (setf (slot-value mh '|member|) member))
+    mh))
 
 (defun %invoke-from-member-name (member-name &rest args)
   "Invoke a method described by a MemberName with the given arguments.
