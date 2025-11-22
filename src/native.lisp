@@ -1986,32 +1986,80 @@ backed by a MemberName and LambdaForm."
         (apply lisp-method-name args)))))
 
 (defun |java/lang/invoke/MethodHandle.linkToStatic(Ljava/lang/invoke/MemberName;)| (&rest args)
-  "MethodHandle intrinsic: invoke a static method via MemberName.
+  "MethodHandle intrinsic: invoke a static method via MemberName (no-arg variant).
    The last argument is the MemberName, the rest are method arguments."
   (let* ((member-name (car (last args)))
          (method-args (butlast args)))
     (apply #'%invoke-from-member-name member-name method-args)))
 
+(defun |java/lang/invoke/MethodHandle.linkToStatic(Ljava/lang/Object;Ljava/lang/invoke/MemberName;)| (arg member-name)
+  "MethodHandle intrinsic: invoke a static method via MemberName (1-arg variant)."
+  (%invoke-from-member-name member-name arg))
+
+(defun |java/lang/invoke/MethodHandle.linkToStatic(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/invoke/MemberName;)| (arg1 arg2 member-name)
+  "MethodHandle intrinsic: invoke a static method via MemberName (2-arg variant)."
+  (%invoke-from-member-name member-name arg1 arg2))
+
+(defun |java/lang/invoke/MethodHandle.linkToStatic(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/invoke/MemberName;)| (arg1 arg2 arg3 member-name)
+  "MethodHandle intrinsic: invoke a static method via MemberName (3-arg variant)."
+  (%invoke-from-member-name member-name arg1 arg2 arg3))
+
 (defun |java/lang/invoke/MethodHandle.linkToVirtual(Ljava/lang/invoke/MemberName;)| (&rest args)
-  "MethodHandle intrinsic: invoke a virtual method via MemberName.
+  "MethodHandle intrinsic: invoke a virtual method via MemberName (varargs variant).
    The last argument is the MemberName, the rest are method arguments (including receiver)."
   (let* ((member-name (car (last args)))
          (method-args (butlast args)))
     (apply #'%invoke-from-member-name member-name method-args)))
+
+(defun |java/lang/invoke/MethodHandle.linkToVirtual(Ljava/lang/Object;Ljava/lang/invoke/MemberName;)| (receiver member-name)
+  "MethodHandle intrinsic: invoke a virtual method via MemberName (receiver-only variant)."
+  (%invoke-from-member-name member-name receiver))
+
+(defun |java/lang/invoke/MethodHandle.linkToVirtual(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/invoke/MemberName;)| (receiver arg1 member-name)
+  "MethodHandle intrinsic: invoke a virtual method via MemberName (1-arg variant)."
+  (%invoke-from-member-name member-name receiver arg1))
+
+(defun |java/lang/invoke/MethodHandle.linkToVirtual(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/invoke/MemberName;)| (receiver arg1 arg2 member-name)
+  "MethodHandle intrinsic: invoke a virtual method via MemberName (2-arg variant)."
+  (%invoke-from-member-name member-name receiver arg1 arg2))
 
 (defun |java/lang/invoke/MethodHandle.linkToSpecial(Ljava/lang/invoke/MemberName;)| (&rest args)
-  "MethodHandle intrinsic: invoke a special (non-virtual) method via MemberName.
+  "MethodHandle intrinsic: invoke a special (non-virtual) method via MemberName (varargs variant).
    The last argument is the MemberName, the rest are method arguments (including receiver)."
   (let* ((member-name (car (last args)))
          (method-args (butlast args)))
     (apply #'%invoke-from-member-name member-name method-args)))
 
+(defun |java/lang/invoke/MethodHandle.linkToSpecial(Ljava/lang/Object;Ljava/lang/invoke/MemberName;)| (receiver member-name)
+  "MethodHandle intrinsic: invoke a special method via MemberName (receiver-only variant)."
+  (%invoke-from-member-name member-name receiver))
+
+(defun |java/lang/invoke/MethodHandle.linkToSpecial(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/invoke/MemberName;)| (receiver arg1 member-name)
+  "MethodHandle intrinsic: invoke a special method via MemberName (1-arg variant)."
+  (%invoke-from-member-name member-name receiver arg1))
+
+(defun |java/lang/invoke/MethodHandle.linkToSpecial(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/invoke/MemberName;)| (receiver arg1 arg2 member-name)
+  "MethodHandle intrinsic: invoke a special method via MemberName (2-arg variant)."
+  (%invoke-from-member-name member-name receiver arg1 arg2))
+
 (defun |java/lang/invoke/MethodHandle.linkToInterface(Ljava/lang/invoke/MemberName;)| (&rest args)
-  "MethodHandle intrinsic: invoke an interface method via MemberName.
+  "MethodHandle intrinsic: invoke an interface method via MemberName (varargs variant).
    The last argument is the MemberName, the rest are method arguments (including receiver)."
   (let* ((member-name (car (last args)))
          (method-args (butlast args)))
     (apply #'%invoke-from-member-name member-name method-args)))
+
+(defun |java/lang/invoke/MethodHandle.linkToInterface(Ljava/lang/Object;Ljava/lang/invoke/MemberName;)| (receiver member-name)
+  "MethodHandle intrinsic: invoke an interface method via MemberName (receiver-only variant)."
+  (%invoke-from-member-name member-name receiver))
+
+(defun |java/lang/invoke/MethodHandle.linkToInterface(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/invoke/MemberName;)| (receiver arg1 member-name)
+  "MethodHandle intrinsic: invoke an interface method via MemberName (1-arg variant)."
+  (%invoke-from-member-name member-name receiver arg1))
+
+(defun |java/lang/invoke/MethodHandle.linkToInterface(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/invoke/MemberName;)| (receiver arg1 arg2 member-name)
+  "MethodHandle intrinsic: invoke an interface method via MemberName (2-arg variant)."
+  (%invoke-from-member-name member-name receiver arg1 arg2))
 
 (defun %ensure-methodtypeform-handle-cache (form index)
   "Ensure MethodTypeForm.methodHandles is a java array large enough for INDEX."
