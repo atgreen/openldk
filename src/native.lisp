@@ -941,17 +941,18 @@ user.variant
     (constructor params)
   (let ((bin-class-name (substitute #\/ #\. (lstring (slot-value (slot-value constructor '|clazz|) '|name|)))))
     (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring bin-class-name) nil nil nil)
-    (let ((obj (make-instance (intern bin-class-name :openldk))))
-      (if (string= "()V" (lstring (slot-value constructor '|signature|)))
-          (|<init>()| obj)
-          (progn
-            (apply (intern
-                    (lispize-method-name
-                     (format nil "<init>~A" (lstring (slot-value constructor '|signature|))))
-                    :openldk)
-                   (cons obj (coerce (java-array-data params) 'list)))))
-      ; (format t "~&NEWINSTANCE0 ~A = ~A~%" constructor obj)
-      obj)))
+          (let ((obj (make-instance (intern bin-class-name :openldk))))
+            (if (string= "()V" (lstring (slot-value constructor '|signature|)))
+                (|<init>()| obj)
+                (progn
+                  (apply (intern
+                          (lispize-method-name
+                           (format nil "<init>~A" (lstring (slot-value constructor '|signature|))))
+                          :openldk)
+                 ;; params can be NIL for zero-arg constructor paths; guard before accessing array-data.
+                 (cons obj (if params (coerce (java-array-data params) 'list) nil)))))
+            ; (format t "~&NEWINSTANCE0 ~A = ~A~%" constructor obj)
+            obj)))
 
 (defmethod |ensureClassInitialized(Ljava/lang/Class;)| ((unsafe |sun/misc/Unsafe|) class)
   (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value class '|name|)))))
@@ -1916,11 +1917,110 @@ backed by a MemberName and LambdaForm."
   (let* ((member (%build-member-name-for-static klass name method-type))
          (lf (make-instance '|java/lang/invoke/LambdaForm|))
          (mh (make-instance '|java/lang/invoke/MethodHandle|)))
-    (setf (slot-value lf '|vmentry|) member)
-    (when (slot-exists-p mh '|type|)
-      (setf (slot-value mh '|type|) method-type))
-    (when (slot-exists-p mh '|form|)
-      (setf (slot-value mh '|form|) lf))
+  (setf (slot-value lf '|vmentry|) member)
+  (when (slot-exists-p mh '|type|)
+    (setf (slot-value mh '|type|) method-type))
+  (when (slot-exists-p mh '|form|)
+    (setf (slot-value mh '|form|) lf))
+  mh))
+
+(defun %invoke-from-member-name (member-name &rest args)
+  "Invoke a method described by a MemberName with the given arguments.
+   This is the core implementation for linkToStatic, linkToVirtual, etc."
+  ;; Extract method information from the MemberName
+  (let* ((clazz (when (and (slot-exists-p member-name '|clazz|)
+                          (slot-boundp member-name '|clazz|))
+                 (slot-value member-name '|clazz|)))
+         (name (when (and (slot-exists-p member-name '|name|)
+                         (slot-boundp member-name '|name|))
+                (slot-value member-name '|name|)))
+         (type (when (and (slot-exists-p member-name '|type$|)
+                         (slot-boundp member-name '|type$|))
+                (slot-value member-name '|type$|)))
+         (flags (when (and (slot-exists-p member-name '|flags|)
+                          (slot-boundp member-name '|flags|))
+                 (slot-value member-name '|flags|))))
+
+    (unless (and clazz name)
+      (error "linkTo*: incomplete MemberName ~A" member-name))
+
+    ;; Get the class name and method name as strings
+    (let* ((class-name-raw (lstring (slot-value clazz '|name|)))
+           ;; Class names from Class.getName() use . separator, but we need /
+           (class-name (substitute #\/ #\. class-name-raw))
+           (method-name (lstring name))
+           ;; type can be either a String (descriptor) or a MethodType
+           (method-type (if (and type (typep type '|java/lang/String|))
+                            ;; It's already a string descriptor
+                            (lstring type)
+                            ;; It's a MethodType, build descriptor from rtype/ptypes
+                            (when type
+                              (let ((rtype (slot-value type '|rtype|))
+                                    (ptypes (when (slot-exists-p type '|ptypes|)
+                                              (slot-value type '|ptypes|))))
+                                (%build-method-descriptor rtype ptypes)))))
+           ;; Check if it's a static method (REF_invokeStatic = 6)
+           (ref-kind (ash (logand flags #x0F000000) -24))
+           (is-static (= ref-kind 6)))
+
+      ;; Construct the lispized method name: class.method(descriptor)
+      (let* ((full-method-sig (format nil "~A.~A~A" class-name method-name method-type))
+             (lisp-method-name (intern (lispize-method-name full-method-sig) :openldk)))
+
+        ;; Invoke the method with the provided arguments
+        (apply lisp-method-name args)))))
+
+(defun |java/lang/invoke/MethodHandle.linkToStatic(Ljava/lang/invoke/MemberName;)| (&rest args)
+  "MethodHandle intrinsic: invoke a static method via MemberName.
+   The last argument is the MemberName, the rest are method arguments."
+  (let* ((member-name (car (last args)))
+         (method-args (butlast args)))
+    (apply #'%invoke-from-member-name member-name method-args)))
+
+(defun |java/lang/invoke/MethodHandle.linkToVirtual(Ljava/lang/invoke/MemberName;)| (&rest args)
+  "MethodHandle intrinsic: invoke a virtual method via MemberName.
+   The last argument is the MemberName, the rest are method arguments (including receiver)."
+  (let* ((member-name (car (last args)))
+         (method-args (butlast args)))
+    (apply #'%invoke-from-member-name member-name method-args)))
+
+(defun |java/lang/invoke/MethodHandle.linkToSpecial(Ljava/lang/invoke/MemberName;)| (&rest args)
+  "MethodHandle intrinsic: invoke a special (non-virtual) method via MemberName.
+   The last argument is the MemberName, the rest are method arguments (including receiver)."
+  (let* ((member-name (car (last args)))
+         (method-args (butlast args)))
+    (apply #'%invoke-from-member-name member-name method-args)))
+
+(defun |java/lang/invoke/MethodHandle.linkToInterface(Ljava/lang/invoke/MemberName;)| (&rest args)
+  "MethodHandle intrinsic: invoke an interface method via MemberName.
+   The last argument is the MemberName, the rest are method arguments (including receiver)."
+  (let* ((member-name (car (last args)))
+         (method-args (butlast args)))
+    (apply #'%invoke-from-member-name member-name method-args)))
+
+(defun %ensure-methodtypeform-handle-cache (form index)
+  "Ensure MethodTypeForm.methodHandles is a java array large enough for INDEX."
+  (let* ((cache (when (slot-exists-p form '|methodHandles|)
+                  (slot-value form '|methodHandles|)))
+         (current-len (if cache (java-array-length cache) 0)))
+    (when (or (null cache) (>= index current-len))
+      (let* ((new-len (max (1+ index) (max 16 current-len)))
+             (component (%get-java-class-by-bin-name "java/lang/invoke/MethodHandle"))
+             (new-cache (make-java-array :component-class component :size new-len)))
+        ;; copy existing entries
+        (when cache
+          (loop for i below current-len
+                do (setf (jaref new-cache i) (jaref cache i))))
+        (setf cache new-cache)
+        (when (slot-exists-p form '|methodHandles|)
+          (setf (slot-value form '|methodHandles|) cache))))
+    cache))
+
+(defun |java/lang/invoke/MethodTypeForm.setCachedMethodHandle(ILjava/lang/invoke/MethodHandle;)| (form index mh)
+  "Native shim used by LambdaForm generation to cache handles per MethodTypeForm."
+  (assert (and form (>= index 0)))
+  (let ((cache (%ensure-methodtypeform-handle-cache form index)))
+    (setf (jaref cache index) mh)
     mh))
 
 (defun |java/lang/invoke/MethodHandleNatives.objectFieldOffset(Ljava/lang/invoke/MemberName;)| (member-name)
@@ -1938,20 +2038,22 @@ backed by a MemberName and LambdaForm."
   (assert (null caller))
   (let ((ldk-class (%get-ldk-class-by-fq-name (lstring (slot-value defc '|name|))))
         (class-loader (|getClassLoader()| defc)))
-    (loop for mn across (java-array-data results)
-          for index from 0
-          for method = (aref (methods ldk-class) index)
-          do (if (eq skip 0)
-                 (progn
-                   (|init(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Object;I)|
-                    mn defc (jstring (name method))
-                    (|java/lang/invoke/MethodType.fromMethodDescriptorString(Ljava/lang/String;Ljava/lang/ClassLoader;)|
-                     (jstring (descriptor method)) class-loader)
-                    (+ (access-flags method)
-                       (if (static-p method) (ash 6 24) (ash 5 24))
-                       (if (string= "<init>" (name method)) 131072 65536))))
-                 (incf skip -1)))
-    (- (length (coerce (methods ldk-class) 'list)) skip)))
+    ;; Caller may pass NIL to query count; only fill when RESULTS provided.
+    (when results
+      (loop for mn across (java-array-data results)
+            for index from 0
+            for method = (aref (methods ldk-class) index)
+            do (if (eq skip 0)
+                   (progn
+                     (|init(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Object;I)|
+                      mn defc (jstring (name method))
+                      (|java/lang/invoke/MethodType.fromMethodDescriptorString(Ljava/lang/String;Ljava/lang/ClassLoader;)|
+                       (jstring (descriptor method)) class-loader)
+                      (+ (access-flags method)
+                         (if (static-p method) (ash 6 24) (ash 5 24))
+                         (if (string= "<init>" (name method)) 131072 65536))))
+                   (incf skip -1))))
+    (- (length (methods ldk-class)) (or skip 0))))
 
 (defmethod |getProtectionDomain0()| ((clazz |java/lang/Class|))
   ;; FIXME
