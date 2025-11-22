@@ -433,19 +433,51 @@ stream."
     attributes))
 
 (defun modified-utf8-to-utf8 (data)
-  "Convert a vector of bytes from Modified UTF-8 to standard UTF-8."
-  (let ((result (make-array 0 :element-type 'unsigned-byte :adjustable t :fill-pointer 0)))
-    (loop for i from 0 below (length data)
+  "Convert a vector of bytes from Modified UTF-8 to standard UTF-8.
+   Handles both the null encoding (0xC0 0x80) and surrogate pairs for supplementary characters."
+  (let ((result (make-array 0 :element-type 'unsigned-byte :adjustable t :fill-pointer 0))
+        (i 0))
+    (loop while (< i (length data))
           do (let ((byte (aref data i)))
-               (if (and (= byte #xC0)
-                        (< (1+ i) (length data))
-                        (= (aref data (1+ i)) #x80))
-                   (progn
-                     ;; Replace the Modified UTF-8 null sequence (0xC0 0x80) with 0x00
-                     (vector-push-extend 0 result)
-                     (incf i)) ;; Skip the next byte (0x80)
-                   ;; Otherwise, copy the byte as is
-                   (vector-push-extend byte result))))
+               (cond
+                 ;; Handle Modified UTF-8 null encoding: 0xC0 0x80 -> 0x00
+                 ((and (= byte #xC0)
+                       (< (1+ i) (length data))
+                       (= (aref data (1+ i)) #x80))
+                  (vector-push-extend 0 result)
+                  (incf i 2))
+
+                 ;; Handle surrogate pairs: 6-byte Modified UTF-8 -> 4-byte UTF-8
+                 ;; High surrogate: ED Ax Bx (where x = A-F)
+                 ;; Low surrogate:  ED Bx Bx (where x = 0-F)
+                 ((and (= byte #xED)
+                       (<= (+ i 5) (length data))
+                       (= (logand (aref data (1+ i)) #xF0) #xA0)  ; High surrogate marker
+                       (= (aref data (+ i 3)) #xED)
+                       (= (logand (aref data (+ i 4)) #xF0) #xB0)) ; Low surrogate marker
+                  ;; Decode the two surrogates
+                  (let* ((b1 (aref data (1+ i)))
+                         (b2 (aref data (+ i 2)))
+                         (b4 (aref data (+ i 4)))
+                         (b5 (aref data (+ i 5)))
+                         ;; Extract surrogate values
+                         (high-surrogate (logior #xD800 (ash (logand b1 #x0F) 6) (logand b2 #x3F)))
+                         (low-surrogate (logior #xDC00 (ash (logand b4 #x0F) 6) (logand b5 #x3F)))
+                         ;; Combine to get the codepoint
+                         (codepoint (+ #x10000
+                                      (ash (logand high-surrogate #x3FF) 10)
+                                      (logand low-surrogate #x3FF))))
+                    ;; Encode as proper 4-byte UTF-8
+                    (vector-push-extend (logior #xF0 (ash codepoint -18)) result)
+                    (vector-push-extend (logior #x80 (logand (ash codepoint -12) #x3F)) result)
+                    (vector-push-extend (logior #x80 (logand (ash codepoint -6) #x3F)) result)
+                    (vector-push-extend (logior #x80 (logand codepoint #x3F)) result)
+                    (incf i 6)))
+
+                 ;; Otherwise, copy the byte as-is
+                 (t
+                  (vector-push-extend byte result)
+                  (incf i)))))
     result))
 
 (defun read-classfile (fin)
