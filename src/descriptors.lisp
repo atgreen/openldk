@@ -237,7 +237,7 @@ as strings."
                   (incf index))
                  ((char= ch #\S)
                   (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
-                         (jstring "java/lang/String") nil nil nil)
+                         (jstring "short") nil nil nil)
                         param-list)
                   (incf index))
                  ((char= ch #\B)
