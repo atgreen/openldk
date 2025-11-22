@@ -13,3 +13,9 @@ systems
 rt
 *.log
 log.txt
+
+# Debug output files
+*-dce.txt
+*-compiling.txt
+build_output.txt
+out.txt
