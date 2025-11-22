@@ -1507,6 +1507,21 @@ user.variant
 (defmethod |pageSize()| ((unsafe |sun/misc/Unsafe|))
   4096)
 
+(defmethod |storeFence()| ((unsafe |sun/misc/Unsafe|))
+  "Ensures that stores before the fence will not be reordered with stores after the fence."
+  (declare (ignore unsafe))
+  (sb-thread:barrier (:memory)))
+
+(defmethod |loadFence()| ((unsafe |sun/misc/Unsafe|))
+  "Ensures that loads before the fence will not be reordered with loads after the fence."
+  (declare (ignore unsafe))
+  (sb-thread:barrier (:memory)))
+
+(defmethod |fullFence()| ((unsafe |sun/misc/Unsafe|))
+  "Ensures that loads and stores before the fence will not be reordered with those after the fence."
+  (declare (ignore unsafe))
+  (sb-thread:barrier (:memory)))
+
 (defun |sun/nio/ch/FileDispatcherImpl.init()| ()
   ;; FIXME
   nil)
