@@ -1769,6 +1769,27 @@ user.variant
 (defun |java/lang/invoke/MethodType.methodType(Ljava/lang/Class;[Ljava/lang/Class;)| (rtype ptypes)
   (%make-simple-method-type rtype ptypes))
 
+(defun |java/lang/invoke/MethodType.parameterCount()| (this)
+  "Native implementation of MethodType.parameterCount() with logging to trace arity issues."
+  (let* ((ptypes (when (and (slot-exists-p this '|ptypes|)
+                            (slot-boundp this '|ptypes|))
+                   (slot-value this '|ptypes|)))
+         (count (if ptypes
+                    (java-array-length ptypes)
+                    0)))
+    (format t "~&*** MethodType.parameterCount() called ***~%")
+    (format t "    MethodType: ~A~%" this)
+    (format t "    ptypes array: ~A~%" ptypes)
+    (format t "    Returning count: ~A~%" count)
+    (format t "    Type of count: ~A~%" (type-of count))
+    (force-output)
+    ;; If we see 255 being returned, trigger a break
+    (when (= count 255)
+      (format t "~%!!! WARNING: parameterCount() returning 255 - this is the bug! !!!~%")
+      (force-output)
+      (break "parameterCount() returned 255"))
+    count))
+
 (defun |java/lang/invoke/MethodHandleNatives.registerNatives()| ()
   ;; FIXME
   nil)

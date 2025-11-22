@@ -162,15 +162,83 @@ The bootstrap method is being called successfully, but something in the security
 
 The lambda bootstrap process triggers security permission checks, which load SocketPermission. That class's initialization is somehow hanging (not an infinite loop, just stuck/slow).
 
+### Latest Findings (2025-11-22 evening - Session 2)
+
+**MAJOR FIX APPLIED:**
+Fixed missing `emit` method for `ir-string-literal` in classfile.lisp (line 152-155):
+```lisp
+(defmethod emit ((v ir-string-literal) cp)
+  "Return the string value from a UTF8 constant pool entry."
+  (declare (ignore cp))
+  (slot-value v 'value))
+```
+
+**Root Cause:**
+When processing CONSTANT-METHOD-HANDLE in the constant pool:
+1. Code called `(emit (aref cp (class-index m)) cp)` to get class name
+2. This retrieved a constant-class-reference pointing to a UTF8 string (`ir-string-literal`)
+3. Then called `(emit (aref cp index) cp)` on the UTF8 string
+4. **BUG**: No `emit` method existed for `ir-string-literal` → returned NIL
+5. Calling `(ir-class-class NIL)` → returned NIL
+6. Calling `(java-class NIL)` → ERROR: "NO-APPLICABLE-METHOD for (JAVA-CLASS NIL)"
+
+**Result:** The NIL error is now FIXED! Lambda bootstrap method is being called successfully.
+
+**Current Status:** Code now hangs inside `LambdaMetafactory.metafactory()` call.
+
+### Latest Findings (2025-11-22 continued - FROM PREVIOUS SESSION)
+
+**Major Progress:**
+1. ✅ Bootstrap returns successfully: `#<java/lang/invoke/ConstantCallSite>`
+2. ✅ Got target MethodHandle: `#<java/lang/invoke/BoundMethodHandle$Species_L>`
+3. ❌ Error when invoking lambda via `invokeWithArguments()`
+
+**Root Cause Discovery (ARRAY[255] IS NOT THE BUG):**
+The array[255] access happens in `Integer.valueOf(127)` for the Integer cache (valid operation).
+
+**Root Cause Discovery (INVOKEWITHAR GUMENTS):**
+The error occurs when `invokeWithArguments()` is called on the lambda MethodHandle:
+- `invokeWithArguments([Ljava/lang/Object;])` is called
+- This triggers `spreadInvoker(0)` → `asSpreader(Object[].class, 0)`
+- Which calls `spreadArgumentsForm()` in LambdaFormEditor
+- This triggers `MethodHandleImpl$Lazy.<clinit>()`
+- Which calls `makeArrays()` to build collector array (size 256, only indices 0-10 filled)
+- Then `varargsArray(255)` is called for some reason
+- It tries to create collector via `findCollector("array", 255, ...)`
+- `findStatic()` tries to find a method with 255 parameters
+- `DirectMethodHandle.makePreparedLambdaForm()` appends MemberName parameter → 256 params
+- **boom: "bad parameter count 256"**
+
+**Analysis:**
+- Java 8's `makeArrays()` creates ARRAYS with size MAX_ARITY+1 (256 slots)
+- Only indices 0-10 are pre-populated with collectors
+- `varargsArray(arity)` checks if `ARRAYS[arity]` is NULL
+- If NULL, tries to create collector on-demand via `findCollector()`
+- For arity 255, this fails because 255 + MemberName = 256 parameters (over JVM limit of 255)
+
+**Why arity 255?**
+Investigation findings:
+- `makeArrays()` only calls `findCollector()` in a loop with arities 0-10 (confirmed via bytecode)
+- The call to `findCollector("array", 255, ...)` comes from `varargsArray(255)`
+- `varargsArray(arity)` is being called with arity=255
+- ~~**Hypothesis**: 255 = -1 as unsigned byte~~ **DISPROVEN**
+- **Confirmed via logging**: The index is legitimately 255 (positive integer), NOT -1!
+  - Type: `(INTEGER 0 4611686018427387903)`
+  - `(< index 0)` returns NIL
+- MAX_ARITY field reads correctly as 255 in Java bytecode (tested)
+- **New hypothesis**: Somewhere is using MAX_ARITY value (255) as a parameter count instead of actual arity
+- The lambda `() -> "Hello"` should have arity 0, but 255 is being passed
+
 ### Next Investigation Steps
 
 1. ✅ **Fix setProperty recursion** - Done with native implementation
 2. ✅ **Reach LambdaMetafactory** - Done, bootstrap is being called!
-3. **Fix SocketPermission hang**
-   - Check if getHost() needs a native implementation
-   - May need to stub out or simplify permission checking
-   - Could try disabling security manager entirely
-4. **Alternative**: Disable ProxyClassesDumper or permission checks during lambda generation
+3. ✅ **Bootstrap returns CallSite** - Working perfectly!
+4. **Fix varargsArray(255) issue**
+   - Option A: Implement native `varargsArray()` that only supports arities 0-10
+   - Option B: Fix whatever is causing arity 255 to be requested
+   - Option C: Implement native `invokeWithArguments()` to avoid spreadInvoker path
+5. **Alternative**: Use direct lambda invocation instead of `invokeWithArguments()`
 
 ---
 

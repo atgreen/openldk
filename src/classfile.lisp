@@ -149,6 +149,11 @@
   (let ((class (emit (aref cp (slot-value v 'class-index)) cp)))
     (values (emit-type (aref cp (slot-value v 'name-and-type-descriptor-index)) cp) class)))
 
+(defmethod emit ((v ir-string-literal) cp)
+  "Return the string value from a UTF8 constant pool entry."
+  (declare (ignore cp))
+  (slot-value v 'value))
+
 (defmethod emit ((v constant-class-reference) cp)
   (let ((classname (emit (aref cp (slot-value v 'index)) cp)))
     (if (char= (aref classname 0) #\[)
