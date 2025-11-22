@@ -651,7 +651,7 @@
   (:DMUL 'ir-dmul :DOUBLE)
   (:DADD 'ir-dadd :DOUBLE)
   (:DREM 'ir-drem :DOUBLE)
-  (:DSUB 'ir-fsub :DOUBLE)
+  (:DSUB 'ir-dsub :DOUBLE)
   (:FADD 'ir-fadd :FLOAT)
   (:FDIV 'ir-fdiv :FLOAT)
   (:FMUL 'ir-fmul :FLOAT)
@@ -815,17 +815,17 @@
                   (push value3 (stack context))
                   (push value2 (stack context))
                   (push value1 (stack context)))
-                (let ((value2 (pop (stack context)))
-                      (value3 (pop (stack context)))
-                      (value4 (pop (stack context))))
-                  (assert (not (or (find (var-type value2) '(:DOUBLE :LONG))
-                                   (find (var-type value3) '(:DOUBLE :LONG))
-                                   (find (var-type value4) '(:DOUBLE :LONG)))))
-                  (push value2 (stack context))
+                (let ((value3 (pop (stack context)))
+                      (value4 (pop (stack context)))
+                      (value5 (pop (stack context))))
+                  (assert (not (or (find (var-type value3) '(:DOUBLE :LONG))
+                                   (find (var-type value4) '(:DOUBLE :LONG))
+                                   (find (var-type value5) '(:DOUBLE :LONG)))))
+                  (push value3 (stack context))
                   (push value1 (stack context))
+                  (push value5 (stack context))
                   (push value4 (stack context))
                   (push value3 (stack context))
-                  (push value2 (stack context))
                   (push value1 (stack context))))))
       (list (make-instance 'ir-nop :address pc-start)))))
 
@@ -1004,11 +1004,11 @@
 
 (define-bytecode-transpiler :DCONST_0 (context code)
   (declare (ignore code))
-  (%transpile-fconst-x context 0.0))
+  (%transpile-dconst-x context 0.0d0))
 
 (define-bytecode-transpiler :DCONST_1 (context code)
   (declare (ignore code))
-  (%transpile-fconst-x context 1.0))
+  (%transpile-dconst-x context 1.0d0))
 
 (defclass/std <stack-variable> (ir-node)
   ((var-numbers)
@@ -1519,20 +1519,21 @@
                    (slot-value (aref constant-pool
                                      (slot-value name-and-type 'name-index))
                                'value))
-;                 (j4 (format t "DI4: ~A~%" method-name))
+;                 (j4 (format t "DI4: method-name=~A~%" method-name))
                  (method-type
                    (let ((mt (|java/lang/invoke/MethodType.fromMethodDescriptorString(Ljava/lang/String;Ljava/lang/ClassLoader;)|
                               (jstring (emit (aref constant-pool (slot-value name-and-type 'type-descriptor-index)) constant-pool))
                               nil)))
                      (make-instance 'ir-object-literal
                                     :value mt)))
-;                 (j6 (format t "DI6: ~A~%" method-type))
+;                 (j6 (format t "DI6: method-type=~A~%" method-type))
                  (descriptor
                    (slot-value (aref constant-pool
                                      (slot-value name-and-type 'type-descriptor-index))
                                'value))
-;                 (j5 (format t "DI5: ~A~%" descriptor))
+;                 (j5 (format t "DI5: descriptor=~A~%" descriptor))
                  (parameter-count (count-parameters descriptor))
+;                 (j7 (format t "DI7: parameter-count=~A~%" parameter-count))
                  (return-type (get-return-type descriptor))
                  (bootstrap-method-name (emit-static-method-reference (aref constant-pool (reference-index bsm-method-handle)) constant-pool))
                  (dynamic-args (reverse (loop repeat parameter-count collect (pop (stack context))))))
@@ -1633,11 +1634,11 @@
 
 (define-bytecode-transpiler :LCONST_0 (context code)
   (declare (ignore code))
-  (%transpile-iconst-x context 0))
+  (%transpile-lconst-x context 0))
 
 (define-bytecode-transpiler :LCONST_1 (context code)
   (declare (ignore code))
-  (%transpile-iconst-x context 1))
+  (%transpile-lconst-x context 1))
 
 (define-bytecode-transpiler :MONITORENTER (context code)
   (declare (ignore code))
@@ -1830,7 +1831,7 @@
     (let* ((pc-start pc)
            (var (make-stack-variable context pc-start :INTEGER))
            (short (unsigned-to-signed-short (+ (* (aref code (incf pc)) 256)
-                                               (* (aref code (incf pc)))))))
+                                               (aref code (incf pc))))))
       (incf pc)
       (push pc (aref (next-insn-list context) pc-start))
       (push var (stack context))

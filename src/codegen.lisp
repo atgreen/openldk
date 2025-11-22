@@ -1135,11 +1135,18 @@
                                                                       ,address
                                                                       ,fname
                                                                       ,@(mapcar (lambda (a) (code (codegen a context))) args))))
+                                (format t "~&Getting target from CallSite...~%")
+                                (force-output)
                                 (let ((target (|getTarget()| callsite)))
-                                  (|invokeWithArguments([Ljava/lang/Object;)|
-                                   target
-                                   (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Object")
-                                                    :initial-contents (list ,@(mapcar (lambda (a) (code (codegen a context))) dynamic-args)))))))))))
+                                  (format t "~&Got target: ~A~%" target)
+                                  (format t "~&Creating args array for invokeWithArguments...~%")
+                                  (force-output)
+                                  (let ((args-array (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Object")
+                                                                     :initial-contents (list ,@(mapcar (lambda (a) (code (codegen a context))) dynamic-args)))))
+                                    (format t "~&Args array: ~A (length=~A)~%" args-array (java-array-length args-array))
+                                    (format t "~&Calling invokeWithArguments...~%")
+                                    (force-output)
+                                    (|invokeWithArguments([Ljava/lang/Object;)| target args-array)))))))))
 
 (defmethod codegen ((insn ir-clinit) context)
   (with-slots (class) insn

@@ -41,21 +41,44 @@
 
 (defun count-parameters (descriptor)
   "Count the number of parameters in a Java method descriptor."
-  (let ((reading-complex-p nil)
-        (count 0))
-    (loop for ch across (subseq descriptor
-                                (position #\( descriptor)  ; lint:suppress
-                                (position #\) descriptor)) ; lint:suppress
-          do (cond
-               ((or (char= ch #\I) (char= ch #\J) (char= ch #\S) (char= ch #\B)
-                    (char= ch #\C) (char= ch #\D) (char= ch #\F) (char= ch #\Z))
-                (unless reading-complex-p (incf count)))
-               ((char= ch #\L)
-                (setf reading-complex-p t))
-               ((char= ch #\;)
-                (incf count)
-                (setf reading-complex-p nil))
-               (t nil)))
+  (let ((count 0)
+        (index 0)
+        (param-str (subseq descriptor
+                           (1+ (position #\( descriptor))  ; lint:suppress
+                           (position #\) descriptor))))    ; lint:suppress
+    (loop while (< index (length param-str))
+          do (let ((ch (char param-str index)))
+               (cond
+                 ;; Array types - skip all brackets, then handle component type
+                 ((char= ch #\[)
+                  (incf count)
+                  ;; Skip all array dimension brackets
+                  (loop while (and (< index (length param-str))
+                                   (char= (char param-str index) #\[))
+                        do (incf index))
+                  ;; Handle the component type
+                  (when (< index (length param-str))
+                    (let ((component-ch (char param-str index)))
+                      (cond
+                        ;; Object array - skip to semicolon
+                        ((char= component-ch #\L)
+                         (setf index (1+ (position #\; param-str :start index))))
+                        ;; Primitive array - skip the type char
+                        (t (incf index))))))
+
+                 ;; Object types - skip to semicolon
+                 ((char= ch #\L)
+                  (incf count)
+                  (setf index (1+ (position #\; param-str :start index))))
+
+                 ;; Primitive types - just skip one char
+                 ((or (char= ch #\I) (char= ch #\J) (char= ch #\S) (char= ch #\B)
+                      (char= ch #\C) (char= ch #\D) (char= ch #\F) (char= ch #\Z))
+                  (incf count)
+                  (incf index))
+
+                 ;; Skip any other characters (shouldn't happen in valid descriptor)
+                 (t (incf index)))))
     count))
 
 (defun get-stack-type-from-descriptor (descriptor)
@@ -172,13 +195,32 @@ as strings."
 
                  ;; For array types
                  ((char= ch #\[)
-                  (incf index)
-                  (loop until (not (member (char descriptor index) '(#\I #\J #\S #\B #\C #\D #\F #\Z #\[)))
-                        do (incf index))
-                  (when (char= (char descriptor index) #\L)
-                    (setf index (position #\; descriptor :start index)))
-                  (push (format nil "~a[]" (translate-type (char descriptor index))) param-list)
-                  (incf index))
+                  (let ((dimensions 0))
+                    ;; Count array dimensions
+                    (loop while (and (< index (length descriptor))
+                                     (char= (char descriptor index) #\[))
+                          do (incf dimensions)
+                             (incf index))
+                    ;; Determine component type
+                    (let* ((component-ch (char descriptor index))
+                           (component-type
+                             (cond
+                               ;; Object type
+                               ((char= component-ch #\L)
+                                (let ((obj-end (position #\; descriptor :start index)))
+                                  (prog1
+                                      (subseq descriptor (1+ index) obj-end)
+                                    (setf index (1+ obj-end)))))
+                               ;; Primitive type
+                               (t
+                                (prog1
+                                    (translate-type component-ch)
+                                  (incf index))))))
+                      ;; Build type string with correct number of [] suffixes
+                      (let ((type-str component-type))
+                        (dotimes (i dimensions)
+                          (setf type-str (concatenate 'string type-str "[]")))
+                        (push type-str param-list)))))
 
                  (t (incf index)))))
     (nreverse param-list))) ; Reverse the list before returning it, since we used push

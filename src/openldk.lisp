@@ -1798,7 +1798,17 @@ the normal call-next-method chain for the owner's superclasses."
 
         (dolist (c '("java/lang/invoke/MethodHandles"
                      "java/lang/invoke/MethodHandles$Lookup"
-                     "java/net/Inet4Address"))
+                     "java/net/Inet4Address"
+                     ;; Lambda support classes (excluding CallSite to avoid infinite recursion during init)
+                     "java/lang/invoke/LambdaMetafactory"
+                     "java/lang/invoke/InnerClassLambdaMetafactory"
+                     "java/lang/invoke/MethodType"
+                     "java/lang/invoke/MethodTypeForm"
+                     "java/lang/invoke/MethodHandle"
+                     "java/lang/invoke/MethodHandleStatics"
+                     "java/lang/invoke/InfoFromMemberName"
+                     "java/lang/reflect/Modifier"
+                     "sun/invoke/util/BytecodeDescriptor"))
           (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil)))
 
     (|condition-java/lang/Throwable| (c)
