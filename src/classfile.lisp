@@ -127,7 +127,7 @@
   (make-instance 'ir-double-literal :value (slot-value v 'value)))
 
 (defmethod get-stack-jtype ((v constant-double))
-  :FLOAT)
+  :DOUBLE)
 
 (defmethod emit ((v constant-int) cp)
   (make-instance 'ir-int-literal :value (slot-value v 'value)))
