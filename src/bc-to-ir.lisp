@@ -1361,30 +1361,41 @@
             (incf pc)
             (incf pc))
           (push pc (aref (next-insn-list context) pc-start))
-          (let* ((descriptor
-                   (slot-value (aref constant-pool
-                                     (slot-value
-                                      (aref constant-pool
-                                            (slot-value method-reference
-                                                        'method-descriptor-index))
-                                      'type-descriptor-index))
-                               'value))
-                 (parameter-count (1+ (count-parameters descriptor))))
-            (list (let* ((return-type (get-return-type (emit method-reference constant-pool)))
-                         (call (make-instance 'ir-call-virtual-method
-                                              :address pc-start
-                                              :return-type (get-return-type (emit method-reference constant-pool))
-                                              :method-name (lispize-method-name (emit method-reference constant-pool))
-                                              :args (reverse (pop-args parameter-count context)))))
-                    (if (eq return-type :VOID)
-                        call
-                        (let ((var (make-stack-variable context pc-start return-type)))
-                          (push var (stack context))
-                          (make-instance 'ir-assign
-                                         :address pc-start
-                                         :lvalue var
-                                         :rvalue call)))))))))))
-
+          (let* ((descriptor (slot-value (aref constant-pool
+                                               (slot-value
+                                                (aref constant-pool
+                                                      (slot-value method-reference
+                                                                  'method-descriptor-index))
+                                                'type-descriptor-index))
+                                         'value))
+                 (parameter-count (1+ (count-parameters descriptor)))
+                 (class-name (emit-name (aref constant-pool (slot-value method-reference 'class-index))
+                                        constant-pool))
+                 (method-simple-name (emit-name (aref constant-pool (slot-value method-reference 'method-descriptor-index))
+                                                constant-pool))
+                 (return-type (get-return-type (emit method-reference constant-pool)))
+                 (args (reverse (pop-args parameter-count context)))
+                 (call (if (and (string= class-name "java/lang/invoke/MethodHandle")
+                                (or (string= method-simple-name "invokeExact")
+                                    (string= method-simple-name "invoke")))
+                           (make-instance 'ir-call-virtual-method
+                                          :address pc-start
+                                          :return-type return-type
+                                          :method-name "%INVOKE-POLYMORPHIC-SIGNATURE"
+                                          :args args)
+                           (make-instance 'ir-call-virtual-method
+                                          :address pc-start
+                                          :return-type return-type
+                                          :method-name (lispize-method-name (emit method-reference constant-pool))
+                                          :args args))))
+            (list (if (eq return-type :VOID)
+                      call
+                      (let ((var (make-stack-variable context pc-start return-type)))
+                        (push var (stack context))
+                        (make-instance 'ir-assign
+                                       :address pc-start
+                                       :lvalue var
+                                       :rvalue call))))))))))
 (define-bytecode-transpiler :INVOKEINTERFACE (context code)
   (%transpile-virtual-call context code t))
 

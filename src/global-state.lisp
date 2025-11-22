@@ -49,6 +49,9 @@
 (defvar *ldk-classes-by-bin-name* (make-hash-table :test #'equal :synchronized t))
 (defvar *ldk-classes-by-fq-name* (make-hash-table :test #'equal :synchronized t))
 
+;; System properties storage to avoid recursion during initialization
+(defvar *ldk-system-properties* (make-hash-table :test #'equal :synchronized t))
+
 ;; These two tables contain java.lang.Class objects, some of which may
 ;; not have been loaded yet.  We will populate them when they are
 ;; loaded.

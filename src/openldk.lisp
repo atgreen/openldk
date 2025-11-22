@@ -892,6 +892,8 @@ the normal call-next-method chain for the owner's superclasses."
                                        :pc 0
                                        :is-clinit-p (string= "<clinit>" (slot-value method 'name)))))
         (setf (svcount *context*) 0)
+        (when *debug-bytecode*
+          (format t "~&; compiling ~A~%" method-key))
         (when *debug-codegen*
           (format t "; compiling ~A.~A~%" class-name (lispize-method-name (format nil "~A~A" (name method) (descriptor method))))
           (force-output))
@@ -921,7 +923,7 @@ the normal call-next-method chain for the owner's superclasses."
                                                              (when stk
                                                                (setf (stack *context*) (car stk))))
                                                            (when *debug-bytecode*
-                                                             (format t "~&; c[~A] ~A ~@<~A~:@>" (pc *context*) (aref *opcodes* (aref code (pc *context*))) (stack *context*)))
+                                                             (format t "~&; ~A c[~A] ~A ~@<~A~:@>" method-key (pc *context*) (aref *opcodes* (aref code (pc *context*))) (stack *context*)))
                                                            (let* ((pc-start (pc *context*)))
                                                              (if (gethash pc-start exception-handler-table)
                                                                  (let ((var (make-stack-variable *context* pc-start :REFERENCE)))
@@ -1358,6 +1360,9 @@ the normal call-next-method chain for the owner's superclasses."
           (let ((classfile-stream (open-java-classfile-on-classpath classname)))
             (if classfile-stream
                 (progn
+                  ;; Temporary debug - always print to trace setProperty loop
+                  (format t "~&>>> CLASSLOAD: ~A~%" classname)
+                  (force-output)
                   (when *debug-load*
                     (format t "~&; LOADING ~A~%" classname))
                   (if classfile-stream

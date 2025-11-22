@@ -834,6 +834,31 @@ and its implementation."
     (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring (car prop)) (ijstring (cdr prop))))
   props)
 
+;; Native implementation of System.setProperty to avoid recursion during MethodHandle initialization
+(defun |java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (key value)
+  "Store a system property directly in Lisp hash table to avoid Java class loading recursion."
+  (let ((key-str (if (typep key 'string)
+                     key
+                     (jstring key)))
+        (value-str (if (typep value 'string)
+                       value
+                       (jstring value))))
+    (let ((old-value (gethash key-str *ldk-system-properties*)))
+      (setf (gethash key-str *ldk-system-properties*) value-str)
+      (if old-value
+          (ijstring old-value)
+          nil))))
+
+(defun |java/lang/System.getProperty(Ljava/lang/String;)| (key)
+  "Retrieve a system property directly from Lisp hash table."
+  (let ((key-str (if (typep key 'string)
+                     key
+                     (jstring key))))
+    (let ((value (gethash key-str *ldk-system-properties*)))
+      (if value
+          (ijstring value)
+          nil))))
+
 #|
 Need to add:
 

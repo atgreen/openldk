@@ -129,40 +129,48 @@ LambdaMetafactory is calling methods that:
 
 ## Investigation Progress
 
-### Latest Findings (2025-11-22 afternoon)
+### Latest Findings (2025-11-22 afternoon/evening)
 
-**Added debug output to %resolve-invokedynamic** - Debug prints show that the function is NEVER reached. The infinite loop happens during class initialization, before any lambda code runs.
+**Progress:**
+1. ✅ Added debug output to %resolve-invokedynamic
+2. ✅ Found infinite setProperty loop with LDK_DEBUG=t
+3. ✅ **FIXED System.setProperty recursion!**
+4. ⚠️ New issue: hanging in SocketPermission initialization
 
-**Traced with LDK_DEBUG=t** - Shows infinite loop calling:
+**Fix Applied:** Implemented native System.setProperty/getProperty
+- Added *ldk-system-properties* hash table in global-state.lisp (line 53)
+- Implemented |java/lang/System.setProperty(...)| in native.lisp (line 838)
+- Implemented |java/lang/System.getProperty(...)| in native.lisp (line 852)
+- These methods store/retrieve from Lisp hash table, avoiding Java class loading
+
+**Result:** The infinite setProperty loop is completely fixed! Now we can progress much further:
+- %resolve-invokedynamic is REACHED (line 1154 in trace)
+- LambdaMetafactory.metafactory() is CALLED (line 1171)
+- InnerClassLambdaMetafactory constructor runs (line 1175)
+
+**New Issue:** Now hangs during SocketPermission static initialization
 ```
-* trace: System.setProperty(String, String)
-* trace: System.getSecurityManager()
-* trace: hashCode()
-* trace: equals(Object)
-* trace: put(Object, Object)
+* <13> trace: entering java/net/SocketPermission.<clinit>()()
+* <13> trace: getProperty(Ljava/lang/String;)
+* <13> trace: entering java/net/SocketPermission.getHost(Ljava/lang/String;)()
+[hangs here]
 ```
 
-**Root Cause**: Loading `DirectMethodHandle` or related lambda classes triggers class initialization that has a circular dependency with `System.setProperty()`.
+The bootstrap method is being called successfully, but something in the security/permission initialization is now blocking progress.
 
 ### Theory
 
-1. SimpleLambdaTest is compiled with `invokedynamic` instruction
-2. OpenLDK starts loading the test class
-3. Class loading triggers static initialization of java.lang.invoke classes
-4. Something in that initialization calls `System.setProperty()`
-5. setProperty triggers more initialization that calls setProperty again → infinite loop
+The lambda bootstrap process triggers security permission checks, which load SocketPermission. That class's initialization is somehow hanging (not an infinite loop, just stuck/slow).
 
 ### Next Investigation Steps
 
-1. ✅ **Add debug output** - Done, shows %resolve-invokedynamic never reached
-2. ✅ **Run with LDK_DEBUG=t** - Done, found setProperty loop
-3. **Identify which class initialization triggers the loop**
-   - Add classload debug to see what class is being loaded when loop starts
-   - Check static initializers of DirectMethodHandle, LambdaForm, etc.
-4. **Fix the circular dependency**
-   - Likely need to stub out or reimplement some initialization method
-   - Or defer property setting until after critical classes are loaded
-5. **Alternative**: Test with pre-Java-8 invokedynamic (string concat, etc.)
+1. ✅ **Fix setProperty recursion** - Done with native implementation
+2. ✅ **Reach LambdaMetafactory** - Done, bootstrap is being called!
+3. **Fix SocketPermission hang**
+   - Check if getHost() needs a native implementation
+   - May need to stub out or simplify permission checking
+   - Could try disabling security manager entirely
+4. **Alternative**: Disable ProxyClassesDumper or permission checks during lambda generation
 
 ---
 
