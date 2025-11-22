@@ -12,3 +12,4 @@ systems
 /testsuite/mauve/gnu/testlet/config.java
 rt
 *.log
+log.txt
