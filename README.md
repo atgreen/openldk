@@ -187,14 +187,16 @@ string of characters that are interpreted as below:
 
 - `b` - trace bytecode compilation
 - `c` - dump all Lisp code prior to evaluation
+- `l` - show class loading (prints "; LOADING classname" for each class)
+- `p` - debug propagation
+- `s` - start a slynk server at startup (port 2025)
 - `t` - trace method entry/exit at runtime
 - `T` - trace method entry/exit with arguments and return values
-- `s` - start a slynk server at startup (port 2025)
 - `u` - unmuffle the Lisp compiler
 - `x` - trace opcode execution (use with `t`)
 
-More specifically, running `LDK_DEBUG=bctux openldk Hello` will enable
-all debug output while running `Hello`.
+More specifically, running `LDK_DEBUG=bcltux openldk Hello` will enable
+most debug output while running `Hello`.
 
 ## Status
 

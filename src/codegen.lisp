@@ -65,7 +65,7 @@
 
 (defmethod codegen ((insn ir-array-literal) context)
   (let* ((values (slot-value insn 'value))
-         (size (if (vectorp values) (length values) (length values))))
+         (size (length values)))
     (cond
       ;; Large constant array - precompute the Java strings NOW and embed reference
       ((and (vectorp values) (> size 50))
@@ -209,7 +209,7 @@
                             (let ((value2 ,(code (codegen (value2 insn) context)))
                                   (value1 ,(code (codegen (value1 insn) context))))
                               (unsigned-to-signed-integer (logand (floor (/ value1 value2)) #xFFFFFFFF)))
-                          (division-by-zero (e)
+                          (division-by-zero ()
                             (error (%lisp-condition (%make-throwable '|java/lang/ArithmeticException|)))))
                  :expression-type :INTEGER))
 
@@ -221,7 +221,7 @@
                             (let ((value2 ,(code (codegen (value2 insn) context)))
                                   (value1 ,(code (codegen (value1 insn) context))))
                               (unsigned-to-signed-long (logand (floor (/ value1 value2)) #xFFFFFFFFFFFFFFFF)))
-                          (division-by-zero (e)
+                          (division-by-zero ()
                             (error (%lisp-condition (%make-throwable '|java/lang/ArithmeticException|)))))
                  :expression-type :LONG))
 
@@ -316,10 +316,7 @@
                  :code `(let ((op1 (logand ,(code (codegen (value1 insn) context)) #xFFFFFFFFFFFFFFFF))
                               (op2 (logand ,(code (codegen (value2 insn) context)) #xFFFFFFFFFFFFFFFF)))
                           ;; (format t "~&~A | ~A = ~A~%" op1 op2 (logior op1 op2))
-                          (logior (logand ,(code (codegen (value1 insn) context))
-                                          #xFFFFFFFFFFFFFFFF)
-                                  (logand ,(code (codegen (value2 insn) context))
-                                          #xFFFFFFFFFFFFFFFF)))
+                          (logior op1 op2))
                  :expression-type :LONG))
 
 (defmethod codegen ((insn ir-iand) context)
@@ -524,7 +521,7 @@
                              (list 'let (list (list 'value2 (code (codegen (value2 insn) context)))
                                               (list 'value1 (code (codegen (value1 insn) context))))
                                    (list 'rem 'value1 'value2))
-                             (list 'division-by-zero (list 'e)
+                             (list 'division-by-zero ()
                                    (list 'error (list '%lisp-condition (list '%make-throwable (list 'quote '|java/lang/ArithmeticException|))))))
                  :expression-type :INTEGER))
 
@@ -535,7 +532,7 @@
                              (list 'let (list (list 'value2 (code (codegen (value2 insn) context)))
                                               (list 'value1 (code (codegen (value1 insn) context))))
                                    (list 'rem 'value1 'value2))
-                             (list 'division-by-zero (list 'e)
+                             (list 'division-by-zero ()
                                    (list 'error (list '%lisp-condition (list '%make-throwable (list 'quote '|java/lang/ArithmeticException|))))))
                  :expression-type :LONG))
 
@@ -561,8 +558,8 @@
                               (value1 ,(code (codegen (value1 insn) context))))
                           (if (eq value2 0.0d0)
                               (cond
-                                ((< value1 0.0) float-features:double-float-negative-infinity)
-                                ((> value1 0.0) float-features:double-float-positive-infinity)
+                                ((< value1 0.0d0) float-features:double-float-negative-infinity)
+                                ((> value1 0.0d0) float-features:double-float-positive-infinity)
                                 (t float-features:double-float-nan))
                               (/ value1 value2)))
                  :expression-type :DOUBLE))
@@ -1268,8 +1265,8 @@
                    :insn insn
                    :code `(slot-value
                            (let ((objref ,(code (codegen objref context))))
-                           (when (null objref)
-                             (error (format nil "Null Pointer Exception ~A" ,(slot-value insn 'address))))
+                             (when (null objref)
+                               (error (format nil "Null Pointer Exception ~A" ,(slot-value insn 'address))))
                              objref)
                            (quote ,(intern (mangle-field-name member-name) :openldk))))))
 
@@ -1398,7 +1395,8 @@ Used to consult block-local substitutions in addition to global ones.")
               ;; Wrap the block's code in HANDLER-CASE
               ;; Pull any branch target out of the HANDLER-CASE first.
               (setf lisp-code
-                    (if (starts-with? "branch-target-" (format nil "~A" (car lisp-code)))
+                    (if (and lisp-code
+                             (starts-with? "branch-target-" (format nil "~A" (car lisp-code))))
                         (let ((bt (car lisp-code))
                               (lisp-code (cdr lisp-code)))
                           `(,bt
