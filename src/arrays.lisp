@@ -46,6 +46,11 @@
 (defun make-java-array (&key component-class (size 0) initial-element initial-contents)
   "Construct a Java-style array wrapper with COMPONENT-CLASS and DATA built from SIZE/INITIAL-ELEMENT or INITIAL-CONTENTS."
   (assert component-class)
+  ;; Validate size for negativity (JVM spec: throw NegativeArraySizeException)
+  (when (< size 0)
+    (let ((exc (make-instance '|java/lang/NegativeArraySizeException|)))
+      (|<init>()| exc)
+      (error (%lisp-condition exc))))
   (if initial-contents
       (let* ((contents-length (length initial-contents))
              (data (if (zerop contents-length)
@@ -73,23 +78,38 @@
 
 (defun (setf jaref) (new-value array index)
   "Setter for JAVA array element at INDEX."
+  ;; Null check (JVM spec: throw NullPointerException)
+  (when (null array)
+    (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|))))
   (let* ((data (java-array-data array))
          (len (length data)))
+    ;; Bounds check
     (when (or (< index 0) (>= index len))
-      ;; Throw Java ArrayIndexOutOfBoundsException
       (let ((exc (make-instance '|java/lang/ArrayIndexOutOfBoundsException|)))
-        ;; Initialize with message
         (|<init>(Ljava/lang/String;)| exc
          (jstring (format nil "~A" index)))
         (error (%lisp-condition exc))))
+    ;; TODO: Add type compatibility check (ArrayStoreException)
+    ;; Requires validating component-class vs new-value type
+    ;; Deferred due to bootstrap complexity with exception classes
     (setf (aref data index) new-value)))
 
 (defun java-array-length (array)
   "Return the logical length of the Java-style ARRAY."
+  ;; Null check (JVM spec: throw NullPointerException)
+  (when (null array)
+    (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|))))
+  ;; TODO: Add type check (throw IllegalArgumentException if not an array)
+  ;; Deferred due to bootstrap complexity with exception classes
   (length (java-array-data array)))
 
 (defun |java/lang/reflect/Array.getLength(Ljava/lang/Object;)| (obj)
   "java.lang.reflect.Array.getLength implementation."
+  ;; Null check (JVM spec: throw NullPointerException)
+  (when (null obj)
+    (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|))))
+  ;; TODO: Add type check (throw IllegalArgumentException if not an array)
+  ;; Deferred due to bootstrap complexity with exception classes
   (length (java-array-data obj)))
 
 (defmethod |length()| ((array java-array))

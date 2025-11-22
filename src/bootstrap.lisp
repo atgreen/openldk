@@ -169,6 +169,18 @@
   ()
   (:documentation "Stub for java.lang.ArithmeticException"))
 
+(defclass |java/lang/NegativeArraySizeException| (|java/lang/RuntimeException|)
+  ()
+  (:documentation "Stub for java.lang.NegativeArraySizeException"))
+
+(defclass |java/lang/ArrayStoreException| (|java/lang/RuntimeException|)
+  ()
+  (:documentation "Stub for java.lang.ArrayStoreException"))
+
+(defclass |java/lang/IllegalArgumentException| (|java/lang/RuntimeException|)
+  ()
+  (:documentation "Stub for java.lang.IllegalArgumentException"))
+
 (define-condition |condition-java/lang/IllegalMonitorStateException|
     (|condition-java/lang/Exception|)
   ())
