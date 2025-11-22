@@ -68,16 +68,45 @@
 
 (defmethod emit ((cmh constant-method-handle) cp)
   (assert (classload "java/lang/invoke/MethodHandles$Lookup"))
-  (let* ((m (aref cp (reference-index cmh)))
+  (let* ((ref-kind (reference-kind cmh))
+         (m (aref cp (reference-index cmh)))
          (refc (java-class (ir-class-class (emit (aref cp (class-index m)) cp))))
          (name (jstring (emit-name (aref cp (method-descriptor-index m)) cp)))
          (type (|java/lang/invoke/MethodType.fromMethodDescriptorString(Ljava/lang/String;Ljava/lang/ClassLoader;)|
-                (jstring (emit-type (aref cp (method-descriptor-index m)) cp)) nil)))
+                (jstring (emit-type (aref cp (method-descriptor-index m)) cp)) nil))
+         ;; Select the appropriate Lookup method based on reference kind
+         ;; See JVM spec: REF_getField=1, REF_getStatic=2, REF_putField=3, REF_putStatic=4,
+         ;;               REF_invokeVirtual=5, REF_invokeStatic=6, REF_invokeSpecial=7,
+         ;;               REF_newInvokeSpecial=8, REF_invokeInterface=9
+         (lookup-method (case ref-kind
+                          (1 '|java/lang/invoke/MethodHandles$Lookup.findGetter(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;)|)
+                          (2 '|java/lang/invoke/MethodHandles$Lookup.findStaticGetter(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;)|)
+                          (3 '|java/lang/invoke/MethodHandles$Lookup.findSetter(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;)|)
+                          (4 '|java/lang/invoke/MethodHandles$Lookup.findStaticSetter(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;)|)
+                          (5 '|java/lang/invoke/MethodHandles$Lookup.findVirtual(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)|)
+                          (6 '|java/lang/invoke/MethodHandles$Lookup.findStatic(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)|)
+                          (7 '|java/lang/invoke/MethodHandles$Lookup.findSpecial(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/Class;)|)
+                          (8 '|java/lang/invoke/MethodHandles$Lookup.findConstructor(Ljava/lang/Class;Ljava/lang/invoke/MethodType;)|)
+                          (9 '|java/lang/invoke/MethodHandles$Lookup.findVirtual(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)|) ; interface methods use findVirtual
+                          (t (error "Unknown MethodHandle reference kind: ~A" ref-kind)))))
     (make-instance 'ir-method-handle
                    :reference-index (reference-index cmh)
-                   :value `(let ((lookup (|java/lang/invoke/MethodHandles.lookup()|)))
-                             (|java/lang/invoke/MethodHandles$Lookup.findStatic(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)|
-                              lookup ,refc ,name ,type)))))
+                   :value (case ref-kind
+                            ;; Field getters/setters take field type, not MethodType
+                            ((1 2 3 4)
+                             (let ((field-type (java-class (ir-class-class (emit (aref cp (descriptor-index (aref cp (method-descriptor-index m)))) cp)))))
+                               `(let ((lookup (|java/lang/invoke/MethodHandles.lookup()|)))
+                                  (,lookup-method lookup ,refc ,name ,field-type))))
+                            ;; findSpecial needs an extra parameter (caller class)
+                            (7 `(let ((lookup (|java/lang/invoke/MethodHandles.lookup()|)))
+                                  (,lookup-method lookup ,refc ,name ,type ,refc)))
+                            ;; findConstructor doesn't take a name parameter
+                            (8 `(let ((lookup (|java/lang/invoke/MethodHandles.lookup()|)))
+                                  (,lookup-method lookup ,refc ,type)))
+                            ;; Standard method lookups (invokeVirtual, invokeStatic, invokeInterface)
+                            ((5 6 9) `(let ((lookup (|java/lang/invoke/MethodHandles.lookup()|)))
+                                        (,lookup-method lookup ,refc ,name ,type)))
+                            (t (error "Unhandled MethodHandle reference kind: ~A" ref-kind))))))
 
 (defclass/std constant-method-type ()
   ((descriptor-index)))
