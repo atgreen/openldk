@@ -1360,9 +1360,6 @@ the normal call-next-method chain for the owner's superclasses."
           (let ((classfile-stream (open-java-classfile-on-classpath classname)))
             (if classfile-stream
                 (progn
-                  ;; Temporary debug - always print to trace setProperty loop
-                  (format t "~&>>> CLASSLOAD: ~A~%" classname)
-                  (force-output)
                   (when *debug-load*
                     (format t "~&; LOADING ~A~%" classname))
                   (if classfile-stream

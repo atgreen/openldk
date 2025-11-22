@@ -2086,6 +2086,34 @@ user.variant
   "MethodHandle intrinsic: invoke an interface method via MemberName (2-arg variant)."
   (%invoke-from-member-name member-name receiver arg1 arg2))
 
+;; Native stub for MethodHandleImpl.makeArrays() to avoid MAX_JVM_ARITY issue
+;; The original tries to create collectors for all arities up to 255, but
+;; arity 255 fails because adding MemberName parameter makes it 256 (over limit).
+;; We return a small array that's sufficient for typical use cases.
+(defun |java/lang/invoke/MethodHandleImpl.makeArrays()| ()
+  "Native stub: return small array of MethodHandle collectors to avoid arity 256 issue.
+   Returns array of size 11 (arities 0-10) which is enough for most lambda expressions."
+  (let* ((mh-class (%get-java-class-by-bin-name "java/lang/invoke/MethodHandle"))
+         ;; Create small array - size 11 for arities 0-10
+         (array (make-java-array :component-class mh-class :size 11)))
+    ;; Leave all entries as NULL - they will be lazily initialized if needed
+    array))
+
+;; Accessor method for makeArrays() called by MethodHandleImpl$Lazy
+(defun |java/lang/invoke/MethodHandleImpl.access$000()| ()
+  "Accessor for makeArrays() - delegates to native stub."
+  (|java/lang/invoke/MethodHandleImpl.makeArrays()|))
+
+;; Stub findCollector to prevent creating 255-arity collectors
+(defun |java/lang/invoke/MethodHandleImpl.findCollector(Ljava/lang/String;ILjava/lang/Class;[Ljava/lang/Class;)| (name arity array-type param-types)
+  "Native stub: prevent creating collectors with arity >= 254 to avoid parameter count overflow."
+  (when (>= arity 254)
+    (error (%lisp-condition
+            (%make-throwable '|java/lang/UnsupportedOperationException|
+                             (ijstring (format nil "Collector arity ~D not supported (max 253)" arity))))))
+  ;; For smaller arities, let Java code handle it by returning NIL (not implemented)
+  nil)
+
 (defun %ensure-methodtypeform-handle-cache (form index)
   "Ensure MethodTypeForm.methodHandles is a java array large enough for INDEX."
   (let* ((cache (when (slot-exists-p form '|methodHandles|)
