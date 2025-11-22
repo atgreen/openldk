@@ -1808,7 +1808,16 @@ the normal call-next-method chain for the owner's superclasses."
                      "java/lang/invoke/MethodHandleStatics"
                      "java/lang/invoke/InfoFromMemberName"
                      "java/lang/reflect/Modifier"
-                     "sun/invoke/util/BytecodeDescriptor"))
+                     "sun/invoke/util/BytecodeDescriptor"
+                     ;; ASM bytecode generation classes used by LambdaMetafactory
+                     "jdk/internal/org/objectweb/asm/ClassWriter"
+                     "jdk/internal/org/objectweb/asm/ClassVisitor"
+                     "jdk/internal/org/objectweb/asm/MethodVisitor"
+                     "jdk/internal/org/objectweb/asm/MethodWriter"
+                     "jdk/internal/org/objectweb/asm/FieldVisitor"
+                     "jdk/internal/org/objectweb/asm/Type"
+                     "jdk/internal/org/objectweb/asm/Label"
+                     "jdk/internal/org/objectweb/asm/ByteVector"))
           (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil)))
 
     (|condition-java/lang/Throwable| (c)
