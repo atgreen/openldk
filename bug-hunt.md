@@ -1,9 +1,37 @@
 # MethodHandle Bug Investigation
 
-## Current Status: BUILD OK; METHODHANDLE CRASH PERSISTS
+## Current Status: NIL BUG FIXED; INTRINSICS IMPLEMENTED; INITIALIZATION HANGS
 
-**Last Known Good Commit**: `464bade` - "fix(strings,native): handle NIL java-array values in lstring and invoke0"  
-**Current Problem**: Build succeeds, but `test_mh` still fails during LambdaForm compilation with `The value NIL is not of type OPENLDK::JAVA-ARRAY`, so MethodHandle path remains broken (no hang now).
+**Latest Commits**:
+- `b48fdc5` - "fix(global-state,codegen): handle NIL values in class lookup functions" ✅
+- `6b19520` - "feat(native): implement MethodHandle intrinsics (linkToStatic, etc.)" ✅
+- `e70c96a` - "docs(bug-hunt): document MethodHandle intrinsics implementation" ✅
+
+**Fixed Issues**:
+- ✅ NIL/JAVA-ARRAY type error completely resolved
+- ✅ All four MethodHandle intrinsics (linkToStatic, linkToVirtual, linkToSpecial, linkToInterface) implemented
+- ✅ Build succeeds without errors
+- ✅ Simple Java programs work correctly
+
+**Current Problem**:
+- ❌ `test_mh` hangs during `lookup.findStatic()` in Java's MethodHandle initialization
+- Hang occurs in Java library code during LambdaForm setup, before intrinsics are called
+- Last method compiled: `sun/invoke/util/VerifyType.isNullConversion`
+- Likely circular dependency or missing Java library method implementation
+
+**Quick Summary**: The original NIL bug and missing intrinsics are fixed. A new issue emerged: Java's MethodHandle initialization code hangs, suggesting deeper issues in the MethodHandle/LambdaForm machinery that require further investigation.
+
+---
+
+## Table of Contents
+1. [The Original Bug](#the-bug-being-investigated) - Initial symptom and test case
+2. [Root Cause Analysis](#root-cause-analysis) - What was causing the NIL error
+3. [Fixes Applied](#fixes-applied-so-far) - All commits and changes
+4. [Progress Logs](#progress-log-2025-11-21) - Detailed timeline of work
+5. [Current Status Summary](#progress-log-2025-11-22---nil-bug-fixed) - Latest state
+6. [Recommendations](#recommendations) - Next steps for MethodHandle support
+
+---
 
 ## The Bug Being Investigated
 
@@ -441,6 +469,62 @@ The MethodHandle intrinsics are correctly implemented but cannot be tested yet d
 1. Investigation of Java's LambdaForm initialization code
 2. Possible missing or incomplete Java library method implementations
 3. Potential circular dependency between MethodHandle setup and class loading
+
+---
+
+## Recommendations
+
+### Immediate Next Steps
+
+1. **Investigate the Hang**
+   - Run `test_mh_debug` with thread backtrace to identify exact hang location
+   - Check if there's a compilation deadlock (method waiting for itself to compile)
+   - Review `*methods-being-compiled*` hash table for stuck entries
+   - Add timeout/detection for circular compilation dependencies
+
+2. **Missing Java Library Methods**
+   - Audit which `java.lang.invoke.*` methods are not yet implemented
+   - Focus on methods called during MethodHandle initialization:
+     - `MethodType.*` methods
+     - `MethodTypeForm.*` methods
+     - `LambdaForm.*` methods
+     - `DirectMethodHandle.*` methods
+   - Implement stub versions that log when called to identify missing pieces
+
+3. **Alternative Testing Approach**
+   - Create minimal MethodHandle test that bypasses `findStatic()`
+   - Manually construct MemberName and test `linkToStatic` directly
+   - This would verify the intrinsics work independent of initialization
+
+### Long-term Improvements
+
+1. **Better Error Handling**
+   - Add compilation timeout to prevent infinite hangs
+   - Improve error messages for circular dependencies
+   - Add detection for methods stuck in compilation
+
+2. **MethodHandle Infrastructure**
+   - Implement more complete `MethodHandles.Lookup` functionality
+   - Add proper `LambdaForm` compilation/caching
+   - Implement `MethodType` caching and reuse
+
+3. **Testing**
+   - Add unit tests for individual intrinsics
+   - Test MethodHandle features incrementally (static → virtual → special → interface)
+   - Create regression tests for NIL handling
+
+### Code Maintenance
+
+1. **Remove Debug Output**
+   - Clean up MHN.INIT and other debug print statements
+   - Use proper debug flags instead of hardcoded prints
+
+2. **Documentation**
+   - Document MethodHandle architecture in CLAUDE.md
+   - Add examples of working MethodHandle usage (when available)
+   - Document known limitations
+
+---
 
 ## References
 
