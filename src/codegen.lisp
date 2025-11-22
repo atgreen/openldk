@@ -370,7 +370,7 @@
                                          (format nil "~A~A" (name method) (descriptor method))))))))
     (if method
         class
-        (find method-name (cons (super ldk-class) (coerce (interfaces ldk-class) 'list))
+        (find method-name (remove nil (cons (super ldk-class) (coerce (interfaces ldk-class) 'list)))
               :test (lambda (method-name class)
                       (%find-declaring-class class method-name))))))
 
@@ -378,16 +378,17 @@
   (with-slots (class method-name args return-type) insn
     (make-instance '<expression>
                    :insn insn
-                   :code (let* ((nargs (length args))
+                   :code (let* ((declaring-class (or (%find-declaring-class class method-name) class))
+                                (nargs (length args))
                                 (call (cond
                                         ((eq nargs 0)
-                                         (list (intern (format nil "~A.~A" (%find-declaring-class class method-name) method-name) :openldk)))
+                                         (list (intern (format nil "~A.~A" declaring-class method-name) :openldk)))
                                         ((eq nargs 1)
-                                         (list (intern (format nil "~A.~A" (%find-declaring-class class method-name)  method-name) :openldk) (code (codegen (car args) context))))
+                                         (list (intern (format nil "~A.~A" declaring-class method-name) :openldk) (code (codegen (car args) context))))
                                         (t
                                          (list 'apply
                                                (list 'function (intern (format nil "~A.~A"
-                                                                              (%find-declaring-class class method-name)
+                                                                              declaring-class
                                                                                method-name)
                                                                        :openldk))
                                                (list 'reverse (cons 'list (mapcar (lambda (a) (code (codegen a context))) args))))))))

@@ -74,6 +74,8 @@
 (defvar *debug-x* nil)
 (defvar *debug-unmuffle* nil)
 (defvar *debug-propagation* nil)
+;; When true, log when set-enclosing-type related code paths run (see src/openldk.lisp).
+(defvar *debug-set-enclosing-type* nil)
 
 ;; Experimental: basic copy/constant propagation over IR. Now enabled in Phase 1.
 (defvar *enable-copy-propagation* t)
@@ -106,9 +108,13 @@
 
 (defun %get-java-class-by-bin-name (bin-name &optional fail-ok)
   "Look up a Java class by its binary name BIN-NAME. When FAIL-OK is non-NIL, return NIL instead of asserting."
-  (let ((bin-name (if (stringp bin-name)
-                      bin-name
-                      (coerce (java-array-data bin-name) 'string))))
+  (let ((bin-name (cond
+                    ((stringp bin-name) bin-name)
+                    ((null bin-name)
+                     (if fail-ok
+                         (return-from %get-java-class-by-bin-name nil)
+                         (error "bin-name is NIL in %get-java-class-by-bin-name")))
+                    (t (coerce (java-array-data bin-name) 'string)))))
     (assert (stringp bin-name))
     (assert (not (find #\. bin-name)))
     (unless fail-ok
@@ -117,9 +123,13 @@
 
 (defun %get-java-class-by-fq-name (fq-name &optional fail-ok)
   "Look up a Java class by its fully-qualified Java name FQ-NAME. When FAIL-OK is non-NIL, return NIL instead of asserting."
-  (let ((fq-name (if (stringp fq-name)
-                     fq-name
-                     (coerce (java-array-data fq-name) 'string))))
+  (let ((fq-name (cond
+                   ((stringp fq-name) fq-name)
+                   ((null fq-name)
+                    (if fail-ok
+                        (return-from %get-java-class-by-fq-name nil)
+                        (error "fq-name is NIL in %get-java-class-by-fq-name")))
+                   (t (coerce (java-array-data fq-name) 'string)))))
     (assert (stringp fq-name))
     (assert (not (find #\/ fq-name)))
     (unless fail-ok
@@ -128,9 +138,13 @@
 
 (defun %get-ldk-class-by-bin-name (bin-name &optional fail-ok)
   "Look up an LDK class by its binary name BIN-NAME. When FAIL-OK is non-NIL, return NIL instead of asserting."
-  (let ((bin-name (if (stringp bin-name)
-                      bin-name
-                      (coerce (java-array-data bin-name) 'string))))
+  (let ((bin-name (cond
+                    ((stringp bin-name) bin-name)
+                    ((null bin-name)
+                     (if fail-ok
+                         (return-from %get-ldk-class-by-bin-name nil)
+                         (error "bin-name is NIL in %get-ldk-class-by-bin-name")))
+                    (t (coerce (java-array-data bin-name) 'string)))))
     (assert (stringp bin-name))
     (assert (not (find #\. bin-name)))
     (unless fail-ok
@@ -139,9 +153,13 @@
 
 (defun %get-ldk-class-by-fq-name (fq-name &optional fail-ok)
   "Look up an LDK class by its fully-qualified Java name FQ-NAME. When FAIL-OK is non-NIL, return NIL instead of asserting."
-  (let ((fq-name (if (stringp fq-name)
-                     fq-name
-                     (coerce (java-array-data fq-name) 'string))))
+  (let ((fq-name (cond
+                   ((stringp fq-name) fq-name)
+                   ((null fq-name)
+                    (if fail-ok
+                        (return-from %get-ldk-class-by-fq-name nil)
+                        (error "fq-name is NIL in %get-ldk-class-by-fq-name")))
+                   (t (coerce (java-array-data fq-name) 'string)))))
     (assert (stringp fq-name))
     (unless fail-ok
       (assert (gethash fq-name *ldk-classes-by-fq-name*)))
