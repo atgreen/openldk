@@ -58,6 +58,8 @@
 
 (defun jaref (array index)
   "Java-style array access for ARRAY at INDEX."
+  (when (null array)
+    (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|))))
   (let* ((data (java-array-data array))
          (len (length data)))
     (when (or (< index 0) (>= index len))
