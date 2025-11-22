@@ -1106,15 +1106,23 @@
 (defparameter *invokedynamic-cache* (make-hash-table :test #'equal))
 
 (defun %resolve-invokedynamic (method-name bootstrap-method-name address fname &rest args)
+  (format t "~&%resolve-invokedynamic: method=~A bootstrap=~A~%" method-name bootstrap-method-name)
+  (force-output)
   (let* ((key (list bootstrap-method-name address))
          (cached (gethash key *invokedynamic-cache*)))
     (if cached
-        cached
-        (let ((resolved (apply bootstrap-method-name
-                               (append (list (|java/lang/invoke/MethodHandles.lookup()|) fname)
-                                       args))))
-          (setf (gethash key *invokedynamic-cache*) resolved)
-          resolved))))
+        (progn
+          (format t "  Using cached CallSite~%")
+          cached)
+        (progn
+          (format t "  Calling bootstrap method...~%")
+          (force-output)
+          (let ((resolved (apply bootstrap-method-name
+                                 (append (list (|java/lang/invoke/MethodHandles.lookup()|) fname)
+                                         args))))
+            (format t "  Bootstrap returned: ~A~%" resolved)
+            (setf (gethash key *invokedynamic-cache*) resolved)
+            resolved)))))
 
 (defmethod codegen ((insn ir-call-dynamic-method) context)
   (with-slots (method-name args dynamic-args bootstrap-method-name address) insn

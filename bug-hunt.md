@@ -127,13 +127,42 @@ LambdaMetafactory is calling methods that:
 
 ---
 
-## Next Investigation Steps
+## Investigation Progress
 
-1. **Add debug output** to track what LambdaMetafactory is doing
-2. **Run with LDK_DEBUG=t** to see method entry/exit
-3. **Check for missing Java methods** in LambdaMetafactory chain
-4. **Look for circular dependencies** in class loading
-5. **Test simpler invokedynamic** (not lambda-based)
+### Latest Findings (2025-11-22 afternoon)
+
+**Added debug output to %resolve-invokedynamic** - Debug prints show that the function is NEVER reached. The infinite loop happens during class initialization, before any lambda code runs.
+
+**Traced with LDK_DEBUG=t** - Shows infinite loop calling:
+```
+* trace: System.setProperty(String, String)
+* trace: System.getSecurityManager()
+* trace: hashCode()
+* trace: equals(Object)
+* trace: put(Object, Object)
+```
+
+**Root Cause**: Loading `DirectMethodHandle` or related lambda classes triggers class initialization that has a circular dependency with `System.setProperty()`.
+
+### Theory
+
+1. SimpleLambdaTest is compiled with `invokedynamic` instruction
+2. OpenLDK starts loading the test class
+3. Class loading triggers static initialization of java.lang.invoke classes
+4. Something in that initialization calls `System.setProperty()`
+5. setProperty triggers more initialization that calls setProperty again → infinite loop
+
+### Next Investigation Steps
+
+1. ✅ **Add debug output** - Done, shows %resolve-invokedynamic never reached
+2. ✅ **Run with LDK_DEBUG=t** - Done, found setProperty loop
+3. **Identify which class initialization triggers the loop**
+   - Add classload debug to see what class is being loaded when loop starts
+   - Check static initializers of DirectMethodHandle, LambdaForm, etc.
+4. **Fix the circular dependency**
+   - Likely need to stub out or reimplement some initialization method
+   - Or defer property setting until after critical classes are loaded
+5. **Alternative**: Test with pre-Java-8 invokedynamic (string concat, etc.)
 
 ---
 
