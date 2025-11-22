@@ -1829,16 +1829,13 @@ user.variant
             REF_LIMIT                  = 10;
   |#
 
-  (format t "MHN.INIT ~A ~A~%" member-name objref)
   (cond
     ((not (eq 0 (logand #x8 (slot-value objref '|modifiers|))))
      ;; Static method
-     (setf (slot-value member-name '|flags|) (logior #x10000 (ash 6 24) (slot-value objref '|modifiers|)))
-     (format t "STATIC ~A~%" (slot-value member-name '|flags|)))
+     (setf (slot-value member-name '|flags|) (logior #x10000 (ash 6 24) (slot-value objref '|modifiers|))))
     (t
      ;; Any other method
-     (setf (slot-value member-name '|flags|) (logior #x10000 (ash 5 24) (slot-value objref '|modifiers|)))
-     (format t "METHOD ~A~%" (slot-value member-name '|flags|)))))
+     (setf (slot-value member-name '|flags|) (logior #x10000 (ash 5 24) (slot-value objref '|modifiers|))))))
 
 (defmethod |defineAnonymousClass(Ljava/lang/Class;[B[Ljava/lang/Object;)|
     ((unsafe |sun/misc/Unsafe|) clazz data cp-patches)
