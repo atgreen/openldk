@@ -13,10 +13,12 @@
   ;; Match Java FP semantics
   (sb-int:set-floating-point-modes :traps nil)
   (let ((args (uiop:command-line-arguments)))
+    (format t "; javacl argv (~D): ~S~%" (length args) args)
+    (finish-output)
     (handler-case
-        (main "com.sun.tools.javac.Main"
-              args
-              :classpath (or (uiop:getenv "CLASSPATH") "."))
+        (openldk::main "com.sun.tools.javac.Main"
+                       args
+                       :classpath (or (uiop:getenv "CLASSPATH") "."))
       (error (condition)
         (cond
           ((typep condition 'openldk::|condition-java/lang/Throwable|)
