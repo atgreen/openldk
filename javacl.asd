@@ -19,7 +19,7 @@
   :build-operation "program-op"
   :build-pathname "javacl"
   ;; Runtime entry point should run javac, not re-dump the image.
-  :entry-point "openldk:javac-main-wrapper")
+  :entry-point "javacl:main")
 
 #+sb-core-compression
 (defmethod asdf:perform ((o asdf:image-op) (c asdf:system))
