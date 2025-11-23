@@ -68,10 +68,15 @@
 
 (defun make-javacl-image (&optional (output-path "javacl"))
   "Build an executable image that jumps straight into javac."
-  ;; Ensure tools.jar is visible during image creation.
   (let ((cp (default-javac-classpath)))
-    (uiop:setenv "CLASSPATH" cp)
-    (openldk::initialize))
+    (openldk::initialize)
+    ;; Set classpath inside the image so warmup uses it.
+    (when cp
+      (setf openldk::*classpath*
+            (loop for cpe in (split-sequence:split-sequence (uiop:inter-directory-separator) cp)
+                  collect (if (str:ends-with? ".jar" cpe)
+                              (make-instance 'openldk::jar-classpath-entry :jarfile cpe)
+                              (make-instance 'openldk::dir-classpath-entry :dir cpe))))))
   ;; Warm up javac by loading core classes (no compilation run).
   (%warmup-javac)
   ;; Kill helper threads before dumping the image.
