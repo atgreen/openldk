@@ -1880,3 +1880,43 @@ the normal call-next-method chain for the owner's superclasses."
                             :executable t
                             :save-runtime-options t
                             :toplevel #'main-wrapper))
+
+(defun javac-main-wrapper ()
+  "Dedicated entry for the pre-dumped javac image."
+  (sb-int:set-floating-point-modes :traps nil)
+  (handler-case
+      (main "com.sun.tools.javac.Main"
+            (rest sb-ext:*posix-argv*)
+            :classpath (or (uiop:getenv "CLASSPATH") "."))
+    (error (condition)
+      (cond
+        ((typep condition '|condition-java/lang/Throwable|)
+         (let ((throwable (and (slot-boundp condition '|objref|)
+                               (slot-value condition '|objref|))))
+           (if (typep throwable '|java/lang/Throwable|)
+               (progn
+                 (format *error-output* "~&Unhandled Java exception:~%")
+                 (%print-java-stack-trace throwable :stream *error-output*)
+                 (finish-output *error-output*))
+               (format *error-output* "~&Unhandled Java condition: ~A~%" condition))))
+        (t
+         (format *error-output* "~&Error: ~A~%" condition)))
+      (uiop:quit 1))))
+
+(defun make-javac-image (&optional (output-path "javacl"))
+  "Build an executable image that runs javac directly, preloading its classes."
+  (initialize)
+  ;; Warm up javac so key classes/methods are already JITed in the saved image.
+  (ignore-errors
+    (main "com.sun.tools.javac.Main"
+          '("-help")
+          :classpath (or (uiop:getenv "CLASSPATH") ".")))
+  ;; Kill helper threads before dumping the image.
+  (loop for thread in (bt:all-threads)
+        when (and (not (eq thread (bt:current-thread)))
+                  (search "Java-Thread" (bt:thread-name thread)))
+        do (bt:destroy-thread thread))
+  (sb-ext:save-lisp-and-die output-path
+                            :executable t
+                            :save-runtime-options t
+                            :toplevel #'javac-main-wrapper))
