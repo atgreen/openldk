@@ -3,33 +3,34 @@
 
 (defpackage #:javacl
   (:use #:cl #:openldk)
-  (:export :javac-main-wrapper
+  (:export :main
            :make-javac-image))
 
 (in-package :javacl)
 
-(defun javac-main-wrapper ()
+(defun main ()
   "Entry point for the pre-dumped javac image. Runs com.sun.tools.javac.Main."
   ;; Match Java FP semantics
   (sb-int:set-floating-point-modes :traps nil)
-  (handler-case
-      (main "com.sun.tools.javac.Main"
-            (rest sb-ext:*posix-argv*)
-            :classpath (or (uiop:getenv "CLASSPATH") "."))
-    (error (condition)
-      (cond
-        ((typep condition 'openldk::|condition-java/lang/Throwable|)
-         (let ((throwable (and (slot-boundp condition 'openldk::|objref|)
-                               (slot-value condition 'openldk::|objref|))))
-           (if (typep throwable 'openldk::|java/lang/Throwable|)
-               (progn
-                 (format *error-output* "~&Unhandled Java exception:~%")
-                 (openldk::%print-java-stack-trace throwable :stream *error-output*)
-                 (finish-output *error-output*))
-               (format *error-output* "~&Unhandled Java condition: ~A~%" condition))))
-        (t
-         (format *error-output* "~&Error: ~A~%" condition)))
-      (uiop:quit 1))))
+  (let ((args (uiop:command-line-arguments)))
+    (handler-case
+        (main "com.sun.tools.javac.Main"
+              args
+              :classpath (or (uiop:getenv "CLASSPATH") "."))
+      (error (condition)
+        (cond
+          ((typep condition 'openldk::|condition-java/lang/Throwable|)
+           (let ((throwable (and (slot-boundp condition 'openldk::|objref|)
+                                 (slot-value condition 'openldk::|objref|))))
+             (if (typep throwable 'openldk::|java/lang/Throwable|)
+                 (progn
+                   (format *error-output* "~&Unhandled Java exception:~%")
+                   (openldk::%print-java-stack-trace throwable :stream *error-output*)
+                   (finish-output *error-output*))
+                 (format *error-output* "~&Unhandled Java condition: ~A~%" condition))))
+          (t
+           (format *error-output* "~&Error: ~A~%" condition)))
+        (uiop:quit 1)))))
 
 (defparameter *javac-warmup-classes*
   '("com/sun/tools/javac/Main"
@@ -50,7 +51,7 @@
     (dolist (c *javac-warmup-classes*)
       (ignore-errors (openldk::classload c)))))
 
-(defun make-javac-image (&optional (output-path "javacl"))
+(defun make-javacl-image (&optional (output-path "javacl"))
   "Build an executable image that jumps straight into javac."
   (openldk::initialize)
   ;; Warm up javac by loading core classes (no compilation run).
@@ -63,4 +64,4 @@
   (sb-ext:save-lisp-and-die output-path
                             :executable t
                             :save-runtime-options t
-                            :toplevel #'javac-main-wrapper))
+                            :toplevel #'main))
