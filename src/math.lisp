@@ -39,374 +39,246 @@
 
 (in-package :openldk)
 
-(defun |java/lang/Math.abs(I)| (a)
+;;; Macro to eliminate code duplication between Math and StrictMath
+(defmacro define-math-functions ((name params) docstring &body body)
+  "Define both Math and StrictMath versions of a function."
+  `(progn
+     (defun ,(intern (format nil "java/lang/Math.~A" name) :openldk) ,params
+       ,docstring
+       ,@body)
+     (defun ,(intern (format nil "java/lang/StrictMath.~A" name) :openldk) ,params
+       ,docstring
+       ,@body)))
+
+(define-math-functions ("abs(I)" (a))
   "Returns the absolute value of an integer."
   (if (eq a -2147483648)
       a
       (abs a)))
 
-(defun |java/lang/Math.abs(J)| (a)
+(define-math-functions ("abs(J)" (a))
   "Returns the absolute value of a long integer."
   (if (eq a -9223372036854775808)
       a
       (abs a)))
 
-(defun |java/lang/Math.abs(F)| (a)
+(define-math-functions ("abs(F)" (a))
   "Returns the absolute value of a float."
   (float-features:bits-single-float
    (logand #x7FFFFFFF (float-features:single-float-bits a))))
 
-(defun |java/lang/Math.abs(D)| (a)
+(define-math-functions ("abs(D)" (a))
   "Returns the absolute value of a double."
   (float-features:bits-double-float
    (logand #x7FFFFFFFFFFFFFFF (float-features:double-float-bits a))))
 
-(defun |java/lang/Math.acos(D)| (a)
+(define-math-functions ("acos(D)" (a))
   "Returns the arc cosine of a value, in radians."
   (acos a))
 
-(defun |java/lang/Math.asin(D)| (a)
+(define-math-functions ("asin(D)" (a))
   "Returns the arc sine of a value, in radians."
   (asin a))
 
-(defun |java/lang/Math.atan(D)| (a)
+(define-math-functions ("atan(D)" (a))
   "Returns the arc tangent of a value, in radians."
   (atan a))
 
-(defun |java/lang/Math.atan2(DD)| (a b)
+(define-math-functions ("atan2(DD)" (a b))
   "Returns the angle theta from the conversion of rectangular coordinates (a, b) to polar coordinates."
   (atan a b))
 
-(defun |java/lang/Math.cbrt(D)| (a)
+(define-math-functions ("cbrt(D)" (a))
   "Returns the cube root of a value."
-  (expt a (/ 1 3)))
+  (if (< a 0.0d0)
+      (- (expt (- a) (/ 1.0d0 3.0d0)))
+      (expt a (/ 1.0d0 3.0d0))))
 
-(defun |java/lang/Math.ceil(D)| (a)
+(define-math-functions ("ceil(D)" (a))
   "Returns the smallest integer greater than or equal to the given value."
   (ceiling a))
 
-(defun |java/lang/Math.cos(D)| (a)
+(define-math-functions ("cos(D)" (a))
   "Returns the cosine of an angle in radians."
   (cos a))
 
-(defun |java/lang/Math.cosh(D)| (a)
+(define-math-functions ("cosh(D)" (a))
   "Returns the hyperbolic cosine of a value."
   (cosh a))
 
-(defun |java/lang/Math.exp(D)| (a)
+(define-math-functions ("exp(D)" (a))
   "Returns Euler's number e raised to the power of a value."
   (exp a))
 
-(defun |java/lang/Math.expm1(D)| (a)
+(define-math-functions ("expm1(D)" (a))
   "Returns e^a - 1."
-  (- (exp a) 1))
+  (if (< (abs a) 1.0d-5)
+      ;; Use Taylor series for small values to preserve precision
+      ;; expm1(x) = x + x²/2! + x³/3! + x⁴/4! + ...
+      (let* ((x a)
+             (term x)
+             (sum x)
+             (n 2))
+        (loop repeat 15
+              do (setf term (* term (/ x n)))
+                 (setf sum (+ sum term))
+                 (incf n)
+              while (> (abs term) (* (abs sum) 1.0d-16)))
+        sum)
+      ;; Use regular formula for larger values
+      (- (exp a) 1.0d0)))
 
-(defun |java/lang/Math.floor(D)| (a)
+(define-math-functions ("floor(D)" (a))
   "Returns the largest integer less than or equal to the given value."
   (floor a))
 
-(defun |java/lang/Math.hypot(DD)| (a b)
+(define-math-functions ("hypot(DD)" (a b))
   "Returns sqrt(a^2 + b^2) without intermediate overflow or underflow."
-  (sqrt (+ (* a a) (* b b))))
+  (let ((abs-a (abs a))
+        (abs-b (abs b)))
+    (cond
+      ((> abs-a abs-b)
+       (if (zerop abs-a)
+           0.0d0
+           (* abs-a (sqrt (+ 1.0d0 (expt (/ abs-b abs-a) 2))))))
+      ((zerop abs-b)
+       0.0d0)
+      (t
+       (* abs-b (sqrt (+ 1.0d0 (expt (/ abs-a abs-b) 2))))))))
 
-(defun |java/lang/Math.IEEEremainder(DD)| (a b)
+(define-math-functions ("IEEEremainder(DD)" (a b))
   "Computes the remainder operation as defined by IEEE 754."
-  (rem a b))
+  (- a (* b (fround (/ a b)))))
 
-(defun |java/lang/Math.log(D)| (a)
+(define-math-functions ("log(D)" (a))
   "Returns the natural logarithm (base e) of a value."
   (log a))
 
-(defun |java/lang/Math.log10(D)| (a)
+(define-math-functions ("log10(D)" (a))
   "Returns the base 10 logarithm of a value."
   (log a 10))
 
-(defun |java/lang/Math.log1p(D)| (a)
+(define-math-functions ("log1p(D)" (a))
   "Returns the natural logarithm of (1 + a)."
-  (log (+ a 1)))
+  (if (< (abs a) 0.5d0)
+      ;; Use Taylor series for small values to preserve precision
+      ;; log1p(x) = x - x²/2 + x³/3 - x⁴/4 + ...
+      (let* ((x a)
+             (x-power x)
+             (sum x)
+             (n 2))
+        (loop repeat 30
+              do (setf x-power (* x-power x))
+                 (let ((term (/ x-power n)))
+                   (if (evenp n)
+                       (setf sum (- sum term))
+                       (setf sum (+ sum term)))
+                   (incf n)
+                   (when (< (abs term) (* (abs sum) 1.0d-16))
+                     (return))))
+        sum)
+      ;; Use regular formula for larger values
+      (log (+ a 1.0d0))))
 
-(defun |java/lang/Math.max(II)| (a b)
+(define-math-functions ("max(II)" (a b))
   "Returns the greater of two integers."
   (max a b))
 
-(defun |java/lang/Math.max(JJ)| (a b)
+(define-math-functions ("max(JJ)" (a b))
   "Returns the greater of two long integers."
   (max a b))
 
-(defun |java/lang/Math.max(FF)| (a b)
+(define-math-functions ("max(FF)" (a b))
   "Returns the greater of two floats."
   (max a b))
 
-(defun |java/lang/Math.max(DD)| (a b)
+(define-math-functions ("max(DD)" (a b))
   "Returns the greater of two doubles."
   (max a b))
 
-(defun |java/lang/Math.min(II)| (a b)
+(define-math-functions ("min(II)" (a b))
   "Returns the smaller of two integers."
   (min a b))
 
-(defun |java/lang/Math.min(JJ)| (a b)
+(define-math-functions ("min(JJ)" (a b))
   "Returns the smaller of two long integers."
   (min a b))
 
-(defun |java/lang/Math.min(FF)| (a b)
+(define-math-functions ("min(FF)" (a b))
   "Returns the smaller of two floats."
   (min a b))
 
-(defun |java/lang/Math.min(DD)| (a b)
+(define-math-functions ("min(DD)" (a b))
   "Returns the smaller of two doubles."
   (min a b))
 
-(defun |java/lang/Math.pow(DD)| (a b)
+(define-math-functions ("pow(DD)" (a b))
   "Returns a raised to the power of b."
   (expt a b))
 
-(defun |java/lang/Math.random()| ()
+(define-math-functions ("random()" ())
   "Returns a pseudo-random number between 0.0 and 1.0."
-  (random 1.0))
+  (random 1.0d0))
 
-(defun |java/lang/Math.rint(D)| (a)
+(define-math-functions ("rint(D)" (a))
   "Returns the integer value that is closest to the argument."
   (fround a))
 
-(defun |java/lang/Math.round(F)| (a)
+(define-math-functions ("round(F)" (a))
   "Returns the closest integer to the given float."
   (round a))
 
-(defun |java/lang/Math.round(D)| (a)
+(define-math-functions ("round(D)" (a))
   "Returns the closest integer to the given double."
   (round a))
 
-(defun |java/lang/Math.signum(F)| (a)
+(define-math-functions ("signum(F)" (a))
   "Returns the signum function of a float: -1 if negative, 1 if positive, 0 if zero."
-  (cond ((> a 0) 1.0)
+  (cond ((float-features:float-nan-p a) a)
+        ((> a 0) 1.0)
         ((< a 0) -1.0)
         (t 0.0)))
 
-(defun |java/lang/Math.signum(D)| (a)
+(define-math-functions ("signum(D)" (a))
   "Returns the signum function of a double: -1 if negative, 1 if positive, 0 if zero."
-  (cond ((> a 0) 1.0)
-        ((< a 0) -1.0)
-        (t 0.0)))
+  (cond ((float-features:float-nan-p a) a)
+        ((> a 0) 1.0d0)
+        ((< a 0) -1.0d0)
+        (t 0.0d0)))
 
-(defun |java/lang/Math.sin(D)| (a)
+(define-math-functions ("sin(D)" (a))
   "Returns the sine of an angle in radians."
   (sin a))
 
-(defun |java/lang/Math.sinh(D)| (a)
+(define-math-functions ("sinh(D)" (a))
   "Returns the hyperbolic sine of a value."
   (sinh a))
 
-(defun |java/lang/Math.sqrt(D)| (a)
+(define-math-functions ("sqrt(D)" (a))
   "Returns the square root of a value."
   (sqrt a))
 
-(defun |java/lang/Math.tan(D)| (a)
+(define-math-functions ("tan(D)" (a))
   "Returns the tangent of an angle in radians."
   (tan a))
 
-(defun |java/lang/Math.tanh(D)| (a)
+(define-math-functions ("tanh(D)" (a))
   "Returns the hyperbolic tangent of a value."
   (tanh a))
 
-(defun |java/lang/Math.toDegrees(D)| (a)
+(define-math-functions ("toDegrees(D)" (a))
   "Converts an angle from radians to degrees."
-  (* a (/ 180.0 cl-user::pi)))
+  (* a (/ 180.0d0 pi)))
 
-(defun |java/lang/Math.toRadians(D)| (a)
+(define-math-functions ("toRadians(D)" (a))
   "Converts an angle from degrees to radians."
-  (* a (/ cl-user::pi 180.0)))
+  (* a (/ pi 180.0d0)))
 
-(defun |java/lang/Math.ulp(F)| (a)
+(define-math-functions ("ulp(F)" (a))
   "Returns the unit in the last place (ULP) of a float."
   (float-epsilon a))
 
-(defun |java/lang/Math.ulp(D)| (a)
+(define-math-functions ("ulp(D)" (a))
   "Returns the unit in the last place (ULP) of a double."
   (float-epsilon a))
 
-(defun |java/lang/StrictMath.abs(I)| (a)
-  "Returns the absolute value of an integer."
-  (if (eq a -2147483648)
-      a
-      (abs a)))
-
-(defun |java/lang/StrictMath.abs(J)| (a)
-  "Returns the absolute value of a long integer."
-  (if (eq a -9223372036854775808)
-      a
-      (abs a)))
-
-(defun |java/lang/StrictMath.abs(F)| (a)
-  "Returns the absolute value of a float."
-  (float-features:bits-single-float
-   (logand #x7FFFFFFF (float-features:single-float-bits a))))
-
-(defun |java/lang/StrictMath.abs(D)| (a)
-  "Returns the absolute value of a double."
-  (float-features:bits-double-float
-   (logand #x7FFFFFFFFFFFFFFF (float-features:double-float-bits a))))
-
-(defun |java/lang/StrictMath.acos(D)| (a)
-  "Returns the arc cosine of a value, in radians."
-  (acos a))
-
-(defun |java/lang/StrictMath.asin(D)| (a)
-  "Returns the arc sine of a value, in radians."
-  (asin a))
-
-(defun |java/lang/StrictMath.atan(D)| (a)
-  "Returns the arc tangent of a value, in radians."
-  (atan a))
-
-(defun |java/lang/StrictMath.atan2(DD)| (a b)
-  "Returns the angle theta from the conversion of rectangular coordinates (a, b) to polar coordinates."
-  (atan a b))
-
-(defun |java/lang/StrictMath.cbrt(D)| (a)
-  "Returns the cube root of a value."
-  (expt a (/ 1 3)))
-
-(defun |java/lang/StrictMath.ceil(D)| (a)
-  "Returns the smallest integer greater than or equal to the given value."
-  (ceiling a))
-
-(defun |java/lang/StrictMath.cos(D)| (a)
-  "Returns the cosine of an angle in radians."
-  (cos a))
-
-(defun |java/lang/StrictMath.cosh(D)| (a)
-  "Returns the hyperbolic cosine of a value."
-  (cosh a))
-
-(defun |java/lang/StrictMath.exp(D)| (a)
-  "Returns Euler's number e raised to the power of a value."
-  (exp a))
-
-(defun |java/lang/StrictMath.expm1(D)| (a)
-  "Returns e^a - 1."
-  (- (exp a) 1))
-
-(defun |java/lang/StrictMath.floor(D)| (a)
-  "Returns the largest integer less than or equal to the given value."
-  (floor a))
-
-(defun |java/lang/StrictMath.hypot(DD)| (a b)
-  "Returns sqrt(a^2 + b^2) without intermediate overflow or underflow."
-  (sqrt (+ (* a a) (* b b))))
-
-(defun |java/lang/StrictMath.IEEEremainder(DD)| (a b)
-  "Computes the remainder operation as defined by IEEE 754."
-  (rem a b))
-
-(defun |java/lang/StrictMath.log(D)| (a)
-  "Returns the natural logarithm (base e) of a value."
-  (log a))
-
-(defun |java/lang/StrictMath.log10(D)| (a)
-  "Returns the base 10 logarithm of a value."
-  (log a 10))
-
-(defun |java/lang/StrictMath.log1p(D)| (a)
-  "Returns the natural logarithm of (1 + a)."
-  (log (+ a 1)))
-
-(defun |java/lang/StrictMath.max(II)| (a b)
-  "Returns the greater of two integers."
-  (max a b))
-
-(defun |java/lang/StrictMath.max(JJ)| (a b)
-  "Returns the greater of two long integers."
-  (max a b))
-
-(defun |java/lang/StrictMath.max(FF)| (a b)
-  "Returns the greater of two floats."
-  (max a b))
-
-(defun |java/lang/StrictMath.max(DD)| (a b)
-  "Returns the greater of two doubles."
-  (max a b))
-
-(defun |java/lang/StrictMath.min(II)| (a b)
-  "Returns the smaller of two integers."
-  (min a b))
-
-(defun |java/lang/StrictMath.min(JJ)| (a b)
-  "Returns the smaller of two long integers."
-  (min a b))
-
-(defun |java/lang/StrictMath.min(FF)| (a b)
-  "Returns the smaller of two floats."
-  (min a b))
-
-(defun |java/lang/StrictMath.min(DD)| (a b)
-  "Returns the smaller of two doubles."
-  (min a b))
-
-(defun |java/lang/StrictMath.pow(DD)| (a b)
-  "Returns a raised to the power of b."
-  (expt a b))
-
-(defun |java/lang/StrictMath.random()| ()
-  "Returns a pseudo-random number between 0.0 and 1.0."
-  (random 1.0))
-
-(defun |java/lang/StrictMath.rint(D)| (a)
-  "Returns the integer value that is closest to the argument."
-  (fround a))
-
-(defun |java/lang/StrictMath.round(F)| (a)
-  "Returns the closest integer to the given float."
-  (round a))
-
-(defun |java/lang/StrictMath.round(D)| (a)
-  "Returns the closest integer to the given double."
-  (round a))
-
-(defun |java/lang/StrictMath.signum(F)| (a)
-  "Returns the signum function of a float: -1 if negative, 1 if positive, 0 if zero."
-  (cond ((> a 0) 1.0)
-        ((< a 0) -1.0)
-        (t 0.0)))
-
-(defun |java/lang/StrictMath.signum(D)| (a)
-  "Returns the signum function of a double: -1 if negative, 1 if positive, 0 if zero."
-  (cond ((> a 0) 1.0)
-        ((< a 0) -1.0)
-        (t 0.0)))
-
-(defun |java/lang/StrictMath.sin(D)| (a)
-  "Returns the sine of an angle in radians."
-  (sin a))
-
-(defun |java/lang/StrictMath.sinh(D)| (a)
-  "Returns the hyperbolic sine of a value."
-  (sinh a))
-
-(defun |java/lang/StrictMath.sqrt(D)| (a)
-  "Returns the square root of a value."
-  (sqrt a))
-
-(defun |java/lang/StrictMath.tan(D)| (a)
-  "Returns the tangent of an angle in radians."
-  (tan a))
-
-(defun |java/lang/StrictMath.tanh(D)| (a)
-  "Returns the hyperbolic tangent of a value."
-  (tanh a))
-
-(defun |java/lang/StrictMath.toDegrees(D)| (a)
-  "Converts an angle from radians to degrees."
-  (* a (/ 180.0 cl-user::pi)))
-
-(defun |java/lang/StrictMath.toRadians(D)| (a)
-  "Converts an angle from degrees to radians."
-  (* a (/ cl-user::pi 180.0)))
-
-(defun |java/lang/StrictMath.ulp(F)| (a)
-  "Returns the unit in the last place (ULP) of a float."
-  (float-epsilon a))
-
-(defun |java/lang/StrictMath.ulp(D)| (a)
-  "Returns the unit in the last place (ULP) of a double."
-  (float-epsilon a))
