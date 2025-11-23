@@ -18,8 +18,8 @@
   :components ((:file "src/javac"))
   :build-operation "program-op"
   :build-pathname "javacl"
-  ;; Runtime entry point should run javac, not re-dump the image.
-  :entry-point "javacl:main")
+  ;; Build-time entry point constructs the image; it embeds runtime toplevel in make-javac-image.
+  :entry-point "javacl:make-javac-image")
 
 #+sb-core-compression
 (defmethod asdf:perform ((o asdf:image-op) (c asdf:system))

@@ -11,11 +11,7 @@ openldk: src/*.lisp *.asd Makefile
 	XDG_CACHE_HOME=$(XDG_CACHE_HOME) sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))" --eval "(openldk::make-image)"
 
 javacl: src/*.lisp *.asd Makefile
-	XDG_CACHE_HOME=$(XDG_CACHE_HOME) CLASSPATH="$(TOOLS_JAR)" sbcl --dynamic-space-size 32768 --disable-debugger \
-	  --eval "(progn (push (namestring (truename \".\")) asdf:*central-registry*) \
-                       (asdf:load-asd \"openldk.asd\") \
-                       (asdf:load-asd \"javacl.asd\") \
-                       (asdf:make \"javacl\"))"
+	XDG_CACHE_HOME=$(XDG_CACHE_HOME) CLASSPATH=$(TOOLS_JAR) sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-asd \"openldk.asd\") (asdf:load-asd \"javacl.asd\") (asdf:operate 'asdf:program-op \"javacl\"))"
 
 check: openldk testsuite/mauve/gnu/testlet/config.class
 	(cd testsuite; runtest --tool openldk $(RUNTESTFLAGS))

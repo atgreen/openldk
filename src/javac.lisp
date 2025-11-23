@@ -69,7 +69,7 @@
 ;; Javac expects a static initializer; provide a no-op to avoid undefined function during warmup.
 (defun |%clinit-com/sun/tools/javac/file/JavacFileManager| () nil)
 
-(defun make-javacl-image (&optional (output-path "javacl"))
+(defun make-javac-image (&optional (output-path "javacl"))
   "Build an executable image that jumps straight into javac."
   (let ((cp (default-javac-classpath)))
     (openldk::initialize)
