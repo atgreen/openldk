@@ -12,11 +12,12 @@ openldk: src/*.lisp *.asd Makefile
 
 javacl: src/*.lisp *.asd Makefile
 	XDG_CACHE_HOME=$(XDG_CACHE_HOME) CLASSPATH="$(TOOLS_JAR)" sbcl --dynamic-space-size 32768 --disable-debugger \
-	  --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) \
-                      (asdf:load-asd \"openldk.asd\") \
-                      (asdf:load-system :openldk) \
-                      (asdf:load-asd \"javacl.asd\") \
-                      (asdf:make :javacl))"
+	  --eval "(progn \
+              (asdf:initialize-source-registry '(:source-registry (:tree \".\") :inherit-configuration)) \
+              (asdf:load-asd (merge-pathnames \"openldk.asd\" (uiop:getcwd))) \
+              (asdf:load-system :openldk) \
+              (asdf:load-asd (merge-pathnames \"javacl.asd\" (uiop:getcwd))) \
+              (asdf:make :javacl))"
 
 javac-image: javacl
 
