@@ -60,10 +60,15 @@
          (class-name (etypecase class-slot
                        (string class-slot)
                        (<class> (name class-slot)))))
-    (and (string= class-name "java/lang/invoke/MethodHandleImpl")
-         (member (slot-value method 'name)
-                 '("makeArrays" "findCollector")
-                 :test #'string=))))
+    (or (and (string= class-name "java/lang/invoke/MethodHandleImpl")
+             (member (slot-value method 'name)
+                     '("makeArrays" "findCollector")
+                     :test #'string=))
+        ;; Javac: ClassReader$2 overrides setEnclosingType to throw; replace with
+        ;; a native stub so we can delegate to our safe implementation.
+        (and (string= class-name "com/sun/tools/javac/jvm/ClassReader$2")
+             (string= (slot-value method 'name) "setEnclosingType")
+             (string= (slot-value method 'descriptor) "(Lcom/sun/tools/javac/code/Type;)V")))))
 
 (defun %eval (code)
   "Evaluate generated CODE, optionally printing and muffling warnings."

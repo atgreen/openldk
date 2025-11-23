@@ -885,6 +885,10 @@ user.variant
   "Initialize file descriptor native IDs (no-op)."
   nil)
 
+(defun |java/io/FileOutputStream.initIDs()| ()
+  "Initialize FileOutputStream native IDs (no-op)."
+  nil)
+
 (defun |sun/nio/ch/IOUtil.initIDs()| ()
   "Initialize NIO IOUtil native IDs (no-op)."
   nil)
@@ -1147,14 +1151,48 @@ user.variant
   (declare (ignore append?))
   ;;  (format t "~&WRITE-BYTES: 1:~A 2:~A 3:~A 4:~A 5:~A 6:~A 7:~A~%" fos (slot-value fos '|fd|) (slot-value (slot-value fos '|fd|) '|fd|) byte-array offset length append?)
   (let* ((file-descriptor (slot-value fos '|fd|))
-         (fd (slot-value file-descriptor '|fd|)))
+         (fd (if (and file-descriptor (slot-exists-p file-descriptor '|fd|))
+                 (slot-value file-descriptor '|fd|)
+                 file-descriptor)))
     (cond
       ((eq fd 1)
        (write-sequence (%convert-to-unsigned-8-bit (java-array-data byte-array)) *standard-output* :start offset :end (+ offset length)))
       ((eq fd 2)
        (write-sequence (%convert-to-unsigned-8-bit (java-array-data byte-array)) *error-output* :start offset :end (+ offset length)))
+      ((streamp fd)
+       (write-sequence (%convert-to-unsigned-8-bit (java-array-data byte-array)) fd :start offset :end (+ offset length)))
       (t
-       (error "unimplemented")))))
+       (error "unimplemented file descriptor ~A in FileOutputStream.writeBytes" fd)))))
+
+(defmethod |open0(Ljava/lang/String;Z)| ((fos |java/io/FileOutputStream|) filename append?)
+  (handler-case
+      (let* ((stream (open (lstring filename)
+                           :element-type '(unsigned-byte 8)
+                           :direction :output
+                           :if-does-not-exist :create
+                           :if-exists (if append? :append :supersede)))
+             (fd (slot-value fos '|fd|)))
+        ;; FileOutputStream stores a FileDescriptor; stash the stream in its fd
+        ;; slot when available, otherwise keep it directly.
+        (if (and fd (slot-exists-p fd '|fd|))
+            (setf (slot-value fd '|fd|) stream)
+            (setf (slot-value fos '|fd|) stream)))
+    ((or sb-ext:file-does-not-exist sb-int:simple-file-error) (e)
+      (declare (ignore e))
+      (let ((fnf (make-instance '|java/io/FileNotFoundException|)))
+        (|<init>(Ljava/lang/String;)| fnf filename)
+        (error (%lisp-condition fnf))))))
+
+(defmethod |close0()| (this)
+  "Native close for file streams."
+  (when (slot-exists-p this '|fd|)
+    (let* ((fd-holder (slot-value this '|fd|))
+           (fd (if (and fd-holder (slot-exists-p fd-holder '|fd|))
+                   (slot-value fd-holder '|fd|)
+                   fd-holder)))
+      (when (streamp fd)
+        (close fd))))
+  nil)
 
 (defmethod |getEnclosingMethod0()| ((this |java/lang/Class|))
   ;; FIXME
@@ -2258,6 +2296,18 @@ CAPTURES is a list of pre-bound values (unused for SimpleLambdaTest but kept for
     (setf (slot-value supplier 'target) impl-handle)
     (setf (slot-value supplier 'captures) captures)
     supplier))
+
+;; ---------------------------------------------------------------------------
+;; Javac helper: allow setEnclosingType on ClassReader$2 / ClassType without
+;; tripping the UnsupportedOperationException override in ClassReader$2.  We
+;; keep it simple: if the expected slots exist, set them and clear cached
+;; params.  Works for both Type$ClassType and the anonymous subclass.
+(defmethod |setEnclosingType(Lcom/sun/tools/javac/code/Type;)| (this outer)
+  (when (slot-exists-p this '|outer_field|)
+    (setf (slot-value this '|outer_field|) outer))
+  (when (slot-exists-p this '|allparams_field|)
+    (setf (slot-value this '|allparams_field|) nil))
+  nil)
 
 (defun %ensure-methodtypeform-handle-cache (form index)
   "Ensure MethodTypeForm.methodHandles is a java array large enough for INDEX."
