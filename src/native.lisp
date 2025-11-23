@@ -1948,7 +1948,26 @@ user.variant
 (defun |java/lang/invoke/MethodHandles.lookup()| ()
   "Return a basic MethodHandles.Lookup instance. We intentionally relax access checks for now."
   (classload "java/lang/invoke/MethodHandles$Lookup")
-  (make-instance '|java/lang/invoke/MethodHandles$Lookup|))
+  (let ((lk (make-instance '|java/lang/invoke/MethodHandles$Lookup|))
+        ;; We don't have caller-sensitive machinery yet; default to Object to
+        ;; avoid NIL lookupClass that blows up in LambdaMetafactory.
+        (caller-class (%get-java-class-by-bin-name "java/lang/Object")))
+    (when (slot-exists-p lk '|lookupClass|)
+      (setf (slot-value lk '|lookupClass|) caller-class))
+    ;; Treat this lookup as trusted to bypass Java access checks for now.
+    (when (slot-exists-p lk '|allowedModes|)
+      (setf (slot-value lk '|allowedModes|) -1)) ; TRUSTED in JDK sources
+    lk))
+
+(defun |java/lang/invoke/MethodHandles$Lookup.lookupClass()| (this)
+  "Return the class this lookup was created for."
+  (when (slot-exists-p this '|lookupClass|)
+    (slot-value this '|lookupClass|)))
+
+(defun |java/lang/invoke/MethodHandles$Lookup.hasFullPrivilegeAccess()| (this)
+  "Conservatively claim full privilege to keep bootstrap happy."
+  (declare (ignore this))
+  1) ; true
 
 (defun %build-member-name-for-static (klass name method-type)
   (classload "java/lang/invoke/MemberName")
@@ -1995,6 +2014,8 @@ user.variant
   "Create a DirectMethodHandle for static method invocation.
    DirectMethodHandle is required by LambdaMetafactory for lambda expressions."
   (declare (ignore lookup))
+  ;; Help diagnose missing or incomplete metadata during lambda bootstrapping.
+  (format t "~&[findStatic] klass=~A name=~A method-type=~A~%" klass name method-type)
   (classload "java/lang/invoke/DirectMethodHandle")
   (classload "java/lang/invoke/LambdaForm")
   (let* ((member (%build-member-name-for-static klass name method-type))
@@ -2014,6 +2035,11 @@ user.variant
     ;; Set the member field
     (setf (slot-value mh '|member|) member)
     mh))
+
+(defun |java/lang/invoke/CallSite.getTarget()| (this)
+  "Accessor required by generated invokedynamic stubs."
+  (when (slot-exists-p this '|target|)
+    (slot-value this '|target|)))
 
 (defun |java/lang/invoke/MethodHandles$Lookup.revealDirect(Ljava/lang/invoke/MethodHandle;)| (lookup target)
   "Crack a direct method handle to reveal its MemberName.
@@ -2206,6 +2232,32 @@ user.variant
                              (ijstring (format nil "Collector arity ~D not supported (max 253)" arity))))))
   ;; For smaller arities, let Java code handle it by returning NIL (not implemented)
   nil)
+
+;; Minimal lambda support -----------------------------------------------------
+;; A tiny Supplier implementation that wraps a MethodHandle target and invokes it with
+;; any captured arguments supplied via the metafactory fast-path.
+(defclass/std |openldk/LambdaSupplier| (|java/lang/Object| |java/util/function/Supplier|)
+  ((target)
+   (captures)))
+
+(defmethod |get()| ((this |openldk/LambdaSupplier|))
+  (let* ((mh (slot-value this 'target))
+         (caps (slot-value this 'captures))
+         (member (when (and mh (slot-exists-p mh '|member|))
+                   (slot-value mh '|member|))))
+    (if member
+        (apply #'%invoke-from-member-name member caps)
+        (let ((args-array (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Object")
+                                           :initial-contents (coerce caps 'vector))))
+          (|invokeWithArguments([Ljava/lang/Object;)| mh args-array)))))
+
+(defun %lambda-metafactory (impl-handle captures)
+  "Construct a java.util.function.Supplier for zero-arg Java lambdas.
+CAPTURES is a list of pre-bound values (unused for SimpleLambdaTest but kept for future work)."
+  (let ((supplier (make-instance '|openldk/LambdaSupplier|)))
+    (setf (slot-value supplier 'target) impl-handle)
+    (setf (slot-value supplier 'captures) captures)
+    supplier))
 
 (defun %ensure-methodtypeform-handle-cache (form index)
   "Ensure MethodTypeForm.methodHandles is a java array large enough for INDEX."

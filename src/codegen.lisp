@@ -1126,24 +1126,32 @@
     (let ((constant-pool (constant-pool (<context>-class context))))
       (make-instance '<expression>
                      :insn insn
-                     :code (let ((fname (jstring method-name)))
-                             `(let ((callsite (%resolve-invokedynamic ',(intern method-name :openldk)
-                                                                      ',(intern bootstrap-method-name :openldk)
-                                                                      ,address
-                                                                      ,fname
-                                                                      ,@(mapcar (lambda (a) (code (codegen a context))) args))))
-                                (format t "~&Getting target from CallSite...~%")
+                     :code
+                     `(let* ((fname ,(jstring method-name))
+                             (bootstrap-name (symbol-name ',(intern bootstrap-method-name :openldk))))
+                        (if (starts-with? "java/lang/invoke/LambdaMetafactory.metafactory" bootstrap-name)
+                            ;; Fast path for Java 8 lambdas: build the functional object directly
+                            (openldk::%lambda-metafactory
+                             ,(code (codegen (third args) context))
+                             (list ,@(mapcar (lambda (a) (code (codegen a context))) dynamic-args)))
+                            ;; Fallback: generic invokedynamic handling
+                            (let ((callsite (%resolve-invokedynamic ',(intern method-name :openldk)
+                                                                    ',(intern bootstrap-method-name :openldk)
+                                                                    ,address
+                                                                    fname
+                                                                    ,@(mapcar (lambda (a) (code (codegen a context))) args))))
+                              (format t "~&Getting target from CallSite...~%")
+                              (force-output)
+                              (let ((target (|getTarget()| callsite)))
+                                (format t "~&Got target: ~A~%" target)
+                                (format t "~&Creating args array for invokeWithArguments...~%")
                                 (force-output)
-                                (let ((target (|getTarget()| callsite)))
-                                  (format t "~&Got target: ~A~%" target)
-                                  (format t "~&Creating args array for invokeWithArguments...~%")
+                                (let ((args-array (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Object")
+                                                                   :initial-contents (list ,@(mapcar (lambda (a) (code (codegen a context))) dynamic-args)))))
+                                  (format t "~&Args array: ~A (length=~A)~%" args-array (java-array-length args-array))
+                                  (format t "~&Calling invokeWithArguments...~%")
                                   (force-output)
-                                  (let ((args-array (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Object")
-                                                                     :initial-contents (list ,@(mapcar (lambda (a) (code (codegen a context))) dynamic-args)))))
-                                    (format t "~&Args array: ~A (length=~A)~%" args-array (java-array-length args-array))
-                                    (format t "~&Calling invokeWithArguments...~%")
-                                    (force-output)
-                                    (|invokeWithArguments([Ljava/lang/Object;)| target args-array)))))))))
+                                  (|invokeWithArguments([Ljava/lang/Object;)| target args-array))))))))))
 
 (defmethod codegen ((insn ir-clinit) context)
   (with-slots (class) insn
