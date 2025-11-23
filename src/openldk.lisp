@@ -1796,59 +1796,10 @@ the normal call-next-method chain for the owner's superclasses."
 
         (|<init>()| boot-class-loader)
 
-        (dolist (c '("java/lang/invoke/MethodHandles"
-                     "java/lang/invoke/MethodHandles$Lookup"
-                     "java/net/Inet4Address"
-                     ;; Lambda support classes (excluding CallSite/ConstantCallSite to avoid infinite recursion)
-                     "java/lang/invoke/LambdaMetafactory"
-                     "java/lang/invoke/InnerClassLambdaMetafactory"
-                     "java/lang/invoke/InnerClassLambdaMetafactory$1"
-                     "java/lang/invoke/InnerClassLambdaMetafactory$2"
-                     "java/lang/invoke/InnerClassLambdaMetafactory$ForwardingMethodGenerator"
-                     "java/lang/invoke/TypeConvertingMethodAdapter"
-                     "java/lang/invoke/MethodType"
-                     "java/lang/invoke/MethodTypeForm"
-                     "java/lang/invoke/MethodHandle"
-                     "java/lang/invoke/MethodHandleStatics"
-                     "java/lang/invoke/MethodHandleNatives"
-                     "java/lang/invoke/InfoFromMemberName"
-                     "java/lang/invoke/LambdaConversionException"
-                     "java/lang/invoke/DirectMethodHandle"
-                     "java/lang/invoke/DirectMethodHandle$Special"
-                     "java/lang/invoke/DirectMethodHandle$Interface"
-                     "java/lang/invoke/DirectMethodHandle$StaticAccessor"
-                     "java/lang/invoke/DirectMethodHandle$Accessor"
-                     "java/lang/invoke/DirectMethodHandle$Lazy"
-                     "java/lang/invoke/LambdaForm"
-                     "java/lang/invoke/SimpleMethodHandle"
-                     "java/lang/invoke/BoundMethodHandle"
-                     "java/lang/invoke/BoundMethodHandle$SpeciesData"
-                     "java/lang/invoke/BoundMethodHandle$Species_L"
-                     "java/lang/invoke/BoundMethodHandle$Factory"
-                     "java/lang/invoke/DelegatingMethodHandle"
-                     "java/lang/invoke/MethodHandleImpl$Intrinsic"
-                     "java/lang/invoke/MethodHandleImpl$IntrinsicMethodHandle"
-                     "java/lang/invoke/Invokers"
-                     "java/lang/invoke/Invokers$Lazy"
-                     "java/lang/invoke/InvokerBytecodeGenerator"
-                     "java/lang/invoke/InvokerBytecodeGenerator$1"
-                     "java/lang/invoke/InvokerBytecodeGenerator$2"
-                     "java/lang/invoke/InvokerBytecodeGenerator$CpPatch"
-                     "java/lang/invoke/LambdaFormEditor"
-                     "java/lang/invoke/LambdaFormEditor$Transform"
-                     "java/lang/invoke/LambdaFormEditor$Transform$Kind"
-                     "java/lang/invoke/LambdaFormBuffer"
-                     "java/lang/invoke/WrongMethodTypeException"
-                     "java/lang/invoke/MethodHandleImpl$WrappedMember"
-                     "java/lang/invoke/MethodHandleImpl$Lazy"
-                     "java/lang/reflect/Modifier"
-                     "sun/invoke/util/BytecodeDescriptor"
-                     "sun/invoke/util/VerifyAccess"
-                     "sun/invoke/util/VerifyAccess$1"
-                     "sun/invoke/util/VerifyType"
-                     "sun/invoke/util/ValueConversions"
-                     "sun/invoke/empty/Empty"
-                     ;; ASM bytecode generation classes used by LambdaMetafactory
+        ;; Minimal pre-load: only ASM bytecode generation classes
+        ;; MethodHandle/LambdaForm classes have complex lazy initialization via ClassSpecializer
+        ;; that doesn't work with pre-loading - they need runtime initialization in correct order
+        (dolist (c '(;; ASM bytecode generation classes used by LambdaMetafactory
                      "jdk/internal/org/objectweb/asm/ClassWriter"
                      "jdk/internal/org/objectweb/asm/ClassVisitor"
                      "jdk/internal/org/objectweb/asm/MethodVisitor"
@@ -1865,10 +1816,7 @@ the normal call-next-method chain for the owner's superclasses."
                      "jdk/internal/org/objectweb/asm/AnnotationWriter"
                      "jdk/internal/org/objectweb/asm/AnnotationVisitor"
                      "jdk/internal/org/objectweb/asm/ClassReader"
-                     "jdk/internal/org/objectweb/asm/Handle"
-                     ;; Utility classes used during lambda bootstrap
-                     "java/util/LinkedHashSet"
-                     "java/util/HashSet"))
+                     "jdk/internal/org/objectweb/asm/Handle"))
           (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil)))
 
     (|condition-java/lang/Throwable| (c)
