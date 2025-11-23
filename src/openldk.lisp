@@ -1816,7 +1816,21 @@ the normal call-next-method chain for the owner's superclasses."
                      "jdk/internal/org/objectweb/asm/AnnotationWriter"
                      "jdk/internal/org/objectweb/asm/AnnotationVisitor"
                      "jdk/internal/org/objectweb/asm/ClassReader"
-                     "jdk/internal/org/objectweb/asm/Handle"))
+                     "jdk/internal/org/objectweb/asm/Handle"
+                     ;; Frequently loaded NIO/charset classes for testsuite performance
+                     "java/io/InterruptedIOException"
+                     "java/nio/BufferOverflowException"
+                     "java/nio/BufferUnderflowException"
+                     "java/nio/charset/CoderMalfunctionError"
+                     "java/nio/charset/CoderResult"
+                     "java/nio/charset/CoderResult$1"
+                     "java/nio/charset/CoderResult$2"
+                     "java/nio/charset/CoderResult$Cache"
+                     "java/nio/HeapCharBuffer"
+                     "java/nio/ReadOnlyBufferException"
+                     "java/lang/Readable"
+                     "java/nio/CharBuffer"
+                     "sun/nio/cs/Surrogate$Parser"))
           (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil)))
 
     (|condition-java/lang/Throwable| (c)

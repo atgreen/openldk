@@ -1967,6 +1967,30 @@ user.variant
       (setf (slot-value mn '|flags|) flags))
     mn))
 
+(defun |java/lang/invoke/DirectMethodHandle.isCrackable()| (this)
+  "DirectMethodHandles are crackable - they can reveal their internal MemberName."
+  (declare (ignore this))
+  1) ; Return 1 (true in Java)
+
+(defun |java/lang/invoke/MethodHandle.isCrackable()| (this)
+  "Base MethodHandles are not crackable."
+  (declare (ignore this))
+  0) ; Return 0 (false in Java)
+
+(defun |java/lang/invoke/DirectMethodHandle.internalMemberName()| (this)
+  "Return the MemberName from a DirectMethodHandle."
+  (format t "~&*** internalMemberName() called on DirectMethodHandle~%")
+  (let ((result (when (and (slot-exists-p this '|member|)
+                          (slot-boundp this '|member|))
+                 (slot-value this '|member|))))
+    (format t "~&*** internalMemberName() returning: ~A~%" result)
+    result))
+
+(defun |java/lang/invoke/MethodHandle.internalMemberName()| (this)
+  "Base MethodHandles don't have an internal MemberName."
+  (declare (ignore this))
+  nil)
+
 (defun |java/lang/invoke/MethodHandles$Lookup.findStatic(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)| (lookup klass name method-type)
   "Create a DirectMethodHandle for static method invocation.
    DirectMethodHandle is required by LambdaMetafactory for lambda expressions."
@@ -1976,14 +2000,62 @@ user.variant
   (let* ((member (%build-member-name-for-static klass name method-type))
          (lf (make-instance '|java/lang/invoke/LambdaForm|))
          (mh (make-instance '|java/lang/invoke/DirectMethodHandle|)))
+    ;; Set vmentry on LambdaForm
     (setf (slot-value lf '|vmentry|) member)
+
+    ;; Set type on MethodHandle
     (when (slot-exists-p mh '|type|)
       (setf (slot-value mh '|type|) method-type))
+
+    ;; Set form on MethodHandle
     (when (slot-exists-p mh '|form|)
       (setf (slot-value mh '|form|) lf))
-    (when (slot-exists-p mh '|member|)
-      (setf (slot-value mh '|member|) member))
+
+    ;; Set the member field
+    (setf (slot-value mh '|member|) member)
     mh))
+
+(defun |java/lang/invoke/MethodHandles$Lookup.revealDirect(Ljava/lang/invoke/MethodHandle;)| (lookup target)
+  "Crack a direct method handle to reveal its MemberName.
+   Returns a MethodHandleInfo that wraps the MemberName."
+  (declare (ignore lookup))
+  (format t "~&*** revealDirect() called on: ~A~%" target)
+  ;; Check if target has a member slot (i.e., is a DirectMethodHandle)
+  (unless (and (slot-exists-p target '|member|)
+               (slot-boundp target '|member|))
+    (format t "~&*** revealDirect() ERROR: target has no member slot or it's unbound~%")
+    (let ((exc (make-instance '|java/lang/IllegalArgumentException|)))
+      (|<init>(Ljava/lang/String;)| exc (jstring "not a direct method handle"))
+      (error (%lisp-condition exc))))
+
+  ;; Extract the MemberName
+  (let ((member (slot-value target '|member|)))
+    (format t "~&*** revealDirect() member = ~A~%" member)
+    (unless member
+      (format t "~&*** revealDirect() ERROR: member is NIL~%")
+      (let ((exc (make-instance '|java/lang/IllegalArgumentException|)))
+        (|<init>(Ljava/lang/String;)| exc (jstring "not a direct method handle"))
+        (error (%lisp-condition exc))))
+
+    ;; Get the reference kind from the MemberName flags
+    ;; The flags field encodes the reference kind in bits 24-27
+    (let* ((flags (when (and (slot-exists-p member '|flags|)
+                            (slot-boundp member '|flags|))
+                   (slot-value member '|flags|)))
+           (ref-kind (if flags
+                         (logand #xFF (ash flags -24))
+                         5))) ; Default to REF_invokeVirtual if no flags
+
+      ;; Create and return InfoFromMemberName
+      (classload "java/lang/invoke/InfoFromMemberName")
+      (let ((info (make-instance '|java/lang/invoke/InfoFromMemberName|)))
+        ;; Set the member field
+        (when (slot-exists-p info '|member|)
+          (setf (slot-value info '|member|) member))
+        ;; Set the referenceKind field
+        (when (slot-exists-p info '|referenceKind|)
+          (setf (slot-value info '|referenceKind|) ref-kind))
+        info))))
 
 (defun %invoke-from-member-name (member-name &rest args)
   "Invoke a method described by a MemberName with the given arguments.

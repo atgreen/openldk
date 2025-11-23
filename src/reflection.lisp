@@ -43,7 +43,7 @@
 (defclass/std |java/lang/invoke/MethodHandle| (|java/lang/Object|)
   ())
 (defclass/std |java/lang/invoke/DirectMethodHandle| (|java/lang/invoke/MethodHandle|)
-  ())
+  ((|member|)))
 
 (defclass/std |com/moxielogic/OpenLDK/MethodHandle| (|java/lang/invoke/DirectMethodHandle| constant-method-handle)
   ())
