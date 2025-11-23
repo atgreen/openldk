@@ -13,18 +13,18 @@
   ;; Match Java FP semantics
   (sb-int:set-floating-point-modes :traps nil)
   (handler-case
-      (openldk::main "com.sun.tools.javac.Main"
+      (main "com.sun.tools.javac.Main"
                      (rest sb-ext:*posix-argv*)
                      :classpath (or (uiop:getenv "CLASSPATH") "."))
     (error (condition)
       (cond
-        ((typep condition 'openldk::|condition-java/lang/Throwable|)
-         (let ((throwable (and (slot-boundp condition 'openldk::|objref|)
-                               (slot-value condition 'openldk::|objref|))))
-           (if (typep throwable 'openldk::|java/lang/Throwable|)
+        ((typep condition '|condition-java/lang/Throwable|)
+         (let ((throwable (and (slot-boundp condition '|objref|)
+                               (slot-value condition '|objref|))))
+           (if (typep throwable '|java/lang/Throwable|)
                (progn
                  (format *error-output* "~&Unhandled Java exception:~%")
-                 (openldk::%print-java-stack-trace throwable :stream *error-output*)
+                 (%print-java-stack-trace throwable :stream *error-output*)
                  (finish-output *error-output*))
                (format *error-output* "~&Unhandled Java condition: ~A~%" condition))))
         (t
