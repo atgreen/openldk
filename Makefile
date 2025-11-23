@@ -12,9 +12,11 @@ openldk: src/*.lisp *.asd Makefile
 
 javacl: src/*.lisp *.asd Makefile
 	XDG_CACHE_HOME=$(XDG_CACHE_HOME) CLASSPATH="$(TOOLS_JAR)" sbcl --dynamic-space-size 32768 --disable-debugger \
-	  --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) \
-                       (asdf:load-asd \"javacl.asd\") \
-                       (asdf:operate 'asdf:program-op :javacl))"
+	  --eval "(let* ((cwd (truename (uiop:getcwd))) \
+                     (open-asd (merge-pathnames #P\"openldk.asd\" cwd)) \
+                     (javac-asd (merge-pathnames #P\"javacl.asd\" cwd))) \
+                (asdf:load-asd open-asd) \
+                (asdf:operate 'asdf:program-op javac-asd))"
 
 check: openldk testsuite/mauve/gnu/testlet/config.class
 	(cd testsuite; runtest --tool openldk $(RUNTESTFLAGS))
