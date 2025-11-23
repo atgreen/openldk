@@ -56,4 +56,7 @@
     #:starts-with?
     #:ends-with?)
   (:documentation "OpenLDK core package")
-  (:export :initialize :main-wrapper))
+  (:export :initialize
+           :main-wrapper
+           :make-javac-image
+           :javac-main-wrapper))
