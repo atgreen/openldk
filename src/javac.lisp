@@ -12,13 +12,15 @@
   "Entry point for the pre-dumped javac image. Runs com.sun.tools.javac.Main."
   ;; Match Java FP semantics
   (sb-int:set-floating-point-modes :traps nil)
-  (let ((args (uiop:command-line-arguments)))
+  (let* ((args (uiop:command-line-arguments))
+         (cp (default-javac-classpath)))
     (format t "; javacl argv (~D): ~S~%" (length args) args)
+    (format t "; javacl default classpath: ~A~%" cp)
     (finish-output)
     (handler-case
         (openldk::main "com.sun.tools.javac.Main"
                        args
-                       :classpath (or (uiop:getenv "CLASSPATH") "."))
+                       :classpath cp)
       (error (condition)
         (cond
           ((typep condition 'openldk::|condition-java/lang/Throwable|)
@@ -29,10 +31,21 @@
                    (format *error-output* "~&Unhandled Java exception:~%")
                    (openldk::%print-java-stack-trace throwable :stream *error-output*)
                    (finish-output *error-output*))
-                 (format *error-output* "~&Unhandled Java condition: ~A~%" condition))))
+               (format *error-output* "~&Unhandled Java condition: ~A~%" condition))))
           (t
            (format *error-output* "~&Error: ~A~%" condition)))
         (uiop:quit 1)))))
+
+(defun default-javac-classpath ()
+  "Pick a sensible default classpath for javac: tools.jar if present, else env or \".\""
+  (or (uiop:getenv "CLASSPATH")
+      (let* ((jh (uiop:getenv "JAVA_HOME"))
+             (tools (and jh
+                         (merge-pathnames #P"lib/tools.jar"
+                                          (uiop:ensure-directory-pathname jh)))))
+        (when (and tools (uiop:file-exists-p tools))
+          (namestring tools)))
+      "."))
 
 (defparameter *javac-warmup-classes*
   '("com/sun/tools/javac/Main"
@@ -55,7 +68,10 @@
 
 (defun make-javacl-image (&optional (output-path "javacl"))
   "Build an executable image that jumps straight into javac."
-  (openldk::initialize)
+  ;; Ensure tools.jar is visible during image creation.
+  (let ((cp (default-javac-classpath)))
+    (uiop:setenv "CLASSPATH" cp)
+    (openldk::initialize))
   ;; Warm up javac by loading core classes (no compilation run).
   (%warmup-javac)
   ;; Kill helper threads before dumping the image.
