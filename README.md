@@ -144,27 +144,11 @@ As of Mar 30, 2025, log4j is starting to function correctly.  See
 [cl-log4j](https://github.com/atgreen/cl-log4j) for an example of how
 to wrap a Java library for Common Lisp usage.
 
-As of Feb 22, 2025, OpenLDK can start up `javac`.
+As of Nov 23, 2025, OpenLDK can compile simple sources with the bundled
+`javacl` wrapper (uses Java 8 tools.jar via OpenLDK):
 
 ```
-$ ./openldk sun.tools.javac.Main
-Usage: javac <options> <source files>
-
-where <options> includes:
-  -g                     Generate all debugging info
-  -g:none                Generate no debugging info
-  -g:{lines,vars,source} Generate only some debugging info
-  -O                     Optimize; may hinder debugging or enlarge class files
-  -nowarn                Generate no warnings
-  -verbose               Output messages about what the compiler is doing
-  -deprecation           Output source locations where deprecated APIs are used
-  -classpath <path>      Specify where to find user class files
-  -sourcepath <path>     Specify where to find input source files
-  -bootclasspath <path>  Override location of bootstrap class files
-  -extdirs <dirs>        Override location of installed extensions
-  -d <directory>         Specify where to place generated class files
-  -encoding <encoding>   Specify character encoding used by source files
-  -target <release>      Generate class files for specific VM version
+$ CLASSPATH= JAVA_HOME=/usr/lib/jvm/temurin-8-jdk/jre ./javacl Hello.java
 ```
 
 Run `make check` to run through the
