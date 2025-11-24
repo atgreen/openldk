@@ -140,16 +140,13 @@ bytecode and generates something like the following:
 
 ### Testing
 
+As of Nov 23, 2025, OpenLDK can successful compile and run `javac`,
+which in turn is capable of building class files from java source
+code.
+
 As of Mar 30, 2025, log4j is starting to function correctly.  See
 [cl-log4j](https://github.com/atgreen/cl-log4j) for an example of how
 to wrap a Java library for Common Lisp usage.
-
-As of Nov 23, 2025, OpenLDK can compile simple sources with the bundled
-`javacl` wrapper (uses Java 8 tools.jar via OpenLDK):
-
-```
-$ CLASSPATH= JAVA_HOME=/usr/lib/jvm/temurin-8-jdk/jre ./javacl Hello.java
-```
 
 Run `make check` to run through the
 [dejagnu](https://www.gnu.org/software/dejagnu/dejagnu)-based testsuite.
