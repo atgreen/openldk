@@ -9,15 +9,11 @@
   (sb-int:set-floating-point-modes :traps nil)
   (let* ((args (uiop:command-line-arguments))
          (cp (default-javac-classpath)))
-    (format t "; javacl argv (~D): ~S~%" (length args) args)
-    (format t "; javacl default classpath: ~A~%" cp)
-    (finish-output)
     (handler-case
         (openldk::main "com.sun.tools.javac.Main"
                        args
                        :classpath cp)
       (error (condition)
-	(print condition)
         (cond
           ((typep condition 'openldk::|condition-java/lang/Throwable|)
            (let ((throwable (and (slot-boundp condition 'openldk::|objref|)
@@ -39,7 +35,6 @@
              (tools (and jh
                          (merge-pathnames #P"../lib/tools.jar"
                                           (uiop:ensure-directory-pathname jh)))))
-	(print tools)
         (when (and tools (uiop:file-exists-p tools))
           (namestring tools)))
       "."))

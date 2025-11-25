@@ -156,7 +156,8 @@ and its implementation."
      "%RESOLVE-INVOKEDYNAMIC"
      "METHOD invoke"
      "#<java/lang/reflect/Method "
-     "#<sun/reflect/NativeMethodAccessorImpl ")))
+     "#<sun/reflect/NativeMethodAccessorImpl "
+     "INVOKE-SPECIAL")))
 
 
 (defun |sun/reflect/Reflection.getCallerClass(I)| (index)
@@ -1149,7 +1150,6 @@ user.variant
 
 (defmethod |writeBytes([BIIZ)| ((fos |java/io/FileOutputStream|) byte-array offset length append?)
   (declare (ignore append?))
-  ;;  (format t "~&WRITE-BYTES: 1:~A 2:~A 3:~A 4:~A 5:~A 6:~A 7:~A~%" fos (slot-value fos '|fd|) (slot-value (slot-value fos '|fd|) '|fd|) byte-array offset length append?)
   (let* ((file-descriptor (slot-value fos '|fd|))
          (fd (if (and file-descriptor (slot-exists-p file-descriptor '|fd|))
                  (slot-value file-descriptor '|fd|)
@@ -1170,7 +1170,7 @@ user.variant
                            :element-type '(unsigned-byte 8)
                            :direction :output
                            :if-does-not-exist :create
-                           :if-exists (if append? :append :supersede)))
+                           :if-exists (if (and append? (not (zerop append?))) :append :supersede)))
              (fd (slot-value fos '|fd|)))
         ;; FileOutputStream stores a FileDescriptor; stash the stream in its fd
         ;; slot when available, otherwise keep it directly.

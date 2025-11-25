@@ -1272,10 +1272,13 @@ the normal call-next-method chain for the owner's superclasses."
                                                            (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
                                                                  collect (intern (format nil "arg~A" i) :openldk)))
                                                      (list '%compile-method (slot-value class 'name) (incf method-index))
-                                                     (cons (intern (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) :openldk)
-                                                           (cons (intern "this" :openldk)
-                                                                 (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
-                                                                       collect (intern (format nil "arg~A" i) :openldk)))))))))
+                                                     (list 'invoke-special
+                                                           (list 'quote (intern (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) :openldk))
+                                                           (list 'quote (intern (slot-value (slot-value m 'class) 'name) :openldk))
+                                                           (cons 'list
+                                                                 (cons (intern "this" :openldk)
+                                                                       (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
+                                                                             collect (intern (format nil "arg~A" i) :openldk))))))))))
                                    methods)))))))
 
     (append defclass-code methods-code)))
