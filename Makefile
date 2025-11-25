@@ -7,6 +7,8 @@ endif
 XDG_CACHE_HOME ?= $(CURDIR)/.cache
 TOOLS_JAR ?= $(dir $(JAVA_HOME))lib/tools.jar
 
+all: openldk javacl
+
 openldk: src/*.lisp *.asd Makefile
 	XDG_CACHE_HOME=$(XDG_CACHE_HOME) sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))" --eval "(openldk::make-image)"
 

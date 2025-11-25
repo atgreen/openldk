@@ -893,7 +893,8 @@ the normal call-next-method chain for the owner's superclasses."
              (return))))))
     (unwind-protect
         (when (gethash "Code" (slot-value method 'attributes)) ; otherwise it is abstract
-      (let* ((parameter-hints (gen-parameter-hints (descriptor method)))
+      (let* ((compile-start-time (get-internal-real-time))
+             (parameter-hints (gen-parameter-hints (descriptor method)))
              (exception-table (slot-value (gethash "Code" (slot-value method 'attributes)) 'exceptions))
              (code (slot-value (gethash "Code" (slot-value method 'attributes)) 'code))
              (max-locals (slot-value (gethash "Code" (slot-value method 'attributes)) 'max-locals))
@@ -910,10 +911,7 @@ the normal call-next-method chain for the owner's superclasses."
                                        :is-clinit-p (string= "<clinit>" (slot-value method 'name)))))
         (setf (svcount *context*) 0)
         (when *debug-bytecode*
-          (format t "~&; compiling ~A~%" method-key))
-        (when *debug-codegen*
-          (format t "; compiling ~A.~A~%" class-name (lispize-method-name (format nil "~A~A" (name method) (descriptor method))))
-          (force-output))
+          (format t "~&; COMPILING ~A~%" method-key))
         (if (static-p method)
             (setf (fn-name *context*)
                   (format nil "~A.~A"
@@ -1120,7 +1118,14 @@ the normal call-next-method chain for the owner's superclasses."
               (%write-aot-method class-name
                                (lispize-method-name (format nil "~A~A" (name method) (descriptor method)))
                                definition-code)
-              (%eval definition-code)))))
+              (%eval definition-code))
+          (when (or *debug-compile* *debug-codegen*)
+            (format t "; COMPILING ~A.~A (~Dms)~%"
+                    class-name
+                    (lispize-method-name (format nil "~A~A" (name method) (descriptor method)))
+                    (round (* 1000 (/ (- (get-internal-real-time) compile-start-time)
+                                      internal-time-units-per-second))))
+            (force-output)))))
       ;; Cleanup: mark compilation as done and notify waiting threads
       (bt:with-lock-held (*method-compilation-lock*)
         (setf (gethash method-key *methods-being-compiled*) :done)
@@ -1389,7 +1394,7 @@ the normal call-next-method chain for the owner's superclasses."
             (if classfile-stream
                 (progn
                   (when *debug-load*
-                    (format t "~&; LOADING ~A~%" classname))
+                    (format t "~&; LOADING   ~A~%" classname))
                   (if classfile-stream
                       (%classload-from-stream classname classfile-stream class-loader)
                       nil))
@@ -1452,6 +1457,9 @@ the normal call-next-method chain for the owner's superclasses."
           (setf *debug-codegen* t))
         (when (find #\l LDK_DEBUG)
           (setf *debug-load* t))
+        (when (find #\L LDK_DEBUG)
+          (setf *debug-load* t)
+          (setf *debug-compile* t))
         (when (find #\s LDK_DEBUG)
           (setf *debug-slynk* t))
         (when (find #\t LDK_DEBUG)
@@ -1721,6 +1729,7 @@ the normal call-next-method chain for the owner's superclasses."
                             (make-instance 'dir-classpath-entry :dir cpe)))))
 
   (setf *debug-load* t)
+  (setf *debug-compile* t)
 
   ;; We need to hand load these before Class.forName0 will work.
   (%clinit (classload "java/lang/Object"))
@@ -1877,7 +1886,8 @@ the normal call-next-method chain for the owner's superclasses."
     (when launcher
       (%clinit launcher)))
 
-  (setf *debug-load* nil))
+  (setf *debug-load* nil)
+  (setf *debug-compile* nil))
 
 (defun make-image (&optional (output-path "openldk"))
   (initialize)

@@ -50,6 +50,11 @@ The OpenLDK project uses [`ocicl`](https://github.com/ocicl/ocicl) for
 package management.  Be sure to run `ocicl install` before building
 `openldk`.
 
+## Building
+
+Running `make` produces two executables:
+- `openldk` - the JIT compiler and runtime for Java
+- `javacl` - Java's `javac` compiler transpiled to Lisp and dumped as an executable
 
 ## How it Works
 
@@ -169,6 +174,7 @@ string of characters that are interpreted as below:
 - `b` - trace bytecode compilation
 - `c` - dump all Lisp code prior to evaluation
 - `l` - show class loading (prints "; LOADING classname" for each class)
+- `L` - show class loading and method compilation with timing
 - `p` - debug propagation
 - `s` - start a slynk server at startup (port 2025)
 - `t` - trace method entry/exit at runtime

@@ -69,6 +69,7 @@
 (defvar *aot-dir* nil)
 (defvar *aot-class-definitions* nil "Hash table storing class definitions for AOT compilation")
 (defvar *debug-load* nil)
+(defvar *debug-compile* nil)
 (defvar *debug-bytecode* nil)
 (defvar *debug-codegen* nil)
 (defvar *debug-slynk* nil)
