@@ -46,7 +46,8 @@
 (defclass jar-classpath-entry (classpath-entry)
   ((jarfile :initarg :jarfile)
    (zipfile :initform nil)
-   (zipfile-entries))
+   (zipfile-entries)
+   (lock :initform (bt:make-lock "jar-classpath-lock")))
   (:documentation "Classpath entry backed by a JAR/ZIP file."))
 
 (defclass dir-classpath-entry (classpath-entry)
@@ -62,30 +63,32 @@
           (invoke-restart 'reopen-zipfile)))
     (reopen-zipfile ()
       :report "Reopen the zipfile and retry."
-      (with-slots (zipfile zipfile-entries jarfile) cpe
-        (setf zipfile (zip:open-zipfile jarfile))
-        (setf zipfile-entries (zip:zipfile-entries zipfile))
+      (with-slots (zipfile zipfile-entries jarfile lock) cpe
+        (bt:with-lock-held (lock)
+          (setf zipfile (zip:open-zipfile jarfile))
+          (setf zipfile-entries (zip:zipfile-entries zipfile)))
         (open-java-classfile cpe classname)))))
 
 ;; And simplify the primary method - no restart needed here
 (defmethod open-java-classfile ((cpe jar-classpath-entry) classname)
   "Return an input stream for a java class, CLASSNAME."
-  (with-slots (jarfile zipfile zipfile-entries) cpe
-    ;; Ensure the zipfile is open
-    (unless zipfile
-      (setf zipfile (zip:open-zipfile jarfile))
-      (setf zipfile-entries (zip:zipfile-entries zipfile)))
-    ;; Look up the class file in the zipfile entries
-    (when-let (ze (gethash (format nil "~A.class" classname) zipfile-entries))
-      ;; Create an in-memory input stream for the class file contents
-      (let ((result (flexi-streams:make-in-memory-input-stream (zip:zipfile-entry-contents ze))))
-        ;; Add the package to the *PACKAGE* hashtable if it doesn't already exist
-        (when-let (last-slash-position (position #\/ classname :from-end t))
-          (let ((package-name (take (1+ last-slash-position) classname)))
-            (unless (gethash package-name *packages*)
-              (setf (gethash package-name *packages*) (jstring jarfile)))))
-        ;; Return the input stream
-        result))))
+  (with-slots (jarfile zipfile zipfile-entries lock) cpe
+    (bt:with-lock-held (lock)
+      ;; Ensure the zipfile is open
+      (unless zipfile
+        (setf zipfile (zip:open-zipfile jarfile))
+        (setf zipfile-entries (zip:zipfile-entries zipfile)))
+      ;; Look up the class file in the zipfile entries
+      (when-let (ze (gethash (format nil "~A.class" classname) zipfile-entries))
+        ;; Create an in-memory input stream for the class file contents
+        (let ((result (flexi-streams:make-in-memory-input-stream (zip:zipfile-entry-contents ze))))
+          ;; Add the package to the *PACKAGE* hashtable if it doesn't already exist
+          (when-let (last-slash-position (position #\/ classname :from-end t))
+            (let ((package-name (take (1+ last-slash-position) classname)))
+              (unless (gethash package-name *packages*)
+                (setf (gethash package-name *packages*) (jstring jarfile)))))
+          ;; Return the input stream
+          result)))))
 
 (defmethod open-java-classfile ((cpe dir-classpath-entry) classname)
   "Return an input stream for a java class, CLASSNAME."
@@ -104,16 +107,17 @@
 
 (defun list-jar-classes (jar-entry)
   "Return a list of all class file names in a JAR file."
-  (with-slots (jarfile zipfile zipfile-entries) jar-entry
-    ;; Ensure the zipfile is open
-    (unless zipfile
-      (setf zipfile (zip:open-zipfile jarfile))
-      (setf zipfile-entries (zip:zipfile-entries zipfile)))
-    ;; Collect all .class files
-    (let ((classes nil))
-      (maphash (lambda (name entry)
-                 (declare (ignore entry))
-                 (when (str:ends-with? ".class" name)
-                   (push name classes)))
-               zipfile-entries)
-      classes)))
+  (with-slots (jarfile zipfile zipfile-entries lock) jar-entry
+    (bt:with-lock-held (lock)
+      ;; Ensure the zipfile is open
+      (unless zipfile
+        (setf zipfile (zip:open-zipfile jarfile))
+        (setf zipfile-entries (zip:zipfile-entries zipfile)))
+      ;; Collect all .class files
+      (let ((classes nil))
+        (maphash (lambda (name entry)
+                   (declare (ignore entry))
+                   (when (str:ends-with? ".class" name)
+                     (push name classes)))
+                 zipfile-entries)
+        classes))))
