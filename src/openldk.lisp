@@ -584,6 +584,7 @@ the normal call-next-method chain for the owner's superclasses."
 
    When allow-locals is T (Phase 2, intra-block):
    - Also propagates local variables if no intervening assignment exists"
+  (declare (ignore def-insn ir-code))
   (let ((use-list (gethash var use-list-table)))
     (and
      ;; Must be a stack variable (SSA)
@@ -933,13 +934,20 @@ the normal call-next-method chain for the owner's superclasses."
                        (let ((code (apply #'append
                                           (loop
                                             while (and (< (pc *context*) length))
-                                            for no-record-stack-state? = (find (aref *opcodes* (aref code (pc *context*))) '(:GOTO :ATHROW :RETURN :IRETURN :LRETURN :FRETURN :DRETURN :ARETURN))
+                                            for no-record-stack-state? = (find (aref *opcodes*
+                                                                                     (aref code (pc *context*)))
+                                                                               '(:GOTO :ATHROW :RETURN :IRETURN
+                                                                                 :LRETURN :FRETURN :DRETURN :ARETURN))
                                             for result = (progn
                                                            (let ((stk (gethash (pc *context*) (stack-state-table *context*))))
                                                              (when stk
                                                                (setf (stack *context*) (car stk))))
                                                            (when *debug-bytecode*
-                                                             (format t "~&; ~A c[~A] ~A ~@<~A~:@>" method-key (pc *context*) (aref *opcodes* (aref code (pc *context*))) (stack *context*)))
+                                                             (format t "~&; ~A c[~A] ~A ~@<~A~:@>"
+                                                                     method-key
+                                                                     (pc *context*)
+                                                                     (aref *opcodes* (aref code (pc *context*)))
+                                                                     (stack *context*)))
                                                            (let* ((pc-start (pc *context*)))
                                                              (if (gethash pc-start exception-handler-table)
                                                                  (let ((var (make-stack-variable *context* pc-start :REFERENCE)))
@@ -1862,8 +1870,7 @@ the normal call-next-method chain for the owner's superclasses."
            (%print-java-stack-trace throwable :stream *error-output*)
            (finish-output *error-output*))
           (t
-           (format *error-output* "~&Unhandled Java condition: ~A~%" c)))))
-    )
+           (format *error-output* "~&Unhandled Java condition: ~A~%" c))))))
 ;; Ensure the bootstrap launcher class is present even if earlier steps signalled.
   (let ((launcher (or (gethash "sun/misc/Launcher" *ldk-classes-by-bin-name*)
                       (ignore-errors (classload "sun/misc/Launcher")))))

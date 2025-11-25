@@ -63,13 +63,14 @@
            (mutex (mutex monitor))
            (current-thread (bordeaux-threads:current-thread)))
     (bordeaux-threads:with-lock-held (mutex)
-      (if (eq (owner monitor) current-thread)
-          (incf (recursion-count monitor))
-          (progn
-            (loop while (owner monitor)
-                  do (bordeaux-threads:condition-wait (condition-variable monitor) mutex))
-            (setf (owner monitor) current-thread
-                  (recursion-count monitor) 1)))))))
+      (cond
+        ((eq (owner monitor) current-thread)
+         (incf (recursion-count monitor)))
+        (t
+         (loop while (owner monitor)
+               do (bordeaux-threads:condition-wait (condition-variable monitor) mutex))
+         (setf (owner monitor) current-thread
+               (recursion-count monitor) 1)))))))
 
 (defun monitor-exit (object)
   "Exit the monitor for OBJECT, releasing its mutex."

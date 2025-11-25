@@ -255,12 +255,10 @@ Combined with global substitutions during codegen for this block only.")
                                            do (push insn (code block))
                                            do (setf (gethash address block-by-address) block)
                                            do (setf ir-code (rest ir-code))
-                                           until (if (and (first ir-code) (gethash (address (first ir-code)) block-starts))
-                                                     (progn
-                                                       (when (find (address (first ir-code)) (aref (next-insn-list *context*) (floor address)))
-                                                         (setf (fall-through-address block) (address (first ir-code))))
-                                                       t)
-                                                     nil))
+                                           until (when (and (first ir-code) (gethash (address (first ir-code)) block-starts))
+                                                   (when (find (address (first ir-code)) (aref (next-insn-list *context*) (floor address)))
+                                                     (setf (fall-through-address block) (address (first ir-code))))
+                                                   t))
                                      block))))
       (dolist (block blocks)
         ;; Make connections between basic blocks.
@@ -291,17 +289,15 @@ Combined with global substitutions during codegen for this block only.")
       ;; Let's eliminate the exit goto for try and handler blocks using dominator sets.
       (labels ((find-merge-point (block dominator seen-table)
                  "Find a successor to BLOCK not dominated by DOMINATOR."
-                 (if (not (gethash block seen-table))
-                     (progn
-                       (setf (gethash block seen-table) t)
-                       (if (fset:member? dominator (dominators block))
-                           (loop for successor in (fset:convert 'list (successors block))
-                                 for merge-point = (find-merge-point successor dominator seen-table)
-                                 when merge-point
-                                   do (setf (end-of-handler? block) t)
-                                   and return merge-point)
-                           block))
-                     nil))
+                 (unless (gethash block seen-table)
+                   (setf (gethash block seen-table) t)
+                   (if (fset:member? dominator (dominators block))
+                       (loop for successor in (fset:convert 'list (successors block))
+                             for merge-point = (find-merge-point successor dominator seen-table)
+                             when merge-point
+                               do (setf (end-of-handler? block) t)
+                               and return merge-point)
+                       block)))
                (remove-goto (block target-address seen-table)
                  "Remove a trailing GOTO to TARGET-ADDRESS at the end of BLOCK and successors until we reach TARGET-ADDRESS."
                  (unless (gethash block seen-table)

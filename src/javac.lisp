@@ -251,12 +251,25 @@
                               (make-instance 'openldk::dir-classpath-entry :dir cpe))))))
   ;; Warm up javac by loading core classes (no compilation run).
   (%warmup-javac)
-  ;; Kill helper threads before dumping the image.
-  (loop for thread in (bt:all-threads)
-        when (and (not (eq thread (bt:current-thread)))
-                  (search "Java-Thread" (bt:thread-name thread)))
-        do (bt:destroy-thread thread))
-  (sb-ext:save-lisp-and-die output-path
-                            :executable t
-                            :save-runtime-options t
-                            :toplevel #'javac-main))
+
+  ;; More warm up...
+  (unwind-protect
+       (let ((cp (default-javac-classpath)))
+	 (let ((openldk::*debug-load* t)
+	       (openldk::*ignore-quit* t))
+	   (openldk::main "com.sun.tools.javac.Main" '() :classpath cp)
+	   (openldk::main "com.sun.tools.javac.Main" '("-version") :classpath cp)
+	   (openldk::main "com.sun.tools.javac.Main" '("-verbose" "Hello.java"))
+	   (openldk::main "com.sun.tools.javac.Main" '("-verbose" "-sourcepath" "testsuite/mauve" "testsuite/mauve/gnu/testlet/TestHarness.java"))))
+    (progn
+      (setf openldk::*ignore-quit* nil)
+      ;; Kill helper threads before dumping the image.
+      (loop for thread in (bt:all-threads)
+            when (and (not (eq thread (bt:current-thread)))
+                      (search "Java-Thread" (bt:thread-name thread)))
+            do (bt:destroy-thread thread))
+      (sb-ext:save-lisp-and-die output-path
+				:executable t
+				:save-runtime-options t
+				:toplevel #'javac-main))))
+

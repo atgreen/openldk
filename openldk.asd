@@ -37,12 +37,15 @@
 ;;; library, but you are not obligated to do so.  If you do not wish
 ;;; to do so, delete this exception statement from your version.
 
-(declaim (optimize (speed 0) (space 0) (debug 3)))
+(declaim (optimize (speed 3) (debug 0) (safety 0)))
 
+#|
+(declaim (optimize (speed 3) (space 0) (debug 0)))
 #+sbcl
 (sb-ext:restrict-compiler-policy 'debug 3)
+|#
 
-(asdf:defsystem #:openldk
+(asdf:defsystem "openldk"
   :description "Java in Common Lisp"
   :author "Anthony Green <green@moxielogic.com>"
   :license "GPL3+Classpath Exception"

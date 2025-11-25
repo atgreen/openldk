@@ -95,6 +95,9 @@
 ;; Uses dataflow analysis to propagate locals across basic blocks when a unique definition reaches.
 (defvar *enable-reaching-definitions* nil)
 
+;; Don't quit.  Used in build process during warm-up.
+(defvar *ignore-quit* nil)
+
 (defvar *boot-class-loader* nil)
 
 ;; Map Java Thread objects to Lisp (bordeaux) threads

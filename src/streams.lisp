@@ -65,12 +65,13 @@
          (let ((java-stream (java-stream stream)))
            (let* ((buffer (make-java-array :component-class (%get-java-class-by-bin-name "byte" t) :size (- end start)))
                   (bytes-read (|readBytes([BII)| java-stream buffer 0 (- end start))))
-             (if (eql bytes-read -1)
-                 start ; Return the start position if no bytes were read (EOF)
-                 (progn
-                   (incf (pos stream) bytes-read)
-                   (replace sequence (java-array-data buffer) :start1 start :end1 (+ start bytes-read))
-                   (+ start bytes-read))))))
+             (cond
+               ((eql bytes-read -1)
+                start) ; Return the start position if no bytes were read (EOF)
+               (t
+                (incf (pos stream) bytes-read)
+                (replace sequence (java-array-data buffer) :start1 start :end1 (+ start bytes-read))
+                (+ start bytes-read))))))
     (incf *call-nesting-level* -1)))
 
 #|

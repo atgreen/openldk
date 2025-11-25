@@ -1501,7 +1501,8 @@ user.variant
   nil)
 
 (defun |java/lang/Shutdown.halt0(I)| (status)
-  (uiop:quit status t))
+  (unless *ignore-quit*
+    (uiop:quit status t)))
 
 (defmethod |getRawAnnotations()| ((class |java/lang/Class|))
   (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value class '|name|)))))
@@ -2264,6 +2265,7 @@ user.variant
 ;; Stub findCollector to prevent creating 255-arity collectors
 (defun |java/lang/invoke/MethodHandleImpl.findCollector(Ljava/lang/String;ILjava/lang/Class;[Ljava/lang/Class;)| (name arity array-type param-types)
   "Native stub: prevent creating collectors with arity >= 254 to avoid parameter count overflow."
+  (declare (ignore name array-type param-types))
   (when (>= arity 254)
     (error (%lisp-condition
             (%make-throwable '|java/lang/UnsupportedOperationException|

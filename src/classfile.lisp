@@ -87,7 +87,8 @@
                           (6 '|java/lang/invoke/MethodHandles$Lookup.findStatic(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)|)
                           (7 '|java/lang/invoke/MethodHandles$Lookup.findSpecial(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/Class;)|)
                           (8 '|java/lang/invoke/MethodHandles$Lookup.findConstructor(Ljava/lang/Class;Ljava/lang/invoke/MethodType;)|)
-                          (9 '|java/lang/invoke/MethodHandles$Lookup.findVirtual(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)|) ; interface methods use findVirtual
+                          ;; interface methods use findVirtual
+                          (9 '|java/lang/invoke/MethodHandles$Lookup.findVirtual(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)|)
                           (t (error "Unknown MethodHandle reference kind: ~A" ref-kind)))))
     (make-instance 'ir-method-handle
                    :reference-index (reference-index cmh)
