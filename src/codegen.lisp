@@ -1133,7 +1133,8 @@
                             ;; Fast path for Java 8 lambdas: build the functional object directly
                             (openldk::%lambda-metafactory
                              ,(code (codegen (third args) context))
-                             (list ,@(mapcar (lambda (a) (code (codegen a context))) dynamic-args)))
+                             (list ,@(mapcar (lambda (a) (code (codegen a context))) dynamic-args))
+                             ,method-name)
                             ;; Fallback: generic invokedynamic handling
                             (let ((callsite (%resolve-invokedynamic ',(intern method-name :openldk)
                                                                     ',(intern bootstrap-method-name :openldk)

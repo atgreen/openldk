@@ -212,15 +212,18 @@ and its implementation."
   (let* ((ldk-class (%get-ldk-class-by-bin-name cname t)))
     (if ldk-class
         ldk-class
-        (let ((lclass (make-instance '<class>
-                                     :name cname
-                                     :super "java/lang/Object"))
-              (java-class (make-instance '|java/lang/Class|)))
-          (setf (slot-value java-class '|name|) (ijstring (substitute #\. #\/ cname)))
+        (let* ((fq-name (substitute #\. #\/ cname)) ;; fq-name uses dots
+               (lclass (make-instance '<class>
+                                      :name cname
+                                      :super "java/lang/Object"))
+               (java-class (make-instance '|java/lang/Class|)))
+          (setf (slot-value java-class '|name|) (ijstring fq-name))
           (setf (slot-value java-class '|classLoader|) nil)
           (setf (slot-value lclass 'java-class) java-class)
-          (setf (gethash cname *ldk-classes-by-fq-name*) lclass)
-          (setf (gethash cname *java-classes-by-fq-name*) java-class)
+          ;; Store by fq-name (with dots) in *-by-fq-name* tables
+          (setf (gethash fq-name *ldk-classes-by-fq-name*) lclass)
+          (setf (gethash fq-name *java-classes-by-fq-name*) java-class)
+          ;; Store by bin-name (with slashes) in *-by-bin-name* tables
           (setf (gethash cname *ldk-classes-by-bin-name*) lclass)
           (setf (gethash cname *java-classes-by-bin-name*) java-class)
           lclass))))
@@ -938,15 +941,38 @@ user.variant
       1
       (if (or (eq (|isPrimitive()| this) 1) (eq (|isPrimitive()| other) 1))
           0
-          (let ((this-ldk-class (%get-ldk-class-by-fq-name (lstring (slot-value this '|name|)) t))
-                (other-ldk-class (%get-ldk-class-by-fq-name (lstring (slot-value other '|name|)) t)))
-            (if (and this-ldk-class
-
-                     other-ldk-class
-                     (closer-mop:subclassp (find-class (intern (name other-ldk-class) :openldk))
-                                           (find-class (intern (name this-ldk-class) :openldk))))
-                1
-                0)))))
+          (let ((this-name (lstring (slot-value this '|name|)))
+                (other-name (lstring (slot-value other '|name|))))
+            ;; Handle array types specially - they don't have CLOS classes
+            (cond
+              ;; Both are arrays
+              ((and (char= (char this-name 0) #\[)
+                    (char= (char other-name 0) #\[))
+               ;; For arrays, check component type assignability
+               ;; All arrays are assignable to Object, Cloneable, Serializable
+               (if (or (string= this-name other-name)
+                       (string= this-name "[Ljava.lang.Object;"))
+                   1
+                   ;; TODO: More complex array covariance checking
+                   0))
+              ;; Other is array, this is not - array assignable to Object/Cloneable/Serializable
+              ((char= (char other-name 0) #\[)
+               (if (member this-name '("java.lang.Object" "java.lang.Cloneable" "java.io.Serializable")
+                           :test #'string=)
+                   1
+                   0))
+              ;; Neither is array - use normal class hierarchy
+              (t
+               (let ((this-ldk-class (%get-ldk-class-by-fq-name this-name t))
+                     (other-ldk-class (%get-ldk-class-by-fq-name other-name t)))
+                 (if (and this-ldk-class
+                          other-ldk-class
+                          (find-class (intern (name other-ldk-class) :openldk) nil)
+                          (find-class (intern (name this-ldk-class) :openldk) nil)
+                          (closer-mop:subclassp (find-class (intern (name other-ldk-class) :openldk))
+                                                (find-class (intern (name this-ldk-class) :openldk))))
+                     1
+                     0))))))))
 
 (defun |java/lang/System.setIn0(Ljava/io/InputStream;)| (in-stream)
   (setf (slot-value |+static-java/lang/System+| '|in|) in-stream))
@@ -2116,6 +2142,13 @@ user.variant
   (declare (ignore this))
   1) ; true
 
+(defun |java/lang/invoke/MethodHandles$Lookup.checkUnprivilegedlookupClass(Ljava/lang/Class;I)| (klass mode)
+  "Native no-op to bypass security check for unprivileged lookup classes.
+   The JDK throws IllegalArgumentException for bootstrap classes (java.*, sun.*)
+   with full access mode (15), but we need to allow this for lambda metafactory."
+  (declare (ignore klass mode))
+  nil)
+
 (defun %build-member-name-for-static (klass name method-type)
   (classload "java/lang/invoke/MemberName")
   (let* ((mn (make-instance '|java/lang/invoke/MemberName|))
@@ -2166,6 +2199,135 @@ user.variant
   (classload "java/lang/invoke/DirectMethodHandle")
   (classload "java/lang/invoke/LambdaForm")
   (let* ((member (%build-member-name-for-static klass name method-type))
+         (lf (make-instance '|java/lang/invoke/LambdaForm|))
+         (mh (make-instance '|java/lang/invoke/DirectMethodHandle|)))
+    ;; Set vmentry on LambdaForm
+    (setf (slot-value lf '|vmentry|) member)
+
+    ;; Set type on MethodHandle
+    (when (slot-exists-p mh '|type|)
+      (setf (slot-value mh '|type|) method-type))
+
+    ;; Set form on MethodHandle
+    (when (slot-exists-p mh '|form|)
+      (setf (slot-value mh '|form|) lf))
+
+    ;; Set the member field
+    (setf (slot-value mh '|member|) member)
+    mh))
+
+(defun %build-member-name-for-special (klass name method-type)
+  "Build a MemberName for invokespecial (private methods, constructors, super calls)."
+  (classload "java/lang/invoke/MemberName")
+  (let* ((mn (make-instance '|java/lang/invoke/MemberName|))
+         ;; MN_IS_METHOD | REF_invokeSpecial << 24 (special = 7)
+         (flags (logior #x10000 (ash 7 24))))
+    (when (slot-exists-p mn '|clazz|)
+      (setf (slot-value mn '|clazz|) klass))
+    (when (slot-exists-p mn '|name|)
+      (setf (slot-value mn '|name|) name))
+    (when (slot-exists-p mn '|type$|)
+      (setf (slot-value mn '|type$|) method-type))
+    (when (slot-exists-p mn '|type|)
+      (setf (slot-value mn '|type|) method-type))
+    (when (slot-exists-p mn '|flags|)
+      (setf (slot-value mn '|flags|) flags))
+    mn))
+
+(defun |java/lang/invoke/MethodHandles$Lookup.findSpecial(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/Class;)| (lookup refc name method-type special-caller)
+  "Create a DirectMethodHandle for invokespecial method invocation.
+   Used for private methods, constructors, and super calls in lambda metafactory."
+  (declare (ignore lookup special-caller))
+  (format t "~&[findSpecial] refc=~A name=~A method-type=~A~%" refc name method-type)
+  (classload "java/lang/invoke/DirectMethodHandle")
+  (classload "java/lang/invoke/LambdaForm")
+  (let* ((member (%build-member-name-for-special refc name method-type))
+         (lf (make-instance '|java/lang/invoke/LambdaForm|))
+         (mh (make-instance '|java/lang/invoke/DirectMethodHandle|)))
+    ;; Set vmentry on LambdaForm
+    (setf (slot-value lf '|vmentry|) member)
+
+    ;; Set type on MethodHandle
+    (when (slot-exists-p mh '|type|)
+      (setf (slot-value mh '|type|) method-type))
+
+    ;; Set form on MethodHandle
+    (when (slot-exists-p mh '|form|)
+      (setf (slot-value mh '|form|) lf))
+
+    ;; Set the member field
+    (setf (slot-value mh '|member|) member)
+    mh))
+
+(defun %build-member-name-for-constructor (klass method-type)
+  "Build a MemberName for constructor invocation."
+  (classload "java/lang/invoke/MemberName")
+  (let* ((mn (make-instance '|java/lang/invoke/MemberName|))
+         ;; MN_IS_CONSTRUCTOR | REF_newInvokeSpecial << 24 (newInvokeSpecial = 8)
+         (flags (logior #x20000 (ash 8 24))))
+    (when (slot-exists-p mn '|clazz|)
+      (setf (slot-value mn '|clazz|) klass))
+    (when (slot-exists-p mn '|name|)
+      (setf (slot-value mn '|name|) (jstring "<init>")))
+    (when (slot-exists-p mn '|type$|)
+      (setf (slot-value mn '|type$|) method-type))
+    (when (slot-exists-p mn '|type|)
+      (setf (slot-value mn '|type|) method-type))
+    (when (slot-exists-p mn '|flags|)
+      (setf (slot-value mn '|flags|) flags))
+    mn))
+
+(defun |java/lang/invoke/MethodHandles$Lookup.findConstructor(Ljava/lang/Class;Ljava/lang/invoke/MethodType;)| (lookup refc method-type)
+  "Create a DirectMethodHandle for constructor invocation.
+   Used by lambda metafactory for method references to constructors."
+  (declare (ignore lookup))
+  (format t "~&[findConstructor] refc=~A method-type=~A~%" refc method-type)
+  (classload "java/lang/invoke/DirectMethodHandle")
+  (classload "java/lang/invoke/LambdaForm")
+  (let* ((member (%build-member-name-for-constructor refc method-type))
+         (lf (make-instance '|java/lang/invoke/LambdaForm|))
+         (mh (make-instance '|java/lang/invoke/DirectMethodHandle|)))
+    ;; Set vmentry on LambdaForm
+    (setf (slot-value lf '|vmentry|) member)
+
+    ;; Set type on MethodHandle
+    (when (slot-exists-p mh '|type|)
+      (setf (slot-value mh '|type|) method-type))
+
+    ;; Set form on MethodHandle
+    (when (slot-exists-p mh '|form|)
+      (setf (slot-value mh '|form|) lf))
+
+    ;; Set the member field
+    (setf (slot-value mh '|member|) member)
+    mh))
+
+(defun %build-member-name-for-virtual (klass name method-type)
+  "Build a MemberName for virtual method invocation."
+  (classload "java/lang/invoke/MemberName")
+  (let* ((mn (make-instance '|java/lang/invoke/MemberName|))
+         ;; MN_IS_METHOD | REF_invokeVirtual << 24 (virtual = 5)
+         (flags (logior #x10000 (ash 5 24))))
+    (when (slot-exists-p mn '|clazz|)
+      (setf (slot-value mn '|clazz|) klass))
+    (when (slot-exists-p mn '|name|)
+      (setf (slot-value mn '|name|) name))
+    (when (slot-exists-p mn '|type$|)
+      (setf (slot-value mn '|type$|) method-type))
+    (when (slot-exists-p mn '|type|)
+      (setf (slot-value mn '|type|) method-type))
+    (when (slot-exists-p mn '|flags|)
+      (setf (slot-value mn '|flags|) flags))
+    mn))
+
+(defun |java/lang/invoke/MethodHandles$Lookup.findVirtual(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)| (lookup refc name method-type)
+  "Create a DirectMethodHandle for virtual method invocation.
+   Used by lambda metafactory for instance method references."
+  (declare (ignore lookup))
+  (format t "~&[findVirtual] refc=~A name=~A method-type=~A~%" refc name method-type)
+  (classload "java/lang/invoke/DirectMethodHandle")
+  (classload "java/lang/invoke/LambdaForm")
+  (let* ((member (%build-member-name-for-virtual refc name method-type))
          (lf (make-instance '|java/lang/invoke/LambdaForm|))
          (mh (make-instance '|java/lang/invoke/DirectMethodHandle|)))
     ;; Set vmentry on LambdaForm
@@ -2265,16 +2427,49 @@ user.variant
                                     (ptypes (when (slot-exists-p type '|ptypes|)
                                               (slot-value type '|ptypes|))))
                                 (%build-method-descriptor rtype ptypes)))))
-           ;; Check if it's a static method (REF_invokeStatic = 6)
+           ;; Extract the reference kind from flags
+           ;; REF_invokeStatic = 6, REF_invokeSpecial = 7, REF_newInvokeSpecial = 8
            (ref-kind (ash (logand flags #x0F000000) -24))
-           (is-static (= ref-kind 6)))
+           (is-constructor (= ref-kind 8)))
 
-      ;; Construct the lispized method name: class.method(descriptor)
-      (let* ((full-method-sig (format nil "~A.~A~A" class-name method-name method-type))
-             (lisp-method-name (intern (lispize-method-name full-method-sig) :openldk)))
-
-        ;; Invoke the method with the provided arguments
-        (apply lisp-method-name args)))))
+      ;; Handle constructors specially - create instance, call init, return instance
+      (if is-constructor
+          (progn
+            ;; Load the class and create a new instance
+            (classload class-name)
+            (let* ((lisp-class-name (intern class-name :openldk))
+                   (instance (make-instance lisp-class-name)))
+              ;; Constructor descriptors always return void - replace any return type with V
+              ;; The MethodType from findConstructor has the class as return type, but
+              ;; <init> methods have void return type
+              (let* ((desc (cond
+                             ((null method-type) "()V")
+                             ;; Extract params portion and append V
+                             ((position #\) method-type)
+                              (format nil "~AV" (subseq method-type 0 (1+ (position #\) method-type)))))
+                             (t (format nil "~AV" method-type))))
+                     ;; Instance methods like constructors are defined as generic functions
+                     ;; with just the method name, not the fully qualified class.method name
+                     (init-method-name (format nil "<init>~A" (subseq desc 0 (1+ (position #\) desc)))))
+                     (lisp-init-name (intern init-method-name :openldk)))
+                (apply lisp-init-name instance args))
+              ;; Return the constructed instance
+              instance))
+          ;; Normal method invocation
+          ;; REF_invokeVirtual = 5, REF_invokeStatic = 6, REF_invokeSpecial = 7
+          (let ((is-static (= ref-kind 6))
+                (is-virtual (= ref-kind 5))
+                (is-special (= ref-kind 7)))
+            (if is-static
+                ;; Static methods use fully qualified names like class.method(desc)
+                (let* ((full-method-sig (format nil "~A.~A~A" class-name method-name method-type))
+                       (lisp-method-name (intern (lispize-method-name full-method-sig) :openldk)))
+                  (apply lisp-method-name args))
+                ;; Virtual and special methods are generic functions with just the method name
+                ;; The first argument is the receiver (this)
+                (let* ((simple-method-name (format nil "~A~A" method-name method-type))
+                       (lisp-method-name (intern (lispize-method-name simple-method-name) :openldk)))
+                  (apply lisp-method-name args))))))))
 
 (defun |java/lang/invoke/MethodHandle.linkToStatic(Ljava/lang/invoke/MemberName;)| (&rest args)
   "MethodHandle intrinsic: invoke a static method via MemberName (no-arg variant).
@@ -2382,30 +2577,89 @@ user.variant
   nil)
 
 ;; Minimal lambda support -----------------------------------------------------
-;; A tiny Supplier implementation that wraps a MethodHandle target and invokes it with
+;; Lambda implementations that wrap a MethodHandle target and invoke it with
 ;; any captured arguments supplied via the metafactory fast-path.
+
+(defun %lambda-invoke (mh captures args)
+  "Common invoke logic for lambda implementations."
+  (let ((member (when (and mh (slot-exists-p mh '|member|))
+                  (slot-value mh '|member|))))
+    (if member
+        (apply #'%invoke-from-member-name member (append captures args))
+        (let ((args-array (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Object")
+                                           :initial-contents (coerce (append captures args) 'vector))))
+          (|invokeWithArguments([Ljava/lang/Object;)| mh args-array)))))
+
+;; Supplier implementation (for get() with no args)
 (defclass/std |openldk/LambdaSupplier| (|java/lang/Object| |java/util/function/Supplier|)
   ((target)
    (captures)))
 
 (defmethod |get()| ((this |openldk/LambdaSupplier|))
-  (let* ((mh (slot-value this 'target))
-         (caps (slot-value this 'captures))
-         (member (when (and mh (slot-exists-p mh '|member|))
-                   (slot-value mh '|member|))))
-    (if member
-        (apply #'%invoke-from-member-name member caps)
-        (let ((args-array (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Object")
-                                           :initial-contents (coerce caps 'vector))))
-          (|invokeWithArguments([Ljava/lang/Object;)| mh args-array)))))
+  (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) nil))
 
-(defun %lambda-metafactory (impl-handle captures)
-  "Construct a java.util.function.Supplier for zero-arg Java lambdas.
-CAPTURES is a list of pre-bound values (unused for SimpleLambdaTest but kept for future work)."
-  (let ((supplier (make-instance '|openldk/LambdaSupplier|)))
-    (setf (slot-value supplier 'target) impl-handle)
-    (setf (slot-value supplier 'captures) captures)
-    supplier))
+;; Predicate implementation (for test(Object))
+(defclass/std |openldk/LambdaPredicate| (|java/lang/Object| |java/util/function/Predicate|)
+  ((target)
+   (captures)))
+
+(defmethod |test(Ljava/lang/Object;)| ((this |openldk/LambdaPredicate|) obj)
+  (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list obj)))
+
+;; Function implementation (for apply(Object))
+(defclass/std |openldk/LambdaFunction| (|java/lang/Object| |java/util/function/Function|)
+  ((target)
+   (captures)))
+
+(defmethod |apply(Ljava/lang/Object;)| ((this |openldk/LambdaFunction|) obj)
+  (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list obj)))
+
+;; Consumer implementation (for accept(Object))
+(defclass/std |openldk/LambdaConsumer| (|java/lang/Object| |java/util/function/Consumer|)
+  ((target)
+   (captures)))
+
+(defmethod |accept(Ljava/lang/Object;)| ((this |openldk/LambdaConsumer|) obj)
+  (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list obj))
+  nil)
+
+;; BiConsumer implementation (for accept(Object, Object))
+(defclass/std |openldk/LambdaBiConsumer| (|java/lang/Object| |java/util/function/BiConsumer|)
+  ((target)
+   (captures)))
+
+(defmethod |accept(Ljava/lang/Object;Ljava/lang/Object;)| ((this |openldk/LambdaBiConsumer|) a b)
+  (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list a b))
+  nil)
+
+;; BinaryOperator implementation (for apply(Object, Object))
+(defclass/std |openldk/LambdaBinaryOperator| (|java/lang/Object| |java/util/function/BinaryOperator|)
+  ((target)
+   (captures)))
+
+(defmethod |apply(Ljava/lang/Object;Ljava/lang/Object;)| ((this |openldk/LambdaBinaryOperator|) a b)
+  (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list a b)))
+
+(defun %lambda-metafactory (impl-handle captures &optional (method-name "get"))
+  "Construct a functional interface implementation for Java lambdas.
+METHOD-NAME is the interface method name (get, test, apply, accept).
+CAPTURES is a list of pre-bound values for captured variables."
+  (let* ((method-str (if (stringp method-name) method-name (lstring method-name)))
+         (lambda-class (cond
+                         ((string= method-str "get") '|openldk/LambdaSupplier|)
+                         ((string= method-str "test") '|openldk/LambdaPredicate|)
+                         ((and (string= method-str "apply") (= 1 (length captures)))
+                          '|openldk/LambdaFunction|)
+                         ((and (string= method-str "apply") (>= (length captures) 0))
+                          '|openldk/LambdaBinaryOperator|)
+                         ((and (string= method-str "accept") (<= (length captures) 1))
+                          '|openldk/LambdaConsumer|)
+                         ((string= method-str "accept") '|openldk/LambdaBiConsumer|)
+                         (t '|openldk/LambdaSupplier|)))
+         (instance (make-instance lambda-class)))
+    (setf (slot-value instance 'target) impl-handle)
+    (setf (slot-value instance 'captures) captures)
+    instance))
 
 ;; ---------------------------------------------------------------------------
 ;; Javac helper: allow setEnclosingType on ClassReader$2 / ClassType without

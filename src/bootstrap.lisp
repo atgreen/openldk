@@ -228,3 +228,13 @@
 ;; Stub constructor for ExceptionInInitializerError (needed during class loading)
 (defmethod |<init>()| ((e |java/lang/ExceptionInInitializerError|))
   e)
+
+;; Bootstrap %lisp-condition implementations for early exception handling
+(defmethod %lisp-condition ((throwable |java/lang/ExceptionInInitializerError|))
+  (make-condition '|condition-java/lang/ExceptionInInitializerError| :|objref| throwable))
+
+(defmethod %lisp-condition ((throwable |java/lang/LinkageError|))
+  (make-condition '|condition-java/lang/LinkageError| :|objref| throwable))
+
+(defmethod %lisp-condition ((throwable |java/lang/Error|))
+  (make-condition '|condition-java/lang/Error| :|objref| throwable))

@@ -68,7 +68,10 @@
         ;; a native stub so we can delegate to our safe implementation.
         (and (string= class-name "com/sun/tools/javac/jvm/ClassReader$2")
              (string= (slot-value method 'name) "setEnclosingType")
-             (string= (slot-value method 'descriptor) "(Lcom/sun/tools/javac/code/Type;)V")))))
+             (string= (slot-value method 'descriptor) "(Lcom/sun/tools/javac/code/Type;)V"))
+        ;; MethodHandles$Lookup security check bypassed to allow lambda metafactory
+        (and (string= class-name "java/lang/invoke/MethodHandles$Lookup")
+             (string= (slot-value method 'name) "checkUnprivilegedlookupClass")))))
 
 (defun %eval (code)
   "Evaluate generated CODE, optionally printing and muffling warnings."
@@ -927,6 +930,7 @@ the normal call-next-method chain for the owner's superclasses."
                                    (slot-value method 'name)
                                    (slot-value method 'descriptor))))))
         (let* ((exception-handler-table (make-exception-handler-table *context*))
+               (in-dead-code nil) ;; Track unreachable code after unconditional branches
                (ir-code-0
                  (setf (ir-code *context*)
                        (let ((code (apply #'append
@@ -936,18 +940,29 @@ the normal call-next-method chain for the owner's superclasses."
                                                                                      (aref code (pc *context*)))
                                                                                '(:GOTO :ATHROW :RETURN :IRETURN
                                                                                  :LRETURN :FRETURN :DRETURN :ARETURN))
+                                            for was-in-dead-code = in-dead-code
                                             for result = (progn
+                                                           ;; Check if we're at a branch target - exit dead code mode
                                                            (let ((stk (gethash (pc *context*) (stack-state-table *context*))))
                                                              (when stk
-                                                               (setf (stack *context*) (car stk))))
-                                                           (when *debug-bytecode*
+                                                               (setf (stack *context*) (car stk))
+                                                               (setf in-dead-code nil)
+                                                               (setf was-in-dead-code nil)))
+                                                           ;; Check if we're at an exception handler - exit dead code mode
+                                                           (let ((pc-start (pc *context*)))
+                                                             (when (gethash pc-start exception-handler-table)
+                                                               (setf in-dead-code nil)
+                                                               (setf was-in-dead-code nil)))
+                                                           (when (and *debug-bytecode* (not was-in-dead-code))
                                                              (format t "~&; ~A c[~A] ~A ~@<~A~:@>"
                                                                      method-key
                                                                      (pc *context*)
                                                                      (aref *opcodes* (aref code (pc *context*)))
                                                                      (stack *context*)))
+                                                           ;; Always call transpiler to populate insn-size and next-insn-list
                                                            (let* ((pc-start (pc *context*)))
-                                                             (if (gethash pc-start exception-handler-table)
+                                                             (if (and (gethash pc-start exception-handler-table)
+                                                                      (not was-in-dead-code))
                                                                  (let ((var (make-stack-variable *context* pc-start :REFERENCE)))
                                                                    (push var (stack *context*))
                                                                    (cons (make-instance 'ir-assign
@@ -964,9 +979,12 @@ the normal call-next-method chain for the owner's superclasses."
                                                                  (funcall
                                                                   (aref *opcodes* (aref code (pc *context*)))
                                                                   *context* code))))
-                                            unless no-record-stack-state?
+                                            ;; Enter dead code mode after unconditional branches
+                                            when no-record-stack-state?
+                                              do (setf in-dead-code t)
+                                            unless (or was-in-dead-code no-record-stack-state?)
                                               do (%record-stack-state (pc *context*) *context*)
-                                            unless (null result)
+                                            unless (or (null result) was-in-dead-code)
                                               collect result))))
                          ;; Do stack analysis to merge stack variables
                          ;; When multiple control flow paths reach the same PC, we need to
@@ -1149,7 +1167,7 @@ the normal call-next-method chain for the owner's superclasses."
                    (handler-case
                        (%eval (list (intern (format nil "~A.<clinit>()" (slot-value class 'name)) :openldk)))
                      (error (e)
-                       ;; DEBUG: Print the original exception
+                       ;; DEBUG: Print the original exception when debug is enabled
                        (when *debug-codegen*
                          (format t "~%; DEBUG: <clinit> caught exception in ~A: ~A~%" (slot-value class 'name) e)
                          (trivial-backtrace:print-backtrace e :output *standard-output*))
