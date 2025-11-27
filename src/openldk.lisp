@@ -1160,11 +1160,13 @@ the normal call-next-method chain for the owner's superclasses."
                                                 (find-class '|java/lang/Error| nil))
                                        (let ((instance (make-instance '|java/lang/ExceptionInInitializerError|)))
                                          (|<init>()| instance)
-                                         ;; Set the cause from the original exception if it's a Java throwable
+                                         ;; Set the exception field from the original exception if it's a Java throwable
+                                         ;; Note: ExceptionInInitializerError uses |exception| field, not |cause|
+                                         ;; and its getCause() method returns |exception|
                                          (when (and (typep e '|condition-java/lang/Throwable|)
                                                     (slot-boundp e '|objref|)
                                                     (slot-value e '|objref|))
-                                           (setf (slot-value instance '|cause|) (slot-value e '|objref|)))
+                                           (setf (slot-value instance '|exception|) (slot-value e '|objref|)))
                                          instance)))))
                          (if eiie
                              (error (%lisp-condition eiie))

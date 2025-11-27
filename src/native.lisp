@@ -768,6 +768,25 @@ and its implementation."
      (setf (jaref obj l) value))
     (t (error "internal error: unrecognized object type in putObjectVolatile: ~A" obj))))
 
+;; getObject - same as getObjectVolatile for OpenLDK (no volatile semantics needed in Lisp)
+(defmethod |getObject(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) obj l)
+  (cond
+    ((typep obj 'java-array)
+     (jaref obj l))
+    ((typep obj '|java/lang/Object|)
+    (let* ((field (gethash l *field-offset-table*))
+            (key (intern (lstring (slot-value field '|name|)) :openldk)))
+       (slot-value obj key)))
+    ((null obj)
+     ;; FIXME: check that the field is STATIC
+    (let* ((field (gethash l *field-offset-table*))
+            (key (intern (lstring (slot-value field '|name|)) :openldk)))
+       (let* ((clazz (slot-value field '|clazz|))
+              (lname (lstring (slot-value clazz '|name|))))
+         (let ((v (slot-value (eval (intern (format nil "+static-~A+" (substitute #\/ #\. lname)) :openldk)) key)))
+           v))))
+    (t (error "internal error: unrecognized object type in getObject: ~A" obj))))
+
 (defmethod |getLongVolatile(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) obj l)
   (cond
     ((typep obj 'java-array)
@@ -802,6 +821,12 @@ and its implementation."
                   ("java.specification.version" . "1.8")
                   ("java.specification.name" . "Java Platform API Specification")
                   ("java.specification.vendor" . "Oracle Corporation")
+                  ("java.vm.specification.version" . "1.8")
+                  ("java.vm.specification.name" . "Java Virtual Machine Specification")
+                  ("java.vm.specification.vendor" . "Oracle Corporation")
+                  ("java.vm.name" . "OpenLDK")
+                  ("java.vm.version" . "1.0")
+                  ("java.vm.vendor" . "OpenLDK")
                   ("java.version" . "8.0")
                   ("java.vendor" . "OpenLDK")
                   ("java.vendor.url" . "https://github.com/atgreen/openldk")

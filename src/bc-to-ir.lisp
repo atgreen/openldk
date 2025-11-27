@@ -69,6 +69,14 @@
                            :index (pop (stack context))
                            :arrayref (pop (stack context)))))))
 
+(define-bytecode-transpiler :NOP (context code)
+  (declare (ignore code))
+  (with-slots (pc) context
+    (let ((pc-start pc))
+      (incf pc)
+      (push pc (aref (next-insn-list context) pc-start))
+      nil)))
+
 (define-bytecode-transpiler :AASTORE (context code)
   (declare (ignore code))
   (%transpile-xastore context 'ir-aastore))

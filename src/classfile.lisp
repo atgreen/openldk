@@ -429,6 +429,8 @@ stream."
            (read-buffer attributes-length))
           ("SourceFile"
            (read-buffer attributes-length))
+          ("SourceDebugExtension"
+           (read-buffer attributes-length))
           ("Signature"
            (read-buffer attributes-length)))))
     attributes))

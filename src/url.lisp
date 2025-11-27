@@ -106,6 +106,22 @@
           (%make-url-from-string url-string))
         (call-next-method))))
 
+;; Override URLClassLoader.findClass to use OpenLDK's native class loading.
+;; This is needed because URLClassLoader.findClass uses URLClassPath.getResource()
+;; internally, which has the same build-time URL issue as findResource.
+(defmethod |findClass(Ljava/lang/String;)| :around ((loader |java/net/URLClassLoader|) name)
+  "Find and define a class by NAME using OpenLDK's native classpath."
+  (let* ((class-name (lstring name))
+         (bin-name (substitute #\/ #\. class-name)))
+    ;; Try to load using OpenLDK's native class loading
+    (or (handler-case
+            (let ((klass (classload bin-name)))
+              (when klass
+                (java-class klass)))
+          (condition () nil))
+        ;; Fall back to Java implementation
+        (call-next-method))))
+
 (defmethod |openStream()| ((url |java/net/URL|))
   "Open an InputStream for the URL."
   (let ((url-string (lstring (|toString()| url))))
