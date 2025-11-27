@@ -99,6 +99,9 @@
 ;; Don't quit.  Used in build process during warm-up.
 (defvar *ignore-quit* nil)
 
+(defvar *cli-jvm-properties* nil
+  "List of (key . value) pairs from -D command line options.")
+
 (defvar *boot-class-loader* nil)
 
 ;; Map Java Thread objects to Lisp (bordeaux) threads

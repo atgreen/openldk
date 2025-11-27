@@ -1410,24 +1410,12 @@ the normal call-next-method chain for the owner's superclasses."
       (format *error-output* "~%OpenLDK Error: Cannot find $JAVA_HOME/lib/rt.jar~%")
       (uiop:quit 1))))
 
-@cli:command
 (defun main (mainclass &optional (args (list)) &key dump-dir classpath aot)
-  (declare
-   (cli:parser (list identity) args)
-   (cli:parser identity classpath)
-   (cli:parser identity dump-dir)
-   (cli:parser identity aot))
-  "openldk - copyright (C) 2023-2024 Anthony Green <green@moxielogic.com>
-   Distributed under the terms of the GPLv3 + Classpath Exception
-
+  "Run a Java class with the given arguments.
    MAINCLASS: The class with the static main method to execute.
-
-   ARGS: Java program command line arguments
-
+   ARGS: Java program command line arguments (list of strings).
    CLASSPATH: The classpath from which classes are loaded.
-
    DUMP-DIR: The directory into which internal debug info is dumped.
-
    AOT: Ahead-of-time compilation directory (generate Lisp source files)."
 
   (ensure-JAVA_HOME)
@@ -1486,6 +1474,11 @@ the normal call-next-method chain for the owner's superclasses."
    (slot-value |+static-java/lang/System+| '|props|))
 
   (%clinit (%get-ldk-class-by-bin-name "sun/misc/Launcher"))
+
+  ;; Apply -D system properties from command line
+  (dolist (prop *cli-jvm-properties*)
+    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)|
+     (ijstring (car prop)) (ijstring (cdr prop))))
 
   (when *debug-slynk*
     (slynk:create-server :port 2025)
@@ -1639,35 +1632,142 @@ the normal call-next-method chain for the owner's superclasses."
                         (return))))))
             (error "Main method not found in class ~A." (name class)))))))
 
+(defun %print-usage ()
+  "Print Java-style usage message."
+  (format *error-output* "~%Usage: openldk [options] <mainclass> [args...]~%")
+  (format *error-output* "       openldk [options] -jar <jarfile> [args...]~%~%")
+  (format *error-output* "where options include:~%")
+  (format *error-output* "    -cp <class search path>~%")
+  (format *error-output* "    -classpath <class search path>~%")
+  (format *error-output* "                  A : separated list of directories, JAR archives,~%")
+  (format *error-output* "                  and ZIP archives to search for class files.~%")
+  (format *error-output* "    -D<name>=<value>~%")
+  (format *error-output* "                  set a system property~%")
+  (format *error-output* "    -verbose:[class|gc|jni]~%")
+  (format *error-output* "                  enable verbose output~%")
+  (format *error-output* "    -version      print product version and exit~%")
+  (format *error-output* "    -? -help      print this help message~%")
+  (format *error-output* "    --dump-dir <dir>~%")
+  (format *error-output* "                  Directory for internal debug info~%")
+  (format *error-output* "    --aot <dir>   Ahead-of-time compilation directory~%~%"))
+
+(defun %parse-java-args ()
+  "Parse Java-style command line arguments.
+   Returns (values mainclass args classpath dump-dir aot).
+   Sets *cli-jvm-properties* as a side effect."
+  (let ((raw-args (rest sb-ext:*posix-argv*)) ; skip program name
+        (classpath nil)
+        (dump-dir nil)
+        (aot nil)
+        (mainclass nil)
+        (program-args nil)
+        (properties nil)
+        (i 0))
+    ;; Parse options until we hit mainclass
+    (loop while (< i (length raw-args))
+          for arg = (nth i raw-args)
+          do (cond
+               ;; -classpath <path> or -cp <path>
+               ((or (string= arg "-classpath") (string= arg "-cp"))
+                (incf i)
+                (when (< i (length raw-args))
+                  (setf classpath (nth i raw-args)))
+                (incf i))
+               ;; -Dkey=value sets a system property
+               ((str:starts-with? "-D" arg)
+                (let* ((prop-str (subseq arg 2))
+                       (eq-pos (position #\= prop-str)))
+                  (if eq-pos
+                      (push (cons (subseq prop-str 0 eq-pos)
+                                  (subseq prop-str (1+ eq-pos)))
+                            properties)
+                      ;; -Dkey with no value sets empty string
+                      (push (cons prop-str "") properties)))
+                (incf i))
+               ;; -XX options are consumed and ignored
+               ((str:starts-with? "-XX" arg)
+                (incf i))
+               ;; -X options are consumed and ignored
+               ((str:starts-with? "-X" arg)
+                (incf i))
+               ;; -verbose options
+               ((str:starts-with? "-verbose" arg)
+                (when (str:contains? "class" arg)
+                  (setf *debug-load* t))
+                (incf i))
+               ;; -version
+               ((string= arg "-version")
+                (format t "openldk version \"1.8.0\"~%")
+                (format t "OpenLDK Runtime Environment~%")
+                (uiop:quit 0))
+               ;; -help, -?, -h
+               ((or (string= arg "-help") (string= arg "-?") (string= arg "-h")
+                    (string= arg "--help"))
+                (%print-usage)
+                (uiop:quit 0))
+               ;; OpenLDK-specific: --dump-dir <dir>
+               ((string= arg "--dump-dir")
+                (incf i)
+                (when (< i (length raw-args))
+                  (setf dump-dir (nth i raw-args)))
+                (incf i))
+               ;; OpenLDK-specific: --aot <dir>
+               ((string= arg "--aot")
+                (incf i)
+                (when (< i (length raw-args))
+                  (setf aot (nth i raw-args)))
+                (incf i))
+               ;; -jar <jarfile>
+               ((string= arg "-jar")
+                (incf i)
+                (when (< i (length raw-args))
+                  ;; For -jar, the jarfile IS the mainclass (will be handled specially)
+                  (setf mainclass (nth i raw-args)))
+                (incf i)
+                ;; Everything after -jar <jarfile> is program args
+                (setf program-args (subseq raw-args i))
+                (return))
+               ;; Unknown option starting with -
+               ((and (> (length arg) 0) (char= (char arg 0) #\-))
+                (format *error-output* "Unrecognized option: ~A~%" arg)
+                (%print-usage)
+                (uiop:quit 1))
+               ;; First non-option is the mainclass
+               (t
+                (setf mainclass arg)
+                (incf i)
+                ;; Everything after mainclass is program args
+                (setf program-args (subseq raw-args i))
+                (return))))
+    (setf *cli-jvm-properties* (nreverse properties))
+    (values mainclass program-args classpath dump-dir aot)))
+
 (defun main-wrapper ()
   "Main entry point into OpenLDK. Process command line errors here."
   ;; Disable floating-point traps to match Java semantics (NaN/Infinity instead of errors)
   (sb-int:set-floating-point-modes :traps nil)
-  (handler-case
-      (main-command)
-    (cli:wrong-number-of-args (condition)
-      (declare (ignore condition))
-      (format *error-output* "~%Usage: openldk MAINCLASS [ARGS...] [--classpath PATH] [--dump-dir DIR]~%~%")
-      (format *error-output* "MAINCLASS: The class with the static main method to execute~%")
-      (format *error-output* "ARGS:      Java program command line arguments~%")
-      (format *error-output* "~%Options:~%")
-      (format *error-output* "  --classpath PATH  The classpath from which classes are loaded~%")
-      (format *error-output* "  --dump-dir DIR    Directory for internal debug info~%~%")
+  ;; Parse Java-style command line arguments
+  (multiple-value-bind (mainclass args classpath dump-dir aot)
+      (%parse-java-args)
+    (unless mainclass
+      (%print-usage)
       (uiop:quit 1))
-    (error (condition)
-      (cond
-        ((typep condition '|condition-java/lang/Throwable|)
-         (let ((throwable (and (slot-boundp condition '|objref|)
-                               (slot-value condition '|objref|))))
-           (if (typep throwable '|java/lang/Throwable|)
-               (progn
-                 (format *error-output* "~&Unhandled Java exception:~%")
-                 (%print-java-stack-trace throwable :stream *error-output*)
-                 (finish-output *error-output*))
-               (format *error-output* "~&Unhandled Java condition: ~A~%" condition))))
-        (t
-         (format *error-output* "~&Error: ~A~%" condition)))
-      (uiop:quit 1))))
+    (handler-case
+        (main mainclass args :classpath classpath :dump-dir dump-dir :aot aot)
+      (error (condition)
+        (cond
+          ((typep condition '|condition-java/lang/Throwable|)
+           (let ((throwable (and (slot-boundp condition '|objref|)
+                                 (slot-value condition '|objref|))))
+             (if (typep throwable '|java/lang/Throwable|)
+                 (progn
+                   (format *error-output* "~&Unhandled Java exception:~%")
+                   (%print-java-stack-trace throwable :stream *error-output*)
+                   (finish-output *error-output*))
+                 (format *error-output* "~&Unhandled Java condition: ~A~%" condition))))
+          (t
+           (format *error-output* "~&Error: ~A~%" condition)))
+        (uiop:quit 1)))))
 
 (defun %java-string (value)
   (cond
