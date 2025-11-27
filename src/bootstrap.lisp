@@ -145,25 +145,49 @@
 (define-condition |condition-java/lang/Throwable| (error)
   ((|objref|)))
 
+(define-condition |condition-java/lang/Error|
+    (|condition-java/lang/Throwable|)
+  ())
+
+(define-condition |condition-java/lang/LinkageError|
+    (|condition-java/lang/Error|)
+  ())
+
+(define-condition |condition-java/lang/ExceptionInInitializerError|
+    (|condition-java/lang/LinkageError|)
+  ())
+
 (define-condition |condition-java/lang/Exception|
     (|condition-java/lang/Throwable|)
   ())
 
-(define-condition |condition-java/lang/ExceptionInInitializerError|
-    (|condition-java/lang/Throwable|)
+(define-condition |condition-java/lang/RuntimeException|
+    (|condition-java/lang/Exception|)
   ())
 
 (defclass |java/lang/Throwable| (|java/lang/Object|)
   ()
   (:documentation "Stub for java.lang.Throwable"))
 
+(defclass |java/lang/Error| (|java/lang/Throwable|)
+  ()
+  (:documentation "Stub for java.lang.Error"))
+
+(defclass |java/lang/LinkageError| (|java/lang/Error|)
+  ()
+  (:documentation "Stub for java.lang.LinkageError"))
+
+(defclass |java/lang/ExceptionInInitializerError| (|java/lang/LinkageError|)
+  ()
+  (:documentation "Stub for java.lang.ExceptionInInitializerError"))
+
 (defclass |java/lang/Exception| (|java/lang/Throwable|)
   ()
   (:documentation "Stub for java.lang.Exception"))
 
-(defclass |java/lang/ExceptionInInitializerError| (|java/lang/Error|)
+(defclass |java/lang/RuntimeException| (|java/lang/Exception|)
   ()
-  (:documentation "Stub for java.lang.ExceptionInInitializerError"))
+  (:documentation "Stub for java.lang.RuntimeException"))
 
 (defclass |java/lang/ArithmeticException| (|java/lang/RuntimeException|)
   ()
@@ -182,10 +206,10 @@
   (:documentation "Stub for java.lang.IllegalArgumentException"))
 
 (define-condition |condition-java/lang/IllegalMonitorStateException|
-    (|condition-java/lang/Exception|)
+    (|condition-java/lang/RuntimeException|)
   ())
 
-(defclass |java/lang/IllegalMonitorStateException| (|java/lang/Exception|)
+(defclass |java/lang/IllegalMonitorStateException| (|java/lang/RuntimeException|)
   ()
   (:documentation "Stub for java.lang.IllegalMonitorStateException"))
 
