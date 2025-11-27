@@ -160,6 +160,14 @@ and its implementation."
      "INVOKE-SPECIAL")))
 
 
+(defun %is-internal-frame-p (caller-string)
+  "Return T if the frame is an internal OpenLDK frame that should be skipped."
+  (let ((lower-string (string-downcase caller-string)))
+    (or (search "%clinit-" lower-string)
+        (search "(labels clinit in %clinit" lower-string)
+        (search "(%clinit " lower-string)
+        (search "sun/reflect/reflection.getcallerclass" lower-string))))
+
 (defun |sun/reflect/Reflection.getCallerClass(I)| (index)
   ;; FIXME: we don't need the whole backtrace
   (let* ((backtrace (%remove-invoke-frames (%remove-adjacent-repeats (sb-debug:list-backtrace)))))
@@ -167,7 +175,24 @@ and its implementation."
     (%get-java-class-by-bin-name (%caller-class-name-from-stack-frame (nth index backtrace)))))
 
 (defun |sun/reflect/Reflection.getCallerClass()| ()
-  (|sun/reflect/Reflection.getCallerClass(I)| 3))
+  ;; Skip internal frames to find the actual caller
+  ;; The caller is the first non-internal Java method frame after:
+  ;; - getCallerClass() itself (frame 0)
+  ;; - The method that called getCallerClass (e.g., registerAsParallelCapable) (frame 1)
+  ;; So we start at frame 2
+  (let* ((backtrace (%remove-invoke-frames (%remove-adjacent-repeats (sb-debug:list-backtrace))))
+         (skip-count 2)) ; Skip getCallerClass() and its immediate caller
+    ;; Find the first non-internal frame after the skip count
+    (loop for i from skip-count below (length backtrace)
+          for frame = (nth i backtrace)
+          for caller-string = (format nil "~A" frame)
+          unless (%is-internal-frame-p caller-string)
+            do (let ((class-name (%caller-class-name-from-stack-frame frame)))
+                 (when (and (stringp class-name)
+                            (not (find #\. class-name))
+                            (gethash class-name *java-classes-by-bin-name*))
+                   (return (%get-java-class-by-bin-name class-name))))
+          finally (return (%get-java-class-by-bin-name "java/lang/System")))))
 
 (defun %type-to-descriptor (type)
   (cond
@@ -834,31 +859,6 @@ and its implementation."
                   ("line.separator" . ,(format nil "~%"))))
     (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring (car prop)) (ijstring (cdr prop))))
   props)
-
-;; Native implementation of System.setProperty to avoid recursion during MethodHandle initialization
-(defun |java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (key value)
-  "Store a system property directly in Lisp hash table to avoid Java class loading recursion."
-  (let ((key-str (if (typep key 'string)
-                     key
-                     (jstring key)))
-        (value-str (if (typep value 'string)
-                       value
-                       (jstring value))))
-    (let ((old-value (gethash key-str *ldk-system-properties*)))
-      (setf (gethash key-str *ldk-system-properties*) value-str)
-      (if old-value
-          (ijstring old-value)
-          nil))))
-
-(defun |java/lang/System.getProperty(Ljava/lang/String;)| (key)
-  "Retrieve a system property directly from Lisp hash table."
-  (let ((key-str (if (typep key 'string)
-                     key
-                     (jstring key))))
-    (let ((value (gethash key-str *ldk-system-properties*)))
-      (if value
-          (ijstring value)
-          nil))))
 
 #|
 Need to add:
