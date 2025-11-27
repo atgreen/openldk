@@ -69,6 +69,7 @@
                (:file "src/descriptors")
                (:file "src/classfile")
                (:file "src/native")
+               (:file "src/url")
                (:file "src/streams")
                (:file "src/zip")
                (:file "src/reflection")

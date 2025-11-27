@@ -1390,6 +1390,89 @@ user.variant
       (declare (ignore c))
       nil)))
 
+(defun %make-url-from-string (url-string)
+  "Create a java.net.URL object from URL-STRING."
+  (let ((url (make-instance '|java/net/URL|)))
+    (|<init>(Ljava/lang/String;)| url (jstring url-string))
+    url))
+
+(defmethod |getBootstrapResource(Ljava/lang/String;)| ((loader |java/lang/ClassLoader|) name)
+  "Find a resource by NAME on the bootstrap classpath."
+  (declare (ignore loader))
+  (let ((resource-name (lstring name)))
+    (when-let (url-string (get-resource-url-on-classpath resource-name))
+      (%make-url-from-string url-string))))
+
+(defmethod |getBootstrapResource(Ljava/lang/String;)| ((loader (eql nil)) name)
+  "Find a resource by NAME on the bootstrap classpath (static call)."
+  (let ((resource-name (lstring name)))
+    (when-let (url-string (get-resource-url-on-classpath resource-name))
+      (%make-url-from-string url-string))))
+
+(defun |java/lang/ClassLoader.getBootstrapResource(Ljava/lang/String;)| (name)
+  "Static native method to find a resource on the bootstrap classpath."
+  (let ((resource-name (lstring name)))
+    (when-let (url-string (get-resource-url-on-classpath resource-name))
+      (%make-url-from-string url-string))))
+
+(defclass/std <resource-input-stream> (|java/io/InputStream|)
+  ((lisp-stream :std nil))
+  (:documentation "InputStream wrapping a Lisp flexi-stream for resource reading."))
+
+(defmethod |read()| ((this <resource-input-stream>))
+  "Read a single byte from the resource stream."
+  (let ((byte (read-byte (slot-value this 'lisp-stream) nil nil)))
+    (if byte byte -1)))
+
+(defmethod |read([BII)| ((this <resource-input-stream>) byte-array offset length)
+  "Read up to LENGTH bytes into BYTE-ARRAY starting at OFFSET."
+  (let ((stream (slot-value this 'lisp-stream))
+        (bytes-read 0))
+    (loop for i from offset below (+ offset length)
+          for byte = (read-byte stream nil nil)
+          while byte
+          do (progn
+               (setf (jaref byte-array i) byte)
+               (incf bytes-read)))
+    (if (zerop bytes-read) -1 bytes-read)))
+
+(defmethod |close()| ((this <resource-input-stream>))
+  "Close the resource stream."
+  (when-let (stream (slot-value this 'lisp-stream))
+    (close stream)
+    (setf (slot-value this 'lisp-stream) nil)))
+
+(defun |java/lang/ClassLoader.getSystemResourceAsStream(Ljava/lang/String;)| (name)
+  "Get a system resource as an InputStream."
+  (let ((resource-name (lstring name)))
+    (when-let (stream (open-resource-on-classpath resource-name))
+      (make-instance '<resource-input-stream> :lisp-stream stream))))
+
+(defun %parse-jar-url (url-string)
+  "Parse a jar: URL and return (jar-path entry-path) or NIL.
+   Format: jar:file:/path/to/file.jar!/path/inside/jar"
+  (when (starts-with? "jar:file:" url-string)
+    (let ((excl-pos (search "!/" url-string)))
+      (when excl-pos
+        (let ((jar-path (subseq url-string 9 excl-pos))  ; Skip "jar:file:"
+              (entry-path (subseq url-string (+ excl-pos 2))))  ; Skip "!/"
+          (values jar-path entry-path))))))
+
+(defun %open-jar-url-stream (url-string)
+  "Open an InputStream for a jar: URL."
+  (multiple-value-bind (jar-path entry-path) (%parse-jar-url url-string)
+    (when (and jar-path entry-path)
+      (handler-case
+          (let ((zf (zip:open-zipfile jar-path)))
+            (when-let (ze (zip:get-zipfile-entry entry-path zf))
+              (let ((contents (zip:zipfile-entry-contents ze)))
+                (zip:close-zipfile zf)
+                (flexi-streams:make-in-memory-input-stream contents))))
+        (error ()
+          nil)))))
+
+;; Note: |openStream()| for java/net/URL is defined in url.lisp after the class is loaded
+
 (defun |java/io/UnixFileSystem.initIDs()| ()
   ;; FIXME
   nil)
