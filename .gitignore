@@ -3,6 +3,7 @@ dumps
 openldk
 javacl
 systems
+ocicl
 .cvsignore
 /*.class
 /*.java
