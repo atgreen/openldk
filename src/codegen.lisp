@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 ;;;
@@ -848,13 +848,11 @@
        expr)))
 
 (defmethod codegen ((insn ir-if-acmpeq) context)
-   (with-slots (index offset const) insn
-     (make-instance '<expression>
-                    :insn insn
-                    :code `(let ((o1 (sxhash ,(code (codegen (value1 insn) context))))
-                                 (o2 (sxhash ,(code (codegen (value2 insn) context)))))
-                             (when (eq o1 o2)
-                               (go ,(intern (format nil "branch-target-~A" offset))))))))
+  (with-slots (offset value1 value2) insn
+    (make-instance '<expression>
+                   :insn insn
+                   :code (list 'when (list 'eq (code (codegen value1 context)) (code (codegen value2 context)))
+                               (list 'go (intern (format nil "branch-target-~A" offset)))))))
 
 (defun %codegen-ir-if-xcmpne (insn context)
   (with-slots (offset value1 value2) insn

@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2024, 2025  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 ;;;
@@ -91,46 +91,58 @@
   "Return a Lisp symbol name derived from Java method NAME."
   (take (1+ (position #\) name)) name))
 
+;; Cache for invoke-special method lookups: (method-symbol . owner-symbol) -> (method-function . next-methods)
+(defvar *invoke-special-cache* (make-hash-table :test 'equal))
+
 (defun invoke-special (method-symbol owner-symbol args)
   "Invoke METHOD-SYMBOL on ARGS using Java invokespecial semantics.
 OWNER-SYMBOL designates the declaring class of the target method.
 This bypasses overriding methods on subclasses while still honouring
 the normal call-next-method chain for the owner's superclasses."
-  (let* ((gf (symbol-function method-symbol))
-         (owner-class (find-class owner-symbol))
-         (class-list (cons owner-class
-                           (loop repeat (max 0 (1- (length args)))
-                                 collect (find-class 't))))
-         (methods (closer-mop:compute-applicable-methods-using-classes gf class-list)))
-    (unless methods
-      (error "No applicable methods found for ~A on declaring class ~A with ~D args"
-             method-symbol owner-symbol (length args)))
-    (when (and *debug-set-enclosing-type*
-               (search "setEnclosingType" (symbol-name method-symbol)))
-      (format t "~&[invoke-special] target=~A owner=~A classes=~S~%"
-              method-symbol owner-symbol class-list)
-      (format t "                 methods=~S~%"
-              (mapcar #'closer-mop:method-specializers methods))
-      (format t "                 qualifiers=~S~%"
-              (mapcar #'closer-mop::method-qualifiers methods)))
-    (let ((method (or (find owner-class methods
-                            :key (lambda (m)
-                                   (when (null (closer-mop::method-qualifiers m))
-                                     (first (closer-mop:method-specializers m))))
-                            :test #'eq :from-end t)
-                     (find owner-class methods
-                           :key (lambda (m)
-                                  (first (closer-mop:method-specializers m)))
-                           :test #'eq))))
-      (unless method
-        (when *debug-set-enclosing-type*
-          (format t "~&[invoke-special] fallback for ~A on ~A; methods=~S~%"
-                  method-symbol owner-symbol
-                  (mapcar #'closer-mop:method-specializers methods)))
-        (setf method (first methods)))
-      (let* ((tail (member method methods :test #'eq))
-             (next (rest tail)))
-        (funcall (closer-mop:method-function method) args next)))))
+  (let* ((cache-key (cons method-symbol owner-symbol))
+         (cached (gethash cache-key *invoke-special-cache*)))
+    (if cached
+        ;; Cache hit - use cached method function and next-methods
+        (funcall (car cached) args (cdr cached))
+        ;; Cache miss - compute and cache
+        (let* ((gf (symbol-function method-symbol))
+               (owner-class (find-class owner-symbol))
+               (class-list (cons owner-class
+                                 (loop repeat (max 0 (1- (length args)))
+                                       collect (find-class 't))))
+               (methods (closer-mop:compute-applicable-methods-using-classes gf class-list)))
+          (unless methods
+            (error "No applicable methods found for ~A on declaring class ~A with ~D args"
+                   method-symbol owner-symbol (length args)))
+          (when (and *debug-set-enclosing-type*
+                     (search "setEnclosingType" (symbol-name method-symbol)))
+            (format t "~&[invoke-special] target=~A owner=~A classes=~S~%"
+                    method-symbol owner-symbol class-list)
+            (format t "                 methods=~S~%"
+                    (mapcar #'closer-mop:method-specializers methods))
+            (format t "                 qualifiers=~S~%"
+                    (mapcar #'closer-mop::method-qualifiers methods)))
+          (let ((method (or (find owner-class methods
+                                  :key (lambda (m)
+                                         (when (null (closer-mop::method-qualifiers m))
+                                           (first (closer-mop:method-specializers m))))
+                                  :test #'eq :from-end t)
+                           (find owner-class methods
+                                 :key (lambda (m)
+                                        (first (closer-mop:method-specializers m)))
+                                 :test #'eq))))
+            (unless method
+              (when *debug-set-enclosing-type*
+                (format t "~&[invoke-special] fallback for ~A on ~A; methods=~S~%"
+                        method-symbol owner-symbol
+                        (mapcar #'closer-mop:method-specializers methods)))
+              (setf method (first methods)))
+            (let* ((tail (member method methods :test #'eq))
+                   (next (rest tail))
+                   (method-fn (closer-mop:method-function method)))
+              ;; Cache the result
+              (setf (gethash cache-key *invoke-special-cache*) (cons method-fn next))
+              (funcall method-fn args next)))))))
 
 (defun make-exception-handler-table (context)
   "Build a hashtable of handler PCs keyed by handler start for CONTEXT."
@@ -143,33 +155,67 @@ the normal call-next-method chain for the owner's superclasses."
     exception-handler-table))
 
 (defun fix-stack-variables (stack-vars)
-  "Merge stack variable groups that share var-numbers across STACK-VARS."
+  "Merge stack variable groups that share var-numbers across STACK-VARS.
+Uses union-find with transitive closure to ensure all connected stack-vars
+get the same unified var-numbers."
 
-  (let ((groups (make-hash-table :test 'equal)))
-    ;; Step 1: Group stack-variables by their var-numbers
-    (dolist (stack-var stack-vars)
-      (let ((var-numbers (slot-value stack-var 'var-numbers)))
-        (dolist (num var-numbers)
-          (push stack-var (gethash num groups)))))
+  ;; Use union-find to group all stack-vars that should be unified
+  (let ((parent (make-hash-table :test 'eq))
+        (rank (make-hash-table :test 'eq)))
 
-    ;; Step 2: Merge groups that share common numbers
-    (let ((merged-groups ()))
-      (maphash (lambda (num stack-vars)
-                 (declare (ignore num))
-                 (let ((merged-group ()))
-                   (dolist (stack-var stack-vars)
-                     (unless (member stack-var merged-group :test #'eq)
-                       (push stack-var merged-group)))
-                   (push merged-group merged-groups)))
-               groups)
+    ;; Initialize each stack-var as its own parent
+    (dolist (sv stack-vars)
+      (setf (gethash sv parent) sv)
+      (setf (gethash sv rank) 0))
 
-      ;; Step 3: Update var-numbers for each stack-variable
-      (dolist (group merged-groups)
-        (let ((all-var-numbers ()))
-          (dolist (stack-var group)
-            (setf all-var-numbers (union all-var-numbers (slot-value stack-var 'var-numbers))))
-          (dolist (stack-var group)
-            (setf (slot-value stack-var 'var-numbers) all-var-numbers))))))
+    ;; Find with path compression
+    (labels ((find-root (sv)
+               (let ((p (gethash sv parent)))
+                 (if (eq p sv)
+                     sv
+                     (let ((root (find-root p)))
+                       (setf (gethash sv parent) root)
+                       root))))
+             ;; Union by rank
+             (union-sets (sv1 sv2)
+               (let ((root1 (find-root sv1))
+                     (root2 (find-root sv2)))
+                 (unless (eq root1 root2)
+                   (let ((rank1 (gethash root1 rank))
+                         (rank2 (gethash root2 rank)))
+                     (cond
+                       ((< rank1 rank2)
+                        (setf (gethash root1 parent) root2))
+                       ((> rank1 rank2)
+                        (setf (gethash root2 parent) root1))
+                       (t
+                        (setf (gethash root2 parent) root1)
+                        (incf (gethash root1 rank)))))))))
+
+      ;; Group stack-vars by var-numbers and union those that share any number
+      (let ((by-num (make-hash-table :test 'eql)))
+        (dolist (sv stack-vars)
+          (dolist (num (slot-value sv 'var-numbers))
+            (let ((existing (gethash num by-num)))
+              (when existing
+                (union-sets sv existing))
+              (setf (gethash num by-num) sv)))))
+
+      ;; Collect all stack-vars by their final root
+      (let ((groups (make-hash-table :test 'eq)))
+        (dolist (sv stack-vars)
+          (push sv (gethash (find-root sv) groups)))
+
+        ;; Update var-numbers for each unified group
+        (maphash (lambda (root group)
+                   (declare (ignore root))
+                   (let ((all-var-numbers ()))
+                     (dolist (sv group)
+                       (setf all-var-numbers
+                             (union all-var-numbers (slot-value sv 'var-numbers) :test 'eql)))
+                     (dolist (sv group)
+                       (setf (slot-value sv 'var-numbers) all-var-numbers))))
+                 groups))))
 
   stack-vars)
 
