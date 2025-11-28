@@ -75,6 +75,7 @@
 (defvar *debug-slynk* nil)
 (defvar *debug-trace* nil)
 (defvar *debug-trace-args* nil)
+(defvar *debug-exceptions* nil)
 (defvar *debug-x* nil)
 (defvar *debug-unmuffle* nil)
 (defvar *debug-propagation* nil)

@@ -1155,41 +1155,49 @@ the normal call-next-method chain for the owner's superclasses."
      (or class (error "Can't find ~A" class)))
     (labels ((clinit (class)
                (let ((super-class (gethash (slot-value class 'super) *ldk-classes-by-bin-name*)))
-                 (when (and super-class
-                            (not (initialized-p super-class)))
+                 (when (and super-class (not (initialized-p super-class)))
                    (clinit super-class)))
                (let ((<clinit>-method (find-if
-                                       (lambda (method) (and (string= (slot-value method 'name) "<clinit>")
-                                                             (string= (slot-value method 'descriptor) "()V")))
+                                       (lambda (method)
+                                         (and (string= (slot-value method 'name) "<clinit>")
+                                              (string= (slot-value method 'descriptor) "()V")))
                                        (slot-value class 'methods))))
                  (when <clinit>-method
                    (setf (initialized-p class) t)
                    (handler-case
                        (%eval (list (intern (format nil "~A.<clinit>()" (slot-value class 'name)) :openldk)))
                      (error (e)
-                       ;; DEBUG: Print the original exception when debug is enabled
-                       (when *debug-codegen*
-                         (format t "~%; DEBUG: <clinit> caught exception in ~A: ~A~%" (slot-value class 'name) e)
-                         (trivial-backtrace:print-backtrace e :output *standard-output*))
-                       ;; Wrap exception in ExceptionInInitializerError if classes are loaded
-                       ;; Use ignore-errors to handle case where parent class isn't loaded yet
-                       (let ((eiie (ignore-errors
-                                     (when (and (find-class '|java/lang/ExceptionInInitializerError| nil)
-                                                (find-class '|java/lang/Error| nil))
-                                       (let ((instance (make-instance '|java/lang/ExceptionInInitializerError|)))
-                                         (|<init>()| instance)
-                                         ;; Set the exception field from the original exception if it's a Java throwable
-                                         ;; Note: ExceptionInInitializerError uses |exception| field, not |cause|
-                                         ;; and its getCause() method returns |exception|
-                                         (when (and (typep e '|condition-java/lang/Throwable|)
-                                                    (slot-boundp e '|objref|)
-                                                    (slot-value e '|objref|))
-                                           (setf (slot-value instance '|exception|) (slot-value e '|objref|)))
-                                         instance)))))
-                         (if eiie
-                             (error (%lisp-condition eiie))
-                             ;; During early bootstrap, just re-signal the original error
-                             (error e)))))))))
+                       (let ((throwable (when (and (typep e '|condition-java/lang/Throwable|)
+                                                   (slot-boundp e '|objref|))
+                                          (slot-value e '|objref|))))
+                         ;; DEBUG: Print the original exception when debug is enabled
+                         (when (or *debug-codegen* *debug-exceptions*)
+                           (format t "~%; DEBUG: <clinit> caught exception in ~A: ~A~%"
+                                   (slot-value class 'name) e)
+                           (if throwable
+                               (%print-java-stack-trace throwable :stream *standard-output*)
+                               (trivial-backtrace:print-backtrace e :output *standard-output*)))
+                         ;; Wrap exception in ExceptionInInitializerError if classes are loaded
+                         ;; Use ignore-errors to handle case where parent class isn't loaded yet
+                         (let ((eiie (ignore-errors
+                                       (when (and (find-class '|java/lang/ExceptionInInitializerError| nil)
+                                                  (find-class '|java/lang/Error| nil))
+                                         (let* ((instance (make-instance '|java/lang/ExceptionInInitializerError|))
+                                                (cause (and (typep throwable '|java/lang/Throwable|) throwable)))
+                                           (if cause
+                                               (|<init>(Ljava/lang/Throwable;)| instance cause)
+                                               (|<init>()| instance))
+                                           ;; Ensure cause/exception slots are populated for stack traces
+                                           (when cause
+                                             (when (slot-exists-p instance '|cause|)
+                                               (setf (slot-value instance '|cause|) cause))
+                                             (when (slot-exists-p instance '|exception|)
+                                               (setf (slot-value instance '|exception|) cause)))
+                                           instance)))))
+                           (if eiie
+                               (error (%lisp-condition eiie))
+                               ;; During early bootstrap, just re-signal the original error
+                               (error e))))))))))
       (clinit class))))
 
 (defun open-java-classfile-on-classpath (class)
@@ -1481,6 +1489,8 @@ the normal call-next-method chain for the owner's superclasses."
           (setf *debug-trace-args* t))
         (when (find #\b LDK_DEBUG)
           (setf *debug-bytecode* t))
+        (when (find #\e LDK_DEBUG)
+          (setf *debug-exceptions* t))
         (when (find #\x LDK_DEBUG)
           (setf *debug-x* t))
         (when (find #\u LDK_DEBUG)
@@ -1817,13 +1827,19 @@ the normal call-next-method chain for the owner's superclasses."
               (let* ((ste (|getStackTraceElement(I)| throwable i))
                      (line (%java-string (|toString()| ste))))
                 (format stream "~&~A    at ~A~%" indent-str line))))))
-      (when (and (slot-boundp throwable '|cause|)
-                 (slot-value throwable '|cause|))
-        (%print-java-stack-trace (slot-value throwable '|cause|)
-                                 :stream stream
-                                 :indent indent
-                                 :prefix "Caused by: "
-                                 :visited visited)))))
+      (let ((cause (cond
+                     ((and (slot-boundp throwable '|cause|)
+                           (slot-value throwable '|cause|))
+                      (slot-value throwable '|cause|))
+                     ((and (slot-boundp throwable '|exception|)
+                           (slot-value throwable '|exception|))
+                      (slot-value throwable '|exception|)))))
+        (when cause
+          (%print-java-stack-trace cause
+                                   :stream stream
+                                   :indent indent
+                                   :prefix "Caused by: "
+                                   :visited visited))))))
 
 (defun initialize (&optional (property-alist (list)))
 

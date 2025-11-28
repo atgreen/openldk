@@ -942,16 +942,39 @@
       1
       0))
 
+;; Helper function for instanceof check
+(defun %instanceof-check (obj target-class-name target-class)
+  "Check instanceof. Returns 1 or 0."
+  (declare (ignore target-class-name))
+  (if (typep obj target-class) 1 0))
+
+;; Helper for integer instanceof check
+(defun %instanceof-integer-check (obj target-class-name target-class)
+  "Check instanceof for integer types - handles native Lisp integers."
+  (declare (ignore target-class-name))
+  (cond
+    ;; Plain Lisp integer - treat as matching all integral types
+    ((integerp obj) 1)
+    ;; CLOS instances - use typep
+    (t (if (typep obj target-class) 1 0))))
+
 (defmethod codegen ((insn ir-instanceof) context)
   (with-slots (class objref) insn
     (make-instance '<expression>
                    :insn insn
-                   :code (let ((cname (name (slot-value (slot-value insn 'class) 'class))))
-                           (if (eq (char cname 0) #\[)
-                               `(%instanceof-array ,(code (codegen objref context)) ,cname)
-                               `(if (typep ,(code (codegen objref context))
-                                           (quote ,(intern cname :openldk)))
-                                    1 0)))
+                   :code (let* ((cname (name (slot-value (slot-value insn 'class) 'class)))
+                                (obj (code (codegen objref context))))
+                           (cond
+                             ;; Array checks
+                             ((eq (char cname 0) #\[)
+                              `(%instanceof-array ,obj ,cname))
+                             ;; Treat native Lisp integers as instances of Java integral wrappers.
+                             ((member cname '("java/lang/Integer" "java/lang/Long"
+                                              "java/lang/Short" "java/lang/Byte")
+                                      :test #'string=)
+                              `(%instanceof-integer-check ,obj ,cname (quote ,(intern cname :openldk))))
+                             (t
+                              `(%instanceof-check ,obj ,cname (quote ,(intern cname :openldk))))))
                    :expression-type :INTEGER)))
 
 ;; Utility functions for signed shifts
@@ -1193,7 +1216,12 @@
     (with-slots (class) class
       (make-instance '<expression>
                      :insn insn
-                     :code (list 'make-instance (list 'quote (intern (slot-value class 'name) :openldk)))
+                     :code `(let* ((obj (make-instance ',(intern (slot-value class 'name) :openldk)))
+                                   (klass ,(java-class class)))
+                              ;; Ensure clazz slot is populated for instanceof/reflection
+                              (when (and klass (slot-exists-p obj '|clazz|))
+                                (setf (slot-value obj '|clazz|) klass))
+                              obj)
                      :expression-type :REFERENCE))))
 
 (defmethod codegen ((insn ir-new-array) context)

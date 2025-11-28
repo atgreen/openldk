@@ -98,6 +98,20 @@
 (defmethod |getStackTraceDepth()| ((this |java/lang/Throwable|))
   (length (slot-value this '|backtrace|)))
 
+(defun %coerce-java-integer (obj)
+  "Return a Common Lisp integer extracted from OBJ when possible.
+Accepts native CL integers and Java numeric wrapper instances."
+  (cond
+    ((integerp obj) obj)
+    ((typep obj '|java/lang/Number|)
+     (when (slot-exists-p obj '|value|)
+       (slot-value obj '|value|)))
+    (t nil)))
+
+(defun %boolean-object (truthy)
+  (slot-value |+static-java/lang/Boolean+|
+              (if truthy '|TRUE| '|FALSE|)))
+
 (defun %caller-class-name-from-stack-frame (caller-list)
   (let ((caller-string (format nil "~A" caller-list)))
     (let ((dot-position (position #\. caller-string)))
@@ -1022,7 +1036,12 @@ user.variant
     (constructor params)
   (let ((bin-class-name (substitute #\/ #\. (lstring (slot-value (slot-value constructor '|clazz|) '|name|)))))
     (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring bin-class-name) nil nil nil)
-          (let ((obj (make-instance (intern bin-class-name :openldk))))
+          (let* ((class-sym (intern bin-class-name :openldk))
+                 (obj (make-instance class-sym)))
+            ;; Ensure clazz metadata is populated
+            (when (slot-exists-p obj '|clazz|)
+              (let ((klass (%get-java-class-by-bin-name bin-class-name t)))
+                (when klass (setf (slot-value obj '|clazz|) klass))))
             (if (string= "()V" (lstring (slot-value constructor '|signature|)))
                 (|<init>()| obj)
                 (progn
@@ -1185,7 +1204,20 @@ user.variant
     remaining))
 
 (defmethod |isInstance(Ljava/lang/Object;)| ((this |java/lang/Class|) objref)
-  (if (typep objref (intern (substitute #\/ #\. (lstring (slot-value this '|name|))) :openldk)) 1 0))
+  (let* ((class-name (lstring (slot-value this '|name|)))
+         (normalized-name (substitute #\/ #\. class-name))
+         (class-symbol (intern normalized-name :openldk)))
+    ;; Handle native Lisp integers for Java integral wrapper types
+    (cond
+      ((and (integerp objref)
+            (member normalized-name '("java/lang/Integer" "java/lang/Long"
+                                      "java/lang/Short" "java/lang/Byte"
+                                      "java/lang/Number")
+                    :test #'string=))
+       1)
+      ;; Standard typep check for CLOS objects
+      ((typep objref class-symbol) 1)
+      (t 0))))
 
 (defmethod |closeAll(Ljava/io/Closeable;)| ((stream stream) closeable)
   (close stream))
