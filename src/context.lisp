@@ -41,6 +41,9 @@
 
 (defclass/std <context> ()
   ((class :with)
+   (ldk-loader
+    :doc "The <ldk-class-loader> that loaded the class being compiled.
+ Used for interning symbols in the correct package.")
    (is-clinit-p)
    (uses-stack-p :std t)
    (classes)
@@ -72,6 +75,13 @@
    (pc :std 0)
    (needs-array-bounds-check :std nil)
    (stack :std (list (make-instance '<stack-bottom-marker>)))))
+
+(defun context-package (context)
+  "Get the Lisp package for interning symbols in CONTEXT.
+   Uses the loader's package if available, falls back to :openldk."
+  (if-let ((loader (slot-value context 'ldk-loader)))
+    (loader-package loader)
+    (find-package :openldk)))
 
 (defconstant +stack-bottom-address+ -99)
 

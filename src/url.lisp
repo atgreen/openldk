@@ -110,12 +110,12 @@
 ;; This is needed because URLClassLoader.findClass uses URLClassPath.getResource()
 ;; internally, which has the same build-time URL issue as findResource.
 (defmethod |findClass(Ljava/lang/String;)| :around ((loader |java/net/URLClassLoader|) name)
-  "Find and define a class by NAME using OpenLDK's native classpath."
+  "Find and define a class by NAME using OpenLDK's native classpath with this loader."
   (let* ((class-name (lstring name))
          (bin-name (substitute #\/ #\. class-name)))
-    ;; Try to load using OpenLDK's native class loading
+    ;; Try to load using OpenLDK's native class loading, passing this loader
     (or (handler-case
-            (let ((klass (classload bin-name)))
+            (let ((klass (classload bin-name loader)))
               (when klass
                 (java-class klass)))
           (condition () nil))

@@ -41,11 +41,92 @@
 
 (defvar *classpath* nil)
 
+;; Counter for generating unique class loader IDs
+(defvar *next-loader-id* 0)
+(defvar *next-loader-id-lock* (bordeaux-threads:make-lock "loader-id-lock"))
+
+;; Class loader structure for per-loader package support
+;; Each class loader has its own Lisp package where class/method symbols are interned
+(defclass/std <ldk-class-loader> ()
+  ((id :std 0)                            ; unique identifier
+   (pkg :std nil)                         ; Lisp package for this loader
+   (parent-loader :std nil)               ; parent <ldk-class-loader> for delegation (or NIL)
+   (java-loader :std nil)                 ; corresponding java.lang.ClassLoader object
+   (ldk-classes-by-bin-name :std nil)     ; per-loader hash table for LDK classes
+   (ldk-classes-by-fq-name :std nil)      ; per-loader hash table by FQ name
+   (java-classes-by-bin-name :std nil)    ; per-loader hash table for java.lang.Class
+   (java-classes-by-fq-name :std nil)))   ; per-loader hash table by FQ name
+
+(defmethod print-object ((loader <ldk-class-loader>) out)
+  (print-unreadable-object (loader out :type t)
+    (format out "~A pkg=~A" (slot-value loader 'id) (slot-value loader 'pkg))))
+
+(defun make-ldk-class-loader (&key parent-loader java-loader package-name)
+  "Create a new LDK class loader with its own package and class maps.
+   PARENT-LOADER is the parent <ldk-class-loader> for delegation.
+   JAVA-LOADER is the corresponding java.lang.ClassLoader object.
+   PACKAGE-NAME is the name for the Lisp package (auto-generated if NIL)."
+  (let* ((id (bordeaux-threads:with-lock-held (*next-loader-id-lock*)
+               (incf *next-loader-id*)))
+         (pkg-name (or package-name (format nil "OPENLDK.L~A" id)))
+         (pkg (or (find-package pkg-name)
+                  (make-package pkg-name :use '(:openldk)))))
+    (make-instance '<ldk-class-loader>
+                   :id id
+                   :pkg pkg
+                   :parent-loader parent-loader
+                   :java-loader java-loader
+                   :ldk-classes-by-bin-name (make-hash-table :test #'equal :synchronized t)
+                   :ldk-classes-by-fq-name (make-hash-table :test #'equal :synchronized t)
+                   :java-classes-by-bin-name (make-hash-table :test #'equal :synchronized t)
+                   :java-classes-by-fq-name (make-hash-table :test #'equal :synchronized t))))
+
+;; The boot class loader - created during initialization with OPENLDK.SYSTEM package
+(defvar *boot-ldk-class-loader* nil)
+
+;; Map from java.lang.ClassLoader objects to <ldk-class-loader> objects
+(defvar *java-to-ldk-loaders* (make-hash-table :test #'eq :synchronized t))
+
+(defun get-ldk-loader-for-java-loader (java-loader)
+  "Get or create the <ldk-class-loader> for a java.lang.ClassLoader object.
+   Returns the boot loader if JAVA-LOADER is NIL."
+  (if (null java-loader)
+      *boot-ldk-class-loader*
+      (or (gethash java-loader *java-to-ldk-loaders*)
+          ;; Create a new LDK loader for this Java loader
+          (let* ((parent-java-loader (when (slot-boundp java-loader '|parent|)
+                                       (slot-value java-loader '|parent|)))
+                 (parent-ldk-loader (if parent-java-loader
+                                        (get-ldk-loader-for-java-loader parent-java-loader)
+                                        *boot-ldk-class-loader*))
+                 (new-loader (make-ldk-class-loader :parent-loader parent-ldk-loader
+                                                    :java-loader java-loader)))
+            (setf (gethash java-loader *java-to-ldk-loaders*) new-loader)
+            new-loader))))
+
+(defun loader-package (loader)
+  "Get the Lisp package for a class loader. Uses boot loader package if LOADER is NIL."
+  (if loader
+      (slot-value loader 'pkg)
+      (if *boot-ldk-class-loader*
+          (slot-value *boot-ldk-class-loader* 'pkg)
+          (find-package :openldk))))
+
+(defun class-package (class-name)
+  "Get the Lisp package for a class by its binary name.
+   Looks up the class and returns its loader's package.
+   Falls back to :openldk if class not found or has no loader."
+  (if-let ((class (%get-ldk-class-by-bin-name class-name t)))
+    (if-let ((loader (slot-value class 'ldk-loader)))
+      (loader-package loader)
+      (find-package :openldk))
+    (find-package :openldk)))
+
 ;; BIN-NAME is the binary name of a class.  eg: java/lang/String
 ;; FQ-NAME is the fully qualified name of a class. eg: java.lang.String
 
-;; These two tables only contain entries for classes that have been
-;; loaded.
+;; These global tables are kept for backward compatibility during transition
+;; They serve as the boot loader's class maps
 (defvar *ldk-classes-by-bin-name* (make-hash-table :test #'equal :synchronized t))
 (defvar *ldk-classes-by-fq-name* (make-hash-table :test #'equal :synchronized t))
 
@@ -117,8 +198,10 @@
 (defvar *thread-interrupted* (make-hash-table :test #'eq :synchronized t)
   "Hash table tracking interrupted status for each Java Thread object.")
 
-(defun %get-java-class-by-bin-name (bin-name &optional fail-ok)
-  "Look up a Java class by its binary name BIN-NAME. When FAIL-OK is non-NIL, return NIL instead of asserting."
+(defun %get-java-class-by-bin-name (bin-name &optional fail-ok loader)
+  "Look up a Java class by its binary name BIN-NAME.
+   When FAIL-OK is non-NIL, return NIL instead of asserting.
+   When LOADER is provided, search the loader's class maps with parent delegation."
   (let ((bin-name (cond
                     ((stringp bin-name) bin-name)
                     ((null bin-name)
@@ -128,12 +211,19 @@
                     (t (coerce (java-array-data bin-name) 'string)))))
     (assert (stringp bin-name))
     (assert (not (find #\. bin-name)))
-    (unless fail-ok
-      (assert (gethash bin-name *java-classes-by-bin-name*)))
-    (gethash bin-name *java-classes-by-bin-name*)))
+    (let ((result (if loader
+                      ;; Search with parent delegation
+                      (%lookup-class-with-delegation loader bin-name 'java-classes-by-bin-name)
+                      ;; Fall back to global tables for backward compatibility
+                      (gethash bin-name *java-classes-by-bin-name*))))
+      (unless (or fail-ok result)
+        (error "Class ~A not found in %get-java-class-by-bin-name" bin-name))
+      result)))
 
-(defun %get-java-class-by-fq-name (fq-name &optional fail-ok)
-  "Look up a Java class by its fully-qualified Java name FQ-NAME. When FAIL-OK is non-NIL, return NIL instead of asserting."
+(defun %get-java-class-by-fq-name (fq-name &optional fail-ok loader)
+  "Look up a Java class by its fully-qualified Java name FQ-NAME.
+   When FAIL-OK is non-NIL, return NIL instead of asserting.
+   When LOADER is provided, search the loader's class maps with parent delegation."
   (let ((fq-name (cond
                    ((stringp fq-name) fq-name)
                    ((null fq-name)
@@ -143,12 +233,17 @@
                    (t (coerce (java-array-data fq-name) 'string)))))
     (assert (stringp fq-name))
     (assert (not (find #\/ fq-name)))
-    (unless fail-ok
-      (assert (gethash fq-name *java-classes-by-fq-name*)))
-    (gethash fq-name *java-classes-by-fq-name*)))
+    (let ((result (if loader
+                      (%lookup-class-with-delegation loader fq-name 'java-classes-by-fq-name)
+                      (gethash fq-name *java-classes-by-fq-name*))))
+      (unless (or fail-ok result)
+        (error "Class ~A not found in %get-java-class-by-fq-name" fq-name))
+      result)))
 
-(defun %get-ldk-class-by-bin-name (bin-name &optional fail-ok)
-  "Look up an LDK class by its binary name BIN-NAME. When FAIL-OK is non-NIL, return NIL instead of asserting."
+(defun %get-ldk-class-by-bin-name (bin-name &optional fail-ok loader)
+  "Look up an LDK class by its binary name BIN-NAME.
+   When FAIL-OK is non-NIL, return NIL instead of asserting.
+   When LOADER is provided, search the loader's class maps with parent delegation."
   (let ((bin-name (cond
                     ((stringp bin-name) bin-name)
                     ((null bin-name)
@@ -158,12 +253,17 @@
                     (t (coerce (java-array-data bin-name) 'string)))))
     (assert (stringp bin-name))
     (assert (not (find #\. bin-name)))
-    (unless fail-ok
-      (assert (gethash bin-name *ldk-classes-by-bin-name*)))
-    (gethash bin-name *ldk-classes-by-bin-name*)))
+    (let ((result (if loader
+                      (%lookup-class-with-delegation loader bin-name 'ldk-classes-by-bin-name)
+                      (gethash bin-name *ldk-classes-by-bin-name*))))
+      (unless (or fail-ok result)
+        (error "Class ~A not found in %get-ldk-class-by-bin-name" bin-name))
+      result)))
 
-(defun %get-ldk-class-by-fq-name (fq-name &optional fail-ok)
-  "Look up an LDK class by its fully-qualified Java name FQ-NAME. When FAIL-OK is non-NIL, return NIL instead of asserting."
+(defun %get-ldk-class-by-fq-name (fq-name &optional fail-ok loader)
+  "Look up an LDK class by its fully-qualified Java name FQ-NAME.
+   When FAIL-OK is non-NIL, return NIL instead of asserting.
+   When LOADER is provided, search the loader's class maps with parent delegation."
   (let ((fq-name (cond
                    ((stringp fq-name) fq-name)
                    ((null fq-name)
@@ -172,6 +272,17 @@
                         (error "fq-name is NIL in %get-ldk-class-by-fq-name")))
                    (t (coerce (java-array-data fq-name) 'string)))))
     (assert (stringp fq-name))
-    (unless fail-ok
-      (assert (gethash fq-name *ldk-classes-by-fq-name*)))
-    (gethash fq-name *ldk-classes-by-fq-name*)))
+    (let ((result (if loader
+                      (%lookup-class-with-delegation loader fq-name 'ldk-classes-by-fq-name)
+                      (gethash fq-name *ldk-classes-by-fq-name*))))
+      (unless (or fail-ok result)
+        (error "Class ~A not found in %get-ldk-class-by-fq-name" fq-name))
+      result)))
+
+(defun %lookup-class-with-delegation (loader name slot-name)
+  "Look up a class in LOADER's hash table (SLOT-NAME) with parent delegation.
+   Returns NIL if not found in any loader in the chain."
+  (when loader
+    (or (gethash name (slot-value loader slot-name))
+        (when-let ((parent (slot-value loader 'parent-loader)))
+          (%lookup-class-with-delegation parent name slot-name)))))

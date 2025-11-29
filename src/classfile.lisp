@@ -236,7 +236,8 @@
     methods
     inner-classes
     attributes
-    java-class)))
+    java-class
+    ldk-loader)))  ; <ldk-class-loader> that loaded this class
 
 (defclass/std <inner-class> ()
   ((inner-class-info-index

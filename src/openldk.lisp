@@ -987,6 +987,7 @@ get the same unified var-numbers."
              (length (length code))
              (*context* (make-instance '<context>
                                        :class class
+                                       :ldk-loader (slot-value class 'ldk-loader)
                                        :classes *ldk-classes-by-bin-name*
                                        :exception-table exception-table
                                        :bytecode code
@@ -1328,31 +1329,46 @@ get the same unified var-numbers."
         ;; No conflict, return as-is
         name)))
 
-(defun emit-<class> (class)
-  (let ((defclass-code (with-slots (name super interfaces fields) class
-                         (list
-                          'progn
-                          (list
-                           'defclass (intern name :openldk)
-                           (if (or super interfaces) (append (if super (list (intern super :openldk)) nil)
-                                                             (let ((ifaces (mapcar (lambda (i) (intern i :openldk))
-                                                                                   (coerce interfaces  'list))))
-                                                               (sort (copy-list ifaces) #'subtypep)))
-                               (list))
-                           (map 'list
-                                (lambda (f)
-                                  (list (intern (mangle-field-name (slot-value f 'name)) :openldk)
-                                        :initform (let ((cf (gethash "ConstantValue" (slot-value f 'attributes))))
-                                                    (if cf
-                                                        (value (emit (aref (constant-pool class) cf) (constant-pool class)))
-                                                        (initform-from-descriptor (slot-value f 'descriptor))))
-                                        :allocation
-                                        (if (eq 0 (logand 8 (slot-value f 'access-flags))) :instance :class)))
-                                fields))
-                          (list
-                           'defparameter (intern (format nil "+static-~A+" (intern name)) :openldk)
-                           (list
-                            'make-instance (list 'quote (intern name :openldk)))))))
+(defun emit-<class> (class ldk-loader)
+  (let* ((pkg (loader-package ldk-loader))
+         (defclass-code (with-slots (name super interfaces fields) class
+                          ;; Look up superclass's package (it may be from a parent loader)
+                          (let ((super-pkg (if super
+                                               (let ((super-class (%get-ldk-class-by-bin-name super t)))
+                                                 (if (and super-class (slot-value super-class 'ldk-loader))
+                                                     (loader-package (slot-value super-class 'ldk-loader))
+                                                     :openldk))
+                                               :openldk)))
+                            (list
+                             'progn
+                             (list
+                              'defclass (intern name pkg)
+                              (if (or super interfaces)
+                                  (append (if super (list (intern super super-pkg)) nil)
+                                          (let ((ifaces (mapcar (lambda (i)
+                                                                  ;; Look up interface's package
+                                                                  (let* ((iface-class (%get-ldk-class-by-bin-name i t))
+                                                                         (iface-pkg (if (and iface-class (slot-value iface-class 'ldk-loader))
+                                                                                        (loader-package (slot-value iface-class 'ldk-loader))
+                                                                                        :openldk)))
+                                                                    (intern i iface-pkg)))
+                                                                (coerce interfaces 'list))))
+                                            (sort (copy-list ifaces) #'subtypep)))
+                                  (list))
+                              (map 'list
+                                   (lambda (f)
+                                     (list (intern (mangle-field-name (slot-value f 'name)) pkg)
+                                           :initform (let ((cf (gethash "ConstantValue" (slot-value f 'attributes))))
+                                                       (if cf
+                                                           (value (emit (aref (constant-pool class) cf) (constant-pool class)))
+                                                           (initform-from-descriptor (slot-value f 'descriptor))))
+                                           :allocation
+                                           (if (eq 0 (logand 8 (slot-value f 'access-flags))) :instance :class)))
+                                   fields))
+                             (list
+                              'defparameter (intern (format nil "+static-~A+" (intern name pkg)) pkg)
+                              (list
+                               'make-instance (list 'quote (intern name pkg))))))))
         (methods-code
           (let ((method-index 0)
                 (done-method-table (make-hash-table :test #'equal)))
@@ -1383,7 +1399,7 @@ get the same unified var-numbers."
                                                                       (format nil "~A~A"
                                                                               (slot-value m 'name)
                                                                               (slot-value m 'descriptor))))
-                                                             :openldk)
+                                                             pkg)
                                                      (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
                                                            collect (intern (format nil "arg~A" i) :openldk))
                                                      (list '%compile-method (slot-value class 'name) (incf method-index))
@@ -1393,17 +1409,19 @@ get the same unified var-numbers."
                                                                             (format nil "~A~A"
                                                                                     (slot-value m 'name)
                                                                                     (slot-value m 'descriptor))))
-                                                                   :openldk)
+                                                                   pkg)
                                                            (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
                                                                  collect (intern (format nil "arg~A" i) :openldk))))
+                                               ;; Instance methods: method name in :openldk (generic functions),
+                                               ;; but class specializer uses pkg (the class we're defining)
                                                (list 'defmethod (intern (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) :openldk)
-                                                     (cons (list (intern "this" :openldk) (intern (slot-value (slot-value m 'class) 'name) :openldk))
+                                                     (cons (list (intern "this" :openldk) (intern (slot-value (slot-value m 'class) 'name) pkg))
                                                            (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
                                                                  collect (intern (format nil "arg~A" i) :openldk)))
                                                      (list '%compile-method (slot-value class 'name) (incf method-index))
                                                      (list 'invoke-special
                                                            (list 'quote (intern (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) :openldk))
-                                                           (list 'quote (intern (slot-value (slot-value m 'class) 'name) :openldk))
+                                                           (list 'quote (intern (slot-value (slot-value m 'class) 'name) pkg))
                                                            (cons 'list
                                                                  (cons (intern "this" :openldk)
                                                                        (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
@@ -1413,24 +1431,29 @@ get the same unified var-numbers."
     (append defclass-code methods-code)))
 
 
-(defun %classload-from-stream (classname classfile-stream class-loader)
+(defun %classload-from-stream (classname classfile-stream class-loader ldk-loader)
+  "Load a class from a stream. CLASS-LOADER is the java.lang.ClassLoader object.
+   LDK-LOADER is the <ldk-class-loader> to use for this class."
   (unwind-protect
-       (let* ((classname-symbol (intern classname :openldk))
+       (let* ((pkg (loader-package ldk-loader))
+              (classname-symbol (intern classname pkg))
               (fq-classname (cl-ppcre:regex-replace-all "\\.anonymous-class"
                                                         (substitute #\. #\/ classname)
                                                         "/anonymous-class"))
               (class
                 (let ((c (read-classfile classfile-stream)))
                   (setf (name c) classname)
-                  (setf (gethash classname *ldk-classes-by-bin-name*) c)
-                  (setf (gethash fq-classname *ldk-classes-by-fq-name*) c)
+                  (setf (slot-value c 'ldk-loader) ldk-loader)
+                  ;; Store in loader's hash tables
+                  (setf (gethash classname (slot-value ldk-loader 'ldk-classes-by-bin-name)) c)
+                  (setf (gethash fq-classname (slot-value ldk-loader 'ldk-classes-by-fq-name)) c)
                   c))
               (super (let ((super (slot-value class 'super)))
                        (when super (classload super))))
               (interfaces (let ((interfaces (slot-value class 'interfaces)))
                             (when interfaces
                               (mapcar (lambda (i) (classload i)) (coerce interfaces 'list))))))
-         (let ((klass (or (%get-java-class-by-bin-name classname t)
+         (let ((klass (or (%get-java-class-by-bin-name classname t ldk-loader)
                           (let ((klass (make-instance '|java/lang/Class|))
                                 (cname (jstring fq-classname)))
                             (with-slots (|name| |classLoader|) klass
@@ -1439,10 +1462,11 @@ get the same unified var-numbers."
                             klass))))
            (setf (java-class class) klass)
            (setf (slot-value klass '|classLoader|) class-loader)
-           (setf (gethash classname *java-classes-by-bin-name*) klass)
-           (setf (gethash fq-classname *java-classes-by-fq-name*) klass))
+           ;; Store in loader's java-class hash tables
+           (setf (gethash classname (slot-value ldk-loader 'java-classes-by-bin-name)) klass)
+           (setf (gethash fq-classname (slot-value ldk-loader 'java-classes-by-fq-name)) klass))
 
-         (let ((code (emit-<class> class)))
+         (let ((code (emit-<class> class ldk-loader)))
            ;; In AOT mode, extract and write class definitions separately
            (when *aot-dir*
              ;; Code is a list like (progn (defclass...) (defparameter...) method-stub1 method-stub2 ...)
@@ -1462,27 +1486,39 @@ get the same unified var-numbers."
                (push class-name (inner-classes class)))))
 
          ;; Emit the class initializer
-         (let ((lisp-class (find-class (intern (substitute #\/ #\. classname) :openldk))))
+         (let ((lisp-class (find-class (intern classname pkg))))
            (closer-mop:finalize-inheritance lisp-class)
-           (let ((icc (append (list 'defun (intern (format nil "%clinit-~A" (substitute #\/ #\. classname)) :openldk) (list))
+           (let ((icc (append (list 'defun (intern (format nil "%clinit-~A" classname) pkg) (list))
                               ;; (list (list 'format 't ">>> clinit ~A~%" lisp-class))
                               (loop for k in (reverse (closer-mop:class-precedence-list lisp-class))
-                                    for clinit-function = (intern (format nil "~a.<clinit>()" (class-name k)) :openldk)
-                                    when (fboundp clinit-function)
-                                      collect (let ((ldkclass (gethash (format nil "~A" (class-name k)) *ldk-classes-by-bin-name*)))
-                                                (list 'unless (list 'initialized-p ldkclass)
-                                                      (list 'setf (list 'initialized-p ldkclass) t)
-                                                      (list clinit-function)))))))
+                                    ;; clinit-function uses the class's own package (it's a static method)
+                                    for k-ldk-class = (%get-ldk-class-by-bin-name (format nil "~A" (class-name k)) t)
+                                    for k-pkg = (if (and k-ldk-class (slot-value k-ldk-class 'ldk-loader))
+                                                    (loader-package (slot-value k-ldk-class 'ldk-loader))
+                                                    :openldk)
+                                    for clinit-function = (intern (format nil "~a.<clinit>()" (class-name k)) k-pkg)
+                                    when (and k-ldk-class (fboundp clinit-function))
+                                      collect (list 'unless (list 'initialized-p k-ldk-class)
+                                                    (list 'setf (list 'initialized-p k-ldk-class) t)
+                                                    (list clinit-function))))))
              (%eval icc)))
 
          (when (and (not (string= classname "java/lang/Throwable"))
                     (subtypep classname-symbol (find-class '|java/lang/Throwable|)))
+           ;; Condition symbols always in :openldk for compatibility
            (let ((condition-symbol (intern (format nil "condition-~A" classname) :openldk)))
-             (setf (gethash (find-class (intern classname :openldk)) *condition-table*) condition-symbol)
-             (let ((ccode `(define-condition ,condition-symbol (,(intern (format nil "condition-~A" (slot-value super 'name)) :openldk))
-                             ())))
-               (%eval ccode))
-             (let ((ccode `(defmethod %lisp-condition ((throwable ,(intern (format nil "~A" classname) :openldk)))
+             (setf (gethash (find-class (intern classname pkg)) *condition-table*) condition-symbol)
+             ;; Get super's loader package for the parent condition
+             (let* ((super-ldk-class (%get-ldk-class-by-bin-name (slot-value super 'name) t))
+                    (super-pkg (if (and super-ldk-class (slot-value super-ldk-class 'ldk-loader))
+                                   (loader-package (slot-value super-ldk-class 'ldk-loader))
+                                   :openldk)))
+               (declare (ignore super-pkg))  ; Parent condition uses :openldk too
+               (let ((ccode `(define-condition ,condition-symbol (,(intern (format nil "condition-~A" (slot-value super 'name)) :openldk))
+                               ())))
+                 (%eval ccode)))
+             ;; %lisp-condition method: method name in :openldk, class specializer uses pkg
+             (let ((ccode `(defmethod %lisp-condition ((throwable ,(intern (format nil "~A" classname) pkg)))
                              (let ((c (make-condition (quote ,(intern (format nil "condition-~A" classname) :openldk)))))
                                ;; Debug: print backtrace for Error types
                                (when (and *debug-codegen* (search "Error" ,classname))
@@ -1500,21 +1536,47 @@ get the same unified var-numbers."
     (close classfile-stream)))
 
 (defun classload (classname &optional (class-loader nil))
+  "Load a class from the classpath. Always uses the boot loader for classpath classes.
+   CLASS-LOADER is the java.lang.ClassLoader object (usually NIL for boot loader)."
   (let ((classname (coerce classname 'string)))
     (assert (not (find #\. classname)))
     (assert (> (length classname) 0))
-    (let ((class (gethash classname *ldk-classes-by-bin-name*)))
-      (if class
-          class
-          (let ((classfile-stream (open-java-classfile-on-classpath classname)))
-            (if classfile-stream
-                (progn
-                  (when *debug-load*
-                    (format t "~&; LOADING   ~A~%" classname))
-                  (if classfile-stream
-                      (%classload-from-stream classname classfile-stream class-loader)
-                      nil))
-                nil))))))
+    ;; Always use boot loader for classpath classes (parent delegation model)
+    ;; Child loaders define their own classes via defineClass, not classload
+    ;; During warm-up before main() initializes boot loader, use global tables directly
+    (if *boot-ldk-class-loader*
+        (let ((class (gethash classname (slot-value *boot-ldk-class-loader* 'ldk-classes-by-bin-name))))
+          (if class
+              class
+              (let ((classfile-stream (open-java-classfile-on-classpath classname)))
+                (if classfile-stream
+                    (progn
+                      (when *debug-load*
+                        (format t "~&; LOADING   ~A~%" classname))
+                      (%classload-from-stream classname classfile-stream class-loader *boot-ldk-class-loader*))
+                    nil))))
+        ;; Fallback for warm-up (before main initializes boot loader)
+        ;; Uses global tables and :openldk package directly
+        (let ((class (gethash classname *ldk-classes-by-bin-name*)))
+          (if class
+              class
+              (let ((classfile-stream (open-java-classfile-on-classpath classname)))
+                (if classfile-stream
+                    (progn
+                      (when *debug-load*
+                        (format t "~&; LOADING   ~A~%" classname))
+                      ;; Create temporary boot loader for warm-up that uses global tables
+                      (let ((temp-loader (make-instance '<ldk-class-loader>
+                                                        :id 0
+                                                        :pkg (find-package :openldk)
+                                                        :parent-loader nil
+                                                        :java-loader nil
+                                                        :ldk-classes-by-bin-name *ldk-classes-by-bin-name*
+                                                        :ldk-classes-by-fq-name *ldk-classes-by-fq-name*
+                                                        :java-classes-by-bin-name *java-classes-by-bin-name*
+                                                        :java-classes-by-fq-name *java-classes-by-fq-name*)))
+                        (%classload-from-stream classname classfile-stream class-loader temp-loader)))
+                    nil)))))))
 
 (defun ensure-JAVA_HOME ()
   (let ((JAVA_HOME (uiop:getenv "JAVA_HOME")))
@@ -1538,6 +1600,20 @@ get the same unified var-numbers."
 
   ;; Install SIGQUIT handler for debugging hangs (send kill -3 to dump all stacks)
   (install-sigquit-handler)
+
+  ;; Initialize the boot class loader if not already done
+  ;; It uses the global class tables and OPENLDK package
+  (unless *boot-ldk-class-loader*
+    (setf *boot-ldk-class-loader*
+          (make-instance '<ldk-class-loader>
+                         :id 0
+                         :pkg (find-package :openldk)
+                         :parent-loader nil
+                         :java-loader nil
+                         :ldk-classes-by-bin-name *ldk-classes-by-bin-name*
+                         :ldk-classes-by-fq-name *ldk-classes-by-fq-name*
+                         :java-classes-by-bin-name *java-classes-by-bin-name*
+                         :java-classes-by-fq-name *java-classes-by-fq-name*)))
 
   ;; If classpath isn't set on the command line, then get it
   ;; from the LDK_CLASSPATH environment variable.

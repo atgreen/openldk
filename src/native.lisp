@@ -544,10 +544,17 @@ and its implementation."
         0
         1)))
 
+(defun get-ldk-class-for-java-class (java-class)
+  "Get the <class> object for a java.lang.Class, using the correct loader."
+  (let* ((fq-name (lstring (slot-value java-class '|name|)))
+         (java-loader (slot-value java-class '|classLoader|))
+         (ldk-loader (get-ldk-loader-for-java-loader java-loader)))
+    (%get-ldk-class-by-fq-name fq-name t ldk-loader)))
+
 (defmethod |isInterface()| ((this |java/lang/Class|))
   (if (and (eq 0 (|isPrimitive()| this))
-           (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value this '|name|)))))
-             (interface-p lclass)))
+           (let ((lclass (get-ldk-class-for-java-class this)))
+             (and lclass (interface-p lclass))))
       1
       0))
 
@@ -557,11 +564,12 @@ and its implementation."
 (defmethod |getConstantPool()| ((this |java/lang/Class|))
   (unless (%get-ldk-class-by-fq-name "sun.reflect.ConstantPool" t)
     (%clinit (classload "sun/reflect/ConstantPool")))
-  (let ((ldk-class (%get-ldk-class-by-fq-name (lstring (slot-value this '|name|)))))
-    (let ((cp (make-instance '|sun/reflect/ConstantPool|)))
-      (setf (slot-value cp '|constantPoolOop|)
-            (make-instance '<constant-pool> :ldk-class ldk-class))
-      cp)))
+  (let ((ldk-class (get-ldk-class-for-java-class this)))
+    (when ldk-class
+      (let ((cp (make-instance '|sun/reflect/ConstantPool|)))
+        (setf (slot-value cp '|constantPoolOop|)
+              (make-instance '<constant-pool> :ldk-class ldk-class))
+        cp))))
 
 (defmethod |getDeclaredConstructors0(Z)| ((this |java/lang/Class|) arg)
   ;; FIXME
@@ -572,13 +580,14 @@ and its implementation."
          (unless (%get-ldk-class-by-bin-name "java/lang/reflect/Constructor")
            (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/reflect/Constructor") nil nil nil))
 
-         ;; Get the lclass for THIS
-         (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value this '|name|)))))
+         ;; Get the lclass for THIS (use correct loader)
+         (let ((lclass (get-ldk-class-for-java-class this)))
            (make-java-array
             :component-class (%get-java-class-by-fq-name "java.lang.reflect.Constructor")
             :initial-contents
-            (coerce (append (loop for method across (methods lclass)
-                                  when (starts-with? "<init>" (name method))
+            (coerce (append (when lclass
+                              (loop for method across (methods lclass)
+                                    when (starts-with? "<init>" (name method))
                                     #|
                                     Class<?>[] parameterTypes,
                                     Class<?>[] checkedExceptions,
@@ -603,19 +612,20 @@ and its implementation."
                                                    (make-java-array
                                                     :component-class (%get-java-class-by-fq-name "byte")
                                                     :initial-contents (cons (length pt) (make-list (* 2 (length pt)) :initial-element 0)))))
-                                              c)))
+                                              c))))
                     'vector))))
     (when *debug-trace*
       (incf *call-nesting-level* -1))))
 
 (defmethod |getDeclaredClasses0()| ((this |java/lang/Class|))
-  (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value this '|name|)))))
+  (let ((lclass (get-ldk-class-for-java-class this)))
     ;; FIXME: need to get all inner classes
     (let ((java-classes
-            (loop for iclass in (inner-classes lclass)
-                  for c = (%get-java-class-by-bin-name (value iclass) t)
-                  when c
-                    collect c)))
+            (when lclass
+              (loop for iclass in (inner-classes lclass)
+                    for c = (%get-java-class-by-bin-name (value iclass) t)
+                    when c
+                      collect c))))
       (make-java-array
        :component-class (%get-java-class-by-fq-name "java.lang.Class")
        :initial-contents (coerce java-classes 'vector)))))
@@ -629,12 +639,13 @@ and its implementation."
          (unless (gethash "java/lang/reflect/Method" *ldk-classes-by-bin-name*)
            (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/reflect/Method") nil nil nil))
 
-         ;; Get the lclass for THIS
-         (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value this '|name|)))))
+         ;; Get the lclass for THIS (use correct loader)
+         (let ((lclass (get-ldk-class-for-java-class this)))
            (make-java-array
             :component-class (%get-java-class-by-fq-name "java.lang.reflect.Method")
-            :initial-contents (coerce (append (loop for method across (methods lclass)
-                                                    unless (starts-with? "<init>" (name method))
+            :initial-contents (coerce (append (when lclass
+                                                (loop for method across (methods lclass)
+                                                      unless (starts-with? "<init>" (name method))
                                                       #|
                                                       Method(Class<?> declaringClass,
                                                       String name,
@@ -683,7 +694,7 @@ and its implementation."
                                                                                          :initial-element 0))))
                                                                    (gethash "AnnotationDefault"
                                                                             (attributes method)))
-                                                          c))))
+                                                          c)))))
                                       'vector))))
          (when *debug-trace*
            (incf *call-nesting-level* -1))))
@@ -697,8 +708,8 @@ and its implementation."
          (unless (gethash "java/lang/reflect/Field" *ldk-classes-by-bin-name* t)
            (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/reflect/Field") nil nil nil))
 
-         ;; Get the lclass for THIS
-         (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value this '|name|)))))
+         ;; Get the lclass for THIS (use correct loader)
+         (let ((lclass (get-ldk-class-for-java-class this)))
            (labels ((get-fields (lclass)
                       (when lclass
                         (append (loop for field across (fields lclass)
@@ -977,14 +988,14 @@ user.variant
                    0))
               ;; Neither is array - use normal class hierarchy
               (t
-               (let ((this-ldk-class (%get-ldk-class-by-fq-name this-name t))
-                     (other-ldk-class (%get-ldk-class-by-fq-name other-name t)))
+               (let ((this-ldk-class (get-ldk-class-for-java-class this))
+                     (other-ldk-class (get-ldk-class-for-java-class other)))
                  (if (and this-ldk-class
                           other-ldk-class
-                          (find-class (intern (name other-ldk-class) :openldk) nil)
-                          (find-class (intern (name this-ldk-class) :openldk) nil)
-                          (closer-mop:subclassp (find-class (intern (name other-ldk-class) :openldk))
-                                                (find-class (intern (name this-ldk-class) :openldk))))
+                          (find-class (intern (name other-ldk-class) (class-package (name other-ldk-class))) nil)
+                          (find-class (intern (name this-ldk-class) (class-package (name this-ldk-class))) nil)
+                          (closer-mop:subclassp (find-class (intern (name other-ldk-class) (class-package (name other-ldk-class))))
+                                                (find-class (intern (name this-ldk-class) (class-package (name this-ldk-class))))))
                      1
                      0))))))))
 
@@ -1010,58 +1021,65 @@ user.variant
   (make-java-array :component-class (java-array-component-class array) :initial-contents (copy-seq (java-array-data array))))
 
 (defun |sun/reflect/Reflection.getClassAccessFlags(Ljava/lang/Class;)| (class)
-  (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value class '|name|)))))
-    (access-flags lclass)))
+  (let ((lclass (get-ldk-class-for-java-class class)))
+    (if lclass (access-flags lclass) 0)))
 
 (defmethod |getModifiers()| ((class |java/lang/Class|))
   (if (eq (|isArray()| class) 1)
       0
-      (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value class '|name|)))))
-        (access-flags lclass))))
+      (let ((lclass (get-ldk-class-for-java-class class)))
+        (if lclass (access-flags lclass) 0))))
 
 (defmethod |getSuperclass()| ((class |java/lang/Class|))
-  (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value class '|name|)))))
-    (gethash (super lclass) *java-classes-by-bin-name*)))
+  (let ((lclass (get-ldk-class-for-java-class class)))
+    (when lclass
+      (gethash (super lclass) *java-classes-by-bin-name*))))
 
 (defmethod |getInterfaces0()| ((class |java/lang/Class|))
   ;; FIXME: do something different for interfaces?
-  (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value class '|name|)))))
+  (let ((lclass (get-ldk-class-for-java-class class)))
     (make-java-array
      :component-class (%get-java-class-by-fq-name "java.lang.Class")
      :initial-contents
-     (coerce (mapcar (lambda (iname) (java-class (gethash iname *ldk-classes-by-bin-name*))) (coerce (interfaces lclass) 'list))
-             'vector))))
+     (if lclass
+         (coerce (mapcar (lambda (iname) (java-class (gethash iname *ldk-classes-by-bin-name*))) (coerce (interfaces lclass) 'list))
+                 'vector)
+         #()))))
 
 (defun |sun/reflect/NativeConstructorAccessorImpl.newInstance0(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)|
     (constructor params)
-  (let ((bin-class-name (substitute #\/ #\. (lstring (slot-value (slot-value constructor '|clazz|) '|name|)))))
+  (let* ((java-class (slot-value constructor '|clazz|))
+         (bin-class-name (substitute #\/ #\. (lstring (slot-value java-class '|name|))))
+         (java-loader (slot-value java-class '|classLoader|))
+         (ldk-loader (get-ldk-loader-for-java-loader java-loader))
+         (pkg (loader-package ldk-loader)))
     (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring bin-class-name) nil nil nil)
-          (let* ((class-sym (intern bin-class-name :openldk))
-                 (obj (make-instance class-sym)))
-            ;; Ensure clazz metadata is populated
-            (when (slot-exists-p obj '|clazz|)
-              (let ((klass (%get-java-class-by-bin-name bin-class-name t)))
-                (when klass (setf (slot-value obj '|clazz|) klass))))
-            (if (string= "()V" (lstring (slot-value constructor '|signature|)))
-                (|<init>()| obj)
-                (progn
-                  (apply (intern
-                          (lispize-method-name
-                           (format nil "<init>~A" (lstring (slot-value constructor '|signature|))))
-                          :openldk)
-                 ;; params can be NIL for zero-arg constructor paths; guard before accessing array-data.
-                 (cons obj (if params (coerce (java-array-data params) 'list) nil)))))
-            ; (format t "~&NEWINSTANCE0 ~A = ~A~%" constructor obj)
-            obj)))
+    (let* ((class-sym (intern bin-class-name pkg))
+           (obj (make-instance class-sym)))
+      ;; Ensure clazz metadata is populated
+      (when (slot-exists-p obj '|clazz|)
+        (let ((klass (%get-java-class-by-bin-name bin-class-name t)))
+          (when klass (setf (slot-value obj '|clazz|) klass))))
+      (if (string= "()V" (lstring (slot-value constructor '|signature|)))
+          (|<init>()| obj)
+          (progn
+            (apply (intern
+                    (lispize-method-name
+                     (format nil "<init>~A" (lstring (slot-value constructor '|signature|))))
+                    pkg)
+                   ;; params can be NIL for zero-arg constructor paths; guard before accessing array-data.
+                   (cons obj (if params (coerce (java-array-data params) 'list) nil)))))
+      ; (format t "~&NEWINSTANCE0 ~A = ~A~%" constructor obj)
+      obj)))
 
 (defmethod |ensureClassInitialized(Ljava/lang/Class;)| ((unsafe |sun/misc/Unsafe|) class)
-  (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value class '|name|)))))
-    (assert lclass)
-    (%clinit lclass)))
+  (let ((lclass (get-ldk-class-for-java-class class)))
+    (when lclass
+      (%clinit lclass))))
 
 (defmethod |shouldBeInitialized(Ljava/lang/Class;)| ((unsafe |sun/misc/Unsafe|) class)
-  (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value class '|name|)))))
-    (if (initialized-p lclass)
+  (let ((lclass (get-ldk-class-for-java-class class)))
+    (if (and lclass (initialized-p lclass))
         1
         0)))
 
@@ -1089,6 +1107,91 @@ user.variant
 (defun |java/lang/ClassLoader.findBuiltinLib(Ljava/lang/String;)| (library-name)
   ;; FIXME
   library-name)
+
+(defun |java/lang/ClassLoader.findLoadedClass0(Ljava/lang/String;)| (loader name)
+  "Check if a class has already been loaded by this class loader.
+   Returns the java.lang.Class if found, nil otherwise."
+  (let* ((class-name (lstring name))
+         (bin-name (substitute #\/ #\. class-name))
+         (ldk-loader (get-ldk-loader-for-java-loader loader)))
+    ;; Check only this loader's class map (not parent - that's Java's job)
+    (when ldk-loader
+      (gethash bin-name (slot-value ldk-loader 'java-classes-by-bin-name)))))
+
+(defun |java/lang/ClassLoader.defineClass1(Ljava/lang/String;[BIILjava/security/ProtectionDomain;Ljava/lang/String;)|
+    (loader name bytes offset len pd source)
+  "Define a class from byte array data using the specified class loader."
+  (declare (ignore pd source))
+  (let* ((class-name (if name (lstring name) nil))
+         (byte-data (java-array-data bytes))
+         ;; Extract the relevant portion of the byte array
+         (class-bytes (if (and (zerop offset) (= len (length byte-data)))
+                          byte-data
+                          (subseq byte-data offset (+ offset len)))))
+    (%define-class-from-bytes loader class-name class-bytes)))
+
+(defun %define-class-from-bytes (loader class-name-hint class-bytes)
+  "Internal function to define a class from raw bytes.
+   LOADER is the java.lang.ClassLoader.
+   CLASS-NAME-HINT is optional hint (may be nil, we read actual name from bytes).
+   CLASS-BYTES is the raw classfile bytes."
+  (let* ((ldk-loader (get-ldk-loader-for-java-loader loader))
+         (pkg (loader-package ldk-loader)))
+    ;; Create an input stream from the bytes
+    (flexi-streams:with-input-from-sequence (stream class-bytes)
+      (let* ((class (read-classfile stream))
+             (classname (slot-value class 'name))
+             (fq-classname (substitute #\. #\/ classname)))
+        ;; Verify name matches hint if provided
+        (when (and class-name-hint
+                   (not (string= classname (substitute #\/ #\. class-name-hint))))
+          (error "Class name ~A does not match expected ~A" classname class-name-hint))
+
+        ;; Set the loader on the class
+        (setf (slot-value class 'ldk-loader) ldk-loader)
+
+        ;; Store in loader's class maps
+        (setf (gethash classname (slot-value ldk-loader 'ldk-classes-by-bin-name)) class)
+        (setf (gethash fq-classname (slot-value ldk-loader 'ldk-classes-by-fq-name)) class)
+
+        ;; Create java.lang.Class object
+        (let ((klass (make-instance '|java/lang/Class|))
+              (cname (jstring fq-classname)))
+          (with-slots (|name| |classLoader|) klass
+            (setf |name| cname)
+            (setf |classLoader| loader))
+          (setf (java-class class) klass)
+          (setf (gethash classname (slot-value ldk-loader 'java-classes-by-bin-name)) klass)
+          (setf (gethash fq-classname (slot-value ldk-loader 'java-classes-by-fq-name)) klass)
+
+          ;; Emit and evaluate the class definition
+          (let ((code (emit-<class> class ldk-loader)))
+            (%eval code))
+
+          ;; Load super and interfaces (using this loader for resolution)
+          (let ((super (slot-value class 'super))
+                (interfaces (slot-value class 'interfaces)))
+            (when super (classload super loader))
+            (when interfaces
+              (dolist (iface (coerce interfaces 'list))
+                (classload iface loader))))
+
+          ;; Emit the class initializer
+          (let ((lisp-class (find-class (intern (substitute #\/ #\. classname) pkg))))
+            (closer-mop:finalize-inheritance lisp-class)
+            (let ((icc (append (list 'defun (intern (format nil "%clinit-~A" (substitute #\/ #\. classname)) pkg) (list))
+                               (loop for k in (reverse (closer-mop:class-precedence-list lisp-class))
+                                     for clinit-function = (intern (format nil "~a.<clinit>()" (class-name k)) pkg)
+                                     when (fboundp clinit-function)
+                                       collect (let ((ldkclass (%get-ldk-class-by-bin-name (format nil "~A" (class-name k)) t ldk-loader)))
+                                                 (when ldkclass
+                                                   (list 'unless (list 'initialized-p ldkclass)
+                                                         (list 'setf (list 'initialized-p ldkclass) t)
+                                                         (list clinit-function))))))))
+              (%eval icc)))
+
+          ;; Return the java.lang.Class
+          klass)))))
 
 (defmethod |load(Ljava/lang/String;Z)| ((loader t) library-name is-builtin)
   (when *debug-trace*
@@ -1206,7 +1309,10 @@ user.variant
 (defmethod |isInstance(Ljava/lang/Object;)| ((this |java/lang/Class|) objref)
   (let* ((class-name (lstring (slot-value this '|name|)))
          (normalized-name (substitute #\/ #\. class-name))
-         (class-symbol (intern normalized-name :openldk)))
+         (java-loader (slot-value this '|classLoader|))
+         (ldk-loader (get-ldk-loader-for-java-loader java-loader))
+         (pkg (loader-package ldk-loader))
+         (class-symbol (intern normalized-name pkg)))
     ;; Handle native Lisp integers for Java integral wrapper types
     (cond
       ((and (integerp objref)
@@ -1436,17 +1542,22 @@ user.variant
            (dotimes (i (length (java-array-data args)))
              (when (typep (jaref args i) '|java/lang/Integer|)
                (setf (jaref args i) (slot-value (jaref args i) '|value|)))))
-         (let ((result (apply (intern
-                               (lispize-method-name
-                                (concatenate 'string
-                                             (substitute #\/ #\. (lstring (slot-value (slot-value method '|clazz|) '|name|)))
-                                             "."
-                                             (lstring (slot-value method '|name|))
-                                             (lstring (slot-value method '|signature|))))
-                               :openldk)
-                              (if (eq 0 (logand #x8 (slot-value method '|modifiers|)))
-                                  (cons object (if args (coerce (java-array-data args) 'list) nil)) ; non-static method
-                                  (if args (coerce (java-array-data args) 'list) nil))))) ; static method
+         (let* ((java-class (slot-value method '|clazz|))
+                (class-name (substitute #\/ #\. (lstring (slot-value java-class '|name|))))
+                (java-loader (slot-value java-class '|classLoader|))
+                (ldk-loader (get-ldk-loader-for-java-loader java-loader))
+                (pkg (loader-package ldk-loader))
+                (result (apply (intern
+                                (lispize-method-name
+                                 (concatenate 'string
+                                              class-name
+                                              "."
+                                              (lstring (slot-value method '|name|))
+                                              (lstring (slot-value method '|signature|))))
+                                pkg)
+                               (if (eq 0 (logand #x8 (slot-value method '|modifiers|)))
+                                   (cons object (if args (coerce (java-array-data args) 'list) nil)) ; non-static method
+                                   (if args (coerce (java-array-data args) 'list) nil))))) ; static method
            (when *debug-trace*
              (format t "~&~V@A trace: result = ~A~%"
                      *call-nesting-level* "*" result))
@@ -1671,7 +1782,7 @@ user.variant
     (uiop:quit status t)))
 
 (defmethod |getRawAnnotations()| ((class |java/lang/Class|))
-  (let ((lclass (%get-ldk-class-by-fq-name (lstring (slot-value class '|name|)))))
+  (let ((lclass (get-ldk-class-for-java-class class)))
     (when (and lclass (attributes lclass))
       (gethash "RuntimeVisibleAnnotations" (attributes lclass)))))
 
@@ -1824,29 +1935,34 @@ user.variant
 
 (defun |java/lang/reflect/Proxy.defineClass0(Ljava/lang/ClassLoader;Ljava/lang/String;[BII)|
     (class-loader class-name data offset length)
-  (let ((stream (make-instance 'byte-array-input-stream
+  (let* ((ldk-loader (get-ldk-loader-for-java-loader class-loader))
+         (stream (make-instance 'byte-array-input-stream
                                :array data
                                :start offset
                                :end (+ offset length))))
-    (java-class (%classload-from-stream (substitute #\/ #\. (lstring class-name)) stream class-loader))))
+    (java-class (%classload-from-stream (substitute #\/ #\. (lstring class-name)) stream class-loader ldk-loader))))
 
 (defmethod |defineClass(Ljava/lang/String;[BIILjava/lang/ClassLoader;Ljava/security/ProtectionDomain;)|
     ((unsafe |sun/misc/Unsafe|) class-name data offset length class-loader protection-domain)
   (declare (ignore protection-domain))
-  ;; FIXME
-  (let ((stream (make-instance 'byte-array-input-stream :array data :start offset :end (+ offset length))))
-    (java-class (%classload-from-stream (substitute #\/ #\. (lstring class-name)) stream class-loader))))
+  (let* ((ldk-loader (get-ldk-loader-for-java-loader class-loader))
+         (stream (make-instance 'byte-array-input-stream :array data :start offset :end (+ offset length))))
+    (java-class (%classload-from-stream (substitute #\/ #\. (lstring class-name)) stream class-loader ldk-loader))))
 
 (defmethod |defineClass1(Ljava/lang/String;[BIILjava/security/ProtectionDomain;Ljava/lang/String;)|
     ((class-loader |java/lang/ClassLoader|) class-name data offset length protection-domain source)
   (declare (ignore source)
            (ignore protection-domain))
-  ;; FIXME
-  (let ((stream (make-instance 'byte-array-input-stream :array data :start offset :end (+ offset length))))
-    (java-class (%classload-from-stream (substitute #\/ #\. (lstring class-name)) stream class-loader))))
+  (let* ((ldk-loader (get-ldk-loader-for-java-loader class-loader))
+         (stream (make-instance 'byte-array-input-stream :array data :start offset :end (+ offset length))))
+    (java-class (%classload-from-stream (substitute #\/ #\. (lstring class-name)) stream class-loader ldk-loader))))
 
 (defmethod |allocateInstance(Ljava/lang/Class;)| ((unsafe |sun/misc/Unsafe|) class)
-  (make-instance (intern (substitute #\/ #\. (lstring (slot-value class '|name|))) :openldk)))
+  (let* ((bin-name (substitute #\/ #\. (lstring (slot-value class '|name|))))
+         (java-loader (slot-value class '|classLoader|))
+         (ldk-loader (get-ldk-loader-for-java-loader java-loader))
+         (pkg (loader-package ldk-loader)))
+    (make-instance (intern bin-name pkg))))
 
 (defmethod |getLocalHostName()| ((inet4 |java/net/Inet4AddressImpl|))
   (jstring (uiop:hostname)))
@@ -2017,9 +2133,10 @@ user.variant
 (defun |java/lang/invoke/MethodHandleNatives.resolve(Ljava/lang/invoke/MemberName;Ljava/lang/Class;)| (member-name klass)
   (declare (ignore klass))
   ;; FIXME
-  (let ((method (find-method-in-class
-                 (%get-ldk-class-by-fq-name (lstring (slot-value (slot-value member-name '|clazz|) '|name|)))
-                 (lstring (slot-value member-name '|name|)))))
+  (let* ((member-class (slot-value member-name '|clazz|))
+         (ldk-class (get-ldk-class-for-java-class member-class))
+         (method (when ldk-class
+                   (find-method-in-class ldk-class (lstring (slot-value member-name '|name|))))))
     (when method
       (setf (slot-value member-name '|flags|) (logior (slot-value member-name '|flags|) (slot-value method 'access-flags)))))
   member-name)
@@ -2090,8 +2207,10 @@ user.variant
 
 (defmethod |defineAnonymousClass(Ljava/lang/Class;[B[Ljava/lang/Object;)|
     ((unsafe |sun/misc/Unsafe|) clazz data cp-patches)
-  (let ((stream (make-instance 'byte-array-input-stream :array data :start 0 :end (java-array-length data))))
-    (java-class (%classload-from-stream (format nil "~A/~A" (substitute #\/ #\. (lstring (slot-value clazz '|name|))) (gensym "anonymous-class-")) stream *boot-class-loader*))))
+  (let* ((stream (make-instance 'byte-array-input-stream :array data :start 0 :end (java-array-length data)))
+         (java-loader (slot-value clazz '|classLoader|))
+         (ldk-loader (get-ldk-loader-for-java-loader java-loader)))
+    (java-class (%classload-from-stream (format nil "~A/~A" (substitute #\/ #\. (lstring (slot-value clazz '|name|))) (gensym "anonymous-class-")) stream java-loader ldk-loader))))
 
 (defun %invoke-polymorphic-signature (method-handle &rest args)
   "Invoke a MethodHandle's target method with the given arguments.
@@ -2144,7 +2263,10 @@ user.variant
 
         ;; Construct the lispized method name: class.method(descriptor)
         (let* ((full-method-sig (format nil "~A.~A~A" class-name method-name method-type))
-               (lisp-method-name (intern (lispize-method-name full-method-sig) :openldk)))
+               (java-loader (slot-value clazz '|classLoader|))
+               (ldk-loader (get-ldk-loader-for-java-loader java-loader))
+               (pkg (loader-package ldk-loader))
+               (lisp-method-name (intern (lispize-method-name full-method-sig) pkg)))
 
           ;; Invoke the method
           ;; For LambdaForm methods, always pass the MethodHandle as first arg
@@ -2465,43 +2587,47 @@ user.variant
            (is-constructor (= ref-kind 8)))
 
       ;; Handle constructors specially - create instance, call init, return instance
-      (if is-constructor
-          (progn
-            ;; Load the class and create a new instance
-            (classload class-name)
-            (let* ((lisp-class-name (intern class-name :openldk))
-                   (instance (make-instance lisp-class-name)))
-              ;; Constructor descriptors always return void - replace any return type with V
-              ;; The MethodType from findConstructor has the class as return type, but
-              ;; <init> methods have void return type
-              (let* ((desc (cond
-                             ((null method-type) "()V")
-                             ;; Extract params portion and append V
-                             ((position #\) method-type)
-                              (format nil "~AV" (subseq method-type 0 (1+ (position #\) method-type)))))
-                             (t (format nil "~AV" method-type))))
-                     ;; Instance methods like constructors are defined as generic functions
-                     ;; with just the method name, not the fully qualified class.method name
-                     (init-method-name (format nil "<init>~A" (subseq desc 0 (1+ (position #\) desc)))))
-                     (lisp-init-name (intern init-method-name :openldk)))
-                (apply lisp-init-name instance args))
-              ;; Return the constructed instance
-              instance))
-          ;; Normal method invocation
-          ;; REF_invokeVirtual = 5, REF_invokeStatic = 6, REF_invokeSpecial = 7
-          (let ((is-static (= ref-kind 6))
-                (is-virtual (= ref-kind 5))
-                (is-special (= ref-kind 7)))
-            (if is-static
-                ;; Static methods use fully qualified names like class.method(desc)
-                (let* ((full-method-sig (format nil "~A.~A~A" class-name method-name method-type))
-                       (lisp-method-name (intern (lispize-method-name full-method-sig) :openldk)))
-                  (apply lisp-method-name args))
-                ;; Virtual and special methods are generic functions with just the method name
-                ;; The first argument is the receiver (this)
-                (let* ((simple-method-name (format nil "~A~A" method-name method-type))
-                       (lisp-method-name (intern (lispize-method-name simple-method-name) :openldk)))
-                  (apply lisp-method-name args))))))))
+      ;; Look up the package for this class using the class loader from the java.lang.Class
+      (let* ((java-loader (slot-value clazz '|classLoader|))
+             (ldk-loader (get-ldk-loader-for-java-loader java-loader))
+             (pkg (loader-package ldk-loader)))
+        (if is-constructor
+            (progn
+              ;; Load the class and create a new instance
+              (classload class-name)
+              (let* ((lisp-class-name (intern class-name pkg))
+                     (instance (make-instance lisp-class-name)))
+                ;; Constructor descriptors always return void - replace any return type with V
+                ;; The MethodType from findConstructor has the class as return type, but
+                ;; <init> methods have void return type
+                (let* ((desc (cond
+                               ((null method-type) "()V")
+                               ;; Extract params portion and append V
+                               ((position #\) method-type)
+                                (format nil "~AV" (subseq method-type 0 (1+ (position #\) method-type)))))
+                               (t (format nil "~AV" method-type))))
+                       ;; Instance methods like constructors are defined as generic functions
+                       ;; with just the method name, not the fully qualified class.method name
+                       (init-method-name (format nil "<init>~A" (subseq desc 0 (1+ (position #\) desc)))))
+                       (lisp-init-name (intern init-method-name pkg)))
+                  (apply lisp-init-name instance args))
+                ;; Return the constructed instance
+                instance))
+            ;; Normal method invocation
+            ;; REF_invokeVirtual = 5, REF_invokeStatic = 6, REF_invokeSpecial = 7
+            (let ((is-static (= ref-kind 6))
+                  (is-virtual (= ref-kind 5))
+                  (is-special (= ref-kind 7)))
+              (if is-static
+                  ;; Static methods use fully qualified names like class.method(desc)
+                  (let* ((full-method-sig (format nil "~A.~A~A" class-name method-name method-type))
+                         (lisp-method-name (intern (lispize-method-name full-method-sig) pkg)))
+                    (apply lisp-method-name args))
+                  ;; Virtual and special methods are generic functions with just the method name
+                  ;; The first argument is the receiver (this)
+                  (let* ((simple-method-name (format nil "~A~A" method-name method-type))
+                         (lisp-method-name (intern (lispize-method-name simple-method-name) pkg)))
+                    (apply lisp-method-name args)))))))))
 
 (defun |java/lang/invoke/MethodHandle.linkToStatic(Ljava/lang/invoke/MemberName;)| (&rest args)
   "MethodHandle intrinsic: invoke a static method via MemberName (no-arg variant).
@@ -2743,7 +2869,7 @@ CAPTURES is a list of pre-bound values for captured variables."
   (assert (null match-sig))
   (assert (eq match-flags 65536)) ;; methods only
   (assert (null caller))
-  (let ((ldk-class (%get-ldk-class-by-fq-name (lstring (slot-value defc '|name|))))
+  (let ((ldk-class (get-ldk-class-for-java-class defc))
         (class-loader (|getClassLoader()| defc)))
     ;; Caller may pass NIL to query count; only fill when RESULTS provided.
     (when results

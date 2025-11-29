@@ -376,18 +376,19 @@
     (make-instance '<expression>
                    :insn insn
                    :code (let* ((declaring-class (or (%find-declaring-class class method-name) class))
+                                (pkg (class-package declaring-class))
                                 (nargs (length args))
                                 (call (cond
                                         ((eq nargs 0)
-                                         (list (intern (format nil "~A.~A" declaring-class method-name) :openldk)))
+                                         (list (intern (format nil "~A.~A" declaring-class method-name) pkg)))
                                         ((eq nargs 1)
-                                         (list (intern (format nil "~A.~A" declaring-class method-name) :openldk) (code (codegen (car args) context))))
+                                         (list (intern (format nil "~A.~A" declaring-class method-name) pkg) (code (codegen (car args) context))))
                                         (t
                                          (list 'apply
                                                (list 'function (intern (format nil "~A.~A"
                                                                               declaring-class
                                                                                method-name)
-                                                                       :openldk))
+                                                                       pkg))
                                                (list 'reverse (cons 'list (mapcar (lambda (a) (code (codegen a context))) args))))))))
                            call)
                    :expression-type return-type)))
@@ -493,7 +494,7 @@
                                     (error (%lisp-condition (%make-throwable '|java/lang/ClassCastException|))))))
                              `(let ((objref ,(code (codegen (objref insn) context))))
                                 (when objref
-                                  (unless (typep objref (quote ,(intern (slot-value insn 'classname) :openldk)))
+                                  (unless (typep objref (quote ,(intern (slot-value insn 'classname) (class-package classname))))
                                     (error (%lisp-condition (%make-throwable '|java/lang/ClassCastException|))))))))
                    :expression-type nil)))
 
@@ -844,7 +845,7 @@
   (with-slots (index const) insn
      (let ((expr (make-instance '<expression>
                                 :insn insn
-                                :code (list 'incf (intern (format nil "local-~A" index) :openldk) const))))
+                                :code (list 'incf (intern (format nil "local-~A" index) (context-package context)) const))))
        expr)))
 
 (defmethod codegen ((insn ir-if-acmpeq) context)
@@ -923,9 +924,10 @@
                                (list 'go (intern (format nil "branch-target-~A" offset)))))))
 
 (defmethod codegen ((insn ir-condition-exception) context)
-  (make-instance '<expression>
-                 :insn insn
-                 :code (list 'slot-value (intern "condition-cache" :openldk) (list 'quote (intern "objref" :openldk)))))
+  (let ((pkg (context-package context)))
+    (make-instance '<expression>
+                   :insn insn
+                   :code (list 'slot-value (intern "condition-cache" pkg) (list 'quote (intern "objref" pkg))))))
 
 (defmethod codegen ((insn ir-ifnonnull) context)
   (with-slots (offset value) insn
@@ -961,6 +963,7 @@
     (make-instance '<expression>
                    :insn insn
                    :code (let* ((cname (name (slot-value (slot-value insn 'class) 'class)))
+                                (pkg (class-package cname))
                                 (obj (code (codegen objref context))))
                            (cond
                              ;; Array checks
@@ -970,9 +973,9 @@
                              ((member cname '("java/lang/Integer" "java/lang/Long"
                                               "java/lang/Short" "java/lang/Byte")
                                       :test #'string=)
-                              `(%instanceof-integer-check ,obj ,cname (quote ,(intern cname :openldk))))
+                              `(%instanceof-integer-check ,obj ,cname (quote ,(intern cname pkg))))
                              (t
-                              `(%instanceof-check ,obj ,cname (quote ,(intern cname :openldk))))))
+                              `(%instanceof-check ,obj ,cname (quote ,(intern cname pkg))))))
                    :expression-type :INTEGER)))
 
 ;; Utility functions for signed shifts
@@ -1108,18 +1111,20 @@
 
 (defmethod codegen ((insn ir-call-virtual-method) context)
   (with-slots (method-name args) insn
-    (make-instance '<expression>
-                   :insn insn
-                   :code (let* ((nargs (length args))
-                                (call (cond
-                                        ((eq nargs 0)
-                                         (error "internal error"))
-                                        ((eq nargs 1)
-                                         (list (intern (format nil "~A" method-name) :openldk) (code (codegen (car args) context))))
-                                        (t
-                                         `(funcall (function ,(intern (format nil "~A" method-name) :openldk))
-                                                   ,@(mapcar (lambda (a) (code (codegen a context))) args))))))
-                           call))))
+    ;; Virtual method dispatch uses the context's package since it's based on runtime type
+    (let ((pkg (context-package context)))
+      (make-instance '<expression>
+                     :insn insn
+                     :code (let* ((nargs (length args))
+                                  (call (cond
+                                          ((eq nargs 0)
+                                           (error "internal error"))
+                                          ((eq nargs 1)
+                                           (list (intern (format nil "~A" method-name) pkg) (code (codegen (car args) context))))
+                                          (t
+                                           `(funcall (function ,(intern (format nil "~A" method-name) pkg))
+                                                     ,@(mapcar (lambda (a) (code (codegen a context))) args))))))
+                             call)))))
 
 (defparameter *invokedynamic-cache* (make-hash-table :test #'equal))
 
@@ -1144,12 +1149,13 @@
 
 (defmethod codegen ((insn ir-call-dynamic-method) context)
   (with-slots (method-name args dynamic-args bootstrap-method-name address) insn
-    (let ((constant-pool (constant-pool (<context>-class context))))
+    (let ((constant-pool (constant-pool (<context>-class context)))
+          (pkg (context-package context)))
       (make-instance '<expression>
                      :insn insn
                      :code
                      `(let* ((fname ,(jstring method-name))
-                             (bootstrap-name (symbol-name ',(intern bootstrap-method-name :openldk))))
+                             (bootstrap-name (symbol-name ',(intern bootstrap-method-name pkg))))
                         (if (starts-with? "java/lang/invoke/LambdaMetafactory.metafactory" bootstrap-name)
                             ;; Fast path for Java 8 lambdas: build the functional object directly
                             (openldk::%lambda-metafactory
@@ -1157,8 +1163,8 @@
                              (list ,@(mapcar (lambda (a) (code (codegen a context))) dynamic-args))
                              ,method-name)
                             ;; Fallback: generic invokedynamic handling
-                            (let ((callsite (%resolve-invokedynamic ',(intern method-name :openldk)
-                                                                    ',(intern bootstrap-method-name :openldk)
+                            (let ((callsite (%resolve-invokedynamic ',(intern method-name pkg)
+                                                                    ',(intern bootstrap-method-name pkg)
                                                                     ,address
                                                                     fname
                                                                     ,@(mapcar (lambda (a) (code (codegen a context))) args))))
@@ -1179,23 +1185,24 @@
   (with-slots (class) insn
     (make-instance '<expression>
                    :insn insn
-                   :code (let ((class (ir-class-class class)))
+                   :code (let* ((class (ir-class-class class))
+                                (pkg (class-package (slot-value class 'name))))
                            (list 'unless (list 'initialized-p class)
-                                 (list (intern (format nil "%clinit-~A" (slot-value class 'name)) :openldk)))))))
+                                 (list (intern (format nil "%clinit-~A" (slot-value class 'name)) pkg)))))))
 
 (defmethod codegen ((insn ir-local-variable) context)
   (with-slots (index) insn
     ;; FIXME: track type of local vars
     (let ((expr (make-instance '<expression>
                                :insn insn
-                               :code (intern (format nil "local-~A" index) :openldk))))
+                               :code (intern (format nil "local-~A" index) (context-package context)))))
       expr)))
 
 (defmethod codegen ((insn ir-long-local-variable) context)
   (with-slots (index) insn
     (let ((expr (make-instance '<expression>
                                :insn insn
-                               :code (intern (format nil "local-~A" index) :openldk)
+                               :code (intern (format nil "local-~A" index) (context-package context))
                                :expression-type :LONG)))
       expr)))
 
@@ -1212,15 +1219,18 @@
 (defmethod codegen ((insn ir-new) context)
   (with-slots (class) insn
     (with-slots (class) class
-      (make-instance '<expression>
-                     :insn insn
-                     :code `(let* ((obj (make-instance ',(intern (slot-value class 'name) :openldk)))
-                                   (klass ,(java-class class)))
-                              ;; Ensure clazz slot is populated for instanceof/reflection
-                              (when (and klass (slot-exists-p obj '|clazz|))
-                                (setf (slot-value obj '|clazz|) klass))
-                              obj)
-                     :expression-type :REFERENCE))))
+      ;; Use the context's loader package - the class being instantiated
+      ;; is typically loaded by the same loader as the code doing the creation
+      (let ((pkg (loader-package (ldk-loader context))))
+        (make-instance '<expression>
+                       :insn insn
+                       :code `(let* ((obj (make-instance ',(intern (slot-value class 'name) pkg)))
+                                     (klass ,(java-class class)))
+                                ;; Ensure clazz slot is populated for instanceof/reflection
+                                (when (and klass (slot-exists-p obj '|clazz|))
+                                  (setf (slot-value obj '|clazz|) klass))
+                                obj)
+                       :expression-type :REFERENCE)))))
 
 (defmethod codegen ((insn ir-new-array) context)
   (let ((init-element
@@ -1286,8 +1296,9 @@
 
 (defmethod codegen ((insn ir-call-special-method) context)
   (with-slots (class method-name args) insn
-    (let* ((method-symbol (intern (format nil "~A" method-name) :openldk))
-           (owner-symbol (intern (slot-value class 'name) :openldk))
+    (let* ((pkg (class-package (slot-value class 'name)))
+           (method-symbol (intern (format nil "~A" method-name) pkg))
+           (owner-symbol (intern (slot-value class 'name) pkg))
            (arg-code (mapcar (lambda (a) (code (codegen a context))) args)))
       (make-instance '<expression>
                      :insn insn
@@ -1296,25 +1307,27 @@
 
 (defmethod codegen ((insn ir-member) context)
   (with-slots (objref member-name) insn
-    (make-instance '<expression>
-                   :insn insn
-                   :code `(slot-value
-                           (let ((objref ,(code (codegen objref context))))
-                             (when (null objref)
-                               (error (format nil "Null Pointer Exception ~A" ,(slot-value insn 'address))))
-                             objref)
-                           (quote ,(intern (mangle-field-name member-name) :openldk))))))
+    ;; Field names use context package since they're accessed on objects
+    (let ((pkg (context-package context)))
+      (make-instance '<expression>
+                     :insn insn
+                     :code `(slot-value
+                             (let ((objref ,(code (codegen objref context))))
+                               (when (null objref)
+                                 (error (format nil "Null Pointer Exception ~A" ,(slot-value insn 'address))))
+                               objref)
+                             (quote ,(intern (mangle-field-name member-name) pkg)))))))
 
 (defmethod codegen ((insn ir-static-member) context)
   (declare (ignore context))
   (with-slots (class member-name) insn
-    (make-instance '<expression>
-                   :insn insn
-                   :code `(slot-value
-                           ,(intern (format nil "+static-~A+"
-                                            (slot-value (slot-value class 'class) 'name))
-                                    :openldk)
-                           (quote ,(intern (mangle-field-name member-name) :openldk))))))
+    (let ((class-name (slot-value (slot-value class 'class) 'name)))
+      (let ((pkg (class-package class-name)))
+        (make-instance '<expression>
+                       :insn insn
+                       :code `(slot-value
+                               ,(intern (format nil "+static-~A+" class-name) pkg)
+                               (quote ,(intern (mangle-field-name member-name) pkg))))))))
 
 (define-condition java-lang-throwable (error)
   ((throwable :initarg :throwable :reader throwable)))
@@ -1336,18 +1349,19 @@
                  :code `(return)))
 
 (defmethod codegen ((insn ir-return-value) context)
-  (make-instance '<expression>
-                 :insn insn
-                 :code `(let ((result ,(code (codegen (slot-value insn 'value) context))))
-                          (cond
-                            (*debug-trace-args*
-                             (format t "~&~V@A <~A> trace: ~A result = ~A~%"
-                                     *call-nesting-level* "*" *call-nesting-level*
-                                     ,(fn-name *context*) result))
-                            (*debug-trace*
-                             (format t "~&~V@A <~A> trace: ~A~%"
-                                     *call-nesting-level* "*" *call-nesting-level* ,(fn-name *context*))))
-                          (return-from ,(intern (slot-value insn 'fn-name) :openldk) result))))
+  (let ((pkg (context-package context)))
+    (make-instance '<expression>
+                   :insn insn
+                   :code `(let ((result ,(code (codegen (slot-value insn 'value) context))))
+                            (cond
+                              (*debug-trace-args*
+                               (format t "~&~V@A <~A> trace: ~A result = ~A~%"
+                                       *call-nesting-level* "*" *call-nesting-level*
+                                       ,(fn-name *context*) result))
+                              (*debug-trace*
+                               (format t "~&~V@A <~A> trace: ~A~%"
+                                       *call-nesting-level* "*" *call-nesting-level* ,(fn-name *context*))))
+                            (return-from ,(intern (slot-value insn 'fn-name) pkg) result)))))
 
 (defvar *current-block* nil
   "Dynamic variable holding the current <basic-block> during codegen.
@@ -1368,7 +1382,7 @@ Used to consult block-local substitutions in addition to global ones.")
         (codegen v context)
         (make-instance '<expression>
                        :insn insn
-                       :code (intern (format nil "s{~{~A~^,~}}" (sort (copy-list (slot-value insn 'var-numbers)) #'<)) :openldk)))))
+                       :code (intern (format nil "s{~{~A~^,~}}" (sort (copy-list (slot-value insn 'var-numbers)) #'<)) (context-package context))))))
 
 (defmethod codegen-block ((basic-block <basic-block>) dominator-block)
   "Generate Lisp code for a basic block, handling exception scopes and control flow."
@@ -1428,7 +1442,8 @@ Used to consult block-local substitutions in addition to global ones.")
                     (setf lisp-code (nconc lisp-code (codegen-block successor (if (try-catch basic-block) basic-block dominator-block)))))))))
 
           ;; Handle exception handlers (try-catch)
-          (let ((try-catch-handlers (try-catch basic-block)))
+          (let ((try-catch-handlers (try-catch basic-block))
+                (ctx-pkg (context-package *context*)))
             (when try-catch-handlers
               (pop (emitted-block-scopes *context*))
               ;; Wrap the block's code in HANDLER-CASE
@@ -1443,21 +1458,23 @@ Used to consult block-local substitutions in addition to global ones.")
                                 (BLOCK TRY-BODY
                                   (TAGBODY ,@lisp-code))
                               ,@(loop for (exception-type . handler-block) in try-catch-handlers
+                                      for exc-pkg = (class-package (or exception-type "java/lang/Throwable"))
                                       when (> (length exception-type) 0)
                                         do (classload exception-type)
                                       collect `(,(intern (format nil "condition-~A" (or exception-type
-                                                                                        "java/lang/Throwable")) :openldk)
-                                                (,(intern "condition" :openldk))
+                                                                                        "java/lang/Throwable")) exc-pkg)
+                                                (,(intern "condition" ctx-pkg))
                                                 (setf |condition-cache| |condition|)
                                                 (go ,(intern (format nil "branch-target-~A" (address handler-block)))))))))
                         `((HANDLER-CASE
                               (BLOCK TRY-BODY
                                 (TAGBODY ,@lisp-code))
                             ,@(loop for (exception-type . handler-block) in try-catch-handlers
+                                    for exc-pkg = (class-package (or exception-type "java/lang/Throwable"))
                                     do (classload exception-type)
                                     collect `(,(intern (format nil "condition-~A" (or exception-type
-                                                                                      "java/lang/Throwable")) :openldk)
-                                              (,(intern "condition" :openldk))
+                                                                                      "java/lang/Throwable")) exc-pkg)
+                                              (,(intern "condition" ctx-pkg))
                                               (setf |condition-cache| |condition|)
                                               (go ,(intern (format nil "branch-target-~A" (address handler-block))))))))))))
           lisp-code)))))
