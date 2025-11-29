@@ -358,24 +358,29 @@
                             (print lookup)
                             (error "unimplemented")))))
 
-(defun %find-declaring-class (class method-name)
-  (let* ((ldk-class (%get-ldk-class-by-bin-name class))
-         (method (find method-name (methods ldk-class)
-                       :test (lambda (method-name method)
-                               (string= method-name
-                                        (lispize-method-name
-                                         (format nil "~A~A" (name method) (descriptor method))))))))
+(defun %find-declaring-class (class method-name &optional loader)
+  "Find the class that declares METHOD-NAME, searching class hierarchy.
+   LOADER is the <ldk-class-loader> to use for class lookups."
+  (let* ((ldk-class (%get-ldk-class-by-bin-name class t loader))
+         (method (when ldk-class
+                   (find method-name (methods ldk-class)
+                         :test (lambda (method-name method)
+                                 (string= method-name
+                                          (lispize-method-name
+                                           (format nil "~A~A" (name method) (descriptor method)))))))))
     (if method
         class
-        (find method-name (remove nil (cons (super ldk-class) (coerce (interfaces ldk-class) 'list)))
-              :test (lambda (method-name class)
-                      (%find-declaring-class class method-name))))))
+        (when ldk-class
+          (find method-name (remove nil (cons (super ldk-class) (coerce (interfaces ldk-class) 'list)))
+                :test (lambda (method-name class)
+                        (%find-declaring-class class method-name loader)))))))
 
 (defmethod codegen ((insn ir-call-static-method) context)
   (with-slots (class method-name args return-type) insn
     (make-instance '<expression>
                    :insn insn
-                   :code (let* ((declaring-class (or (%find-declaring-class class method-name) class))
+                   :code (let* ((loader (slot-value context 'ldk-loader))
+                                (declaring-class (or (%find-declaring-class class method-name loader) class))
                                 (pkg (class-package declaring-class))
                                 (nargs (length args))
                                 (call (cond
@@ -499,11 +504,11 @@
                    :expression-type nil)))
 
 (defmethod codegen ((insn ir-class) context)
-  (declare (ignore context))
-  (let ((classname (slot-value (slot-value insn 'class) 'name)))
+  (let* ((classname (slot-value (slot-value insn 'class) 'name))
+         (loader (slot-value context 'ldk-loader)))
     (let ((expr (make-instance '<expression>
                                :insn insn
-                               :code (java-class (%get-ldk-class-by-bin-name classname))
+                               :code (java-class (%get-ldk-class-by-bin-name classname t loader))
                                :expression-type :REFERENCE)))
       expr)))
 
@@ -1217,14 +1222,14 @@
                  :code `(monitor-exit ,(code (codegen (slot-value insn 'objref) context)))))
 
 (defmethod codegen ((insn ir-new) context)
+  (declare (ignore context))
   (with-slots (class) insn
     (with-slots (class) class
-      ;; Use the context's loader package - the class being instantiated
-      ;; is typically loaded by the same loader as the code doing the creation
-      (let ((pkg (loader-package (ldk-loader context))))
+      ;; All class names in :openldk for compatibility
+      (let ((classname (slot-value class 'name)))
         (make-instance '<expression>
                        :insn insn
-                       :code `(let* ((obj (make-instance ',(intern (slot-value class 'name) pkg)))
+                       :code `(let* ((obj (make-instance ',(intern classname :openldk)))
                                      (klass ,(java-class class)))
                                 ;; Ensure clazz slot is populated for instanceof/reflection
                                 (when (and klass (slot-exists-p obj '|clazz|))
