@@ -1152,11 +1152,18 @@ user.variant
         ;; Check if class already defined - return existing java.lang.Class
         ;; This mirrors JVM behavior where defineClass on existing class is an error,
         ;; but we return the existing class instead to handle warm-up scenarios
-        (let ((existing-class (or (gethash classname *java-classes-by-bin-name*)
-                                  (when ldk-loader
-                                    (gethash classname (slot-value ldk-loader 'java-classes-by-bin-name))))))
-          (when existing-class
-            (return-from %define-class-from-bytes existing-class)))
+        ;; Check both java.lang.Class and LDK class to prevent double loading
+        (let ((existing-java-class (or (gethash classname *java-classes-by-bin-name*)
+                                       (when ldk-loader
+                                         (gethash classname (slot-value ldk-loader 'java-classes-by-bin-name))))))
+          (when existing-java-class
+            (return-from %define-class-from-bytes existing-java-class)))
+        ;; Also check for existing LDK class (may have been loaded via classload path)
+        (let ((existing-ldk-class (or (gethash classname *ldk-classes-by-bin-name*)
+                                      (when ldk-loader
+                                        (gethash classname (slot-value ldk-loader 'ldk-classes-by-bin-name))))))
+          (when existing-ldk-class
+            (return-from %define-class-from-bytes (java-class existing-ldk-class))))
 
         ;; Set the loader on the class
         (setf (slot-value class 'ldk-loader) ldk-loader)
