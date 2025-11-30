@@ -2,11 +2,165 @@
 
 ## Current Status
 
+**UPDATE 2024-11-29**: Investigating per-loader class isolation bug. The `shiftLeft` static method resolution error is being debugged. Debug output has been added to `class-package` and `static-method-symbol` functions.
+
 **UPDATE 2024-11-28**: Fixed the `integer?` returning null issue! The root cause was incomplete transitive merging of stack variables at control flow merge points.
 
 **UPDATE 2024-11-28 (later)**: Added `invoke-special` method dispatch caching to fix a 9-minute hang during Clojure compilation. The hang was caused by repeated `compute-applicable-methods-using-classes` calls for `|<init>()|` with 851+ methods.
 
-OpenLDK can now correctly execute Clojure's `integer?` function. Testing continues to see if Clojure fully loads. Current hang appears to be during initial class loading after ~33 method handle lookups.
+OpenLDK can now correctly execute Clojure's `integer?` function. Testing continues to see if Clojure fully loads.
+
+---
+
+## ACTIVE BUG: Static Method Symbol Resolution (Per-Loader Class Isolation)
+
+### Problem Summary
+
+When running Clojure on OpenLDK, static method calls can fail with "undefined function" errors because the generated code looks for method symbols in the wrong Lisp package:
+
+```
+The function OPENLDK::|clojure/lang/Numbers.shiftLeft(JLjava/lang/Object;)| is undefined.
+```
+
+The method should be in `OPENLDK.APP` (application class loader's package), but the generated code looks in `OPENLDK` (bootstrap class loader's package).
+
+### Background: Class Loader Hierarchy
+
+OpenLDK implements JVM class loader isolation using Lisp packages:
+
+| Class Loader | Lisp Package | Purpose |
+|--------------|--------------|---------|
+| Bootstrap | `OPENLDK` | JDK core classes (java/*, sun/*, etc.) |
+| Application | `OPENLDK.APP` | Application classpath classes |
+| DynamicClassLoader | `OPENLDK.L1`, `L2`, ... | Clojure's dynamic class loading |
+
+Each class loaded by a specific loader has its CLOS class definition and static method stubs defined in that loader's package.
+
+### How to Reproduce
+
+```bash
+# Build OpenLDK
+make
+
+# Run Clojure Hello World (triggers the bug)
+JAVA_CMD=./openldk LDK_DEBUG=L clojure -M -e '(println "Hello World!")'
+```
+
+The error occurs during Clojure's `bit_shift_left` compilation, which calls `clojure.lang.Numbers.shiftLeft()`.
+
+### Key Code Paths
+
+#### 1. Static Method Codegen (`src/codegen.lisp:378-401`)
+
+```lisp
+(defmethod codegen ((insn ir-call-static-method) context)
+  (with-slots (class method-name args return-type) insn
+    (make-instance '<expression>
+      :code (let* ((loader (slot-value context 'ldk-loader))
+                   (_ (classload class))
+                   (declaring-class (or (%find-declaring-class class method-name loader) class))
+                   (pkg (class-package declaring-class))  ; <-- Gets package for the class
+                   (full-name (format nil "~A.~A" declaring-class method-name))
+                   (method-sym (static-method-symbol full-name pkg)))  ; <-- Resolves symbol
+              ...))))
+```
+
+#### 2. class-package (`src/global-state.lisp:169-199`)
+
+```lisp
+(defun class-package (class-name)
+  "Get the Lisp package for a class by its binary name.
+   Searches boot loader, then app loader for the class.
+   Falls back to :openldk if class not found or has no loader."
+  (if-let ((class (%get-ldk-class-by-bin-name class-name t)))
+    (if-let ((loader (slot-value class 'ldk-loader)))
+      (loader-package loader)
+      (find-package :openldk))
+    ;; Not in boot loader - check app loader
+    (if (and *app-ldk-class-loader*
+             (gethash class-name (slot-value *app-ldk-class-loader* 'ldk-classes-by-bin-name)))
+        (loader-package *app-ldk-class-loader*)
+        (find-package :openldk))))
+```
+
+#### 3. static-method-symbol (`src/global-state.lisp:213-229`)
+
+```lisp
+(defun static-method-symbol (method-name loader-pkg)
+  "Get the symbol for a static method name.
+   First checks :openldk for native method implementations,
+   then falls back to the loader's package for Java-defined methods."
+  (let ((openldk-sym (find-symbol method-name (find-package :openldk))))
+    (if (and openldk-sym (fboundp openldk-sym))
+        openldk-sym  ; Native method in :openldk
+        (intern method-name loader-pkg))))  ; Java method in loader's package
+```
+
+### Debug Output Added
+
+Debug statements have been added to trace the bug:
+
+**In `class-package`** (triggers for `clojure/lang/Numbers`):
+```lisp
+(when (str:starts-with? "clojure/lang/Numbers" class-name)
+  (format t "~&; DEBUG: class-package called for ~A~%" class-name)
+  (format t "~&; DEBUG: class-package for ~A: loader=~A pkg=~A~%"
+          class-name loader pkg))
+```
+
+**In `static-method-symbol`** (triggers for `shiftLeft`):
+```lisp
+(when (str:contains? "shiftLeft" method-name)
+  (format t "~&; DEBUG: static-method-symbol: method-name=~A loader-pkg=~A~%"
+          method-name loader-pkg)
+  (format t "~&; DEBUG: static-method-symbol: openldk-sym=~A fboundp=~A~%"
+          openldk-sym (and openldk-sym (fboundp openldk-sym)))
+  (format t "~&; DEBUG: static-method-symbol: returning ~A (package ~A)~%"
+          result (symbol-package result)))
+```
+
+### Observations from Debug Output
+
+Sample output:
+```
+; DEBUG: class-package called for clojure/lang/Numbers
+; DEBUG: class-package for clojure/lang/Numbers: loader=#<<LDK-CLASS-LOADER> 1 pkg=#<PACKAGE "OPENLDK.APP">> pkg=#<PACKAGE "OPENLDK.APP">
+```
+
+This shows `class-package` IS returning `OPENLDK.APP` correctly. The bug may involve:
+
+1. **Timing**: Class not loaded when `class-package` is called during codegen
+2. **Symbol already exists**: Symbol may exist in `:openldk` from previous reference
+3. **Call site mismatch**: Stub defined correctly but call site uses wrong symbol
+
+### Related Fix: Duplicate DEFCLASS Bug
+
+A related bug was fixed where `clojure/core$dotimes` was defined multiple times. The fix added `find-class-in-loader-hierarchy` to check parent loaders before defining a class.
+
+### Next Steps for Investigation
+
+1. Verify timing: Add debug to see if `classload` completes before `class-package` is called
+2. Check symbol creation: Trace when `OPENLDK::|..shiftLeft..|` symbol is first created
+3. Inspect compiled code: Use `--dump-dir` to see generated code for `bit_shift_left`
+4. Compare with working case: Check why other static methods work
+
+### Test Commands
+
+```bash
+# Basic test with debug output
+JAVA_CMD=./openldk LDK_DEBUG=L clojure -M -e '(println "Hello World!")'
+
+# Capture full output
+JAVA_CMD=./openldk LDK_DEBUG=L clojure -M -e '(println "Hello World!")' 2>&1 > debug.log
+
+# Filter for debug lines
+grep -E "DEBUG|shiftLeft|bit_shift_left" debug.log
+
+# Simple Hello World (fewer classes)
+./openldk Hello
+```
+
+---
 
 ## How to Reproduce
 

@@ -78,10 +78,11 @@
 
 (defun context-package (context)
   "Get the Lisp package for interning symbols in CONTEXT.
-   Uses the loader's package if available, falls back to :openldk."
+   Uses the loader's package if available, falls back to OPENLDK.SYSTEM."
   (if-let ((loader (slot-value context 'ldk-loader)))
     (loader-package loader)
-    (find-package :openldk)))
+    (or (find-package "OPENLDK.SYSTEM")
+        (make-package "OPENLDK.SYSTEM" :use '(:openldk)))))
 
 (defconstant +stack-bottom-address+ -99)
 

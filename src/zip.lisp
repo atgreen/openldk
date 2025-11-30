@@ -87,7 +87,7 @@
 (defmethod |getEntry(Ljava/lang/String;)| ((this |java/util/zip/ZipFile|) name)
   ; (format t "GET-ENTRY: ~A in ~A~%" (lstring name) (slot-value this '|jzfile|))
   (when-let (ze (zip:get-zipfile-entry (lstring name) (slot-value this '|jzfile|)))
-    (let ((entry (make-instance '|java/util/zip/ZipEntry|)))
+    (let ((entry (%make-java-instance "java/util/zip/ZipEntry")))
       (|<init>(Ljava/lang/String;)| entry name)
       entry)))
 
@@ -190,7 +190,7 @@
   (classload "java/util/jar/Manifest")
   (let ((buffer (zip:zipfile-entry-contents (zip:get-zipfile-entry "META-INF/MANIFEST.MF"
                                                                    (slot-value this '|in|))))
-        (manifest (make-instance '|java/util/jar/Manifest|)))
+        (manifest (%make-java-instance "java/util/jar/Manifest")))
     (|<init>()| manifest)
     (setf (slot-value this '|man|) manifest)
     (|read(Ljava/io/InputStream;)| manifest (make-instance '<buffer-input-stream> :buf buffer))))

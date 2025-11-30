@@ -39,6 +39,12 @@
 
 (in-package :openldk)
 
+;; Ensure OPENLDK.SYSTEM package exists at compile/load time
+;; This is the boot loader's package - classes loaded during warm-up go here
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (unless (find-package "OPENLDK.SYSTEM")
+    (make-package "OPENLDK.SYSTEM" :use '(:openldk))))
+
 (defvar *classpath* nil)
 
 ;; Counter for generating unique class loader IDs
@@ -65,12 +71,25 @@
   "Create a new LDK class loader with its own package and class maps.
    PARENT-LOADER is the parent <ldk-class-loader> for delegation.
    JAVA-LOADER is the corresponding java.lang.ClassLoader object.
-   PACKAGE-NAME is the name for the Lisp package (auto-generated if NIL)."
+   PACKAGE-NAME is the name for the Lisp package (auto-generated if NIL).
+
+   Package hierarchy for class isolation:
+   - OPENLDK.SYSTEM for bootstrap loader (parent=nil)
+   - OPENLDK.APP for application class loader
+   - OPENLDK.L1, OPENLDK.L2, etc. for user-defined loaders
+
+   Each package :use's its parent loader's package for symbol resolution,
+   implementing Java's parent delegation model at the Lisp package level."
   (let* ((id (bordeaux-threads:with-lock-held (*next-loader-id-lock*)
                (incf *next-loader-id*)))
          (pkg-name (or package-name (format nil "OPENLDK.L~A" id)))
+         ;; Use the parent loader's package for symbol delegation
+         ;; If no parent, use :openldk for base definitions
+         (parent-pkg (if parent-loader
+                         (slot-value parent-loader 'pkg)
+                         (find-package :openldk)))
          (pkg (or (find-package pkg-name)
-                  (make-package pkg-name :use '(:openldk)))))
+                  (make-package pkg-name :use (list parent-pkg)))))
     (make-instance '<ldk-class-loader>
                    :id id
                    :pkg pkg
@@ -82,14 +101,35 @@
                    :java-classes-by-fq-name (make-hash-table :test #'equal :synchronized t))))
 
 ;; The boot class loader - created during initialization with OPENLDK.SYSTEM package
+;; Loads core JDK classes (java/*, javax/*, sun/*, etc.) into :openldk package
 (defvar *boot-ldk-class-loader* nil)
+
+;; The application class loader - loads user classes from CLASSPATH
+;; Child of boot loader, uses OPENLDK.APP package
+(defvar *app-ldk-class-loader* nil)
 
 ;; Map from java.lang.ClassLoader objects to <ldk-class-loader> objects
 (defvar *java-to-ldk-loaders* (make-hash-table :test #'eq :synchronized t))
 
+(defun jdk-class-p (classname)
+  "Return T if CLASSNAME is a JDK/system class that should be loaded by boot loader."
+  (or (str:starts-with? "java/" classname)
+      (str:starts-with? "javax/" classname)
+      (str:starts-with? "sun/" classname)
+      (str:starts-with? "com/sun/" classname)
+      (str:starts-with? "jdk/" classname)
+      (str:starts-with? "org/xml/" classname)
+      (str:starts-with? "org/w3c/" classname)))
+
 (defun get-ldk-loader-for-java-loader (java-loader)
   "Get or create the <ldk-class-loader> for a java.lang.ClassLoader object.
-   Returns the boot loader if JAVA-LOADER is NIL."
+   Returns the boot loader if JAVA-LOADER is NIL.
+
+   For user-defined loaders (children of the app loader), we reuse the parent's
+   package to avoid package proliferation. This is safe because:
+   1. User loaders typically generate uniquely-named classes (e.g., Clojure's fn__123)
+   2. The per-loader class maps still track which loader defined each class
+   3. Symbol resolution via :use chains works correctly"
   (if (null java-loader)
       *boot-ldk-class-loader*
       (or (gethash java-loader *java-to-ldk-loaders*)
@@ -99,28 +139,111 @@
                  (parent-ldk-loader (if parent-java-loader
                                         (get-ldk-loader-for-java-loader parent-java-loader)
                                         *boot-ldk-class-loader*))
+                 ;; For user-defined loaders (children of app loader or other user loaders),
+                 ;; share the app loader's package to avoid creating hundreds of packages.
+                 ;; Boot loader and app loader get their own packages.
+                 (share-parent-pkg (and *app-ldk-class-loader*
+                                        parent-ldk-loader
+                                        (not (eq parent-ldk-loader *boot-ldk-class-loader*))))
+                 (pkg-name (when share-parent-pkg
+                             (package-name (slot-value parent-ldk-loader 'pkg))))
                  (new-loader (make-ldk-class-loader :parent-loader parent-ldk-loader
-                                                    :java-loader java-loader)))
+                                                    :java-loader java-loader
+                                                    :package-name pkg-name)))
             (setf (gethash java-loader *java-to-ldk-loaders*) new-loader)
             new-loader))))
 
 (defun loader-package (loader)
-  "Get the Lisp package for a class loader. Uses boot loader package if LOADER is NIL."
+  "Get the Lisp package for a class loader. Uses :openldk for boot loader.
+   Boot loader classes use :openldk to match bootstrap class definitions.
+   Only user loaders get their own packages (OPENLDK.L1, etc)."
   (if loader
-      (slot-value loader 'pkg)
-      (if *boot-ldk-class-loader*
-          (slot-value *boot-ldk-class-loader* 'pkg)
-          (find-package :openldk))))
+      (let ((pkg (slot-value loader 'pkg)))
+        ;; Boot loader uses :openldk (matches bootstrap classes)
+        (if (eq pkg (find-package "OPENLDK.SYSTEM"))
+            (find-package :openldk)
+            pkg))
+      ;; No loader means boot loader - use :openldk
+      (find-package :openldk)))
 
 (defun class-package (class-name)
   "Get the Lisp package for a class by its binary name.
-   Looks up the class and returns its loader's package.
+   Searches boot loader, then app loader for the class.
    Falls back to :openldk if class not found or has no loader."
+  ;; Debug for specific class
+  (when (str:starts-with? "clojure/lang/Numbers" class-name)
+    (format t "~&; DEBUG: class-package called for ~A~%" class-name))
+  ;; First check boot loader's table (global table)
   (if-let ((class (%get-ldk-class-by-bin-name class-name t)))
     (if-let ((loader (slot-value class 'ldk-loader)))
-      (loader-package loader)
-      (find-package :openldk))
-    (find-package :openldk)))
+      (let ((pkg (loader-package loader)))
+        (when (str:starts-with? "clojure/lang/Numbers" class-name)
+          (format t "~&; DEBUG: class-package for ~A: loader=~A pkg=~A~%"
+                  class-name loader pkg))
+        (when (and (eq pkg (find-package :openldk))
+                   (not (jdk-class-p class-name)))
+          (format t "~&; DEBUG: class-package returning :openldk for non-JDK class ~A (loader=~A)~%"
+                  class-name loader))
+        pkg)
+      (progn
+        (format t "~&; DEBUG: class-package: class ~A has NIL ldk-loader~%" class-name)
+        (find-package :openldk)))
+    ;; Not in boot loader - check app loader
+    (if (and *app-ldk-class-loader*
+             (gethash class-name (slot-value *app-ldk-class-loader* 'ldk-classes-by-bin-name)))
+        (loader-package *app-ldk-class-loader*)
+        ;; Not found anywhere - fall back to :openldk
+        (progn
+          (when (not (jdk-class-p class-name))
+            (format t "~&; DEBUG: class-package: class ~A not found in any loader~%" class-name))
+          (find-package :openldk)))))
+
+(defun class-symbol-for-reference (class-name loader)
+  "Get the Lisp symbol for CLASS-NAME when referenced from LOADER.
+   Looks up the class in the loader hierarchy to find its defining loader's package.
+   If not found, interns in LOADER's package (the class will be defined there)."
+  (if-let ((klass (%get-ldk-class-by-bin-name class-name t loader)))
+    ;; Class found - use its defining loader's package via loader-package
+    ;; (loader-package handles boot loader -> :openldk mapping)
+    (let ((pkg (loader-package (slot-value klass 'ldk-loader))))
+      (intern class-name pkg))
+    ;; Class not yet loaded - intern in this loader's package
+    (intern class-name (loader-package loader))))
+
+(defun static-method-symbol (method-name loader-pkg)
+  "Get the symbol for a static method name.
+   First checks :openldk for native method implementations,
+   then falls back to the loader's package for Java-defined methods."
+  (when (str:contains? "shiftLeft" method-name)
+    (format t "~&; DEBUG: static-method-symbol: method-name=~A loader-pkg=~A~%" method-name loader-pkg))
+  (let ((openldk-sym (find-symbol method-name (find-package :openldk))))
+    (when (str:contains? "shiftLeft" method-name)
+      (format t "~&; DEBUG: static-method-symbol: openldk-sym=~A fboundp=~A~%"
+              openldk-sym (and openldk-sym (fboundp openldk-sym))))
+    (let ((result (if (and openldk-sym (fboundp openldk-sym))
+                      openldk-sym
+                      (intern method-name loader-pkg))))
+      (when (str:contains? "shiftLeft" method-name)
+        (format t "~&; DEBUG: static-method-symbol: returning ~A (package ~A)~%"
+                result (symbol-package result)))
+      result)))
+
+(defun %make-java-instance (class-name)
+  "Create an instance of a Java class using the correct class symbol.
+   CLASS-NAME is the binary name (e.g. \"java/lang/String\").
+   First checks :openldk for bootstrap/shared classes, then falls back to
+   the class's defining loader's package."
+  ;; First try :openldk - this handles bootstrap classes and ensures
+  ;; method dispatch works for methods defined on bootstrap classes
+  (let ((openldk-sym (find-symbol class-name :openldk)))
+    (when (and openldk-sym (find-class openldk-sym nil))
+      (return-from %make-java-instance (make-instance openldk-sym))))
+  ;; Fall back to the loader's package for user-defined classes
+  (let* ((pkg (class-package class-name))
+         (sym (intern class-name pkg)))
+    (if (find-class sym nil)
+        (make-instance sym)
+        (error "Class not found: ~A" class-name))))
 
 ;; BIN-NAME is the binary name of a class.  eg: java/lang/String
 ;; FQ-NAME is the fully qualified name of a class. eg: java.lang.String

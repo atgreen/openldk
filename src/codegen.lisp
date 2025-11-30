@@ -353,7 +353,7 @@
   (with-slots (class) insn
     (make-instance '<expression>
                    :insn insn
-                   :code `(let ((lookup (make-instance '|java/lang/invoke/MethodHandles$Lookup|)))
+                   :code `(let ((lookup (%make-java-instance "java/lang/invoke/MethodHandles$Lookup")))
                             (|<init>(Ljava/lang/Class;)| lookup ,class)
                             (print lookup)
                             (error "unimplemented")))))
@@ -380,20 +380,22 @@
     (make-instance '<expression>
                    :insn insn
                    :code (let* ((loader (slot-value context 'ldk-loader))
+                                ;; Ensure class is loaded before package lookup
+                                (_ (classload class))
                                 (declaring-class (or (%find-declaring-class class method-name loader) class))
                                 (pkg (class-package declaring-class))
+                                (full-name (format nil "~A.~A" declaring-class method-name))
+                                ;; Use static-method-symbol to check :openldk first (for native methods)
+                                (method-sym (static-method-symbol full-name pkg))
                                 (nargs (length args))
                                 (call (cond
                                         ((eq nargs 0)
-                                         (list (intern (format nil "~A.~A" declaring-class method-name) pkg)))
+                                         (list method-sym))
                                         ((eq nargs 1)
-                                         (list (intern (format nil "~A.~A" declaring-class method-name) pkg) (code (codegen (car args) context))))
+                                         (list method-sym (code (codegen (car args) context))))
                                         (t
                                          (list 'apply
-                                               (list 'function (intern (format nil "~A.~A"
-                                                                              declaring-class
-                                                                               method-name)
-                                                                       pkg))
+                                               (list 'function method-sym)
                                                (list 'reverse (cons 'list (mapcar (lambda (a) (code (codegen a context))) args))))))))
                            call)
                    :expression-type return-type)))
@@ -486,6 +488,9 @@
 
 (defmethod codegen ((insn ir-checkcast) context)
   (with-slots (classname) insn
+    ;; Ensure class is loaded before package lookup (unless it's an array type)
+    (unless (eq (char classname 0) #\[)
+      (classload classname))
     (make-instance '<expression>
                    :insn insn
                    :code (progn
@@ -847,10 +852,11 @@
 
 (defmethod codegen ((insn ir-iinc) context)
   ;; FIXME: don't increment above width of type
+  ;; Local variables use :openldk package - they don't need per-loader isolation
   (with-slots (index const) insn
      (let ((expr (make-instance '<expression>
                                 :insn insn
-                                :code (list 'incf (intern (format nil "local-~A" index) (context-package context)) const))))
+                                :code (list 'incf (intern (format nil "local-~A" index) :openldk) const))))
        expr)))
 
 (defmethod codegen ((insn ir-if-acmpeq) context)
@@ -929,10 +935,11 @@
                                (list 'go (intern (format nil "branch-target-~A" offset)))))))
 
 (defmethod codegen ((insn ir-condition-exception) context)
-  (let ((pkg (context-package context)))
-    (make-instance '<expression>
-                   :insn insn
-                   :code (list 'slot-value (intern "condition-cache" pkg) (list 'quote (intern "objref" pkg))))))
+  (declare (ignore context))
+  ;; condition-cache and objref are runtime symbols in :openldk
+  (make-instance '<expression>
+                 :insn insn
+                 :code (list 'slot-value '|condition-cache| (list 'quote 'openldk::|objref|))))
 
 (defmethod codegen ((insn ir-ifnonnull) context)
   (with-slots (offset value) insn
@@ -968,6 +975,8 @@
     (make-instance '<expression>
                    :insn insn
                    :code (let* ((cname (name (slot-value (slot-value insn 'class) 'class)))
+                                ;; Ensure class is loaded before package lookup (unless array type)
+                                (_ (unless (eq (char cname 0) #\[) (classload cname)))
                                 (pkg (class-package cname))
                                 (obj (code (codegen objref context))))
                            (cond
@@ -1116,20 +1125,20 @@
 
 (defmethod codegen ((insn ir-call-virtual-method) context)
   (with-slots (method-name args) insn
-    ;; Virtual method dispatch uses the context's package since it's based on runtime type
-    (let ((pkg (context-package context)))
-      (make-instance '<expression>
-                     :insn insn
-                     :code (let* ((nargs (length args))
-                                  (call (cond
-                                          ((eq nargs 0)
-                                           (error "internal error"))
-                                          ((eq nargs 1)
-                                           (list (intern (format nil "~A" method-name) pkg) (code (codegen (car args) context))))
-                                          (t
-                                           `(funcall (function ,(intern (format nil "~A" method-name) pkg))
-                                                     ,@(mapcar (lambda (a) (code (codegen a context))) args))))))
-                             call)))))
+    ;; Virtual method dispatch uses :openldk package for generic function names
+    ;; Instance methods are defined as CLOS generic functions in :openldk for cross-loader dispatch
+    (make-instance '<expression>
+                   :insn insn
+                   :code (let* ((nargs (length args))
+                                (call (cond
+                                        ((eq nargs 0)
+                                         (error "internal error"))
+                                        ((eq nargs 1)
+                                         (list (intern (format nil "~A" method-name) :openldk) (code (codegen (car args) context))))
+                                        (t
+                                         `(funcall (function ,(intern (format nil "~A" method-name) :openldk))
+                                                   ,@(mapcar (lambda (a) (code (codegen a context))) args))))))
+                           call))))
 
 (defparameter *invokedynamic-cache* (make-hash-table :test #'equal))
 
@@ -1198,16 +1207,18 @@
 (defmethod codegen ((insn ir-local-variable) context)
   (with-slots (index) insn
     ;; FIXME: track type of local vars
+    ;; Local variables use :openldk package - they don't need per-loader isolation
     (let ((expr (make-instance '<expression>
                                :insn insn
-                               :code (intern (format nil "local-~A" index) (context-package context)))))
+                               :code (intern (format nil "local-~A" index) :openldk))))
       expr)))
 
 (defmethod codegen ((insn ir-long-local-variable) context)
   (with-slots (index) insn
+    ;; Local variables use :openldk package - they don't need per-loader isolation
     (let ((expr (make-instance '<expression>
                                :insn insn
-                               :code (intern (format nil "local-~A" index) (context-package context))
+                               :code (intern (format nil "local-~A" index) :openldk)
                                :expression-type :LONG)))
       expr)))
 
@@ -1225,11 +1236,13 @@
   (declare (ignore context))
   (with-slots (class) insn
     (with-slots (class) class
-      ;; All class names in :openldk for compatibility
-      (let ((classname (slot-value class 'name)))
+      ;; Ensure class is loaded before package lookup
+      (let* ((classname (slot-value class 'name))
+             (_ (classload classname))
+             (pkg (class-package classname)))
         (make-instance '<expression>
                        :insn insn
-                       :code `(let* ((obj (make-instance ',(intern classname :openldk)))
+                       :code `(let* ((obj (make-instance ',(intern classname pkg)))
                                      (klass ,(java-class class)))
                                 ;; Ensure clazz slot is populated for instanceof/reflection
                                 (when (and klass (slot-exists-p obj '|clazz|))
@@ -1262,7 +1275,7 @@
       (let ((size (car dimensions)))
         ;; Check for negative array size
         (when (< size 0)
-          (let ((exc (make-instance '|java/lang/NegativeArraySizeException|)))
+          (let ((exc (%make-java-instance "java/lang/NegativeArraySizeException")))
             (|<init>()| exc)
             (error (%lisp-condition exc))))
         (make-java-array :size size
@@ -1301,9 +1314,15 @@
 
 (defmethod codegen ((insn ir-call-special-method) context)
   (with-slots (class method-name args) insn
-    (let* ((pkg (class-package (slot-value class 'name)))
-           (method-symbol (intern (format nil "~A" method-name) pkg))
-           (owner-symbol (intern (slot-value class 'name) pkg))
+    (let* ((class-name (slot-value class 'name))
+           ;; Ensure class is loaded before package lookup
+           (_ (classload class-name))
+           (pkg (class-package class-name))
+           ;; Method symbol goes in :openldk - constructors are generic functions
+           ;; shared across loaders for CLOS dispatch, like instance methods
+           (method-symbol (intern (format nil "~A" method-name) :openldk))
+           ;; Owner class symbol goes in the class's package
+           (owner-symbol (intern class-name pkg))
            (arg-code (mapcar (lambda (a) (code (codegen a context))) args)))
       (make-instance '<expression>
                      :insn insn
@@ -1321,18 +1340,23 @@
                                (when (null objref)
                                  (error (format nil "Null Pointer Exception ~A" ,(slot-value insn 'address))))
                                objref)
-                             (quote ,(intern (mangle-field-name member-name) pkg)))))))
+                             ;; Field names stay in :openldk for CLOS slot inheritance
+                             (quote ,(intern (mangle-field-name member-name) :openldk)))))))
 
 (defmethod codegen ((insn ir-static-member) context)
   (declare (ignore context))
   (with-slots (class member-name) insn
     (let ((class-name (slot-value (slot-value class 'class) 'name)))
+      ;; Ensure class is loaded before looking up its package
+      ;; This is necessary because the class might be in a different loader's package
+      (classload class-name)
       (let ((pkg (class-package class-name)))
         (make-instance '<expression>
                        :insn insn
                        :code `(slot-value
                                ,(intern (format nil "+static-~A+" class-name) pkg)
-                               (quote ,(intern (mangle-field-name member-name) pkg))))))))
+                               ;; Field names stay in :openldk for CLOS slot inheritance
+                               (quote ,(intern (mangle-field-name member-name) :openldk))))))))
 
 (define-condition java-lang-throwable (error)
   ((throwable :initarg :throwable :reader throwable)))
@@ -1354,7 +1378,13 @@
                  :code `(return)))
 
 (defmethod codegen ((insn ir-return-value) context)
-  (let ((pkg (context-package context)))
+  ;; Static methods have format "class/name.method()" with "." before "("
+  ;; Instance methods have format "method(Ljava/lang/Object;)" - "/" only in descriptors
+  ;; Static methods use loader's package, instance methods use :openldk (generic functions)
+  (let* ((fn-name (slot-value insn 'fn-name))
+         (fn-pkg (if (find #\. fn-name)
+                     (context-package context)
+                     (find-package :openldk))))
     (make-instance '<expression>
                    :insn insn
                    :code `(let ((result ,(code (codegen (slot-value insn 'value) context))))
@@ -1366,7 +1396,7 @@
                               (*debug-trace*
                                (format t "~&~V@A <~A> trace: ~A~%"
                                        *call-nesting-level* "*" *call-nesting-level* ,(fn-name *context*))))
-                            (return-from ,(intern (slot-value insn 'fn-name) pkg) result)))))
+                            (return-from ,(intern fn-name fn-pkg) result)))))
 
 (defvar *current-block* nil
   "Dynamic variable holding the current <basic-block> during codegen.
@@ -1385,9 +1415,10 @@ Used to consult block-local substitutions in addition to global ones.")
             (setf v (gethash insn local-subs))))))
     (if v
         (codegen v context)
+        ;; Stack variables use :openldk package - they don't need per-loader isolation
         (make-instance '<expression>
                        :insn insn
-                       :code (intern (format nil "s{~{~A~^,~}}" (sort (copy-list (slot-value insn 'var-numbers)) #'<)) (context-package context))))))
+                       :code (intern (format nil "s{~{~A~^,~}}" (sort (copy-list (slot-value insn 'var-numbers)) #'<)) :openldk)))))
 
 (defmethod codegen-block ((basic-block <basic-block>) dominator-block)
   "Generate Lisp code for a basic block, handling exception scopes and control flow."
@@ -1462,24 +1493,24 @@ Used to consult block-local substitutions in addition to global ones.")
                             (HANDLER-CASE
                                 (BLOCK TRY-BODY
                                   (TAGBODY ,@lisp-code))
+                              ;; Condition symbols always in :openldk for cross-loader catching
                               ,@(loop for (exception-type . handler-block) in try-catch-handlers
-                                      for exc-pkg = (class-package (or exception-type "java/lang/Throwable"))
                                       when (> (length exception-type) 0)
                                         do (classload exception-type)
                                       collect `(,(intern (format nil "condition-~A" (or exception-type
-                                                                                        "java/lang/Throwable")) exc-pkg)
-                                                (,(intern "condition" ctx-pkg))
+                                                                                        "java/lang/Throwable")) :openldk)
+                                                (|condition|)
                                                 (setf |condition-cache| |condition|)
                                                 (go ,(intern (format nil "branch-target-~A" (address handler-block)))))))))
                         `((HANDLER-CASE
                               (BLOCK TRY-BODY
                                 (TAGBODY ,@lisp-code))
+                            ;; Condition symbols always in :openldk for cross-loader catching
                             ,@(loop for (exception-type . handler-block) in try-catch-handlers
-                                    for exc-pkg = (class-package (or exception-type "java/lang/Throwable"))
                                     do (classload exception-type)
                                     collect `(,(intern (format nil "condition-~A" (or exception-type
-                                                                                      "java/lang/Throwable")) exc-pkg)
-                                              (,(intern "condition" ctx-pkg))
+                                                                                      "java/lang/Throwable")) :openldk)
+                                              (|condition|)
                                               (setf |condition-cache| |condition|)
                                               (go ,(intern (format nil "branch-target-~A" (address handler-block))))))))))))
           lisp-code)))))

@@ -48,7 +48,7 @@
   (assert component-class)
   ;; Validate size for negativity (JVM spec: throw NegativeArraySizeException)
   (when (< size 0)
-    (let ((exc (make-instance '|java/lang/NegativeArraySizeException|)))
+    (let ((exc (%make-java-instance "java/lang/NegativeArraySizeException")))
       (|<init>()| exc)
       (error (%lisp-condition exc))))
   (if initial-contents
@@ -69,7 +69,7 @@
          (len (length data)))
     (when (or (< index 0) (>= index len))
       ;; Throw Java ArrayIndexOutOfBoundsException
-      (let ((exc (make-instance '|java/lang/ArrayIndexOutOfBoundsException|)))
+      (let ((exc (%make-java-instance "java/lang/ArrayIndexOutOfBoundsException")))
         ;; Initialize with message
         (|<init>(Ljava/lang/String;)| exc
          (jstring (format nil "~A" index)))
@@ -85,7 +85,7 @@
          (len (length data)))
     ;; Bounds check
     (when (or (< index 0) (>= index len))
-      (let ((exc (make-instance '|java/lang/ArrayIndexOutOfBoundsException|)))
+      (let ((exc (%make-java-instance "java/lang/ArrayIndexOutOfBoundsException")))
         (|<init>(Ljava/lang/String;)| exc
          (jstring (format nil "~A" index)))
         (error (%lisp-condition exc))))
