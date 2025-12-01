@@ -127,6 +127,12 @@ Send 'kill -3 <pid>' or 'kill -QUIT <pid>' to trigger."
   (when *debug-codegen*
     (pprint code)
     (format t "~%"))
+  ;; Debug: print code containing shiftLeft
+  (let ((code-str (format nil "~S" code)))
+    (when (search "shiftLeft" code-str)
+      (format t "~&; DEBUG %eval: code containing shiftLeft:~%")
+      (pprint code)
+      (force-output)))
   (if *debug-unmuffle*
       (eval code) ; lint:suppress eval-usage
       (handler-bind
@@ -999,6 +1005,11 @@ get the same unified var-numbers."
         (setf (svcount *context*) 0)
         (when *debug-bytecode*
           (format t "~&; COMPILING ~A~%" method-key))
+        ;; Debug: trace loader for bit_shift methods
+        (when (search "bit_shift" method-key)
+          (format t "~&; DEBUG %compile-method: method=~A class-loader=~A~%"
+                  method-key (slot-value class 'ldk-loader))
+          (force-output))
         (if (static-p method)
             (setf (fn-name *context*)
                   (format nil "~A.~A"

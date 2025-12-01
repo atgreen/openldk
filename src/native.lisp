@@ -1564,24 +1564,47 @@ user.variant
             (list method object args)))
   (unwind-protect
        (progn
+         ;; Unbox primitive wrapper types
          (when args
            (dotimes (i (length (java-array-data args)))
-             (when (typep (jaref args i) '|java/lang/Integer|)
-               (setf (jaref args i) (slot-value (jaref args i) '|value|)))))
+             (let ((arg (jaref args i)))
+               (cond
+                 ((typep arg '|java/lang/Integer|)
+                  (setf (jaref args i) (slot-value arg '|value|)))
+                 ((typep arg '|java/lang/Long|)
+                  (setf (jaref args i) (slot-value arg '|value|)))
+                 ((typep arg '|java/lang/Boolean|)
+                  (setf (jaref args i) (slot-value arg '|value|)))
+                 ((typep arg '|java/lang/Byte|)
+                  (setf (jaref args i) (slot-value arg '|value|)))
+                 ((typep arg '|java/lang/Short|)
+                  (setf (jaref args i) (slot-value arg '|value|)))
+                 ((typep arg '|java/lang/Character|)
+                  (setf (jaref args i) (slot-value arg '|value|)))
+                 ((typep arg '|java/lang/Float|)
+                  (setf (jaref args i) (slot-value arg '|value|)))
+                 ((typep arg '|java/lang/Double|)
+                  (setf (jaref args i) (slot-value arg '|value|)))))))
          (let* ((java-class (slot-value method '|clazz|))
                 (class-name (substitute #\/ #\. (lstring (slot-value java-class '|name|))))
-                ;; Use :openldk for all method symbols
-                (result (apply (intern
-                                (lispize-method-name
-                                 (concatenate 'string
-                                              class-name
-                                              "."
-                                              (lstring (slot-value method '|name|))
-                                              (lstring (slot-value method '|signature|))))
-                                :openldk)
-                               (if (eq 0 (logand #x8 (slot-value method '|modifiers|)))
-                                   (cons object (if args (coerce (java-array-data args) 'list) nil)) ; non-static method
-                                   (if args (coerce (java-array-data args) 'list) nil))))) ; static method
+                (is-static (not (eq 0 (logand #x8 (slot-value method '|modifiers|)))))
+                ;; For static methods, use the class's package; for instance methods use :openldk
+                (java-loader (slot-value java-class '|classLoader|))
+                (ldk-loader (get-ldk-loader-for-java-loader java-loader))
+                (method-name (lispize-method-name
+                              (concatenate 'string
+                                           class-name
+                                           "."
+                                           (lstring (slot-value method '|name|))
+                                           (lstring (slot-value method '|signature|)))))
+                ;; Static methods are in the class's loader package, instance methods in :openldk
+                (pkg (if is-static
+                         (class-package class-name ldk-loader)
+                         (find-package :openldk)))
+                (result (apply (intern method-name pkg)
+                               (if is-static
+                                   (if args (coerce (java-array-data args) 'list) nil)
+                                   (cons object (if args (coerce (java-array-data args) 'list) nil))))))
            (when *debug-trace*
              (format t "~&~V@A trace: result = ~A~%"
                      *call-nesting-level* "*" result))
@@ -2642,10 +2665,16 @@ user.variant
                   (is-special (= ref-kind 7)))
               (if is-static
                   ;; Static methods use fully qualified names like class.method(desc)
-                  ;; They live in the loader's package
-                  (let* ((pkg (class-package class-name))
+                  ;; They live in the loader's package - get loader from the Class object
+                  (let* ((java-loader (slot-value clazz '|classLoader|))
+                         (ldk-loader (get-ldk-loader-for-java-loader java-loader))
+                         (pkg (class-package class-name ldk-loader))
                          (full-method-sig (format nil "~A.~A~A" class-name method-name method-type))
                          (lisp-method-name (intern (lispize-method-name full-method-sig) pkg)))
+                    (when (search "shiftLeft" method-name)
+                      (format t "~&; DEBUG invoke-from-member-name: class=~A method=~A loader=~A pkg=~A lisp-method=~A~%"
+                              class-name method-name ldk-loader pkg lisp-method-name)
+                      (force-output))
                     (apply lisp-method-name args))
                   ;; Virtual and special methods are generic functions with just the method name
                   ;; The first argument is the receiver (this)

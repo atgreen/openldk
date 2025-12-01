@@ -383,10 +383,14 @@
                                 ;; Ensure class is loaded before package lookup
                                 (_ (classload class))
                                 (declaring-class (or (%find-declaring-class class method-name loader) class))
-                                (pkg (class-package declaring-class))
+                                (pkg (class-package declaring-class loader))
                                 (full-name (format nil "~A.~A" declaring-class method-name))
                                 ;; Use static-method-symbol to check :openldk first (for native methods)
                                 (method-sym (static-method-symbol full-name pkg))
+                                (_ (when (search "shiftLeft" full-name)
+                                     (format t "~&; DEBUG codegen static-call: class=~A method=~A loader=~A pkg=~A sym=~A sym-pkg=~A~%"
+                                             declaring-class method-name loader pkg method-sym (symbol-package method-sym))
+                                     (force-output)))
                                 (nargs (length args))
                                 (call (cond
                                         ((eq nargs 0)

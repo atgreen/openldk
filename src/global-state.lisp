@@ -166,37 +166,45 @@
       ;; No loader means boot loader - use :openldk
       (find-package :openldk)))
 
-(defun class-package (class-name)
+(defun class-package (class-name &optional fallback-loader)
   "Get the Lisp package for a class by its binary name.
-   Searches boot loader, then app loader for the class.
-   Falls back to :openldk if class not found or has no loader."
-  ;; Debug for specific class
-  (when (str:starts-with? "clojure/lang/Numbers" class-name)
-    (format t "~&; DEBUG: class-package called for ~A~%" class-name))
-  ;; First check boot loader's table (global table)
-  (if-let ((class (%get-ldk-class-by-bin-name class-name t)))
-    (if-let ((loader (slot-value class 'ldk-loader)))
-      (let ((pkg (loader-package loader)))
-        (when (str:starts-with? "clojure/lang/Numbers" class-name)
-          (format t "~&; DEBUG: class-package for ~A: loader=~A pkg=~A~%"
-                  class-name loader pkg))
-        (when (and (eq pkg (find-package :openldk))
-                   (not (jdk-class-p class-name)))
-          (format t "~&; DEBUG: class-package returning :openldk for non-JDK class ~A (loader=~A)~%"
-                  class-name loader))
-        pkg)
-      (progn
-        (format t "~&; DEBUG: class-package: class ~A has NIL ldk-loader~%" class-name)
-        (find-package :openldk)))
-    ;; Not in boot loader - check app loader
-    (if (and *app-ldk-class-loader*
-             (gethash class-name (slot-value *app-ldk-class-loader* 'ldk-classes-by-bin-name)))
-        (loader-package *app-ldk-class-loader*)
-        ;; Not found anywhere - fall back to :openldk
-        (progn
-          (when (not (jdk-class-p class-name))
-            (format t "~&; DEBUG: class-package: class ~A not found in any loader~%" class-name))
-          (find-package :openldk)))))
+   When FALLBACK-LOADER is provided, searches that loader's hierarchy first.
+   Falls back to global tables, then app loader, then :openldk."
+  ;; Search with fallback-loader first if provided, then global table
+  (let ((class (or (and fallback-loader
+                        (%get-ldk-class-by-bin-name class-name t fallback-loader))
+                   (%get-ldk-class-by-bin-name class-name t))))
+    (when (search "Numbers" class-name)
+      (format t "~&; DEBUG class-package: class-name=~A fallback-loader=~A class=~A~%"
+              class-name fallback-loader class)
+      (force-output)
+      (when class
+        (format t "~&; DEBUG class-package: ldk-loader=~A~%"
+                (and (slot-boundp class 'ldk-loader) (slot-value class 'ldk-loader)))
+        (force-output)))
+    (cond
+      ;; Found the class - use its defining loader's package
+      ((and class
+            (slot-boundp class 'ldk-loader)
+            (slot-value class 'ldk-loader))
+       (let ((pkg (loader-package (slot-value class 'ldk-loader))))
+         (when (search "Numbers" class-name)
+           (format t "~&; DEBUG class-package: returning ~A~%" pkg)
+           (force-output))
+         pkg))
+      ;; Class found but no loader - use :openldk
+      (class
+       (when (search "Numbers" class-name)
+         (format t "~&; DEBUG class-package: no ldk-loader, returning :openldk~%")
+         (force-output))
+       (find-package :openldk))
+      ;; Not found - check app loader
+      ((and *app-ldk-class-loader*
+            (gethash class-name (slot-value *app-ldk-class-loader* 'ldk-classes-by-bin-name)))
+       (loader-package *app-ldk-class-loader*))
+      ;; Not found anywhere - fall back to :openldk
+      (t
+       (find-package :openldk)))))
 
 (defun class-symbol-for-reference (class-name loader)
   "Get the Lisp symbol for CLASS-NAME when referenced from LOADER.
@@ -214,18 +222,21 @@
   "Get the symbol for a static method name.
    First checks :openldk for native method implementations,
    then falls back to the loader's package for Java-defined methods."
-  (when (str:contains? "shiftLeft" method-name)
-    (format t "~&; DEBUG: static-method-symbol: method-name=~A loader-pkg=~A~%" method-name loader-pkg))
+  (when (search "shiftLeft" method-name)
+    (format t "~&; DEBUG: static-method-symbol: method-name=~A loader-pkg=~A~%" method-name loader-pkg)
+    (force-output))
   (let ((openldk-sym (find-symbol method-name (find-package :openldk))))
-    (when (str:contains? "shiftLeft" method-name)
+    (when (search "shiftLeft" method-name)
       (format t "~&; DEBUG: static-method-symbol: openldk-sym=~A fboundp=~A~%"
-              openldk-sym (and openldk-sym (fboundp openldk-sym))))
+              openldk-sym (and openldk-sym (fboundp openldk-sym)))
+      (force-output))
     (let ((result (if (and openldk-sym (fboundp openldk-sym))
                       openldk-sym
                       (intern method-name loader-pkg))))
-      (when (str:contains? "shiftLeft" method-name)
+      (when (search "shiftLeft" method-name)
         (format t "~&; DEBUG: static-method-symbol: returning ~A (package ~A)~%"
-                result (symbol-package result)))
+                result (symbol-package result))
+        (force-output))
       result)))
 
 (defun %make-java-instance (class-name)
