@@ -398,9 +398,8 @@
                                         ((eq nargs 1)
                                          (list method-sym (code (codegen (car args) context))))
                                         (t
-                                         (list 'apply
-                                               (list 'function method-sym)
-                                               (list 'reverse (cons 'list (mapcar (lambda (a) (code (codegen a context))) args))))))))
+                                         (cons method-sym
+                                               (reverse (mapcar (lambda (a) (code (codegen a context))) args)))))))
                            call)
                    :expression-type return-type)))
 
