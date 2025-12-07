@@ -62,14 +62,14 @@ jobs:
         run: |
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           export JAVA_HOME=/usr/lib/jvm/temurin-8-jdk-amd64/jre
-	  ocicl install
+          ocicl install
           make
 
       - name: Build (macOS)
         if: runner.os == 'macOS'
         run: |
           export JAVA_HOME=$JAVA_HOME/jre
-	  ocicl install
+          ocicl install
           make
 
 #      - name: Partial Test
