@@ -57,24 +57,19 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-ocicl-
 
-#      - name: Install dependencies
-#        run: |
-#          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-#          ocicl install
-
       - name: Build (Linux)
         if: runner.os == 'Linux'
         run: |
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           export JAVA_HOME=/usr/lib/jvm/temurin-8-jdk-amd64/jre
+	  ocicl install
           make
 
       - name: Build (macOS)
         if: runner.os == 'macOS'
         run: |
-          set -x
-          env
-          find $JAVA_HOME 
+          export JAVA_HOME=$JAVA_HOME/jre
+	  ocicl install
           make
 
 #      - name: Partial Test
