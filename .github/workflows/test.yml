@@ -72,7 +72,7 @@ jobs:
       - name: Build (macOS)
         if: runner.os == 'macOS'
         run: |
-          export JAVA_HOME=$JAVA_HOME_8_X64
+          env
           make
 
 #      - name: Partial Test
