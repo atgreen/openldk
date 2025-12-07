@@ -19,7 +19,7 @@ jobs:
   tests:
     strategy:
       matrix:
-        os: [ubuntu-latest]
+        os: [ubuntu-latest, macos-latest]
 
     runs-on: ${{ matrix.os }}
 
@@ -35,9 +35,16 @@ jobs:
           distribution: 'temurin'
           java-version: '8'
 
-      - name: Setup SBCL and ocicl
+      - name: Setup SBCL and ocicl (Linux)
+        if: runner.os == 'Linux'
         run: |
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          brew install sbcl ocicl dejagnu
+          ocicl setup >> ~/.sbclrc
+
+      - name: Setup SBCL and ocicl (macOS)
+        if: runner.os == 'macOS'
+        run: |
           brew install sbcl ocicl dejagnu
           ocicl setup >> ~/.sbclrc
 
@@ -55,10 +62,17 @@ jobs:
 #          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 #          ocicl install
 
-      - name: Build
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
         run: |
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           export JAVA_HOME=/usr/lib/jvm/temurin-8-jdk-amd64/jre
+          make
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          export JAVA_HOME=$JAVA_HOME_8_X64
           make
 
 #      - name: Partial Test
