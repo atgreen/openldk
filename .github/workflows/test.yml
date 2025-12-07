@@ -72,7 +72,10 @@ jobs:
       - name: Build (macOS)
         if: runner.os == 'macOS'
         run: |
+	  set -x
           env
+	  ls -l $JAVA_HOME/lib/rt.jar
+	  find $JAVA_HOME 
           make
 
 #      - name: Partial Test
