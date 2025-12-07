@@ -1113,8 +1113,9 @@ user.variant
   (sb-alien:free-alien (gethash address *unsafe-memory-table*)))
 
 (defun |java/lang/System.mapLibraryName(Ljava/lang/String;)| (library-name)
-  #+LINUX (jstring (format nil "lib~A.so" (lstring library-name)))
-  #-LINUX (error "unimplemented"))
+  (or #+LINUX (jstring (format nil "lib~A.so" (lstring library-name)))
+      #+DARWIN (jstring (format nil "lib~A.dylib" (lstring library-name)))
+      (error "unimplemented")))
 
 (defun |java/lang/ClassLoader.findBuiltinLib(Ljava/lang/String;)| (library-name)
   ;; FIXME
@@ -2449,7 +2450,8 @@ user.variant
       (setf (slot-value mn '|flags|) flags))
     mn))
 
-(defun |java/lang/invoke/MethodHandles$Lookup.findSpecial(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/Class;)| (lookup refc name method-type special-caller)
+(defun |java/lang/invoke/MethodHandles$Lookup.findSpecial(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/Class;)|
+    (lookup refc name method-type special-caller)
   "Create a DirectMethodHandle for invokespecial method invocation.
    Used for private methods, constructors, and super calls in lambda metafactory."
   (declare (ignore lookup special-caller))
