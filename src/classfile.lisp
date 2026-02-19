@@ -194,6 +194,9 @@
 (defmethod get-stack-jtype ((v constant-class-reference))
   :REFERENCE)
 
+(defmethod get-stack-jtype ((v constant-method-handle))
+  :REFERENCE)
+
 (defmethod emit-name ((v constant-class-reference) cp)
   (emit (aref cp (slot-value v 'index)) cp))
 

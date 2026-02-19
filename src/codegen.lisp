@@ -1204,10 +1204,12 @@
   (with-slots (class) insn
     (make-instance '<expression>
                    :insn insn
-                   :code (let* ((class (ir-class-class class))
-                                (pkg (class-package (slot-value class 'name))))
-                           (list 'unless (list 'initialized-p class)
-                                 (list (intern (format nil "%clinit-~A" (slot-value class 'name)) pkg)))))))
+                   :code (let* ((class (ir-class-class class)))
+                           (if class
+                               (let ((pkg (class-package (slot-value class 'name))))
+                                 (list 'unless (list 'initialized-p class)
+                                       (list (intern (format nil "%clinit-~A" (slot-value class 'name)) pkg))))
+                               nil)))))
 
 (defmethod codegen ((insn ir-local-variable) context)
   (with-slots (index) insn
@@ -1463,14 +1465,17 @@ Used to consult block-local substitutions in addition to global ones.")
                   (push (list) (emitted-block-scopes *context*))
                 (setf new-scope t))
 |#
-                (setf lisp-code
-                      (nconc lisp-code
-                             (if (or (find (fall-through-address basic-block) (car (emitted-block-scopes *context*)))
-                                     (gethash (address (fall-through-address basic-block)) (try-end-table *context*)))
-                                 (list (list 'go (intern (format nil "branch-target-~A" (address (car (code (fall-through-address basic-block))))))))
-                                 (codegen-block
-                                  (fall-through-address basic-block)
-                                  (if (try-catch basic-block) basic-block dominator-block))))))
+                (let* ((ft-block (fall-through-address basic-block))
+                       (ft-tag (intern (format nil "branch-target-~A" (address (car (code ft-block)))))))
+                  (setf lisp-code
+                        (nconc lisp-code
+                               (if (or (find ft-block (car (emitted-block-scopes *context*)))
+                                       (gethash (address ft-block) (try-end-table *context*)))
+                                   (list (list 'go ft-tag))
+                                   ;; If codegen-block returns NIL (e.g. dominator check fails),
+                                   ;; generate a GO to the fall-through block's tag in an enclosing TAGBODY.
+                                   (or (codegen-block ft-block (if (try-catch basic-block) basic-block dominator-block))
+                                       (list (list 'go ft-tag))))))))
 #|
               (when (and (not new-scope) (try-catch basic-block))
                 (push (list) (emitted-block-scopes *context*))
@@ -1487,35 +1492,44 @@ Used to consult block-local substitutions in addition to global ones.")
                 (ctx-pkg (context-package *context*)))
             (when try-catch-handlers
               (pop (emitted-block-scopes *context*))
-              ;; Wrap the block's code in HANDLER-CASE
-              ;; Pull any branch target out of the HANDLER-CASE first.
-              (setf lisp-code
-                    (if (and lisp-code
-                             (starts-with? "branch-target-" (format nil "~A" (car lisp-code))))
-                        (let ((bt (car lisp-code))
-                              (lisp-code (cdr lisp-code)))
-                          `(,bt
-                            (HANDLER-CASE
+              ;; Compute a GO to the try-end block to prevent fall-through
+              ;; after the HANDLER-CASE (JVM semantics: normal completion
+              ;; of a try block continues at the end-pc).
+              (let ((fall-through-go
+                      (when-let ((end-block (first (exception-end-blocks basic-block))))
+                        (list (list 'go (intern (format nil "branch-target-~A"
+                                                        (address (car (code end-block))))))))))
+                ;; Wrap the block's code in HANDLER-CASE
+                ;; Pull any branch target out of the HANDLER-CASE first.
+                (setf lisp-code
+                      (if (and lisp-code
+                               (starts-with? "branch-target-" (format nil "~A" (car lisp-code))))
+                          (let ((bt (car lisp-code))
+                                (lisp-code (cdr lisp-code)))
+                            `(,bt
+                              (HANDLER-CASE
+                                  (BLOCK TRY-BODY
+                                    (TAGBODY ,@lisp-code))
+                                ;; Condition symbols always in :openldk for cross-loader catching
+                                ,@(loop for (exception-type . handler-block) in try-catch-handlers
+                                        when (> (length exception-type) 0)
+                                          do (classload exception-type)
+                                        collect `(,(intern (format nil "condition-~A" (or exception-type
+                                                                                          "java/lang/Throwable")) :openldk)
+                                                  (|condition|)
+                                                  (setf |condition-cache| |condition|)
+                                                  (go ,(intern (format nil "branch-target-~A" (address handler-block)))))))
+                              ,@fall-through-go))
+                          `((HANDLER-CASE
                                 (BLOCK TRY-BODY
                                   (TAGBODY ,@lisp-code))
                               ;; Condition symbols always in :openldk for cross-loader catching
                               ,@(loop for (exception-type . handler-block) in try-catch-handlers
-                                      when (> (length exception-type) 0)
-                                        do (classload exception-type)
+                                      do (classload exception-type)
                                       collect `(,(intern (format nil "condition-~A" (or exception-type
                                                                                         "java/lang/Throwable")) :openldk)
                                                 (|condition|)
                                                 (setf |condition-cache| |condition|)
-                                                (go ,(intern (format nil "branch-target-~A" (address handler-block)))))))))
-                        `((HANDLER-CASE
-                              (BLOCK TRY-BODY
-                                (TAGBODY ,@lisp-code))
-                            ;; Condition symbols always in :openldk for cross-loader catching
-                            ,@(loop for (exception-type . handler-block) in try-catch-handlers
-                                    do (classload exception-type)
-                                    collect `(,(intern (format nil "condition-~A" (or exception-type
-                                                                                      "java/lang/Throwable")) :openldk)
-                                              (|condition|)
-                                              (setf |condition-cache| |condition|)
-                                              (go ,(intern (format nil "branch-target-~A" (address handler-block))))))))))))
+                                                (go ,(intern (format nil "branch-target-~A" (address handler-block)))))))
+                            ,@fall-through-go))))))
           lisp-code)))))

@@ -274,18 +274,32 @@ and its implementation."
          (when *debug-trace*
            (format t "~&~V@A trace: entering java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;) ~A~%"
                    (incf *call-nesting-level* 1) "*" (list name initialize loader caller)))
-         (if (and loader (not (equal loader *boot-class-loader*)))
-             (|findClass(Ljava/lang/String;)| loader name)
-             (let ((lname (substitute #\/ #\. (lstring name))))
-               (or (and (eq (char lname 0) #\[)
-                        (or (%get-java-class-by-bin-name lname t)
-                            (java-class (%get-array-ldk-class-from-name lname))))
-                   (and (%get-ldk-class-by-bin-name lname t)
-                        (java-class (%get-ldk-class-by-bin-name lname)))
-                   (let ((klass (classload lname)))
-                     (when klass
-                       (%clinit klass)
-                       (java-class klass)))))))
+         (let* ((lname (substitute #\/ #\. (lstring name)))
+                (result
+                  ;; Try user class loader first (if provided and not boot loader),
+                  ;; then fall back to our classpath search.
+                  ;; This mirrors JVM's loadClass delegation: parent first, then findClass.
+                  (or (and (and loader (not (equal loader *boot-class-loader*)))
+                           (handler-case
+                               (|findClass(Ljava/lang/String;)| loader name)
+                             (|condition-java/lang/ClassNotFoundException| () nil)
+                             (error () nil)))
+                      (and (eq (char lname 0) #\[)
+                           (or (%get-java-class-by-bin-name lname t)
+                               (java-class (%get-array-ldk-class-from-name lname))))
+                      (and (%get-ldk-class-by-bin-name lname t)
+                           (java-class (%get-ldk-class-by-bin-name lname)))
+                      (let ((klass (classload lname)))
+                        (when klass
+                          (%clinit klass)
+                          (java-class klass))))))
+           ;; Only throw ClassNotFoundException at runtime (after app loader is initialized).
+           ;; During image build, return nil for missing classes.
+           (when (and (not result) *app-ldk-class-loader*)
+             (let ((cnfe (%make-java-instance "java/lang/ClassNotFoundException")))
+               (setf (slot-value cnfe '|detailMessage|) name)
+               (error (make-condition '|condition-java/lang/ClassNotFoundException| :|objref| cnfe))))
+           result))
     (when *debug-trace*
       (incf *call-nesting-level* -1))))
 
@@ -571,8 +585,7 @@ and its implementation."
               (make-instance '<constant-pool> :ldk-class ldk-class))
         cp))))
 
-(defmethod |getDeclaredConstructors0(Z)| ((this |java/lang/Class|) arg)
-  ;; FIXME
+(defmethod |getDeclaredConstructors0(Z)| ((this |java/lang/Class|) public-only)
   (unwind-protect
        (progn
          (when *debug-trace*
@@ -587,7 +600,9 @@ and its implementation."
             :initial-contents
             (coerce (append (when lclass
                               (loop for method across (methods lclass)
-                                    when (starts-with? "<init>" (name method))
+                                    when (and (starts-with? "<init>" (name method))
+                                             (or (zerop public-only)
+                                                 (not (zerop (logand #x1 (access-flags method))))))
                                     #|
                                     Class<?>[] parameterTypes,
                                     Class<?>[] checkedExceptions,
@@ -606,7 +621,8 @@ and its implementation."
                                                (make-java-array
                                                 :component-class (%get-java-class-by-fq-name "java.lang.Class")
                                                 :size 0)
-                                               (access-flags method) 0 (ijstring (descriptor method))
+                                               (access-flags method) 0
+                                               nil  ; generic signature (not yet supported)
                                                (gethash "RuntimeVisibleAnnotations" (attributes method))
                                                (or (gethash "RuntimeVisibleParameterAnnotations" (attributes method))
                                                    (make-java-array
@@ -630,8 +646,7 @@ and its implementation."
        :component-class (%get-java-class-by-fq-name "java.lang.Class")
        :initial-contents (coerce java-classes 'vector)))))
 
-(defmethod |getDeclaredMethods0(Z)| ((this |java/lang/Class|) arg)
-  ;; FIXME
+(defmethod |getDeclaredMethods0(Z)| ((this |java/lang/Class|) public-only)
   (unwind-protect
        (progn
          (when *debug-trace*
@@ -645,7 +660,9 @@ and its implementation."
             :component-class (%get-java-class-by-fq-name "java.lang.reflect.Method")
             :initial-contents (coerce (append (when lclass
                                                 (loop for method across (methods lclass)
-                                                      unless (starts-with? "<init>" (name method))
+                                                      when (and (not (starts-with? "<init>" (name method)))
+                                                                (or (zerop public-only)
+                                                                    (not (zerop (logand #x1 (access-flags method))))))
                                                       #|
                                                       Method(Class<?> declaringClass,
                                                       String name,
@@ -680,7 +697,7 @@ and its implementation."
                                                                     (%get-java-class-by-fq-name "java.lang.Class")
                                                                     :size 0)
                                                                    (access-flags method) 0
-                                                                   (ijstring (descriptor method))
+                                                                   nil  ; generic signature (not yet supported)
                                                                    (gethash "RuntimeVisibleAnnotations"
                                                                             (attributes method))
                                                                    (or (gethash "RuntimeVisibleParameterAnnotations"
@@ -700,7 +717,64 @@ and its implementation."
            (incf *call-nesting-level* -1))))
 
 
-(defmethod |getDeclaredFields0(Z)| ((this |java/lang/Class|) arg)
+;; Guard against null dispatch on gnu.bytecode.Type methods.
+;; Kawa's PrimProcedure sometimes has a null retType, causing isVoid() and
+;; getRawType() to be called on nil.
+(defmethod |isVoid()| ((obj null))
+  0)
+
+(defmethod |getRawType()| ((obj null))
+  nil)
+
+(defmethod |isCompatibleWithValue(Lgnu/bytecode/Type;)| ((obj null) other)
+  -1)
+
+(defmethod |isCompatibleWithValue(Lgnu/bytecode/Type;)| (obj (other null))
+  -1)
+
+;; Fix: Type.make(Class) can fail for primitive types when AbstractWeakHashTable
+;; lookups fail (e.g. due to hash collisions or GC clearing weak references).
+;; Fall back to looking up the well-known primitive Type static fields directly.
+(defmethod |getTypeFor(Ljava/lang/Class;)| :around (self jclass)
+  (or (handler-case (call-next-method)
+        (error () nil))
+      (when jclass
+        (let* ((name (lstring (slot-value jclass '|name|)))
+               (pkg (class-package "gnu/bytecode/Type"))
+               (static-sym (find-symbol "+static-gnu/bytecode/Type+" pkg))
+               (static-holder (when (and static-sym (boundp static-sym))
+                                (symbol-value static-sym)))
+               (field-name (cond
+                             ((string= name "void")    "voidType")
+                             ((string= name "int")     "intType")
+                             ((string= name "boolean") "booleanType")
+                             ((string= name "byte")    "byteType")
+                             ((string= name "short")   "shortType")
+                             ((string= name "long")    "longType")
+                             ((string= name "float")   "floatType")
+                             ((string= name "double")  "doubleType")
+                             ((string= name "char")    "charType"))))
+          (when (and field-name static-holder)
+            (let ((field-sym (find-symbol field-name :openldk)))
+              (when (and field-sym (slot-exists-p static-holder field-sym))
+                (slot-value static-holder field-sym))))))))
+
+
+;; Generic type methods - return non-generic types until full generics support is implemented.
+;; These must be defmethod without class specializer since java/lang/reflect/Method
+;; doesn't exist at compile time. The native-override-p check prevents the bytecode
+;; versions from being compiled, so these are the only definitions.
+(defmethod |getGenericReturnType()| (method)
+  "Return the return type. Generic type information is not yet supported."
+  (slot-value method '|returnType|))
+
+(defmethod |getGenericParameterTypes()| (method)
+  "Return the parameter types. Generic type information is not yet supported."
+  (let ((pt (slot-value method '|parameterTypes|)))
+    (or pt (make-java-array :component-class (%get-java-class-by-fq-name "java.lang.Class")
+                            :size 0))))
+
+(defmethod |getDeclaredFields0(Z)| ((this |java/lang/Class|) public-only)
   (unwind-protect
        (progn
          (when *debug-trace*
@@ -713,6 +787,9 @@ and its implementation."
            (labels ((get-fields (lclass)
                       (when lclass
                         (append (loop for field across (fields lclass)
+                                      ;; When public-only is 1 (true), skip non-public fields
+                                      when (or (zerop public-only)
+                                               (not (zerop (logand #x1 (access-flags field)))))
                                       collect (let ((f (%make-java-instance "java/lang/reflect/Field")))
                                                 (|<init>(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;IILjava/lang/String;[B)|
                                                  f this (ijstring (name field))
@@ -750,7 +827,7 @@ and its implementation."
          0))
     (t
     (let* ((field (gethash field-id *field-offset-table*))
-            (key (intern (lstring (slot-value field '|name|)) :openldk)))
+            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
        (if (equal (slot-value obj key) expected-value)
            (progn
              (setf (slot-value obj key) new-value)
@@ -760,7 +837,7 @@ and its implementation."
 (defmethod |compareAndSwapInt(Ljava/lang/Object;JII)| ((unsafe |sun/misc/Unsafe|) obj field-id expected-value new-value)
   ;; FIXME: use atomics package
   (let* ((field (gethash field-id *field-offset-table*))
-         (key (intern (lstring (slot-value field '|name|)) :openldk)))
+         (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
     (if (equal (slot-value obj key) expected-value)
         (progn
           (setf (slot-value obj key) new-value)
@@ -777,12 +854,12 @@ and its implementation."
      (jaref obj l))
     ((typep obj '|java/lang/Object|)
     (let* ((field (gethash l *field-offset-table*))
-            (key (intern (lstring (slot-value field '|name|)) :openldk)))
+            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
        (slot-value obj key)))
     ((null obj)
      ;; FIXME: check that the field is STATIC
     (let* ((field (gethash l *field-offset-table*))
-            (key (intern (lstring (slot-value field '|name|)) :openldk)))
+            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
        (let* ((clazz (slot-value field '|clazz|))
               (lname (lstring (slot-value clazz '|name|)))
               (bin-name (substitute #\/ #\. lname))
@@ -792,10 +869,22 @@ and its implementation."
     (t (error "internal error: unrecognized object type in getObjectVolatile: ~A" obj))))
 
 (defmethod |putObjectVolatile(Ljava/lang/Object;JLjava/lang/Object;)| ((unsafe |sun/misc/Unsafe|) obj l value)
-  ;; FIXME
   (cond
     ((typep obj 'java-array)
      (setf (jaref obj l) value))
+    ((typep obj '|java/lang/Object|)
+     (let* ((field (gethash l *field-offset-table*))
+            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
+       (setf (slot-value obj key) value)))
+    ((null obj)
+     ;; Static field access
+     (let* ((field (gethash l *field-offset-table*))
+            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk))
+            (clazz (slot-value field '|clazz|))
+            (lname (lstring (slot-value clazz '|name|)))
+            (bin-name (substitute #\/ #\. lname))
+            (pkg (class-package bin-name)))
+       (setf (slot-value (eval (intern (format nil "+static-~A+" bin-name) pkg)) key) value)))
     (t (error "internal error: unrecognized object type in putObjectVolatile: ~A" obj))))
 
 ;; getObject - same as getObjectVolatile for OpenLDK (no volatile semantics needed in Lisp)
@@ -805,14 +894,14 @@ and its implementation."
      (jaref obj l))
     ((typep obj '|java/lang/Object|)
     (let* ((field (gethash l *field-offset-table*))
-            (key (intern (lstring (slot-value field '|name|)) :openldk)))
+            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
        (slot-value obj key)))
     ((null obj)
      ;; FIXME: check that the field is STATIC
     (let* ((field (gethash l *field-offset-table*)))
        (if (null field)
            nil
-           (let* ((key (intern (lstring (slot-value field '|name|)) :openldk))
+           (let* ((key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk))
                   (clazz (slot-value field '|clazz|))
                   (lname (lstring (slot-value clazz '|name|)))
                   (bin-name (substitute #\/ #\. lname))
@@ -832,20 +921,28 @@ and its implementation."
      (jaref obj l))
     ((typep obj '|java/lang/Object|)
     (let* ((field (gethash l *field-offset-table*))
-            (key (intern (lstring (slot-value field '|name|)) :openldk)))
+            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
        (slot-value obj key)))
     (t (error "internal error: unrecognized object type in getLongVolatile: ~A" obj))))
 
 (defmethod |putObject(Ljava/lang/Object;JLjava/lang/Object;)| ((unsafe |sun/misc/Unsafe|) obj l value)
-  ; (format t "putObject: ~A ~A ~A~%" obj (gethash l field-offset-table) value)
   (cond
     ((typep obj 'java-array)
      (setf (jaref obj l) value))
     ((typep obj '|java/lang/Object|)
-    (let* ((field (gethash l *field-offset-table*))
-            (key (intern (lstring (slot-value field '|name|)) :openldk)))
+     (let* ((field (gethash l *field-offset-table*))
+            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
        (setf (slot-value obj key) value)))
-    (t (error "internal error: unrecognized object type in putObjectVolatile: ~A" obj))))
+    ((null obj)
+     ;; Static field access
+     (let* ((field (gethash l *field-offset-table*))
+            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk))
+            (clazz (slot-value field '|clazz|))
+            (lname (lstring (slot-value clazz '|name|)))
+            (bin-name (substitute #\/ #\. lname))
+            (pkg (class-package bin-name)))
+       (setf (slot-value (eval (intern (format nil "+static-~A+" bin-name) pkg)) key) value)))
+    (t (error "internal error: unrecognized object type in putObject: ~A" obj))))
 
 (defmethod |putOrderedObject(Ljava/lang/Object;JLjava/lang/Object;)| ((unsafe |sun/misc/Unsafe|) obj l value)
   ;; FIXME
@@ -1049,7 +1146,7 @@ user.variant
      (jaref param-object param-long))
     (t
     (let* ((field (gethash param-long *field-offset-table*))
-            (key (intern (lstring (slot-value field '|name|)) :openldk)))
+            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
        (slot-value param-object key)))))
 
 (defmethod |clone()| ((array java-array))
@@ -1058,16 +1155,6 @@ user.variant
 (defun |sun/reflect/Reflection.getClassAccessFlags(Ljava/lang/Class;)| (class)
   (let ((lclass (get-ldk-class-for-java-class class)))
     (if lclass (access-flags lclass) 0)))
-
-(defun |sun/reflect/Reflection.verifyMemberAccess(Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Object;I)| (current-class member-class target modifiers)
-  "Always permit member access - OpenLDK does not enforce Java access control."
-  (declare (ignore current-class member-class target modifiers))
-  1)
-
-(defun |sun/reflect/Reflection.ensureMemberAccess(Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Object;I)| (current-class member-class target modifiers)
-  "No-op - OpenLDK does not enforce Java access control."
-  (declare (ignore current-class member-class target modifiers))
-  nil)
 
 (defmethod |getModifiers()| ((class |java/lang/Class|))
   (if (eq (|isArray()| class) 1)
@@ -1091,6 +1178,39 @@ user.variant
                  'vector)
          #()))))
 
+(defun java-class-to-type-descriptor (jclass)
+  "Convert a java.lang.Class object to its JVM type descriptor string.
+   E.g., int -> \"I\", java.lang.String -> \"Ljava/lang/String;\", int[] -> \"[I\"."
+  (let ((name (lstring (slot-value jclass '|name|))))
+    (cond
+      ((string= name "int") "I")
+      ((string= name "long") "J")
+      ((string= name "boolean") "Z")
+      ((string= name "byte") "B")
+      ((string= name "char") "C")
+      ((string= name "short") "S")
+      ((string= name "float") "F")
+      ((string= name "double") "D")
+      ((string= name "void") "V")
+      ;; Array types: name is like "[I" or "[Ljava.lang.String;" - already in descriptor form
+      ;; but with dots instead of slashes for the element type
+      ((and (> (length name) 0) (char= (char name 0) #\[))
+       (substitute #\/ #\. name))
+      ;; Object types
+      (t (format nil "L~A;" (substitute #\/ #\. name))))))
+
+(defun build-method-descriptor (parameter-types &optional return-type)
+  "Build a JVM method descriptor string from parameterTypes (java-array of Class)
+   and optional returnType (Class). If return-type is nil, uses V (void)."
+  (format nil "(~{~A~})~A"
+          (if parameter-types
+              (loop for pclass across (java-array-data parameter-types)
+                    collect (java-class-to-type-descriptor pclass))
+              nil)
+          (if return-type
+              (java-class-to-type-descriptor return-type)
+              "V")))
+
 (defun |sun/reflect/NativeConstructorAccessorImpl.newInstance0(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)|
     (constructor params)
   (let* ((java-class (slot-value constructor '|clazz|))
@@ -1099,17 +1219,18 @@ user.variant
     ;; Get class package from loader - class symbols live in loader's package
     (let* ((pkg (class-package bin-class-name))
            (class-sym (intern bin-class-name pkg))
-           (obj (make-instance class-sym)))
+           (obj (make-instance class-sym))
+           (descriptor (build-method-descriptor (slot-value constructor '|parameterTypes|))))
       ;; Ensure clazz metadata is populated
       (when (slot-exists-p obj '|clazz|)
         (let ((klass (%get-java-class-by-bin-name bin-class-name t)))
           (when klass (setf (slot-value obj '|clazz|) klass))))
-      (if (string= "()V" (lstring (slot-value constructor '|signature|)))
+      (if (string= "()V" descriptor)
           (|<init>()| obj)
           (progn
             (apply (intern
                     (lispize-method-name
-                     (format nil "<init>~A" (lstring (slot-value constructor '|signature|))))
+                     (format nil "<init>~A" descriptor))
                     :openldk)
                    ;; params can be NIL for zero-arg constructor paths; guard before accessing array-data.
                    (cons obj (if params (coerce (java-array-data params) 'list) nil)))))
@@ -1543,8 +1664,19 @@ user.variant
       jenvs)))
 
 (defun |java/lang/System.identityHashCode(Ljava/lang/Object;)| (objref)
-  ;; Hash down the 64-bit SXHASH to 32-bits.
-  (unsigned-to-signed-integer (cl-murmurhash:murmurhash (sxhash objref))))
+  ;; Return a unique, stable identity hash per object instance.
+  ;; SBCL's sxhash returns the same value for all instances of the same
+  ;; CLOS class, which breaks identity-based hash tables like Kawa's
+  ;; AbstractWeakHashTable. Instead, assign a unique counter-based hash
+  ;; on first access (mimicking JVM object header identity hash).
+  (if (null objref)
+      0
+      (bordeaux-threads:with-lock-held (*identity-hash-counter-lock*)
+        (or (gethash objref *identity-hash-table*)
+            (let ((hash (unsigned-to-signed-integer
+                         (logand (incf *identity-hash-counter*) #xFFFFFFFF))))
+              (setf (gethash objref *identity-hash-table*) hash)
+              hash)))))
 
 (defun |java/lang/Thread.yield()| ()
   ;; FIXME
@@ -1637,12 +1769,15 @@ user.variant
                 ;; For static methods, use the class's package; for instance methods use :openldk
                 (java-loader (slot-value java-class '|classLoader|))
                 (ldk-loader (get-ldk-loader-for-java-loader java-loader))
+                (descriptor (build-method-descriptor
+                             (slot-value method '|parameterTypes|)
+                             (slot-value method '|returnType|)))
                 (method-name (lispize-method-name
                               (concatenate 'string
                                            class-name
                                            "."
                                            (lstring (slot-value method '|name|))
-                                           (lstring (slot-value method '|signature|)))))
+                                           descriptor)))
                 ;; Static methods are in the class's loader package, instance methods in :openldk
                 (pkg (if is-static
                          (class-package class-name ldk-loader)
@@ -1818,25 +1953,25 @@ user.variant
 (defmethod |getInt(Ljava/lang/Object;J)|((unsafe |sun/misc/Unsafe|) objref ptr)
   (declare (ignore unsafe))
   (let* ((field (gethash ptr *field-offset-table*))
-         (key (intern (lstring (slot-value field '|name|)) :openldk)))
+         (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
     (slot-value objref key)))
 
 (defmethod |putLong(Ljava/lang/Object;JJ)|((unsafe |sun/misc/Unsafe|) objref ptr value)
   (declare (ignore unsafe))
   (let* ((field (gethash ptr *field-offset-table*))
-         (key (intern (lstring (slot-value field '|name|)) :openldk)))
+         (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
     (setf (slot-value objref key) value)))
 
 (defmethod |putInt(Ljava/lang/Object;JI)|((unsafe |sun/misc/Unsafe|) objref ptr value)
   (declare (ignore unsafe))
   (let* ((field (gethash ptr *field-offset-table*))
-         (key (intern (lstring (slot-value field '|name|)) :openldk)))
+         (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
     (setf (slot-value objref key) value)))
 
 (defmethod |getLong(Ljava/lang/Object;J)|((unsafe |sun/misc/Unsafe|) objref ptr)
   (declare (ignore unsafe))
   (let* ((field (gethash ptr *field-offset-table*))
-         (key (intern (lstring (slot-value field '|name|)) :openldk)))
+         (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
     (slot-value objref key)))
 
 (defmethod |getLong(J)| ((unsafe |sun/misc/Unsafe|) ptr)
@@ -2216,20 +2351,31 @@ user.variant
   (assert (zerop which))
   0)
 
-(defun find-method-in-class (class name)
+(defun find-method-in-class (class name &key static)
+  "Find a method by name in a class. When STATIC is :yes, only match static methods.
+   When STATIC is :no, only match non-static methods. When STATIC is nil, match any."
   (find-if (lambda (m)
-             (string= (slot-value m 'name) name))
+             (and (string= (slot-value m 'name) name)
+                  (case static
+                    (:yes (not (zerop (logand #x0008 (access-flags m)))))
+                    (:no  (zerop (logand #x0008 (access-flags m))))
+                    (t t))))
            (coerce (slot-value class 'methods) 'list)))
 
 (defun |java/lang/invoke/MethodHandleNatives.resolve(Ljava/lang/invoke/MemberName;Ljava/lang/Class;)| (member-name klass)
   (declare (ignore klass))
-  ;; FIXME
   (let* ((member-class (slot-value member-name '|clazz|))
          (ldk-class (get-ldk-class-for-java-class member-class))
+         (mn-flags (slot-value member-name '|flags|))
+         ;; Reference kind is in bits 24-27. REF_invokeStatic = 6.
+         (ref-kind (logand #xf (ash mn-flags -24)))
+         ;; Also check ACC_STATIC in modifier bits (0x0008)
+         (want-static (or (= ref-kind 6) (not (zerop (logand #x0008 mn-flags)))))
          (method (when ldk-class
-                   (find-method-in-class ldk-class (lstring (slot-value member-name '|name|))))))
+                   (find-method-in-class ldk-class (lstring (slot-value member-name '|name|))
+                                         :static (if want-static :yes :no)))))
     (when method
-      (setf (slot-value member-name '|flags|) (logior (slot-value member-name '|flags|) (slot-value method 'access-flags)))))
+      (setf (slot-value member-name '|flags|) (logior mn-flags (access-flags method)))))
   member-name)
 
 (defun |java/lang/invoke/MethodHandleNatives.getMemberVMInfo(Ljava/lang/invoke/MemberName;)| (member-name)
@@ -2442,8 +2588,6 @@ user.variant
   "Create a DirectMethodHandle for static method invocation.
    DirectMethodHandle is required by LambdaMetafactory for lambda expressions."
   (declare (ignore lookup))
-  ;; Help diagnose missing or incomplete metadata during lambda bootstrapping.
-  (format t "~&[findStatic] klass=~A name=~A method-type=~A~%" klass name method-type)
   (classload "java/lang/invoke/DirectMethodHandle")
   (classload "java/lang/invoke/LambdaForm")
   (let* ((member (%build-member-name-for-static klass name method-type))
@@ -2487,7 +2631,6 @@ user.variant
   "Create a DirectMethodHandle for invokespecial method invocation.
    Used for private methods, constructors, and super calls in lambda metafactory."
   (declare (ignore lookup special-caller))
-  (format t "~&[findSpecial] refc=~A name=~A method-type=~A~%" refc name method-type)
   (classload "java/lang/invoke/DirectMethodHandle")
   (classload "java/lang/invoke/LambdaForm")
   (let* ((member (%build-member-name-for-special refc name method-type))
@@ -2530,7 +2673,6 @@ user.variant
   "Create a DirectMethodHandle for constructor invocation.
    Used by lambda metafactory for method references to constructors."
   (declare (ignore lookup))
-  (format t "~&[findConstructor] refc=~A method-type=~A~%" refc method-type)
   (classload "java/lang/invoke/DirectMethodHandle")
   (classload "java/lang/invoke/LambdaForm")
   (let* ((member (%build-member-name-for-constructor refc method-type))
@@ -2573,7 +2715,6 @@ user.variant
   "Create a DirectMethodHandle for virtual method invocation.
    Used by lambda metafactory for instance method references."
   (declare (ignore lookup))
-  (format t "~&[findVirtual] refc=~A name=~A method-type=~A~%" refc name method-type)
   (classload "java/lang/invoke/DirectMethodHandle")
   (classload "java/lang/invoke/LambdaForm")
   (let* ((member (%build-member-name-for-virtual refc name method-type))
@@ -2747,6 +2888,10 @@ user.variant
 (defun |java/lang/invoke/MethodHandle.linkToStatic(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/invoke/MemberName;)| (arg1 arg2 arg3 member-name)
   "MethodHandle intrinsic: invoke a static method via MemberName (3-arg variant)."
   (%invoke-from-member-name member-name arg1 arg2 arg3))
+
+(defun |java/lang/invoke/MethodHandle.linkToStatic(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/invoke/MemberName;)| (arg1 arg2 arg3 arg4 member-name)
+  "MethodHandle intrinsic: invoke a static method via MemberName (4-arg variant)."
+  (%invoke-from-member-name member-name arg1 arg2 arg3 arg4))
 
 (defun |java/lang/invoke/MethodHandle.linkToVirtual(Ljava/lang/invoke/MemberName;)| (&rest args)
   "MethodHandle intrinsic: invoke a virtual method via MemberName (varargs variant).

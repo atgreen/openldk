@@ -121,10 +121,10 @@ Send 'kill -3 <pid>' or 'kill -QUIT <pid>' to trigger."
         ;; MethodHandles$Lookup security check bypassed to allow lambda metafactory
         (and (string= class-name "java/lang/invoke/MethodHandles$Lookup")
              (string= (slot-value method 'name) "checkUnprivilegedlookupClass"))
-        ;; Bypass Java access control checks - not needed in OpenLDK
-        (and (string= class-name "sun/reflect/Reflection")
+        ;; Generic type methods on Method - native stubs return non-generic types
+        (and (string= class-name "java/lang/reflect/Method")
              (member (slot-value method 'name)
-                     '("ensureMemberAccess" "verifyMemberAccess")
+                     '("getGenericReturnType" "getGenericParameterTypes")
                      :test #'string=)))))
 
 (defun %eval (code)
@@ -132,12 +132,6 @@ Send 'kill -3 <pid>' or 'kill -QUIT <pid>' to trigger."
   (when *debug-codegen*
     (pprint code)
     (format t "~%"))
-  ;; Debug: print code containing shiftLeft
-  (let ((code-str (format nil "~S" code)))
-    (when (search "shiftLeft" code-str)
-      (format t "~&; DEBUG %eval: code containing shiftLeft:~%")
-      (pprint code)
-      (force-output)))
   (if *debug-unmuffle*
       (eval code) ; lint:suppress eval-usage
       (handler-bind
@@ -1267,7 +1261,9 @@ get the same unified var-numbers."
                                          (and (string= (slot-value method 'name) "<clinit>")
                                               (string= (slot-value method 'descriptor) "()V")))
                                        (slot-value class 'methods))))
-                 (when <clinit>-method
+                 ;; Per JVM spec: if class init is already in progress
+                 ;; by the current thread, return immediately.
+                 (when (and <clinit>-method (not (initialized-p class)))
                    (setf (initialized-p class) t)
                    (handler-case
                        ;; Get package from loader if available, else use OPENLDK.SYSTEM
@@ -1282,13 +1278,12 @@ get the same unified var-numbers."
                        (let ((throwable (when (and (typep e '|condition-java/lang/Throwable|)
                                                    (slot-boundp e '|objref|))
                                           (slot-value e '|objref|))))
-                         ;; DEBUG: Always print the original exception during clinit failures
-                         (format t "~%; DEBUG: <clinit> caught exception in ~A: ~A~%"
-                                 (slot-value class 'name) e)
                          (when (or *debug-codegen* *debug-exceptions*)
+                           (format *error-output* "~&<clinit> caught exception in ~A: ~A~%"
+                                   (slot-value class 'name) e)
                            (if throwable
-                               (%print-java-stack-trace throwable :stream *standard-output*)
-                               (trivial-backtrace:print-backtrace e :output *standard-output*)))
+                               (%print-java-stack-trace throwable :stream *error-output*)
+                               (trivial-backtrace:print-backtrace e :output *error-output*)))
                          ;; Wrap exception in ExceptionInInitializerError if classes are loaded
                          ;; Use ignore-errors to handle case where parent class isn't loaded yet
                          (let ((eiie (ignore-errors
@@ -1357,6 +1352,39 @@ get the same unified var-numbers."
         ;; No conflict, return as-is
         name)))
 
+(defun %topo-sort-interfaces (ifaces)
+  "Sort interface symbols so that subtypes come before supertypes.
+   For CLOS C3 linearization, if A is a subtype of B, A must come before B.
+   Uses an insertion-based approach that compares all pairs."
+  (when (null ifaces)
+    (return-from %topo-sort-interfaces nil))
+  (let ((result (copy-list ifaces)))
+    ;; For each pair (i, j) where i < j, if result[j] is a supertype of result[i],
+    ;; that's fine. But if result[i] is a supertype of result[j], we need to move
+    ;; result[j] before result[i].
+    ;; Repeat until stable.
+    (loop with changed = t
+          while changed
+          do (setf changed nil)
+             (loop for i from 0 below (1- (length result))
+                   do (loop for j from (1+ i) below (length result)
+                            do (let ((a (nth i result))
+                                     (b (nth j result)))
+                                 (let ((fc-a (find-class a nil))
+                                       (fc-b (find-class b nil)))
+                                   ;; If B is a (strict) subtype of A, B should come before A
+                                   (when (and fc-a fc-b
+                                              (subtypep fc-b fc-a)
+                                              (not (subtypep fc-a fc-b)))
+                                     ;; Move B to position i (before A)
+                                     (setf result (append (subseq result 0 i)
+                                                          (list b)
+                                                          (subseq result i j)
+                                                          (subseq result (1+ j))))
+                                     (setf changed t)
+                                     (return)))))))
+    result))
+
 (defun emit-<class> (class ldk-loader)
   "Emit CLOS class and method definitions for a Java class.
    LDK-LOADER is the class loader that will own this class.
@@ -1372,10 +1400,12 @@ get the same unified var-numbers."
                (if (or super interfaces)
                    (append (when super
                              (list (class-symbol-for-reference super ldk-loader)))
-                           (let ((ifaces (mapcar (lambda (i)
+                           (let ((ifaces (remove-if-not
+                                         (lambda (sym) (find-class sym nil))
+                                         (mapcar (lambda (i)
                                                    (class-symbol-for-reference i ldk-loader))
-                                                 (coerce interfaces 'list))))
-                             (sort (copy-list ifaces) #'subtypep)))
+                                                 (coerce interfaces 'list)))))
+                             (%topo-sort-interfaces ifaces)))
                    (list))
                ;; Field names stay in :openldk (slots are inherited across packages)
                (map 'list
@@ -2073,10 +2103,12 @@ get the same unified var-numbers."
                      (line (%java-string (|toString()| ste))))
                 (format stream "~&~A    at ~A~%" indent-str line))))))
       (let ((cause (cond
-                     ((and (slot-boundp throwable '|cause|)
+                     ((and (slot-exists-p throwable '|cause|)
+                           (slot-boundp throwable '|cause|)
                            (slot-value throwable '|cause|))
                       (slot-value throwable '|cause|))
-                     ((and (slot-boundp throwable '|exception|)
+                     ((and (slot-exists-p throwable '|exception|)
+                           (slot-boundp throwable '|exception|)
                            (slot-value throwable '|exception|))
                       (slot-value throwable '|exception|)))))
         (when cause
@@ -2131,7 +2163,7 @@ get the same unified var-numbers."
 
         (dolist (p '(("byte" . "B") ("char" . "C") ("int" . "I")
                      ("short" . "S") ("long" . "J") ("double" . "D")
-                     ("float" . "F") ("boolean" . "Z") ("void" . "Z")))
+                     ("float" . "F") ("boolean" . "Z") ("void" . "V")))
           (let ((jclass (%make-java-instance "java/lang/Class"))
                 (lclass (make-instance '<class>)))
             (setf (slot-value jclass '|name|) (ijstring (car p)))

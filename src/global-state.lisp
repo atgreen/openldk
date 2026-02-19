@@ -174,29 +174,14 @@
   (let ((class (or (and fallback-loader
                         (%get-ldk-class-by-bin-name class-name t fallback-loader))
                    (%get-ldk-class-by-bin-name class-name t))))
-    (when (search "Numbers" class-name)
-      (format t "~&; DEBUG class-package: class-name=~A fallback-loader=~A class=~A~%"
-              class-name fallback-loader class)
-      (force-output)
-      (when class
-        (format t "~&; DEBUG class-package: ldk-loader=~A~%"
-                (and (slot-boundp class 'ldk-loader) (slot-value class 'ldk-loader)))
-        (force-output)))
     (cond
       ;; Found the class - use its defining loader's package
       ((and class
             (slot-boundp class 'ldk-loader)
             (slot-value class 'ldk-loader))
-       (let ((pkg (loader-package (slot-value class 'ldk-loader))))
-         (when (search "Numbers" class-name)
-           (format t "~&; DEBUG class-package: returning ~A~%" pkg)
-           (force-output))
-         pkg))
+       (loader-package (slot-value class 'ldk-loader)))
       ;; Class found but no loader - use :openldk
       (class
-       (when (search "Numbers" class-name)
-         (format t "~&; DEBUG class-package: no ldk-loader, returning :openldk~%")
-         (force-output))
        (find-package :openldk))
       ;; Not found - check app loader
       ((and *app-ldk-class-loader*
@@ -222,22 +207,10 @@
   "Get the symbol for a static method name.
    First checks :openldk for native method implementations,
    then falls back to the loader's package for Java-defined methods."
-  (when (search "shiftLeft" method-name)
-    (format t "~&; DEBUG: static-method-symbol: method-name=~A loader-pkg=~A~%" method-name loader-pkg)
-    (force-output))
   (let ((openldk-sym (find-symbol method-name (find-package :openldk))))
-    (when (search "shiftLeft" method-name)
-      (format t "~&; DEBUG: static-method-symbol: openldk-sym=~A fboundp=~A~%"
-              openldk-sym (and openldk-sym (fboundp openldk-sym)))
-      (force-output))
-    (let ((result (if (and openldk-sym (fboundp openldk-sym))
-                      openldk-sym
-                      (intern method-name loader-pkg))))
-      (when (search "shiftLeft" method-name)
-        (format t "~&; DEBUG: static-method-symbol: returning ~A (package ~A)~%"
-                result (symbol-package result))
-        (force-output))
-      result)))
+    (if (and openldk-sym (fboundp openldk-sym))
+        openldk-sym
+        (intern method-name loader-pkg))))
 
 (defun %make-java-instance (class-name)
   "Create an instance of a Java class using the correct class symbol.
@@ -331,6 +304,13 @@
 ;; Track interrupted status for each Thread (not a field in Java 8)
 (defvar *thread-interrupted* (make-hash-table :test #'eq :synchronized t)
   "Hash table tracking interrupted status for each Java Thread object.")
+
+;; Identity hash code support: each object gets a unique, stable hash
+;; (Java's identityHashCode semantics). Uses a weak EQ hash table so
+;; objects can still be GC'd.
+(defvar *identity-hash-counter* 0)
+(defvar *identity-hash-counter-lock* (bordeaux-threads:make-lock "identity-hash-lock"))
+(defvar *identity-hash-table* (make-hash-table :test #'eq :weakness :key :synchronized t))
 
 (defun %get-java-class-by-bin-name (bin-name &optional fail-ok loader)
   "Look up a Java class by its binary name BIN-NAME.
