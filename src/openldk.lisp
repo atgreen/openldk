@@ -120,7 +120,12 @@ Send 'kill -3 <pid>' or 'kill -QUIT <pid>' to trigger."
              (string= (slot-value method 'descriptor) "(Lcom/sun/tools/javac/code/Type;)V"))
         ;; MethodHandles$Lookup security check bypassed to allow lambda metafactory
         (and (string= class-name "java/lang/invoke/MethodHandles$Lookup")
-             (string= (slot-value method 'name) "checkUnprivilegedlookupClass")))))
+             (string= (slot-value method 'name) "checkUnprivilegedlookupClass"))
+        ;; Bypass Java access control checks - not needed in OpenLDK
+        (and (string= class-name "sun/reflect/Reflection")
+             (member (slot-value method 'name)
+                     '("ensureMemberAccess" "verifyMemberAccess")
+                     :test #'string=)))))
 
 (defun %eval (code)
   "Evaluate generated CODE, optionally printing and muffling warnings."

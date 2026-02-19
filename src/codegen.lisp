@@ -371,9 +371,9 @@
     (if method
         class
         (when ldk-class
-          (find method-name (remove nil (cons (super ldk-class) (coerce (interfaces ldk-class) 'list)))
-                :test (lambda (method-name class)
-                        (%find-declaring-class class method-name loader)))))))
+          (loop for parent in (remove nil (cons (super ldk-class) (coerce (interfaces ldk-class) 'list)))
+                for result = (%find-declaring-class parent method-name loader)
+                when result return result)))))
 
 (defmethod codegen ((insn ir-call-static-method) context)
   (with-slots (class method-name args return-type) insn

@@ -809,14 +809,21 @@ and its implementation."
        (slot-value obj key)))
     ((null obj)
      ;; FIXME: check that the field is STATIC
-    (let* ((field (gethash l *field-offset-table*))
-            (key (intern (lstring (slot-value field '|name|)) :openldk)))
-       (let* ((clazz (slot-value field '|clazz|))
-              (lname (lstring (slot-value clazz '|name|)))
-              (bin-name (substitute #\/ #\. lname))
-              (pkg (class-package bin-name)))
-         (let ((v (slot-value (eval (intern (format nil "+static-~A+" bin-name) pkg)) key)))
-           v))))
+    (let* ((field (gethash l *field-offset-table*)))
+       (if (null field)
+           nil
+           (let* ((key (intern (lstring (slot-value field '|name|)) :openldk))
+                  (clazz (slot-value field '|clazz|))
+                  (lname (lstring (slot-value clazz '|name|)))
+                  (bin-name (substitute #\/ #\. lname))
+                  (pkg (class-package bin-name))
+                  (static-sym (find-symbol (format nil "+static-~A+" bin-name) pkg)))
+             (if (and static-sym (boundp static-sym))
+                 (let ((static-obj (symbol-value static-sym)))
+                   (if (slot-boundp static-obj key)
+                       (slot-value static-obj key)
+                       nil))
+                 nil)))))
     (t (error "internal error: unrecognized object type in getObject: ~A" obj))))
 
 (defmethod |getLongVolatile(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) obj l)
@@ -956,6 +963,21 @@ user.variant
   "Initialize FileOutputStream native IDs (no-op)."
   nil)
 
+(defun |java/io/Console.istty()| ()
+  "Return whether stdin is a tty."
+  (not (zerop (sb-alien:alien-funcall
+               (sb-alien:extern-alien "isatty" (function sb-alien:int sb-alien:int))
+               0))))
+
+(defun |java/io/Console.encoding()| ()
+  "Return the console encoding, or null for default."
+  nil)
+
+(defun |java/io/Console.echo(Z)| (on)
+  "Set console echo mode. Returns previous value."
+  (declare (ignore on))
+  t)
+
 (defun |sun/nio/ch/IOUtil.initIDs()| ()
   "Initialize NIO IOUtil native IDs (no-op)."
   nil)
@@ -1036,6 +1058,16 @@ user.variant
 (defun |sun/reflect/Reflection.getClassAccessFlags(Ljava/lang/Class;)| (class)
   (let ((lclass (get-ldk-class-for-java-class class)))
     (if lclass (access-flags lclass) 0)))
+
+(defun |sun/reflect/Reflection.verifyMemberAccess(Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Object;I)| (current-class member-class target modifiers)
+  "Always permit member access - OpenLDK does not enforce Java access control."
+  (declare (ignore current-class member-class target modifiers))
+  1)
+
+(defun |sun/reflect/Reflection.ensureMemberAccess(Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Object;I)| (current-class member-class target modifiers)
+  "No-op - OpenLDK does not enforce Java access control."
+  (declare (ignore current-class member-class target modifiers))
+  nil)
 
 (defmethod |getModifiers()| ((class |java/lang/Class|))
   (if (eq (|isArray()| class) 1)
@@ -1499,15 +1531,15 @@ user.variant
 (defun |java/lang/ProcessEnvironment.environ()| ()
   ;; FIXME: don't force utf-8 encoding
   (let ((env (remove-if (lambda (e) (not (find #\= e))) (sb-ext:posix-environ))))
-    (let ((jenvs (make-java-array :size (* 2 (length env)))))
+    (let ((jenvs (make-java-array :component-class "[B" :size (* 2 (length env)))))
       (loop for kv in env
             for i from 0 by 2
             for p = (position #\= kv)
             do (progn
                  (setf (jaref jenvs i)
-                       (make-java-array :initial-contents (flexi-streams:string-to-octets (subseq kv 0 p) :external-format :utf-8)))
+                       (make-java-array :component-class "B" :initial-contents (flexi-streams:string-to-octets (subseq kv 0 p) :external-format :utf-8)))
                  (setf (jaref jenvs (+ i 1))
-                       (make-java-array :initial-contents (flexi-streams:string-to-octets (subseq kv (1+ p)) :external-format :utf-8)))))
+                       (make-java-array :component-class "B" :initial-contents (flexi-streams:string-to-octets (subseq kv (1+ p)) :external-format :utf-8)))))
       jenvs)))
 
 (defun |java/lang/System.identityHashCode(Ljava/lang/Object;)| (objref)

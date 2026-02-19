@@ -143,7 +143,7 @@
   (error (format nil "Missing %lisp-condition implementation for ~A." throwable)))
 
 (define-condition |condition-java/lang/Throwable| (error)
-  ((|objref|)))
+  ((|objref| :initarg :|objref| :initform nil)))
 
 (define-condition |condition-java/lang/Error|
     (|condition-java/lang/Throwable|)
