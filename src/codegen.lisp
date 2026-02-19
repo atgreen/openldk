@@ -854,13 +854,15 @@
                  :expression-type :LONG))
 
 (defmethod codegen ((insn ir-iinc) context)
-  ;; FIXME: don't increment above width of type
   ;; Local variables use :openldk package - they don't need per-loader isolation
   (with-slots (index const) insn
-     (let ((expr (make-instance '<expression>
+    (let* ((local-var (intern (format nil "local-~A" index) :openldk))
+           (expr (make-instance '<expression>
                                 :insn insn
-                                :code (list 'incf (intern (format nil "local-~A" index) :openldk) const))))
-       expr)))
+                                :code (list 'setf local-var
+                                            (list 'unsigned-to-signed-integer
+                                                  (list 'logand (list '+ local-var const) #xFFFFFFFF))))))
+      expr)))
 
 (defmethod codegen ((insn ir-if-acmpeq) context)
   (with-slots (offset value1 value2) insn
