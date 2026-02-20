@@ -1530,7 +1530,10 @@ user.variant
          (fd (if (and file-descriptor (slot-exists-p file-descriptor '|fd|))
                  (slot-value file-descriptor '|fd|)
                  file-descriptor))
-         (in-stream (cond ((eql fd 0) *standard-input*)
+         (in-stream (cond ((eql fd 0)
+                           ;; Flush stdout before blocking on stdin, like C stdio.
+                           (force-output *standard-output*)
+                           *standard-input*)
                           ((streamp fd) fd)
                           (t (error "unimplemented fd ~A in FileInputStream.readBytes" fd))))
          (bytes-read 0))
@@ -2359,7 +2362,8 @@ user.variant
                  (slot-value file-descriptor '|fd|)
                  file-descriptor)))
     (cond
-      ((eql fd 0) (let ((b (read-byte *standard-input* nil nil)))
+      ((eql fd 0) (force-output *standard-output*)
+                  (let ((b (read-byte *standard-input* nil nil)))
                     (or b -1)))
       ((streamp fd) (let ((b (read-byte fd nil nil)))
                       (or b -1)))
