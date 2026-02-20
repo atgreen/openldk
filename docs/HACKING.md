@@ -101,9 +101,13 @@ Exception handlers are integrated into control flow:
 
 - `b` - trace bytecode compilation
 - `c` - dump all Lisp code prior to evaluation
+- `e` - trace exceptions
+- `l` - trace class loading
+- `L` - trace class loading and compilation (includes `l`)
+- `p` - trace data-flow propagation
+- `s` - start slynk server at startup (port 2025)
 - `t` - trace method entry/exit at runtime
 - `T` - trace method entry/exit with arguments and return values
-- `s` - start slynk server at startup (port 2025)
 - `u` - unmuffle the Lisp compiler
 - `x` - trace opcode execution (use with `t`)
 
@@ -178,6 +182,28 @@ can break program semantics.
 4. **Use slynk for live debugging**: `LDK_DEBUG=s ./openldk ClassName`
    - Connect Emacs/Sly to port 2025
    - Set breakpoints in generated code
+
+### Testing with Kawa Scheme
+
+[Kawa](https://www.gnu.org/software/kawa/) is a Scheme implementation targeting the JVM.
+It exercises many JVM features (reflection, class generation, module loading) and serves
+as a good integration test for OpenLDK.
+
+```bash
+# Download Kawa 3.1.1 and extract to /tmp/kawa-3.1.1
+
+# Basic test
+./openldk -cp /tmp/kawa-3.1.1/lib/kawa.jar:/tmp/kawa-3.1.1/lib/jline.jar \
+  kawa.repl -e '(display 42)(newline)' 2>/dev/null
+
+# Arithmetic (exercises reflection on primitive types)
+./openldk -cp /tmp/kawa-3.1.1/lib/kawa.jar:/tmp/kawa-3.1.1/lib/jline.jar \
+  kawa.repl -e '(display (+ 2 3))(newline)' 2>/dev/null
+
+# Debug class loading during Kawa startup
+LDK_DEBUG=l ./openldk -cp /tmp/kawa-3.1.1/lib/kawa.jar:/tmp/kawa-3.1.1/lib/jline.jar \
+  kawa.repl -e '(display 42)(newline)'
+```
 
 ## Build System Notes
 

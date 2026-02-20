@@ -794,13 +794,17 @@ and its implementation."
                                                 (|<init>(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;IILjava/lang/String;[B)|
                                                  f this (ijstring (name field))
                                                  (let ((cn (slot-value field 'descriptor)))
-                                                   (when (eq (char cn 0) #\L)
-                                                     (setf cn (subseq cn 1 (1- (length cn)))))
-                                                   (or (%get-java-class-by-bin-name cn t)
-                                                       (let ((njc (%make-java-instance "java/lang/Class")))
-                                                         (setf (slot-value njc '|name|) (ijstring (substitute #\. #\/ cn)))
-                                                         (setf (gethash (substitute #\. #\/ cn) *java-classes-by-fq-name*) njc)
-                                                         (setf (gethash cn *java-classes-by-bin-name*) njc))))
+                                                   (if (eq (char cn 0) #\L)
+                                                       ;; Object types: strip L prefix and ; suffix, use lazy lookup
+                                                       ;; to avoid triggering class loading during image build.
+                                                       (let ((cn (subseq cn 1 (1- (length cn)))))
+                                                         (or (%get-java-class-by-bin-name cn t)
+                                                             (let ((njc (%make-java-instance "java/lang/Class")))
+                                                               (setf (slot-value njc '|name|) (ijstring (substitute #\. #\/ cn)))
+                                                               (setf (gethash (substitute #\. #\/ cn) *java-classes-by-fq-name*) njc)
+                                                               (setf (gethash cn *java-classes-by-bin-name*) njc))))
+                                                       ;; Primitives (I, J, Z, etc.) and arrays ([I, [Ljava/lang/String;, etc.)
+                                                       (%bin-type-name-to-class cn)))
                                                  (access-flags field) nil nil nil)
                                                 f))
                                 (when (super lclass)
@@ -1144,8 +1148,17 @@ user.variant
   (cond
     ((typep param-object 'java-array)
      (jaref param-object param-long))
+    ((null param-object)
+     ;; Static field access: look up the static singleton
+     (let* ((field (gethash param-long *field-offset-table*))
+            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk))
+            (clazz (slot-value field '|clazz|))
+            (lname (lstring (slot-value clazz '|name|)))
+            (bin-name (substitute #\/ #\. lname))
+            (pkg (class-package bin-name)))
+       (slot-value (eval (intern (format nil "+static-~A+" bin-name) pkg)) key)))
     (t
-    (let* ((field (gethash param-long *field-offset-table*))
+     (let* ((field (gethash param-long *field-offset-table*))
             (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
        (slot-value param-object key)))))
 
@@ -1954,25 +1967,53 @@ user.variant
   (declare (ignore unsafe))
   (let* ((field (gethash ptr *field-offset-table*))
          (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
-    (slot-value objref key)))
+    (if objref
+        (slot-value objref key)
+        ;; Static field access: look up the static singleton
+        (let* ((clazz (slot-value field '|clazz|))
+               (lname (lstring (slot-value clazz '|name|)))
+               (bin-name (substitute #\/ #\. lname))
+               (pkg (class-package bin-name)))
+          (slot-value (eval (intern (format nil "+static-~A+" bin-name) pkg)) key)))))
 
 (defmethod |putLong(Ljava/lang/Object;JJ)|((unsafe |sun/misc/Unsafe|) objref ptr value)
   (declare (ignore unsafe))
   (let* ((field (gethash ptr *field-offset-table*))
          (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
-    (setf (slot-value objref key) value)))
+    (if objref
+        (setf (slot-value objref key) value)
+        ;; Static field access: look up the static singleton
+        (let* ((clazz (slot-value field '|clazz|))
+               (lname (lstring (slot-value clazz '|name|)))
+               (bin-name (substitute #\/ #\. lname))
+               (pkg (class-package bin-name)))
+          (setf (slot-value (eval (intern (format nil "+static-~A+" bin-name) pkg)) key) value)))))
 
 (defmethod |putInt(Ljava/lang/Object;JI)|((unsafe |sun/misc/Unsafe|) objref ptr value)
   (declare (ignore unsafe))
   (let* ((field (gethash ptr *field-offset-table*))
          (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
-    (setf (slot-value objref key) value)))
+    (if objref
+        (setf (slot-value objref key) value)
+        ;; Static field access: look up the static singleton
+        (let* ((clazz (slot-value field '|clazz|))
+               (lname (lstring (slot-value clazz '|name|)))
+               (bin-name (substitute #\/ #\. lname))
+               (pkg (class-package bin-name)))
+          (setf (slot-value (eval (intern (format nil "+static-~A+" bin-name) pkg)) key) value)))))
 
 (defmethod |getLong(Ljava/lang/Object;J)|((unsafe |sun/misc/Unsafe|) objref ptr)
   (declare (ignore unsafe))
   (let* ((field (gethash ptr *field-offset-table*))
          (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
-    (slot-value objref key)))
+    (if objref
+        (slot-value objref key)
+        ;; Static field access: look up the static singleton
+        (let* ((clazz (slot-value field '|clazz|))
+               (lname (lstring (slot-value clazz '|name|)))
+               (bin-name (substitute #\/ #\. lname))
+               (pkg (class-package bin-name)))
+          (slot-value (eval (intern (format nil "+static-~A+" bin-name) pkg)) key)))))
 
 (defmethod |getLong(J)| ((unsafe |sun/misc/Unsafe|) ptr)
   (declare (ignore unsafe))
