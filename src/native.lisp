@@ -39,6 +39,11 @@
 
 (in-package :openldk)
 
+;; Methods registered here will not have their native Lisp implementations
+;; overwritten by bytecode compilation.  Key is the method key string
+;; (e.g. "java/lang/System.console()Ljava/io/Console;").
+(defvar *native-overrides* (make-hash-table :test #'equal))
+
 ;; In Java, a method call on a NULL object results in a
 ;; NullPointerException.  CLOS makes it easy to implement this
 ;; behaviour by providing our own CLOS no-applicable-method method.
@@ -1071,6 +1076,32 @@ user.variant
                (sb-alien:extern-alien "isatty" (function sb-alien:int sb-alien:int))
                0))))
 
+(defun |java/lang/System.console()| ()
+  "Return null - console object not yet supported in OpenLDK."
+  nil)
+(setf (gethash "java/lang/System.console()Ljava/io/Console;" *native-overrides*)
+      #'|java/lang/System.console()|)
+
+;; Override CheckConsole.haveConsole() to detect real TTYs.
+;; The bytecoded version calls System.console() which returns nil above,
+;; but we want prompts when stdin is an interactive terminal.
+(defun |gnu/kawa/io/CheckConsole.haveConsole()| ()
+  (if (|java/io/Console.istty()|) 1 0))
+(setf (gethash "gnu/kawa/io/CheckConsole.haveConsole()Z" *native-overrides*)
+      #'|gnu/kawa/io/CheckConsole.haveConsole()|)
+
+;; Override TtyInPort.make() to directly create a plain TtyInPort.
+;; The bytecoded version has a codegen bug: the exception handler for the
+;; JLine reflection path doesn't fall through to the fallback TtyInPort
+;; creation code (end-of-handler? prevents it). This native override
+;; bypasses the buggy compiled code entirely.
+(defun |gnu/kawa/io/TtyInPort.make(Ljava/io/InputStream;Lgnu/kawa/io/Path;Lgnu/kawa/io/OutPort;)| (in-stream path out-port)
+  (let ((tty (make-instance (intern "gnu/kawa/io/TtyInPort" (find-package "OPENLDK.APP")))))
+    (|<init>(Ljava/io/InputStream;Lgnu/kawa/io/Path;Lgnu/kawa/io/OutPort;)| tty in-stream path out-port)
+    tty))
+(setf (gethash "gnu/kawa/io/TtyInPort.make(Ljava/io/InputStream;Lgnu/kawa/io/Path;Lgnu/kawa/io/OutPort;)Lgnu/kawa/io/TtyInPort;" *native-overrides*)
+      #'|gnu/kawa/io/TtyInPort.make(Ljava/io/InputStream;Lgnu/kawa/io/Path;Lgnu/kawa/io/OutPort;)|)
+
 (defun |java/io/Console.encoding()| ()
   "Return the console encoding, or null for default."
   nil)
@@ -1495,20 +1526,30 @@ user.variant
     bytes-read))
 
 (defmethod |readBytes([BII)| ((fis |java/io/FileInputStream|) byte-array offset length)
-  (let ((in-stream (slot-value fis '|fd|))
-        (bytes-read 0))
+  (let* ((file-descriptor (slot-value fis '|fd|))
+         (fd (if (and file-descriptor (slot-exists-p file-descriptor '|fd|))
+                 (slot-value file-descriptor '|fd|)
+                 file-descriptor))
+         (in-stream (cond ((eql fd 0) *standard-input*)
+                          ((streamp fd) fd)
+                          (t (error "unimplemented fd ~A in FileInputStream.readBytes" fd))))
+         (bytes-read 0))
     (loop for i from offset below (+ offset length)
-          for byte = (read-byte in-stream nil nil) ; Read a byte, return NIL on EOF
+          for byte = (read-byte in-stream nil nil)
           while byte
           do (setf (jaref byte-array i) byte)
-             (incf bytes-read))  ; Count bytes read
-    bytes-read))
+             (incf bytes-read))
+    (if (and (zerop bytes-read) (plusp length)) -1 bytes-read)))
 
 (defmethod |available0()| ((fis |java/io/FileInputStream|))
-  ;; FIXME - may throw exception
-  (let* ((in-stream (slot-value fis '|fd|))
-         (remaining (- (file-length in-stream) (file-position in-stream))))
-    remaining))
+  (let* ((file-descriptor (slot-value fis '|fd|))
+         (fd (if (and file-descriptor (slot-exists-p file-descriptor '|fd|))
+                 (slot-value file-descriptor '|fd|)
+                 file-descriptor)))
+    (cond
+      ((eql fd 0) 0)
+      ((streamp fd) (- (file-length fd) (file-position fd)))
+      (t 0))))
 
 (defmethod |isInstance(Ljava/lang/Object;)| ((this |java/lang/Class|) objref)
   (let* ((class-name (lstring (slot-value this '|name|)))
@@ -1555,6 +1596,20 @@ user.variant
        (write-sequence (%convert-to-unsigned-8-bit (java-array-data byte-array)) fd :start offset :end (+ offset length)))
       (t
        (error "unimplemented file descriptor ~A in FileOutputStream.writeBytes" fd)))))
+
+;; Flush the underlying Lisp stream for stdout/stderr.
+;; In standard Java, FileOutputStream.write() calls the OS write() directly
+;; (no Lisp-level buffering). In OpenLDK, writes go through SBCL's stream
+;; buffering, so we need explicit force-output when Java code calls flush().
+(defmethod |flush()| ((fos |java/io/FileOutputStream|))
+  (let* ((file-descriptor (slot-value fos '|fd|))
+         (fd (if (and file-descriptor (slot-exists-p file-descriptor '|fd|))
+                 (slot-value file-descriptor '|fd|)
+                 file-descriptor)))
+    (cond
+      ((eq fd 1) (force-output *standard-output*))
+      ((eq fd 2) (force-output *error-output*))
+      ((streamp fd) (force-output fd)))))
 
 (defmethod |open0(Ljava/lang/String;Z)| ((fos |java/io/FileOutputStream|) filename append?)
   (handler-case
@@ -2299,8 +2354,16 @@ user.variant
   555)
 
 (defmethod |read0()| ((this |java/io/FileInputStream|))
-  (let ((in-stream (slot-value this '|fd|)))
-    (read-byte in-stream nil nil)))
+  (let* ((file-descriptor (slot-value this '|fd|))
+         (fd (if (and file-descriptor (slot-exists-p file-descriptor '|fd|))
+                 (slot-value file-descriptor '|fd|)
+                 file-descriptor)))
+    (cond
+      ((eql fd 0) (let ((b (read-byte *standard-input* nil nil)))
+                    (or b -1)))
+      ((streamp fd) (let ((b (read-byte fd nil nil)))
+                      (or b -1)))
+      (t (error "unimplemented fd ~A in FileInputStream.read0" fd)))))
 
 (defun %class->descriptor-string (class)
   "Return a JVM type descriptor fragment for the given java.lang.Class."

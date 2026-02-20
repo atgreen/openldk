@@ -964,6 +964,25 @@ get the same unified var-numbers."
   (let* ((class (%get-ldk-class-by-bin-name class-name))
          (method (aref (slot-value class 'methods) (1- method-index)))
          (method-key (format nil "~A.~A~A" class-name (slot-value method 'name) (slot-value method 'descriptor))))
+    ;; Skip bytecode compilation for methods with native overrides.
+    ;; Replace the stub with the native function so the stub doesn't loop.
+    (when-let ((native-fn (gethash method-key *native-overrides*)))
+      (let* ((pkg (loader-package (slot-value class 'ldk-loader)))
+             (fn-name (if (static-p method)
+                          (format nil "~A.~A"
+                                  (slot-value class 'name)
+                                  (lispize-method-name
+                                   (format nil "~A~A"
+                                           (slot-value method 'name)
+                                           (slot-value method 'descriptor))))
+                          (lispize-method-name
+                           (format nil "~A~A"
+                                   (slot-value method 'name)
+                                   (slot-value method 'descriptor)))))
+             (fn-symbol (intern fn-name pkg)))
+        (setf (symbol-function fn-symbol) native-fn))
+      (setf (gethash method-key *methods-being-compiled*) :done)
+      (return-from %compile-method nil))
     ;; Use a lock to atomically check if method is being compiled and claim it if not
     (bt:with-lock-held (*method-compilation-lock*)
       (loop
@@ -1530,6 +1549,14 @@ get the same unified var-numbers."
               (interfaces (let ((interfaces (slot-value class 'interfaces)))
                             (when interfaces
                               (mapcar (lambda (i) (classload i)) (coerce interfaces 'list))))))
+         ;; If superclass couldn't be loaded, bail out (like JVM NoClassDefFoundError).
+         ;; Clean up the partially-registered class entries and return nil.
+         (when (and (slot-value class 'super) (null super))
+           (remhash classname (slot-value ldk-loader 'ldk-classes-by-bin-name))
+           (remhash fq-classname (slot-value ldk-loader 'ldk-classes-by-fq-name))
+           (remhash classname *ldk-classes-by-bin-name*)
+           (remhash fq-classname *ldk-classes-by-fq-name*)
+           (return-from %classload-from-stream nil))
          (let ((klass (or (%get-java-class-by-bin-name classname t ldk-loader)
                           (let ((klass (%make-java-instance "java/lang/Class"))
                                 (cname (jstring fq-classname)))
@@ -1569,7 +1596,6 @@ get the same unified var-numbers."
          (let ((lisp-class (find-class classname-symbol)))
            (closer-mop:finalize-inheritance lisp-class)
            (let ((icc (append (list 'defun (intern (format nil "%clinit-~A" classname) pkg) (list))
-                              ;; (list (list 'format 't ">>> clinit ~A~%" lisp-class))
                               (loop for k in (reverse (closer-mop:class-precedence-list lisp-class))
                                     for k-ldk-class = (%get-ldk-class-by-bin-name (format nil "~A" (class-name k)) t ldk-loader)
                                     ;; Each superclass's clinit is in its defining loader's package
