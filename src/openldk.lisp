@@ -127,6 +127,74 @@ Send 'kill -3 <pid>' or 'kill -QUIT <pid>' to trigger."
                      '("getGenericReturnType" "getGenericParameterTypes")
                      :test #'string=)))))
 
+(defun %find-branch-targets (code length)
+  "Pre-scan bytecode to identify all PCs that are branch targets.
+Returns a hash table mapping target PCs to T.  This is needed because
+the main bytecode-to-IR pass processes instructions sequentially, so
+backward branch targets would be incorrectly eliminated as dead code
+if we relied solely on the stack-state-table (which is populated during
+the forward pass)."
+  (let ((targets (make-hash-table))
+        (pc 0))
+    (flet ((%read-s2 (base)
+             (unsigned-to-signed-short
+              (+ (ash (aref code base) 8) (aref code (1+ base)))))
+           (%read-s4 (base)
+             (unsigned-to-signed-integer
+              (+ (ash (aref code base) 24) (ash (aref code (1+ base)) 16)
+                 (ash (aref code (+ base 2)) 8) (aref code (+ base 3))))))
+      (loop while (< pc length)
+            for opcode = (aref code pc)
+            do (cond
+                 ;; Branch instructions with 2-byte signed offset:
+                 ;; ifeq(99)..jsr(a8), ifnull(c6), ifnonnull(c7)
+                 ((or (<= #x99 opcode #xa8)
+                      (<= #xc6 opcode #xc7))
+                  (setf (gethash (+ pc (%read-s2 (1+ pc))) targets) t)
+                  (incf pc 3))
+                 ;; goto_w(c8), jsr_w(c9) with 4-byte signed offset
+                 ((or (= opcode #xc8) (= opcode #xc9))
+                  (setf (gethash (+ pc (%read-s4 (1+ pc))) targets) t)
+                  (incf pc 5))
+                 ;; tableswitch - variable length
+                 ((= opcode #xaa)
+                  (let* ((aligned (logand (+ pc 4) (lognot 3))))
+                    (setf (gethash (+ pc (%read-s4 aligned)) targets) t) ; default
+                    (let* ((low (%read-s4 (+ aligned 4)))
+                           (high (%read-s4 (+ aligned 8)))
+                           (num-cases (1+ (- high low))))
+                      (loop for i from 0 below num-cases
+                            do (setf (gethash (+ pc (%read-s4 (+ aligned 12 (* i 4)))) targets) t))
+                      (setf pc (+ aligned 12 (* num-cases 4))))))
+                 ;; lookupswitch - variable length
+                 ((= opcode #xab)
+                  (let* ((aligned (logand (+ pc 4) (lognot 3))))
+                    (setf (gethash (+ pc (%read-s4 aligned)) targets) t) ; default
+                    (let ((npairs (%read-s4 (+ aligned 4))))
+                      (loop for i from 0 below npairs
+                            do (setf (gethash (+ pc (%read-s4 (+ aligned 8 (* i 8) 4))) targets) t))
+                      (setf pc (+ aligned 8 (* npairs 8))))))
+                 ;; wide prefix
+                 ((= opcode #xc4)
+                  (incf pc (if (= (aref code (1+ pc)) #x84) 6 4)))
+                 ;; All other fixed-size instructions
+                 (t
+                  (incf pc (aref #(1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 ; 00-0f
+                                   2 3 2 3 3 2 2 2 2 2 1 1 1 1 1 1 ; 10-1f
+                                   1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 ; 20-2f
+                                   1 1 1 1 1 1 2 2 2 2 2 1 1 1 1 1 ; 30-3f
+                                   1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 ; 40-4f
+                                   1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 ; 50-5f
+                                   1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 ; 60-6f
+                                   1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 ; 70-7f
+                                   1 1 1 1 3 1 1 1 1 1 1 1 1 1 1 1 ; 80-8f
+                                   1 1 1 1 1 1 1 1 1 3 3 3 3 3 3 3 ; 90-9f
+                                   3 3 3 3 3 3 3 3 3 2 1 1 1 1 1 1 ; a0-af
+                                   1 1 3 3 3 3 3 3 3 5 5 3 2 3 1 1 ; b0-bf
+                                   3 3 1 1 1 4 3 3 5 5)             ; c0-c9
+                                 opcode))))))
+    targets))
+
 (defun %eval (code)
   "Evaluate generated CODE, optionally printing and muffling warnings."
   (when *debug-codegen*
@@ -1043,6 +1111,7 @@ get the same unified var-numbers."
                                    (slot-value method 'name)
                                    (slot-value method 'descriptor))))))
         (let* ((exception-handler-table (make-exception-handler-table *context*))
+               (branch-targets (%find-branch-targets code length))
                (in-dead-code nil) ;; Track unreachable code after unconditional branches
                (ir-code-0
                  (setf (ir-code *context*)
@@ -1092,9 +1161,13 @@ get the same unified var-numbers."
                                                                  (funcall
                                                                   (aref *opcodes* (aref code (pc *context*)))
                                                                   *context* code))))
-                                            ;; Enter dead code mode after unconditional branches
+                                            ;; Enter dead code mode after unconditional branches,
+                                            ;; but NOT if the next instruction is a branch target
+                                            ;; (it may be reachable via a backward branch that
+                                            ;; hasn't been processed yet in this forward pass).
                                             when no-record-stack-state?
-                                              do (setf in-dead-code t)
+                                              do (unless (gethash (pc *context*) branch-targets)
+                                                   (setf in-dead-code t))
                                             unless (or was-in-dead-code no-record-stack-state?)
                                               do (%record-stack-state (pc *context*) *context*)
                                             unless (or (null result) was-in-dead-code)
@@ -1254,7 +1327,12 @@ get the same unified var-numbers."
               (%write-aot-method class-name
                                (lispize-method-name (format nil "~A~A" (name method) (descriptor method)))
                                definition-code)
-              (%eval definition-code))
+              (handler-case
+                  (%eval definition-code)
+                (error (c)
+                  (format *error-output* "~&;; COMPILE-ERROR in ~A.~A~A: ~A~%"
+                          class-name (name method) (descriptor method) c)
+                  (force-output *error-output*))))
           (when (or *debug-compile* *debug-codegen*)
             (format t "; COMPILING ~A.~A (~Dms)~%"
                     class-name
@@ -1283,6 +1361,9 @@ get the same unified var-numbers."
                  ;; Per JVM spec: if class init is already in progress
                  ;; by the current thread, return immediately.
                  (when (and <clinit>-method (not (initialized-p class)))
+                   (when (search "TwoWayStream" (slot-value class 'name))
+                     (format *error-output* "~&;; CLINIT: initializing ~A~%" (slot-value class 'name))
+                     (force-output *error-output*))
                    (setf (initialized-p class) t)
                    (handler-case
                        ;; Get package from loader if available, else use OPENLDK.SYSTEM
@@ -1297,9 +1378,10 @@ get the same unified var-numbers."
                        (let ((throwable (when (and (typep e '|condition-java/lang/Throwable|)
                                                    (slot-boundp e '|objref|))
                                           (slot-value e '|objref|))))
+                         (format *error-output* "~&;; <clinit> ERROR in ~A: ~A~%"
+                                 (slot-value class 'name) e)
+                         (force-output *error-output*)
                          (when (or *debug-codegen* *debug-exceptions*)
-                           (format *error-output* "~&<clinit> caught exception in ~A: ~A~%"
-                                   (slot-value class 'name) e)
                            (if throwable
                                (%print-java-stack-trace throwable :stream *error-output*)
                                (trivial-backtrace:print-backtrace e :output *error-output*)))

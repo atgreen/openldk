@@ -78,8 +78,9 @@
       (unless zipfile
         (setf zipfile (zip:open-zipfile jarfile))
         (setf zipfile-entries (zip:zipfile-entries zipfile)))
-      ;; Look up the class file in the zipfile entries
-      (when-let (ze (gethash (format nil "~A.class" classname) zipfile-entries))
+      ;; Look up the class file in the zipfile entries (try .class then .cls)
+      (when-let (ze (or (gethash (format nil "~A.class" classname) zipfile-entries)
+                        (gethash (format nil "~A.cls" classname) zipfile-entries)))
         ;; Create an in-memory input stream for the class file contents
         (let ((result (flexi-streams:make-in-memory-input-stream (zip:zipfile-entry-contents ze))))
           ;; Add the package to the *PACKAGE* hashtable if it doesn't already exist

@@ -1243,6 +1243,13 @@
   (declare (ignore context))
   (with-slots (class) insn
     (with-slots (class) class
+      (when (null class)
+        (return-from codegen
+          (make-instance '<expression>
+                         :insn insn
+                         :code `(error (%lisp-condition
+                                        (%make-throwable '|java/lang/NoClassDefFoundError|)))
+                         :expression-type :REFERENCE)))
       ;; Ensure class is loaded before package lookup
       (let* ((classname (slot-value class 'name))
              (_ (classload classname))
@@ -1321,6 +1328,13 @@
 
 (defmethod codegen ((insn ir-call-special-method) context)
   (with-slots (class method-name args) insn
+    (when (null class)
+      (return-from codegen
+        (make-instance '<expression>
+                       :insn insn
+                       :code `(error (%lisp-condition
+                                      (%make-throwable '|java/lang/NoClassDefFoundError|)))
+                       :expression-type :REFERENCE)))
     (let* ((class-name (slot-value class 'name))
            ;; Ensure class is loaded before package lookup
            (_ (classload class-name))
