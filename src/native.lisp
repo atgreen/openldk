@@ -247,7 +247,8 @@ and its implementation."
     (%get-array-ldk-class-from-name cname)))
 
 (defmethod |getClass()| (object)
-  ;;; FIXME - throw nullpointerexception
+  (when (null object)
+    (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|))))
   (unwind-protect
        (progn
          (when *debug-trace*
