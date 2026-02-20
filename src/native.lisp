@@ -1537,11 +1537,21 @@ user.variant
                           ((streamp fd) fd)
                           (t (error "unimplemented fd ~A in FileInputStream.readBytes" fd))))
          (bytes-read 0))
-    (loop for i from offset below (+ offset length)
-          for byte = (read-byte in-stream nil nil)
-          while byte
-          do (setf (jaref byte-array i) byte)
-             (incf bytes-read))
+    ;; First byte: block waiting for input.
+    ;; Subsequent bytes: only read if immediately available (listen).
+    ;; This matches OS read() behavior on terminals, which returns
+    ;; available data rather than trying to fill the entire buffer.
+    (when (plusp length)
+      (let ((byte (read-byte in-stream nil nil)))
+        (when byte
+          (setf (jaref byte-array offset) byte)
+          (incf bytes-read)
+          (loop for i from (1+ offset) below (+ offset length)
+                while (listen in-stream)
+                for b = (read-byte in-stream nil nil)
+                while b
+                do (setf (jaref byte-array i) b)
+                   (incf bytes-read)))))
     (if (and (zerop bytes-read) (plusp length)) -1 bytes-read)))
 
 (defmethod |available0()| ((fis |java/io/FileInputStream|))
