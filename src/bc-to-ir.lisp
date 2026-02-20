@@ -1665,20 +1665,28 @@
       (list (make-instance 'ir-monitorexit :address pc-start :objref (pop (stack context)))))))
 
 (define-bytecode-transpiler :NEW (context code)
-  (with-slots (pc class) context
-    (let ((pc-start pc))
-      (with-slots (constant-pool) class
+  (with-slots (pc class is-clinit-p) context
+    (let ((context-class class)
+          (pc-start pc))
+      (with-slots (constant-pool) context-class
         (let* ((index (+ (* (aref code (incf pc)) 256)
                          (aref code (incf pc))))
                (class (emit (aref constant-pool index) constant-pool))
-               (var (make-stack-variable context pc-start :REFERENCE)))
+               (var (make-stack-variable context pc-start :REFERENCE))
+               (needs-clinit (not (and is-clinit-p (equal (ir-class-class class) context-class)))))
           (incf pc)
           (push pc (aref (next-insn-list context) pc-start))
           (push var (stack context))
-          (list (make-instance 'ir-assign
-                               :address pc-start
-                               :lvalue var
-                               :rvalue (make-instance 'ir-new :address pc-start :class class))))))))
+          (let ((code (list (make-instance 'ir-assign
+                                           :address (if needs-clinit (+ pc-start 0.1) pc-start)
+                                           :lvalue var
+                                           :rvalue (make-instance 'ir-new :address pc-start :class class)))))
+            (if needs-clinit
+                (cons (make-instance 'ir-clinit
+                                     :address pc-start
+                                     :class class)
+                      code)
+                code)))))))
 
 (define-bytecode-transpiler :ANEWARRAY (context code)
   (with-slots (pc class) context

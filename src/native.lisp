@@ -87,6 +87,10 @@
 (defun |java/lang/Class.registerNatives()| ()
   ())
 
+(defmethod |getClassLoader0()| ((this |java/lang/Class|))
+  "Return the ClassLoader that loaded this class, or NIL for bootstrap classes."
+  (slot-value this '|classLoader|))
+
 (defun |java/lang/Class.desiredAssertionStatus0(Ljava/lang/Class;)| (class)
   (declare (ignore class))
   ;; Return 0 (false) to disable assertions
@@ -1064,6 +1068,10 @@ user.variant
 
 (defun |java/io/FileDescriptor.initIDs()| ()
   "Initialize file descriptor native IDs (no-op)."
+  nil)
+
+(defun |java/io/FileInputStream.initIDs()| ()
+  "Initialize FileInputStream native IDs (no-op)."
   nil)
 
 (defun |java/io/FileOutputStream.initIDs()| ()
