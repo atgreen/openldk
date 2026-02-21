@@ -264,6 +264,14 @@ and its implementation."
            (format t "~&~V@A trace: java/lang/Object.getClass(~A)"
                    (incf *call-nesting-level* 1) "*" object))
          (let ((c (cond
+                    ((integerp object)
+                     (%get-java-class-by-bin-name "java/lang/Long"))
+                    ((typep object 'single-float)
+                     (%get-java-class-by-bin-name "java/lang/Float"))
+                    ((typep object 'double-float)
+                     (%get-java-class-by-bin-name "java/lang/Double"))
+                    ((characterp object)
+                     (%get-java-class-by-bin-name "java/lang/Character"))
                     ((typep object 'java-array)
                      (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
                       (jstring (format nil "[L~A;"
@@ -301,8 +309,15 @@ and its implementation."
                            (java-class (%get-ldk-class-by-bin-name lname)))
                       (let ((klass (classload lname)))
                         (when klass
-                          (%clinit klass)
                           (java-class klass))))))
+           ;; Per JVM spec: when initialize=true, ensure <clinit> has run.
+           ;; Previously only the classload branch called %clinit; the findClass
+           ;; and already-loaded branches skipped it, breaking autoloads that
+           ;; rely on Class.forName triggering static initialization.
+           (when (and result initialize (not (eql initialize 0)))
+             (let ((ldk-class (%get-ldk-class-by-bin-name lname t)))
+               (when ldk-class
+                 (%clinit ldk-class))))
            ;; Only throw ClassNotFoundException at runtime (after app loader is initialized).
            ;; During image build, return nil for missing classes.
            (when (and (not result) *app-ldk-class-loader*)
@@ -387,7 +402,7 @@ and its implementation."
 
 (defmethod |run()| (arg)
   (declare (ignore arg))
-  (error "internal error"))
+  (error (%lisp-condition (%make-throwable '|java/lang/UnsupportedOperationException|))))
 
 (defmethod |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedAction;)| (action)
   (|run()| action))
@@ -748,26 +763,25 @@ and its implementation."
 (defmethod |getTypeFor(Ljava/lang/Class;)| :around (self jclass)
   (or (handler-case (call-next-method)
         (error () nil))
-      (when jclass
-        (let* ((name (lstring (slot-value jclass '|name|)))
-               (pkg (class-package "gnu/bytecode/Type"))
-               (static-sym (find-symbol "+static-gnu/bytecode/Type+" pkg))
-               (static-holder (when (and static-sym (boundp static-sym))
-                                (symbol-value static-sym)))
-               (field-name (cond
-                             ((string= name "void")    "voidType")
-                             ((string= name "int")     "intType")
-                             ((string= name "boolean") "booleanType")
-                             ((string= name "byte")    "byteType")
-                             ((string= name "short")   "shortType")
-                             ((string= name "long")    "longType")
-                             ((string= name "float")   "floatType")
-                             ((string= name "double")  "doubleType")
-                             ((string= name "char")    "charType"))))
-          (when (and field-name static-holder)
-            (let ((field-sym (find-symbol field-name :openldk)))
-              (when (and field-sym (slot-exists-p static-holder field-sym))
-                (slot-value static-holder field-sym))))))))
+      (let* ((name (lstring (slot-value jclass '|name|)))
+             (pkg (class-package "gnu/bytecode/Type"))
+             (static-sym (find-symbol "+static-gnu/bytecode/Type+" pkg))
+             (static-holder (when (and static-sym (boundp static-sym))
+                              (symbol-value static-sym)))
+             (field-name (cond
+                           ((string= name "void")    "voidType")
+                           ((string= name "int")     "intType")
+                           ((string= name "boolean") "booleanType")
+                           ((string= name "byte")    "byteType")
+                           ((string= name "short")   "shortType")
+                           ((string= name "long")    "longType")
+                           ((string= name "float")   "floatType")
+                           ((string= name "double")  "doubleType")
+                           ((string= name "char")    "charType"))))
+        (when (and field-name static-holder)
+          (let ((field-sym (find-symbol field-name :openldk)))
+            (when (and field-sym (slot-exists-p static-holder field-sym))
+              (slot-value static-holder field-sym)))))))
 
 
 ;; Generic type methods - return non-generic types until full generics support is implemented.
@@ -1078,6 +1092,10 @@ user.variant
   "Initialize FileOutputStream native IDs (no-op)."
   nil)
 
+(defun |java/io/RandomAccessFile.initIDs()| ()
+  "Initialize RandomAccessFile native IDs (no-op)."
+  nil)
+
 (defun |java/io/Console.istty()| ()
   "Return whether stdin is a tty."
   (not (zerop (sb-alien:alien-funcall
@@ -1090,11 +1108,13 @@ user.variant
 (setf (gethash "java/lang/System.console()Ljava/io/Console;" *native-overrides*)
       #'|java/lang/System.console()|)
 
-;; Override CheckConsole.haveConsole() to detect real TTYs.
-;; The bytecoded version calls System.console() which returns nil above,
-;; but we want prompts when stdin is an interactive terminal.
+;; Override CheckConsole.haveConsole() to always return true.
+;; In Kawa's processArgs bytecode, haveConsole()==false skips Shell.run()
+;; entirely and only tries startGuiConsole (which fails without a display).
+;; Returning true ensures Shell.run() is always called, which correctly
+;; handles both TTY input (with prompts) and piped input (no prompts).
 (defun |gnu/kawa/io/CheckConsole.haveConsole()| ()
-  (if (|java/io/Console.istty()|) 1 0))
+  1)
 (setf (gethash "gnu/kawa/io/CheckConsole.haveConsole()Z" *native-overrides*)
       #'|gnu/kawa/io/CheckConsole.haveConsole()|)
 
@@ -1125,7 +1145,7 @@ user.variant
 
 (defmethod |run()| (arg)
   (declare (ignore arg))
-  (error "internal error"))
+  (error (%lisp-condition (%make-throwable '|java/lang/UnsupportedOperationException|))))
 
 (defun |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedExceptionAction;)| (action)
   (let ((result (|run()| action)))
@@ -1162,6 +1182,8 @@ user.variant
                            :test #'string=)
                    1
                    0))
+              ;; java.lang.Object is assignable from everything
+              ((string= this-name "java.lang.Object") 1)
               ;; Neither is array - use normal class hierarchy
               (t
                (let ((this-ldk-class (get-ldk-class-for-java-class this))
@@ -1202,6 +1224,24 @@ user.variant
             (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
        (slot-value param-object key)))))
 
+(defmethod |getCharVolatile(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) param-object param-long)
+  (cond
+    ((typep param-object 'java-array)
+     (jaref param-object param-long))
+    ((null param-object)
+     ;; Static field access: look up the static singleton
+     (let* ((field (gethash param-long *field-offset-table*))
+            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk))
+            (clazz (slot-value field '|clazz|))
+            (lname (lstring (slot-value clazz '|name|)))
+            (bin-name (substitute #\/ #\. lname))
+            (pkg (class-package bin-name)))
+       (slot-value (eval (intern (format nil "+static-~A+" bin-name) pkg)) key)))
+    (t
+     (let* ((field (gethash param-long *field-offset-table*))
+            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
+       (slot-value param-object key)))))
+
 (defmethod |clone()| ((array java-array))
   (make-java-array :component-class (java-array-component-class array) :initial-contents (copy-seq (java-array-data array))))
 
@@ -1217,8 +1257,23 @@ user.variant
 
 (defmethod |getSuperclass()| ((class |java/lang/Class|))
   (let ((lclass (get-ldk-class-for-java-class class)))
-    (when lclass
-      (gethash (super lclass) *java-classes-by-bin-name*))))
+    (when (and lclass (super lclass))
+      (or (gethash (super lclass) *java-classes-by-bin-name*)
+          (let ((super-lclass (classload (super lclass))))
+            (when super-lclass
+              (java-class super-lclass)))))))
+
+;; Kawa's ClassType.getSuperclass() has a guard that checks
+;; "java.lang.Object".equals(getName()) to avoid calling
+;; reflectClass.getSuperclass() on Object (which returns null).
+;; However, ClassType objects may store names with slashes
+;; ("java/lang/Object"), so the guard fails and Type.make(null)
+;; is called, triggering a NullPointerException on null.isArray().
+;; This :around method catches that NPE and returns nil, which is
+;; the correct result: Object has no superclass.
+(defmethod |getSuperclass()| :around (self)
+  (handler-case (call-next-method)
+    (|condition-java/lang/NullPointerException| () nil)))
 
 (defmethod |getInterfaces0()| ((class |java/lang/Class|))
   ;; FIXME: do something different for interfaces?
@@ -1227,7 +1282,10 @@ user.variant
      :component-class (%get-java-class-by-fq-name "java.lang.Class")
      :initial-contents
      (if lclass
-         (coerce (mapcar (lambda (iname) (java-class (gethash iname *ldk-classes-by-bin-name*))) (coerce (interfaces lclass) 'list))
+         (coerce (remove nil (mapcar (lambda (iname)
+                                        (let ((lc (gethash iname *ldk-classes-by-bin-name*)))
+                                          (when lc (java-class lc))))
+                                      (coerce (interfaces lclass) 'list)))
                  'vector)
          #()))))
 
@@ -1578,14 +1636,19 @@ user.variant
          ;; Get class's loader package for correct type lookup
          (pkg (class-package normalized-name))
          (class-symbol (intern normalized-name pkg)))
-    ;; Handle native Lisp integers for Java integral wrapper types
+    ;; Handle native Lisp types (integers, floats, doubles, characters)
     (cond
-      ((and (integerp objref)
-            (member normalized-name '("java/lang/Integer" "java/lang/Long"
-                                      "java/lang/Short" "java/lang/Byte"
-                                      "java/lang/Number")
-                    :test #'string=))
+      ((%native-type-castable-p objref normalized-name)
        1)
+      ;; Java arrays (java-array structs) are instances of Object, Cloneable, Serializable,
+      ;; and matching array types
+      ((java-array-p objref)
+       (cond
+         ((member class-name '("java.lang.Object" "java.lang.Cloneable" "java.io.Serializable")
+                  :test #'string=) 1)
+         ;; Check if the target is an array class matching the component type
+         ((and (plusp (length class-name)) (char= (char class-name 0) #\[)) 1)
+         (t 0)))
       ;; Standard typep check for CLOS objects
       ((typep objref class-symbol) 1)
       (t 0))))
@@ -2021,6 +2084,14 @@ user.variant
                     path-str (lstring result)))
           result)))))
 
+(defmethod |checkAccess(Ljava/io/File;I)| ((ufs |java/io/UnixFileSystem|) file access-mode)
+  ;; TODO: check actual POSIX permissions (R_OK/W_OK/X_OK) instead of just file existence
+  (declare (ignore ufs access-mode))
+  (let ((path (lstring (slot-value file '|path|))))
+    (handler-case
+        (if (probe-file path) 1 0)
+      (error () 0))))
+
 (defmethod |getLastModifiedTime(Ljava/io/File;)| ((ufs |java/io/UnixFileSystem|) file)
   (declare (ignore ufs))
   (* (org.shirakumo.file-attributes:modification-time
@@ -2039,6 +2110,21 @@ user.variant
     (setf (sb-alien:deref mem 0) value)
     (|<init>(JI)| dbb ptr 8)
     dbb))
+
+(defmethod |getBoolean(Ljava/lang/Object;J)|((unsafe |sun/misc/Unsafe|) objref ptr)
+  (declare (ignore unsafe))
+  (let* ((field (gethash ptr *field-offset-table*))
+         (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
+    (if objref
+        (let ((v (slot-value objref key)))
+          (if v (if (eql v 0) 0 1) 0))
+        ;; Static field access: look up the static singleton
+        (let* ((clazz (slot-value field '|clazz|))
+               (lname (lstring (slot-value clazz '|name|)))
+               (bin-name (substitute #\/ #\. lname))
+               (pkg (class-package bin-name))
+               (v (slot-value (eval (intern (format nil "+static-~A+" bin-name) pkg)) key)))
+          (if v (if (eql v 0) 0 1) 0)))))
 
 (defmethod |getInt(Ljava/lang/Object;J)|((unsafe |sun/misc/Unsafe|) objref ptr)
   (declare (ignore unsafe))
@@ -2286,22 +2372,37 @@ user.variant
                                :array data
                                :start offset
                                :end (+ offset length))))
-    (java-class (%classload-from-stream (substitute #\/ #\. (lstring class-name)) stream class-loader ldk-loader))))
+    (let ((result (%classload-from-stream (substitute #\/ #\. (lstring class-name)) stream class-loader ldk-loader)))
+      (unless result
+        (let ((exc (%make-java-instance "java/lang/NoClassDefFoundError")))
+          (|<init>(Ljava/lang/String;)| exc class-name)
+          (error (%lisp-condition exc))))
+      (java-class result))))
 
 (defmethod |defineClass(Ljava/lang/String;[BIILjava/lang/ClassLoader;Ljava/security/ProtectionDomain;)|
     ((unsafe |sun/misc/Unsafe|) class-name data offset length class-loader protection-domain)
   (declare (ignore protection-domain))
   (let* ((ldk-loader (get-ldk-loader-for-java-loader class-loader))
-         (stream (make-instance 'byte-array-input-stream :array data :start offset :end (+ offset length))))
-    (java-class (%classload-from-stream (substitute #\/ #\. (lstring class-name)) stream class-loader ldk-loader))))
+         (stream (make-instance 'byte-array-input-stream :array data :start offset :end (+ offset length)))
+         (result (%classload-from-stream (substitute #\/ #\. (lstring class-name)) stream class-loader ldk-loader)))
+    (unless result
+      (let ((exc (%make-java-instance "java/lang/NoClassDefFoundError")))
+        (|<init>(Ljava/lang/String;)| exc class-name)
+        (error (%lisp-condition exc))))
+    (java-class result)))
 
 (defmethod |defineClass1(Ljava/lang/String;[BIILjava/security/ProtectionDomain;Ljava/lang/String;)|
     ((class-loader |java/lang/ClassLoader|) class-name data offset length protection-domain source)
   (declare (ignore source)
            (ignore protection-domain))
   (let* ((ldk-loader (get-ldk-loader-for-java-loader class-loader))
-         (stream (make-instance 'byte-array-input-stream :array data :start offset :end (+ offset length))))
-    (java-class (%classload-from-stream (substitute #\/ #\. (lstring class-name)) stream class-loader ldk-loader))))
+         (stream (make-instance 'byte-array-input-stream :array data :start offset :end (+ offset length)))
+         (result (%classload-from-stream (substitute #\/ #\. (lstring class-name)) stream class-loader ldk-loader)))
+    (unless result
+      (let ((exc (%make-java-instance "java/lang/NoClassDefFoundError")))
+        (|<init>(Ljava/lang/String;)| exc class-name)
+        (error (%lisp-condition exc))))
+    (java-class result)))
 
 (defmethod |allocateInstance(Ljava/lang/Class;)| ((unsafe |sun/misc/Unsafe|) class)
   (let* ((bin-name (substitute #\/ #\. (lstring (slot-value class '|name|))))
@@ -2573,8 +2674,13 @@ user.variant
     ((unsafe |sun/misc/Unsafe|) clazz data cp-patches)
   (let* ((stream (make-instance 'byte-array-input-stream :array data :start 0 :end (java-array-length data)))
          (java-loader (slot-value clazz '|classLoader|))
-         (ldk-loader (get-ldk-loader-for-java-loader java-loader)))
-    (java-class (%classload-from-stream (format nil "~A/~A" (substitute #\/ #\. (lstring (slot-value clazz '|name|))) (gensym "anonymous-class-")) stream java-loader ldk-loader))))
+         (ldk-loader (get-ldk-loader-for-java-loader java-loader))
+         (result (%classload-from-stream (format nil "~A/~A" (substitute #\/ #\. (lstring (slot-value clazz '|name|))) (gensym "anonymous-class-")) stream java-loader ldk-loader)))
+    (unless result
+      (let ((exc (%make-java-instance "java/lang/NoClassDefFoundError")))
+        (|<init>(Ljava/lang/String;)| exc (slot-value clazz '|name|))
+        (error (%lisp-condition exc))))
+    (java-class result)))
 
 (defun %invoke-polymorphic-signature (method-handle &rest args)
   "Invoke a MethodHandle's target method with the given arguments.
@@ -2635,9 +2741,17 @@ user.variant
                         (find-package :openldk)))
                (lisp-method-name (intern lispized-name pkg)))
 
-          ;; Invoke the method
-          ;; For LambdaForm methods, always pass the MethodHandle as first arg
-          (apply lisp-method-name method-handle args))))))
+          ;; Invoke the method.
+          ;; LambdaForm internal methods (invokeStaticInit_*, etc.) expect the
+          ;; MethodHandle as their first argument (part of the LambdaForm calling
+          ;; convention).  Actual target methods do NOT -- they receive only the
+          ;; user-visible arguments.  We distinguish by checking the parameter
+          ;; count: if the method takes exactly (length args) parameters, skip the
+          ;; MethodHandle; if it takes (1+ (length args)), prepend it.
+          (let ((param-count (count-parameters method-type)))
+            (if (= param-count (length args))
+                (apply lisp-method-name args)
+                (apply lisp-method-name method-handle args))))))))
 
 (defun |java/lang/invoke/MethodHandles.lookup()| ()
   "Return a basic MethodHandles.Lookup instance. We intentionally relax access checks for now."

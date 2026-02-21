@@ -293,6 +293,12 @@
 
 (defvar *boot-class-loader* nil)
 
+(defvar *default-mainclass* nil
+  "Default main class baked into an app image by dump-app-image.")
+
+(defvar *default-classpath* nil
+  "Default classpath string baked into an app image by dump-app-image.")
+
 ;; Map Java Thread objects to Lisp (bordeaux) threads
 (defvar *java-threads* (make-hash-table :test #'eq :synchronized t)
   "Hash table mapping Java Thread objects to bordeaux-threads.")

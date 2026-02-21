@@ -58,5 +58,7 @@
   (:documentation "OpenLDK core package")
   (:export :initialize
            :main-wrapper
+           :app-main-wrapper
            :make-javac-image
-           :javac-main-wrapper))
+           :javac-main-wrapper
+           :dump-app-image))

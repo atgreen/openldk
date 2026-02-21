@@ -507,7 +507,8 @@
                                     (error (%lisp-condition (%make-throwable '|java/lang/ClassCastException|))))))
                              `(let ((objref ,(code (codegen (objref insn) context))))
                                 (when objref
-                                  (unless (typep objref (quote ,(intern (slot-value insn 'classname) (class-package classname))))
+                                  (unless (or (typep objref (quote ,(intern (slot-value insn 'classname) (class-package classname))))
+                                              (%native-type-castable-p objref ,classname))
                                     (error (%lisp-condition (%make-throwable '|java/lang/ClassCastException|))))))))
                    :expression-type nil)))
 
@@ -953,17 +954,67 @@
                    :code (list 'when (list 'not (list 'null (code (codegen value context))))
                                (list 'go (intern (format nil "branch-target-~A" offset)))))))
 
+(defun %box-if-native (obj)
+  "Auto-box native Lisp values to Java wrapper objects for virtual method dispatch.
+   Native integers become java/lang/Long, floats become java/lang/Float, etc."
+  (cond
+    ((integerp obj)
+     (let ((boxed (%make-java-instance "java/lang/Long")))
+       (setf (slot-value boxed '|value|) obj)
+       boxed))
+    ((typep obj 'single-float)
+     (let ((boxed (%make-java-instance "java/lang/Float")))
+       (setf (slot-value boxed '|value|) obj)
+       boxed))
+    ((typep obj 'double-float)
+     (let ((boxed (%make-java-instance "java/lang/Double")))
+       (setf (slot-value boxed '|value|) obj)
+       boxed))
+    ((characterp obj)
+     (let ((boxed (%make-java-instance "java/lang/Character")))
+       (setf (slot-value boxed '|value|) obj)
+       boxed))
+    (t obj)))
+
 (defun %instanceof-array (objref typename)
   ;; FIXME - this isn't following any of the array instanceof rules
   (if (typep objref 'java-array)
       1
       0))
 
+;; Check if a native Lisp value is compatible with a Java class type.
+(defun %native-type-castable-p (obj classname)
+  "Return T if native Lisp value OBJ is compatible with Java CLASSNAME."
+  (cond
+    ((integerp obj)
+     (member classname '("java/lang/Object" "java/lang/Number"
+                          "java/lang/Long" "java/lang/Integer"
+                          "java/lang/Short" "java/lang/Byte"
+                          "java/lang/Comparable" "java/io/Serializable")
+             :test #'string=))
+    ((typep obj 'single-float)
+     (member classname '("java/lang/Object" "java/lang/Number"
+                          "java/lang/Float"
+                          "java/lang/Comparable" "java/io/Serializable")
+             :test #'string=))
+    ((typep obj 'double-float)
+     (member classname '("java/lang/Object" "java/lang/Number"
+                          "java/lang/Double"
+                          "java/lang/Comparable" "java/io/Serializable")
+             :test #'string=))
+    ((characterp obj)
+     (member classname '("java/lang/Object" "java/lang/Character"
+                          "java/lang/Comparable" "java/io/Serializable")
+             :test #'string=))
+    (t nil)))
+
 ;; Helper function for instanceof check
 (defun %instanceof-check (obj target-class-name target-class)
   "Check instanceof. Returns 1 or 0."
-  (declare (ignore target-class-name))
-  (if (typep obj target-class) 1 0))
+  (cond
+    ((%native-type-castable-p obj target-class-name) 1)
+    ((typep obj target-class) 1)
+    (t 0)))
 
 ;; Helper for integer instanceof check
 (defun %instanceof-integer-check (obj target-class-name target-class)
@@ -1135,14 +1186,16 @@
     (make-instance '<expression>
                    :insn insn
                    :code (let* ((nargs (length args))
+                                (receiver `(%box-if-native ,(code (codegen (car args) context))))
                                 (call (cond
                                         ((eq nargs 0)
                                          (error "internal error"))
                                         ((eq nargs 1)
-                                         (list (intern (format nil "~A" method-name) :openldk) (code (codegen (car args) context))))
+                                         (list (intern (format nil "~A" method-name) :openldk) receiver))
                                         (t
                                          `(funcall (function ,(intern (format nil "~A" method-name) :openldk))
-                                                   ,@(mapcar (lambda (a) (code (codegen a context))) args))))))
+                                                   ,receiver
+                                                   ,@(mapcar (lambda (a) (code (codegen a context))) (cdr args)))))))
                            call))))
 
 (defparameter *invokedynamic-cache* (make-hash-table :test #'equal))

@@ -320,17 +320,24 @@ as strings."
                  ;; For array types
                  ((char= ch #\[)
                   (let ((start index))
-                    (incf index)
+                    ;; Skip array dimension markers only
                     (loop while (and (< index (length descriptor))
-                                     (member (char descriptor index)
-                                             '(#\I #\J #\S #\B #\C #\D #\F #\Z #\[)))
+                                     (char= (char descriptor index) #\[))
                           do (incf index))
-                    (when (and (< index (length descriptor))
-                               (char= (char descriptor index) #\L))
-                      (let ((semi (position #\; descriptor :start index)))
-                        (when semi
-                          (setf index (1+ semi)))))
-                    (setf index (min index (length descriptor)))
+                    ;; Now consume exactly one component type
+                    (when (< index (length descriptor))
+                      (let ((component-ch (char descriptor index)))
+                        (cond
+                          ;; Primitive component type - consume just one character
+                          ((member component-ch '(#\I #\J #\S #\B #\C #\D #\F #\Z))
+                           (incf index))
+                          ;; Object component type - consume through semicolon
+                          ((char= component-ch #\L)
+                           (let ((semi (position #\; descriptor :start index)))
+                             (when semi
+                               (setf index (1+ semi)))))
+                          ;; Unknown - skip one character
+                          (t (incf index)))))
                     (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
                            (jstring (substitute #\. #\/ (subseq descriptor start index))) nil nil nil)
                           param-list)))

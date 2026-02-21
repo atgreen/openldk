@@ -206,7 +206,8 @@ the forward pass)."
           (#+ansi-cl
            (style-warning (lambda (c)
                             (declare (ignore c))
-                            (invoke-restart 'muffle-warning))))
+                            (invoke-restart 'muffle-warning)))
+)
         (eval code)))) ; lint:suppress eval-usage
 
 (defun lispize-method-name (name)
@@ -253,7 +254,6 @@ the normal call-next-method chain for the owner's superclasses."
       (let* ((tail (member method methods :test #'eq))
              (next (rest tail)))
         (funcall (closer-mop:method-function method) args next)))))
-
 (defun make-exception-handler-table (context)
   "Build a hashtable of handler PCs keyed by handler start for CONTEXT."
   (let ((exception-table (exception-table context))
@@ -1453,12 +1453,29 @@ get the same unified var-numbers."
         ;; No conflict, return as-is
         name)))
 
+(defun %remove-redundant-interfaces (ifaces)
+  "Remove interfaces already inherited through other interfaces in the list.
+   If Indexed extends Counted, and both are in the list, remove Counted."
+  (remove-if (lambda (iface)
+               (let ((fc-iface (find-class iface nil)))
+                 (and fc-iface
+                      (some (lambda (other)
+                              (and (not (eq iface other))
+                                   (let ((fc-other (find-class other nil)))
+                                     (and fc-other
+                                          (subtypep fc-other fc-iface)
+                                          (not (subtypep fc-iface fc-other))))))
+                            ifaces))))
+             ifaces))
+
 (defun %topo-sort-interfaces (ifaces)
   "Sort interface symbols so that subtypes come before supertypes.
    For CLOS C3 linearization, if A is a subtype of B, A must come before B.
+   First removes redundant interfaces to avoid CPL circularity.
    Uses an insertion-based approach that compares all pairs."
   (when (null ifaces)
     (return-from %topo-sort-interfaces nil))
+  (setf ifaces (%remove-redundant-interfaces ifaces))
   (let ((result (copy-list ifaces)))
     ;; For each pair (i, j) where i < j, if result[j] is a supertype of result[i],
     ;; that's fine. But if result[i] is a supertype of result[j], we need to move
@@ -2187,6 +2204,35 @@ get the same unified var-numbers."
            (format *error-output* "~&Error: ~A~%" condition)))
         (uiop:quit 1)))))
 
+(defun app-main-wrapper ()
+  "Generic entry point for pre-dumped app images.
+   Uses *default-mainclass* and *default-classpath* baked at build time.
+   CLI -cp overrides the baked classpath; a CLI mainclass overrides the default."
+  (sb-int:set-floating-point-modes :traps nil)
+  (multiple-value-bind (cli-mainclass args cli-classpath dump-dir aot)
+      (%parse-java-args)
+    (let ((mainclass (or cli-mainclass *default-mainclass*))
+          (classpath (or cli-classpath *default-classpath*)))
+      (unless mainclass
+        (%print-usage)
+        (uiop:quit 1))
+      (handler-case
+          (main mainclass args :classpath classpath :dump-dir dump-dir :aot aot)
+        (error (condition)
+          (cond
+            ((typep condition '|condition-java/lang/Throwable|)
+             (let ((throwable (and (slot-boundp condition '|objref|)
+                                   (slot-value condition '|objref|))))
+               (if (typep throwable '|java/lang/Throwable|)
+                   (progn
+                     (format *error-output* "~&Unhandled Java exception:~%")
+                     (%print-java-stack-trace throwable :stream *error-output*)
+                     (finish-output *error-output*))
+                   (format *error-output* "~&Unhandled Java condition: ~A~%" condition))))
+            (t
+             (format *error-output* "~&Error: ~A~%" condition)))
+          (uiop:quit 1))))))
+
 (defun %java-string (value)
   (cond
     ((null value) "")
@@ -2359,6 +2405,19 @@ get the same unified var-numbers."
 
         (|<init>()| boot-class-loader)
 
+        ;; Functional interfaces used by lambda implementation classes in native.lisp.
+        ;; These must be loaded before anything triggers finalize-inheritance on
+        ;; LambdaSupplier/LambdaPredicate/etc., which are defined via defclass/std
+        ;; with these interfaces as superclasses.
+        (dolist (c '("java/util/function/Supplier"
+                     "java/util/function/Predicate"
+                     "java/util/function/Function"
+                     "java/util/function/Consumer"
+                     "java/util/function/BiConsumer"
+                     "java/util/function/BiFunction"
+                     "java/util/function/BinaryOperator"))
+          (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil))
+
         ;; Minimal pre-load: only ASM bytecode generation classes
         ;; MethodHandle/LambdaForm classes have complex lazy initialization via ClassSpecializer
         ;; that doesn't work with pre-loading - they need runtime initialization in correct order
@@ -2417,6 +2476,8 @@ get the same unified var-numbers."
 
 (defun make-image (&optional (output-path "openldk"))
   (initialize)
+  ;; Clear all monitor state to prevent deadlocks in the saved image.
+  (clrhash *monitors*)
   ;; Kill all Java threads before saving core (SBCL can't save with threads running)
   (loop for thread in (bt:all-threads)
         when (and (not (eq thread (bt:current-thread)))
@@ -2426,3 +2487,30 @@ get the same unified var-numbers."
                             :executable t
                             :save-runtime-options t
                             :toplevel #'main-wrapper))
+
+(defun dump-app-image (output-path default-mainclass &key classpath)
+  "Build a generic executable image for a Java application.
+   OUTPUT-PATH:       Path for the saved executable.
+   DEFAULT-MAINCLASS: The Java class to run when no class is given on the CLI.
+   CLASSPATH:         Classpath string to bake in. If nil, reads CLASSPATH env var."
+  (initialize)
+  (let ((cp (or classpath (uiop:getenv "CLASSPATH") ".")))
+    (setf *default-mainclass* default-mainclass)
+    (setf *default-classpath* cp)
+    (setf *classpath*
+          (loop for cpe in (split-sequence:split-sequence (uiop:inter-directory-separator) cp)
+                collect (if (str:ends-with? ".jar" cpe)
+                            (make-instance 'jar-classpath-entry :jarfile cpe)
+                            (make-instance 'dir-classpath-entry :dir cpe)))))
+  ;; Clear all monitor state to prevent deadlocks in the saved image.
+  (clrhash *monitors*)
+  ;; Kill all Java threads before saving core (SBCL can't save with threads running)
+  (loop for thread in (bt:all-threads)
+        when (and (not (eq thread (bt:current-thread)))
+                  (search "Java-Thread" (bt:thread-name thread)))
+        do (bt:destroy-thread thread))
+  (sb-ext:save-lisp-and-die output-path
+                            :executable t
+                            :save-runtime-options t
+                            :toplevel #'app-main-wrapper))
+

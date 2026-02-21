@@ -112,5 +112,13 @@
   ;; Deferred due to bootstrap complexity with exception classes
   (length (java-array-data obj)))
 
+(defun |java/lang/reflect/Array.get(Ljava/lang/Object;I)| (array index)
+  "java.lang.reflect.Array.get implementation."
+  (jaref array index))
+
+(defun |java/lang/reflect/Array.set(Ljava/lang/Object;ILjava/lang/Object;)| (array index value)
+  "java.lang.reflect.Array.set implementation."
+  (setf (jaref array index) value))
+
 (defmethod |length()| ((array java-array))
   (length (java-array-data array)))
