@@ -214,46 +214,71 @@ the forward pass)."
   "Return a Lisp symbol name derived from Java method NAME."
   (take (1+ (position #\) name)) name))
 
+(defun %compute-invoke-special-entry (gf owner-class nargs)
+  "Compute the invoke-special cache entry for GF dispatching on OWNER-CLASS.
+Returns a cons (method-fn . next-methods)."
+  (let* ((class-list (cons owner-class
+                           (make-list (max 0 (1- nargs))
+                                      :initial-element (find-class 't))))
+         (methods (closer-mop:compute-applicable-methods-using-classes gf class-list)))
+    (unless methods
+      (return-from %compute-invoke-special-entry nil))
+    (let ((method (or (find owner-class methods
+                            :key (lambda (m)
+                                   (when (null (closer-mop::method-qualifiers m))
+                                     (first (closer-mop:method-specializers m))))
+                            :test #'eq :from-end t)
+                      (find owner-class methods
+                            :key (lambda (m)
+                                   (first (closer-mop:method-specializers m)))
+                            :test #'eq))))
+      (unless method
+        (setf method (first methods)))
+      (let* ((tail (member method methods :test #'eq))
+             (next (rest tail)))
+        (cons (closer-mop:method-function method) next)))))
+
 (defun invoke-special (method-symbol owner-symbol args)
   "Invoke METHOD-SYMBOL on ARGS using Java invokespecial semantics.
 OWNER-SYMBOL designates the declaring class of the target method.
 This bypasses overriding methods on subclasses while still honouring
 the normal call-next-method chain for the owner's superclasses."
   (let* ((gf (symbol-function method-symbol))
-         (owner-class (find-class owner-symbol))
-         (class-list (cons owner-class
-                           (loop repeat (max 0 (1- (length args)))
-                                 collect (find-class 't))))
-         (methods (closer-mop:compute-applicable-methods-using-classes gf class-list)))
-    (unless methods
-      (error "No applicable methods found for ~A on declaring class ~A with ~D args"
-             method-symbol owner-symbol (length args)))
-    (when (and *debug-set-enclosing-type*
-               (search "setEnclosingType" (symbol-name method-symbol)))
-      (format t "~&[invoke-special] target=~A owner=~A classes=~S~%"
-              method-symbol owner-symbol class-list)
-      (format t "                 methods=~S~%"
-              (mapcar #'closer-mop:method-specializers methods))
-      (format t "                 qualifiers=~S~%"
-              (mapcar #'closer-mop::method-qualifiers methods)))
-    (let ((method (or (find owner-class methods
-                            :key (lambda (m)
-                                   (when (null (closer-mop::method-qualifiers m))
-                                     (first (closer-mop:method-specializers m))))
-                            :test #'eq :from-end t)
-                     (find owner-class methods
-                           :key (lambda (m)
-                                  (first (closer-mop:method-specializers m)))
-                           :test #'eq))))
-      (unless method
-        (when *debug-set-enclosing-type*
-          (format t "~&[invoke-special] fallback for ~A on ~A; methods=~S~%"
-                  method-symbol owner-symbol
-                  (mapcar #'closer-mop:method-specializers methods)))
-        (setf method (first methods)))
-      (let* ((tail (member method methods :test #'eq))
-             (next (rest tail)))
-        (funcall (closer-mop:method-function method) args next)))))
+         (owner-class (find-class owner-symbol)))
+    ;; Fast path: use invoke-special cache for java-generic-function GFs
+    (when (typep gf 'java-generic-function)
+      (let* ((cache (java-gf-invoke-special-cache gf))
+             (entry (gethash owner-class cache)))
+        (unless entry
+          (setf entry (%compute-invoke-special-entry gf owner-class (length args)))
+          (when entry
+            (bordeaux-threads:with-lock-held ((java-gf-cache-lock gf))
+              (setf (gethash owner-class cache) entry))))
+        (when entry
+          (return-from invoke-special
+            (funcall (car entry) args (cdr entry))))))
+    ;; Slow path: full MOP lookup for non-java-generic-function GFs
+    (let* ((class-list (cons owner-class
+                             (loop repeat (max 0 (1- (length args)))
+                                   collect (find-class 't))))
+           (methods (closer-mop:compute-applicable-methods-using-classes gf class-list)))
+      (unless methods
+        (error "No applicable methods found for ~A on declaring class ~A with ~D args"
+               method-symbol owner-symbol (length args)))
+      (let ((method (or (find owner-class methods
+                              :key (lambda (m)
+                                     (when (null (closer-mop::method-qualifiers m))
+                                       (first (closer-mop:method-specializers m))))
+                              :test #'eq :from-end t)
+                       (find owner-class methods
+                             :key (lambda (m)
+                                    (first (closer-mop:method-specializers m)))
+                             :test #'eq))))
+        (unless method
+          (setf method (first methods)))
+        (let* ((tail (member method methods :test #'eq))
+               (next (rest tail)))
+          (funcall (closer-mop:method-function method) args next))))))
 (defun make-exception-handler-table (context)
   "Build a hashtable of handler PCs keyed by handler start for CONTEXT."
   (let ((exception-table (exception-table context))
@@ -1585,19 +1610,33 @@ get the same unified var-numbers."
                                                            (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
                                                                  collect (intern (format nil "arg~A" i) :openldk))))
                                                ;; Instance methods: generic function name in :openldk for dispatch,
-                                               ;; class specializer in loader's package for isolation
-                                               (list 'defmethod (intern (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) :openldk)
-                                                     (cons (list (intern "this" :openldk) (intern (slot-value (slot-value m 'class) 'name) pkg))
-                                                           (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
-                                                                 collect (intern (format nil "arg~A" i) :openldk)))
-                                                     (list '%compile-method (slot-value class 'name) (incf method-index))
-                                                     (list 'invoke-special
-                                                           (list 'quote (intern (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) :openldk))
-                                                           (list 'quote (intern (slot-value (slot-value m 'class) 'name) pkg))
-                                                           (cons 'list
-                                                                 (cons (intern "this" :openldk)
-                                                                       (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
-                                                                             collect (intern (format nil "arg~A" i) :openldk))))))))))
+                                               ;; class specializer in loader's package for isolation.
+                                               ;; Pre-create GF with java-generic-function metaclass for fast dispatch.
+                                               (let ((method-name (intern (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) :openldk))
+                                                     (param-count (count-parameters (slot-value m 'descriptor))))
+                                                 (list 'progn
+                                                       (list 'unless
+                                                             (list 'and
+                                                                   (list 'fboundp (list 'quote method-name))
+                                                                   (list 'typep (list 'symbol-function (list 'quote method-name)) ''generic-function))
+                                                             (list 'ensure-generic-function (list 'quote method-name)
+                                                                   :generic-function-class ''java-generic-function
+                                                                   :lambda-list (list 'quote
+                                                                                      (cons (intern "this" :openldk)
+                                                                                            (loop for i from 1 upto param-count
+                                                                                                  collect (intern (format nil "arg~A" i) :openldk))))))
+                                                       (list 'defmethod method-name
+                                                             (cons (list (intern "this" :openldk) (intern (slot-value (slot-value m 'class) 'name) pkg))
+                                                                   (loop for i from 1 upto param-count
+                                                                         collect (intern (format nil "arg~A" i) :openldk)))
+                                                             (list '%compile-method (slot-value class 'name) (incf method-index))
+                                                             (list 'invoke-special
+                                                                   (list 'quote method-name)
+                                                                   (list 'quote (intern (slot-value (slot-value m 'class) 'name) pkg))
+                                                                   (cons 'list
+                                                                         (cons (intern "this" :openldk)
+                                                                               (loop for i from 1 upto param-count
+                                                                                     collect (intern (format nil "arg~A" i) :openldk))))))))))))
                                    methods)))))))
 
     (append defclass-code methods-code)))
