@@ -234,9 +234,8 @@
   "Subset of javac classes to preload into the javacl image.")
 
 (defun %warmup-javac ()
-  (let ((openldk::*debug-load* t))
-    (dolist (c *javac-warmup-classes*)
-      (openldk::|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (openldk::jstring c) nil openldk::*boot-class-loader* nil))))
+  (dolist (c *javac-warmup-classes*)
+    (openldk::|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (openldk::jstring c) nil openldk::*boot-class-loader* nil)))
 
 (defun make-javac-image (&optional (output-path "javacl"))
   "Build an executable image that jumps straight into javac."
@@ -255,8 +254,7 @@
   ;; More warm up...
   (unwind-protect
        (let ((cp (default-javac-classpath)))
-	 (let ((openldk::*debug-load* t)
-	       (openldk::*ignore-quit* t))
+	 (let ((openldk::*ignore-quit* t))
 	   (openldk::main "com.sun.tools.javac.Main" '() :classpath cp)
 	   (openldk::main "com.sun.tools.javac.Main" '("-version") :classpath cp)
 	   (openldk::main "com.sun.tools.javac.Main" '("-verbose" "Hello.java"))

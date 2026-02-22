@@ -2334,9 +2334,6 @@ get the same unified var-numbers."
                             (make-instance 'jar-classpath-entry :jarfile cpe)
                             (make-instance 'dir-classpath-entry :dir cpe)))))
 
-  (setf *debug-load* t)
-  (setf *debug-compile* t)
-
   ;; We need to hand load these before Class.forName0 will work.
   (%clinit (classload "java/lang/Object"))
   (%clinit (classload "java/lang/String"))
