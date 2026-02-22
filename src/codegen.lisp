@@ -387,10 +387,6 @@
                                 (full-name (format nil "~A.~A" declaring-class method-name))
                                 ;; Use static-method-symbol to check :openldk first (for native methods)
                                 (method-sym (static-method-symbol full-name pkg))
-                                (_ (when (search "shiftLeft" full-name)
-                                     (format t "~&; DEBUG codegen static-call: class=~A method=~A loader=~A pkg=~A sym=~A sym-pkg=~A~%"
-                                             declaring-class method-name loader pkg method-sym (symbol-package method-sym))
-                                     (force-output)))
                                 (nargs (length args))
                                 (call (cond
                                         ((eq nargs 0)
@@ -1233,7 +1229,8 @@
                             (openldk::%lambda-metafactory
                              ,(code (codegen (third args) context))
                              (list ,@(mapcar (lambda (a) (code (codegen a context))) dynamic-args))
-                             ,method-name)
+                             ,method-name
+                             ,(code (codegen (second args) context)))
                             ;; Fallback: generic invokedynamic handling
                             (let ((callsite (%resolve-invokedynamic ',(intern method-name pkg)
                                                                     ',(intern bootstrap-method-name pkg)

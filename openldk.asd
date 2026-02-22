@@ -53,6 +53,7 @@
   :serial t
   :components ((:file "src/package")
                (:file "src/global-state")
+               (:file "src/java-gf")
                (:file "src/debug")
                (:file "src/monitor")
                (:file "src/context")

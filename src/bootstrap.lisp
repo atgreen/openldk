@@ -45,6 +45,10 @@
 (defclass/std |java/lang/Cloneable| ()
   ())
 
+(ensure-generic-function '|clone()|
+                         :generic-function-class 'java-generic-function
+                         :lambda-list '(|this|))
+
 (defmethod |clone()| ((|this| |java/lang/Object|))
   "Default implementation of clone for CLONEABLE objects."
   (assert (typep |this| '|java/lang/Cloneable|))
@@ -139,6 +143,10 @@
   ()
   (:documentation "Stub for sun.reflect.ConstantPool"))
 
+(ensure-generic-function '%lisp-condition
+                         :generic-function-class 'java-generic-function
+                         :lambda-list '(|this|))
+
 (defmethod %lisp-condition ((throwable |java/lang/Throwable|))
   (error (format nil "Missing %lisp-condition implementation for ~A." throwable)))
 
@@ -224,6 +232,10 @@
 (defclass |sun/management/VMManagementImpl| (|java/lang/Object|)
   ()
   (:documentation "Stub for sun.management.VMManagementImpl"))
+
+(ensure-generic-function '|<init>()|
+                         :generic-function-class 'java-generic-function
+                         :lambda-list '(|this|))
 
 ;; Stub constructor for ExceptionInInitializerError (needed during class loading)
 (defmethod |<init>()| ((e |java/lang/ExceptionInInitializerError|))
