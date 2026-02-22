@@ -1233,7 +1233,8 @@
                             (openldk::%lambda-metafactory
                              ,(code (codegen (third args) context))
                              (list ,@(mapcar (lambda (a) (code (codegen a context))) dynamic-args))
-                             ,method-name)
+                             ,method-name
+                             ,(code (codegen (second args) context)))
                             ;; Fallback: generic invokedynamic handling
                             (let ((callsite (%resolve-invokedynamic ',(intern method-name pkg)
                                                                     ',(intern bootstrap-method-name pkg)

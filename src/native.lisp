@@ -1926,11 +1926,15 @@ user.variant
                              (slot-value method '|parameterTypes|)
                              (slot-value method '|returnType|)))
                 (method-name (lispize-method-name
-                              (concatenate 'string
-                                           class-name
-                                           "."
-                                           (lstring (slot-value method '|name|))
-                                           descriptor)))
+                              (if is-static
+                                  (concatenate 'string
+                                               class-name
+                                               "."
+                                               (lstring (slot-value method '|name|))
+                                               descriptor)
+                                  (concatenate 'string
+                                               (lstring (slot-value method '|name|))
+                                               descriptor))))
                 ;; Static methods are in the class's loader package, instance methods in :openldk
                 (pkg (if is-static
                          (class-package class-name ldk-loader)
@@ -3284,19 +3288,27 @@ user.variant
 (defmethod |apply(Ljava/lang/Object;Ljava/lang/Object;)| ((this |openldk/LambdaBinaryOperator|) a b)
   (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list a b)))
 
-(defun %lambda-metafactory (impl-handle captures &optional (method-name "get"))
+(defun %lambda-metafactory (impl-handle captures &optional (method-name "get") sam-method-type)
   "Construct a functional interface implementation for Java lambdas.
 METHOD-NAME is the interface method name (get, test, apply, accept).
-CAPTURES is a list of pre-bound values for captured variables."
+CAPTURES is a list of pre-bound values for captured variables.
+SAM-METHOD-TYPE is the MethodType of the functional interface method,
+used to determine the correct arity (e.g. Consumer vs BiConsumer)."
   (let* ((method-str (if (stringp method-name) method-name (lstring method-name)))
+         (sam-param-count (if (and sam-method-type
+                                   (slot-exists-p sam-method-type '|ptypes|)
+                                   (slot-boundp sam-method-type '|ptypes|)
+                                   (slot-value sam-method-type '|ptypes|))
+                              (java-array-length (slot-value sam-method-type '|ptypes|))
+                              nil))
          (lambda-class (cond
                          ((string= method-str "get") '|openldk/LambdaSupplier|)
                          ((string= method-str "test") '|openldk/LambdaPredicate|)
-                         ((and (string= method-str "apply") (= 1 (length captures)))
+                         ((and (string= method-str "apply") sam-param-count (<= sam-param-count 1))
                           '|openldk/LambdaFunction|)
-                         ((and (string= method-str "apply") (>= (length captures) 0))
+                         ((string= method-str "apply")
                           '|openldk/LambdaBinaryOperator|)
-                         ((and (string= method-str "accept") (<= (length captures) 1))
+                         ((and (string= method-str "accept") sam-param-count (<= sam-param-count 1))
                           '|openldk/LambdaConsumer|)
                          ((string= method-str "accept") '|openldk/LambdaBiConsumer|)
                          (t '|openldk/LambdaSupplier|)))
