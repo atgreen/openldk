@@ -145,25 +145,11 @@ bytecode and generates something like the following:
 
 ### Testing
 
-As of Nov 23, 2025, OpenLDK can successful compile and run `javac`,
-which in turn is capable of building class files from java source
-code.
-
-As of Mar 30, 2025, log4j is starting to function correctly.  See
-[cl-log4j](https://github.com/atgreen/cl-log4j) for an example of how
+See [cl-log4j](https://github.com/atgreen/cl-log4j) for an example of how
 to wrap a Java library for Common Lisp usage.
 
 Run `make check` to run through the
 [dejagnu](https://www.gnu.org/software/dejagnu/dejagnu)-based testsuite.
-As of Mar 6 2025, the results look like this
-```
-		=== openldk Summary ===
-
-# of expected passes		8839
-# of unexpected failures	11
-# of expected failures		1712
-# of unresolved testcases	11
-```
 
 ### Debugging
 
@@ -187,12 +173,18 @@ most debug output while running `Hello`.
 
 ## Status
 
-Very basic programs work.  This includes the whole runtime startup
-process, covering class loading, reflection, exceptions, file IO, and
-more.
+OpenLDK can run non-trivial Java applications:
 
-Not much more than that works yet.  You are looking at a work in
-progress that may never be completed.
+- **javac** - Java's own compiler runs on OpenLDK and can compile Java
+  source to class files.  A pre-warmed `javacl` image is built by `make`.
+- **Kawa** - The [Kawa](https://www.gnu.org/software/kawa/) Scheme
+  implementation (a JVM language) boots and runs its REPL on OpenLDK.
+- **ABCL** - [Armed Bear Common Lisp](https://abcl.org/) 1.9.2 fully
+  bootstraps on OpenLDK (~3700 classes, ~42s startup), printing its
+  banner and completing both low-level and high-level initialization.
+  REPL interaction is not yet working.  See [docs/ABCL.md](docs/ABCL.md).
+- **Clojure** - [Clojure](https://clojure.org/) 1.12.0 fully
+  bootstraps and runs its REPL on OpenLDK.
 
 The code is not optimized.  Even with heavy optimization, OpenLDK's
 performance will not be competitive to modern Java implementations.

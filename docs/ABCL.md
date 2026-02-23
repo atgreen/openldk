@@ -62,67 +62,49 @@ export LDK_CLASSPATH="lib/abcl/abcl.jar:lib/abcl"
 ./openldk org.armedbear.lisp.ABCLMain
 ```
 
-## Current Status (2026-02-20)
+## Current Status (2026-02-22)
 
 ### What Works
 
+- **Full ABCL bootstrap completes successfully**
 - Custom ABCLMain entry point runs the interpreter on the main thread
-- ABCL loads 600+ classes successfully
-- `Interpreter.createDefaultInstance()` runs
-- `Interpreter.initializeLisp()` starts executing
-- ABCL's bootstrap Lisp file (`boot.lisp`) is loaded and parsed
-- ABCL's Lisp reader/evaluator actually executes Lisp forms
-- Further Lisp files loaded: `macros`, `read-circle`, `early-defuns`, etc.
-- Macro expansion (e.g., `destructuring-bind`) works
-- ABCL banner prints:
+- ABCL loads 3700+ classes successfully (JDK + ABCL core + CLOS + compiled Lisp)
+- `Interpreter.createDefaultInstance()` and `initializeLisp()` run to completion
+- ABCL's bootstrap Lisp file (`boot.lisp`) is fully loaded
+- All FASL-compiled Lisp files (`.cls`) load via `FaslClassLoader`:
+  - `macros`, `read-circle`, `early-defuns`, `defstruct`, `defpackage`, etc.
+  - Full CLOS implementation (`clos_1` through `clos_1642`)
+  - `print_object`, `format`, `ldb`, etc.
+- ABCL banner prints with both init phases completing:
   ```
   Armed Bear Common Lisp 1.9.2
   Java 8.0 OpenLDK
   OpenLDK
   Low-level initialization completed in -0.001 seconds.
+  Startup completed in 42.173 seconds.
   ```
-- ABCL begins loading FASL-compiled Lisp files via `FaslClassLoader`
 
-### Current Blockers
+### Current Blocker
 
-**1. Null class reference in codegen (`slot-value NIL 'name`)**
+**REPL stdin interaction**
 
-When loading `.cls` files from ABCL's jar (ABCL uses `.cls` for compiled
-Lisp class files), some classes reference other classes that can't be found.
-The `classload` returns NIL, which propagates to codegen where
-`(slot-value nil 'name)` crashes.
+After full startup, `interpreter.run()` enters the REPL but hangs waiting
+for stdin. When stdin is `/dev/null`, the REPL eventually throws an
+`org.armedbear.lisp.Go` exception (ABCL's `tagbody`/`go` control transfer)
+which escapes to the top level. With a pipe or FIFO, the REPL simply hangs
+without producing a prompt or processing input.
 
-Fix (in `src/codegen.lisp`): Check for null class in `ir-new` codegen and
-generate `NoClassDefFoundError` instead of crashing.
-
-**2. "nonexistent tag" compiler error**
-
-SBCL fails compiling generated Lisp code for methods like
-`destructuring_bind_10.execute()`. The generated `tagbody` code references
-`|branch-target-23|` but the label was never emitted because the dead-code
-eliminator incorrectly skipped it.
-
-**Root cause**: The bytecode-to-IR pass detects dead code after unconditional
-branches (GOTO, RETURN, ATHROW). When a GOTO at PC 20 jumps to PC 43, the
-code at PC 23 is marked as dead. But a later instruction at PC 60 branches
-backward to PC 23 (a loop). Since the backward branch hasn't been processed
-yet when PC 23 is encountered, the stack-state-table has no entry for it,
-and the code is incorrectly eliminated.
-
-**Fix needed**: Pre-scan bytecode for all branch targets before the main IR
-pass. Any PC that is a branch target should never be treated as dead code.
-A `%find-branch-targets` function has been written (in the full working tree
-changes) but causes build failures when the dead code recovery generates
-invalid IR for some JDK methods. Needs more careful integration.
+The `--batch` and `--eval` flags are passed through to ABCL's
+`Interpreter.createDefaultInstance(args)` but don't appear to take effect,
+suggesting the argument processing or stream setup during `interpreter.run()`
+has an issue (possibly related to OpenLDK's stdin stream implementation).
 
 ### ABCL `.cls` Extension
 
 ABCL stores compiled Lisp code as `.cls` files inside its jar (not `.class`).
 For example: `org/armedbear/lisp/destructuring_bind_10.cls`. The classpath
-loader needs to try both `.class` and `.cls` extensions when looking up
-entries in jar files.
-
-Fix (in `src/classpath.lisp`): Try `.cls` as fallback in `jar-classpath-entry`.
+loader tries both `.class` and `.cls` extensions when looking up entries in
+jar files.
 
 ## Changes Made for ABCL Support
 
@@ -159,12 +141,8 @@ stuck (often in `SB-WALKER::WALK-METHOD-LAMBDA` for large methods).
 ### Verbose output
 ```bash
 ./openldk -verbose:class org.armedbear.lisp.ABCLMain    # class loading
-./openldk -verbose:compile org.armedbear.lisp.ABCLMain  # method compilation
+LDK_DEBUG=L ./openldk org.armedbear.lisp.ABCLMain       # loading + compile timing
 ```
-
-### Codegen debugging
-If a "nonexistent tag" compiler error occurs, the generated Lisp code is
-dumped to `/tmp/abcl-codegen-error.lisp`.
 
 ## ABCL Bootstrap Sequence
 
@@ -175,23 +153,24 @@ dumped to `/tmp/abcl-codegen-error.lisp`.
    - `setf`, `fdefinition`, `macros`, `read-circle`, `early-defuns`, etc.
 5. Many of these are FASL files (`.abcl` format) containing compiled `.cls`
    class files that get loaded via `FaslClassLoader`
-6. Eventually `interpreter.run()` starts the REPL
+6. Full CLOS bootstrap: 1600+ `clos_*` compiled classes
+7. `interpreter.run()` starts the REPL
 
 Each loaded Lisp file triggers class loading and JIT compilation for the
 Java classes implementing ABCL's built-in functions.
 
 ## Performance Notes
 
-- Low-level init takes ~30s (JIT compilation of JDK + ABCL core classes)
-- Large methods like `Stream.readString()` (37+ stack variables) cause slow
-  SBCL compilation (visible as "hangs" during init)
-- `kill -3` is essential for diagnosing apparent hangs
+- Full startup takes ~42 seconds (3700+ classes JIT-compiled)
+- Java single-dispatch optimization (`java-generic-function` metaclass)
+  was critical for reaching this point — the previous PCL discrimination-net
+  approach caused exponential slowdowns with thousands of classes
+- `kill -3` is essential for diagnosing apparent hangs during compilation
 
 ## Known Issues / TODO
 
-1. **Dead code elimination for backward branch targets** - needs pre-scan
-   pass (`%find-branch-targets` written but needs careful integration)
-2. **Null class references** - some `.cls` classes reference missing classes
-3. **Thread support** - ABCL may try to create threads during later init
-4. **Performance** - JIT compilation of ABCL's many small compiled classes
-   is slow; lazy compilation could help
+1. **REPL stdin interaction** - REPL hangs after startup; `--eval`/`--batch`
+   flags don't appear to work; `Go` exception on EOF
+2. **Thread support** - ABCL may try to create threads during later use
+3. **Performance** - 42s startup is acceptable but could improve with
+   lazy/deferred compilation
