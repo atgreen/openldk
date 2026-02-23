@@ -1143,7 +1143,8 @@
   (%transpile-compare-branch context code 'ir-if-icmple))
 
 (defun %record-stack-state (pc context)
-  (push (stack context) (gethash pc (stack-state-table context))))
+  (unless (in-dead-code context)
+    (push (stack context) (gethash pc (stack-state-table context)))))
 
 (defmacro %define-if<cond>-transpilers (&rest opcodes)
   `(progn

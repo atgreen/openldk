@@ -74,7 +74,8 @@
     :std (make-hash-table :test #'equal))
    (pc :std 0)
    (needs-array-bounds-check :std nil)
-   (stack :std (list (make-instance '<stack-bottom-marker>)))))
+   (stack :std (list (make-instance '<stack-bottom-marker>)))
+   (in-dead-code :std nil)))
 
 (defun context-package (context)
   "Get the Lisp package for interning symbols in CONTEXT.

@@ -1141,7 +1141,8 @@ get the same unified var-numbers."
                                             for no-record-stack-state? = (find (aref *opcodes*
                                                                                      (aref code (pc *context*)))
                                                                                '(:GOTO :ATHROW :RETURN :IRETURN
-                                                                                 :LRETURN :FRETURN :DRETURN :ARETURN))
+                                                                                 :LRETURN :FRETURN :DRETURN :ARETURN
+                                                                                 :TABLESWITCH :LOOKUPSWITCH))
                                             for was-in-dead-code = in-dead-code
                                             for result = (progn
                                                            ;; Check if we're at a branch target - exit dead code mode
@@ -1149,11 +1150,13 @@ get the same unified var-numbers."
                                                              (when stk
                                                                (setf (stack *context*) (car stk))
                                                                (setf in-dead-code nil)
+                                                               (setf (in-dead-code *context*) nil)
                                                                (setf was-in-dead-code nil)))
                                                            ;; Check if we're at an exception handler - exit dead code mode
                                                            (let ((pc-start (pc *context*)))
                                                              (when (gethash pc-start exception-handler-table)
                                                                (setf in-dead-code nil)
+                                                               (setf (in-dead-code *context*) nil)
                                                                (setf was-in-dead-code nil)))
                                                            (when (and *debug-bytecode* (not was-in-dead-code))
                                                              (format t "~&; ~A c[~A] ~A ~@<~A~:@>"
@@ -1187,7 +1190,8 @@ get the same unified var-numbers."
                                             ;; hasn't been processed yet in this forward pass).
                                             when no-record-stack-state?
                                               do (unless (gethash (pc *context*) branch-targets)
-                                                   (setf in-dead-code t))
+                                                   (setf in-dead-code t)
+                                                   (setf (in-dead-code *context*) t))
                                             unless (or was-in-dead-code no-record-stack-state?)
                                               do (%record-stack-state (pc *context*) *context*)
                                             unless (or (null result) was-in-dead-code)
