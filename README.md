@@ -36,12 +36,16 @@ only developing with sbcl for now.
 
 `openldk` has only been tested in Linux.
 
-`openldk` uses the `JAVA_HOME` environment variable to find the boot classpath.
-Be sure to point it at your Java 8 directory.  On
-my Fedora Linux system that looks like:
+`openldk` uses pre-extracted JDK 17 class files for its boot classpath.
+Set `JAVA_HOME` to point at your JDK 17 installation and extract the
+class files:
 ```
-$ export JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.432.b06-3.fc40.x86_64/jre
+$ export JAVA_HOME=/home/linuxbrew/.linuxbrew/opt/openjdk@17/libexec
+$ make jdk17-classes
 ```
+
+The `LDK_JDK_CLASSES` environment variable points to the extracted
+class files (defaults to `jdk17-classes/` in the project directory).
 
 You can provide additional classpath elements through the
 `LDK_CLASSPATH` environment variable.
@@ -193,8 +197,6 @@ for when you want to code in Common Lisp, but you need that one Java
 library.
 
 Here's an incomplete list of what's not implemented:
-- support for class files beyond Java 8
-- dynamic method invocation
 - bytecode verification
 
 Author and License
