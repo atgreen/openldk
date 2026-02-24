@@ -1060,7 +1060,9 @@ get the same unified var-numbers."
     ;; Skip bytecode compilation for methods with native overrides.
     ;; Replace the stub with the native function so the stub doesn't loop.
     (when-let ((native-fn (gethash method-key *native-overrides*)))
-      (let* ((pkg (loader-package (slot-value class 'ldk-loader)))
+      (let* ((pkg (if (slot-value class 'ldk-loader)
+                     (loader-package (slot-value class 'ldk-loader))
+                     (find-package :openldk)))
              (fn-name (if (static-p method)
                           (format nil "~A.~A"
                                   (slot-value class 'name)
@@ -1073,7 +1075,23 @@ get the same unified var-numbers."
                                    (slot-value method 'name)
                                    (slot-value method 'descriptor)))))
              (fn-symbol (intern fn-name pkg)))
-        (setf (symbol-function fn-symbol) native-fn))
+        (if (static-p method)
+            (setf (symbol-function fn-symbol) native-fn)
+            ;; For instance methods, install as a CLOS method via defmethod
+            ;; so we don't destroy the generic function (which other classes
+            ;; may also have methods on).
+            (let* ((class-pkg (if (slot-value class 'ldk-loader)
+                                  (loader-package (slot-value class 'ldk-loader))
+                                  (or (find-package "OPENLDK.SYSTEM")
+                                      (find-package :openldk))))
+                   (class-sym (intern (slot-value class 'name) class-pkg))
+                   (n-params (count-parameters (slot-value method 'descriptor)))
+                   (param-names (loop for i from 1 upto n-params
+                                      collect (intern (format nil "arg~A" i) :openldk)))
+                   (this-sym (intern "this" :openldk)))
+              (%eval `(defmethod ,fn-symbol
+                          ((,this-sym ,class-sym) ,@param-names)
+                        (funcall ,native-fn ,this-sym ,@param-names))))))
       (setf (gethash method-key *methods-being-compiled*) :done)
       (return-from %compile-method nil))
     ;; Use a lock to atomically check if method is being compiled and claim it if not
@@ -1094,7 +1112,10 @@ get the same unified var-numbers."
              ;; Not being compiled - claim it and proceed
              (setf (gethash method-key *methods-being-compiled*) t)
              (return))))))
+    (let ((compilation-completed nil))
     (unwind-protect
+        (handler-case
+        (progn
         (when (gethash "Code" (slot-value method 'attributes)) ; otherwise it is abstract
       (let* ((compile-start-time (get-internal-real-time))
              (parameter-hints (gen-parameter-hints (descriptor method)))
@@ -1263,22 +1284,47 @@ get the same unified var-numbers."
                                                           ,(car lisp-code)
                                                        (incf *call-nesting-level* -1)))
                                      lisp-code))
-               (array-checked-lisp-code (if (needs-array-bounds-check *context*)
-                                            `((handler-bind
-                                                  ((sb-int:invalid-array-index-error
-                                                     (lambda (e)
-                                                       (error (openldk::%lisp-condition
-                                                               (openldk::%make-throwable
-                                                                'openldk::|java/lang/ArrayIndexOutOfBoundsException|)))))
-                                                   (type-error
-                                                     (lambda (e)
-                                                       (format t "TYPE-ERROR: ~A~%" e)
-                                                       (sb-debug:print-backtrace)
-                                                       (error (openldk::%lisp-condition
-                                                               (openldk::%make-throwable
-                                                                'openldk::|java/lang/NullPointerException|))))))
-                                                ,(car traced-lisp-code)))
-                                            traced-lisp-code))
+               ;; Always install memory-fault-error and type-error handlers
+               ;; to convert null pointer dereferences (SIGSEGV at NIL+offset)
+               ;; to Java NullPointerException.  Array bounds handler is only
+               ;; needed when the method contains array operations.
+               (null-checked-lisp-code
+                `((handler-bind
+                      (,@(when (needs-array-bounds-check *context*)
+                           `((sb-int:invalid-array-index-error
+                               (lambda (e)
+                                 (declare (ignore e))
+                                 (error (openldk::%lisp-condition
+                                         (openldk::%make-throwable
+                                          'openldk::|java/lang/ArrayIndexOutOfBoundsException|)))))))
+                       (sb-sys:memory-fault-error
+                         (lambda (e)
+                           (declare (ignore e))
+                           (error (openldk::%lisp-condition
+                                   (openldk::%make-throwable
+                                    'openldk::|java/lang/NullPointerException|)))))
+                       (type-error
+                         (lambda (e)
+                           (declare (ignore e))
+                           (error (openldk::%lisp-condition
+                                   (openldk::%make-throwable
+                                    'openldk::|java/lang/NullPointerException|))))))
+                    ,(car traced-lisp-code))))
+               ;; For ACC_SYNCHRONIZED methods, wrap body with monitor-enter/exit.
+               ;; Instance methods synchronize on 'this'; static methods on the Class object.
+               (synchronized-lisp-code
+                 (if (synchronized-p method)
+                     (let ((monitor-obj
+                             (if (static-p method)
+                                 `(openldk::|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
+                                   (openldk::jstring ,(slot-value class 'name)) nil nil nil)
+                                 (intern "this" :openldk))))
+                       `((let ((%sync-monitor-obj% ,monitor-obj))
+                           (monitor-enter %sync-monitor-obj%)
+                           (unwind-protect
+                                ,(car null-checked-lisp-code)
+                             (monitor-exit %sync-monitor-obj%)))))
+                     null-checked-lisp-code))
                (definition-code
                  (let ((parameter-count (count-parameters (slot-value method 'descriptor))))
                    (let ((args (if (static-p method)
@@ -1346,17 +1392,71 @@ get the same unified var-numbers."
                                                 do (if (eq ph t) (incf i) (incf i 2)))
                                           (loop for x from parameter-count upto (1+ max-locals)
                                                 collect (list (intern (format nil "local-~A" (incf i)) :openldk)))))))
-                                                array-checked-lisp-code)))))))))
+                                                synchronized-lisp-code)))))))))
+          (when (search "require" method-key)
+            (format *error-output* "~&;; COMPILING METHOD: ~A~%" method-key)
+            (force-output *error-output*))
           (if *aot-dir*
               (%write-aot-method class-name
                                (lispize-method-name (format nil "~A~A" (name method) (descriptor method)))
                                definition-code)
-              (handler-case
-                  (%eval definition-code)
-                (error (c)
-                  (format *error-output* "~&;; COMPILE-ERROR in ~A.~A~A: ~A~%"
-                          class-name (name method) (descriptor method) c)
-                  (force-output *error-output*))))
+              (progn
+                (handler-case
+                    ;; Very large bytecode (e.g. 1000+ element array initializers)
+                    ;; can cause SBCL's native compiler to hang or abort.  Use the
+                    ;; interpreter directly for those methods.
+                    (if (> length 5000)
+                        (let ((sb-ext:*evaluator-mode* :interpret))
+                          (eval definition-code))
+                        (%eval definition-code))
+                  (error (c)
+                    (format *error-output* "~&;; COMPILE-ERROR in ~A.~A~A: ~A~%"
+                            class-name (name method) (descriptor method) c)
+                    (force-output *error-output*)
+                    (error c)))
+                ;; SBCL's native compiler can silently fail on very large method
+                ;; bodies (e.g. 1000+ element array initializations).  When this
+                ;; happens, eval returns without error but the defmethod is never
+                ;; installed on the GF — leaving the self-compiling stub in place,
+                ;; which causes infinite recursion via invoke-special.  Detect
+                ;; this by checking whether the stub was actually replaced, and
+                ;; fall back to interpreted evaluation if not.
+                (when (not (static-p method))
+                  (let* ((cpkg (if (ldk-loader *context*)
+                                   (loader-package (ldk-loader *context*))
+                                   (or (find-package "OPENLDK.SYSTEM")
+                                       (find-package :openldk))))
+                         (gf-sym (intern (fn-name *context*) :openldk))
+                         (gf (and (fboundp gf-sym) (symbol-function gf-sym)))
+                         (class-sym (intern (slot-value class 'name) cpkg))
+                         (class-obj (find-class class-sym nil)))
+                    (when (and gf class-obj (typep gf 'generic-function))
+                      (let* ((methods (sb-mop:generic-function-methods gf))
+                             (our-method (find class-obj methods
+                                               :key (lambda (m)
+                                                      (first (sb-mop:method-specializers m)))
+                                               :test #'eq)))
+                        ;; Check if the method's source-name still references
+                        ;; %compile-method — i.e. the stub was never replaced.
+                        (when (or (null our-method)
+                                  (let ((mf (sb-mop:method-function our-method)))
+                                    (and mf
+                                         (search "%COMPILE-METHOD"
+                                                 (princ-to-string
+                                                  (sb-kernel:%fun-name mf))))))
+                          (format *error-output*
+                                  "~&;; COMPILE-FALLBACK: native compilation failed silently for ~A, retrying interpreted~%"
+                                  method-key)
+                          (force-output *error-output*)
+                          (handler-case
+                              (let ((sb-ext:*evaluator-mode* :interpret))
+                                (eval definition-code)) ; lint:suppress eval-usage
+                            (error (c)
+                              (format *error-output*
+                                      "~&;; COMPILE-FALLBACK-ERROR in ~A: ~A~%"
+                                      method-key c)
+                              (force-output *error-output*)
+                              (error c))))))))))
           (when (or *debug-compile* *debug-codegen*)
             (format t "; COMPILING ~A.~A (~Dms)~%"
                     class-name
@@ -1364,10 +1464,63 @@ get the same unified var-numbers."
                     (round (* 1000 (/ (- (get-internal-real-time) compile-start-time)
                                       internal-time-units-per-second))))
             (force-output)))))
-      ;; Cleanup: mark compilation as done and notify waiting threads
+          (setf compilation-completed t))
+          (error (c)
+            ;; Compilation failed (IR translation, codegen, or eval error).
+            ;; Install an error-throwing function on the stub to prevent infinite
+            ;; self-call loops — without this, the stub calls %compile-method
+            ;; (which returns immediately since status is :done), then self-calls,
+            ;; causing control stack exhaustion.
+            ;; Use plain Lisp errors (not Java exceptions) to avoid triggering
+            ;; further class loading during error handling.
+            (format *error-output* "~&;; JIT-ERROR in ~A: ~A~%" method-key c)
+            (force-output *error-output*)
+            (let* ((ldr (slot-value class 'ldk-loader))
+                   (pkg (if ldr (loader-package ldr) (find-package :openldk)))
+                   (key method-key))
+              (if (static-p method)
+                  (let* ((fn-name (format nil "~A.~A"
+                                          (slot-value class 'name)
+                                          (lispize-method-name
+                                           (format nil "~A~A"
+                                                   (slot-value method 'name)
+                                                   (slot-value method 'descriptor)))))
+                         (fn-symbol (intern fn-name pkg)))
+                    (when (fboundp fn-symbol)
+                      (setf (symbol-function fn-symbol)
+                            (lambda (&rest args)
+                              (declare (ignore args))
+                              (error "JIT compilation failed for ~A" key)))))
+                  ;; Instance method: install a defmethod that throws an error.
+                  ;; Use CL:EVAL (not %eval) to avoid re-entering the JIT.
+                  (let* ((fn-name (lispize-method-name
+                                   (format nil "~A~A"
+                                           (slot-value method 'name)
+                                           (slot-value method 'descriptor))))
+                         (fn-symbol (intern fn-name pkg))
+                         (class-pkg (if ldr
+                                        (loader-package ldr)
+                                        (or (find-package "OPENLDK.SYSTEM")
+                                            (find-package :openldk))))
+                         (class-sym (intern (slot-value class 'name) class-pkg))
+                         (this-sym (intern "this" :openldk))
+                         (n-params (count-parameters (slot-value method 'descriptor)))
+                         (param-names (loop for i from 1 upto n-params
+                                            collect (gensym (format nil "P~A-" i)))))
+                    (when (find-class class-sym nil)
+                      (eval `(defmethod ,fn-symbol ((,this-sym ,class-sym) ,@param-names)
+                               (declare (ignore ,this-sym ,@param-names))
+                               (error "JIT compilation failed for ~A" ,key)))))))
+            (setf compilation-completed t)))
+      ;; Cleanup: mark compilation as done and notify waiting threads.
+      ;; If compilation was interrupted (e.g. by timeout or stack overflow),
+      ;; clear the status so a future call can retry.
       (bt:with-lock-held (*method-compilation-lock*)
-        (setf (gethash method-key *methods-being-compiled*) :done)
-        (bt:condition-notify *method-compilation-cv*)))))
+        (if compilation-completed
+            (setf (gethash method-key *methods-being-compiled*) :done)
+            (remhash method-key *methods-being-compiled*))
+        (bt:condition-notify *method-compilation-cv*))))))
+
 
 (defun %clinit (class)
   (let ((class (gethash (name class) *ldk-classes-by-bin-name*)))
@@ -1397,7 +1550,10 @@ get the same unified var-numbers."
                                       (loader-package (slot-value class 'ldk-loader))
                                       (or (find-package "OPENLDK.SYSTEM")
                                           (make-package "OPENLDK.SYSTEM" :use '(:openldk))))))
-                         (%eval (list (intern (format nil "~A.<clinit>()" (slot-value class 'name)) pkg))))
+                         (%eval (list (intern (format nil "~A.<clinit>()" (slot-value class 'name)) pkg)))
+                         ;; Run post-clinit hook if registered (for VM-injected fields)
+                         (let ((hook (gethash (slot-value class 'name) *post-clinit-hooks*)))
+                           (when hook (funcall hook class pkg))))
                      (error (e)
                        (let ((throwable (when (and (typep e '|condition-java/lang/Throwable|)
                                                    (slot-boundp e '|objref|))
@@ -1539,16 +1695,25 @@ get the same unified var-numbers."
               'progn
               (list
                'defclass (intern name pkg)  ; This class in loader's package
-               (if (or super interfaces)
-                   (append (when super
-                             (list (class-symbol-for-reference super ldk-loader)))
-                           (let ((ifaces (remove-if-not
-                                         (lambda (sym) (find-class sym nil))
-                                         (mapcar (lambda (i)
-                                                   (class-symbol-for-reference i ldk-loader))
-                                                 (coerce interfaces 'list)))))
-                             (%topo-sort-interfaces ifaces)))
-                   (list))
+               (let ((supers
+                      (if (or super interfaces)
+                          (append (when super
+                                    (list (class-symbol-for-reference super ldk-loader)))
+                                  (let ((ifaces (remove-if-not
+                                                 (lambda (sym) (find-class sym nil))
+                                                 (mapcar (lambda (i)
+                                                           (class-symbol-for-reference i ldk-loader))
+                                                         (coerce interfaces 'list)))))
+                                    (%topo-sort-interfaces ifaces)))
+                          (list))))
+                ;; JDK 9+: jdk/internal/misc/Unsafe must inherit from sun/misc/Unsafe
+                ;; so that existing native method stubs dispatch correctly.
+                ;; Replace java/lang/Object with sun/misc/Unsafe (which itself extends Object).
+                (when (and (string= name "jdk/internal/misc/Unsafe")
+                           (find-class '|sun/misc/Unsafe| nil)
+                           (not (member '|sun/misc/Unsafe| supers)))
+                  (setf supers (substitute '|sun/misc/Unsafe| '|java/lang/Object| supers)))
+                supers)
                ;; Field names stay in :openldk (slots are inherited across packages)
                (map 'list
                     (lambda (f)
@@ -1700,6 +1865,9 @@ get the same unified var-numbers."
                             (with-slots (|name| |classLoader|) klass
                               (setf |name| cname)
                               (setf |classLoader| class-loader))
+                            ;; JDK 9+: set unnamed module so Class.getModule() is non-null
+                            (when (and *unnamed-module* (slot-exists-p klass '|module|))
+                              (setf (slot-value klass '|module|) *unnamed-module*))
                             klass))))
            (setf (java-class class) klass)
            (setf (slot-value klass '|classLoader|) class-loader)
@@ -1728,6 +1896,19 @@ get the same unified var-numbers."
              (let* ((class-reference (aref (constant-pool class) (inner-class-info-index ic)))
                     (class-name (aref (constant-pool class) (index class-reference))))
                (push class-name (inner-classes class)))))
+
+         ;; Populate NestHost/NestMembers from class attributes (JDK 11+)
+         (when-let ((host-index (gethash "NestHost" (attributes class))))
+           (let* ((class-ref (aref (constant-pool class) host-index))
+                  (name-entry (aref (constant-pool class) (index class-ref))))
+             (setf (nest-host class) (slot-value name-entry 'value))))
+         (when-let ((member-indices (gethash "NestMembers" (attributes class))))
+           (setf (nest-members class)
+                 (mapcar (lambda (idx)
+                           (let* ((class-ref (aref (constant-pool class) idx))
+                                  (name-entry (aref (constant-pool class) (index class-ref))))
+                             (slot-value name-entry 'value)))
+                         member-indices)))
 
          ;; Emit the class initializer
          (let ((lisp-class (find-class classname-symbol)))
@@ -1811,6 +1992,8 @@ get the same unified var-numbers."
                    nil)))))
       ;; Check if already loaded by boot loader
       ((gethash classname (slot-value *boot-ldk-class-loader* 'ldk-classes-by-bin-name)))
+      ;; Check global tables (classes loaded during warm-up before loaders were created)
+      ((gethash classname *ldk-classes-by-bin-name*))
       ;; JDK classes always loaded by boot loader (into :openldk)
       ((jdk-class-p classname)
        (let ((classfile-stream (open-java-classfile-on-classpath classname)))
@@ -1841,9 +2024,22 @@ get the same unified var-numbers."
       (format *error-output* "~%OpenLDK Error: JAVA_HOME environment variable not set~%")
       (uiop:quit 1))
 
-    (unless (uiop:file-exists-p (concatenate 'string JAVA_HOME "/lib/rt.jar"))
-      (format *error-output* "~%OpenLDK Error: Cannot find $JAVA_HOME/lib/rt.jar~%")
-      (uiop:quit 1))))
+    (cond
+      ;; JDK 9+: has lib/modules
+      ((uiop:file-exists-p (concatenate 'string JAVA_HOME "/lib/modules"))
+       (setf *jdk-version* :jdk9+)
+       (unless (uiop:getenv "LDK_JDK_CLASSES")
+         (format *error-output* "~%OpenLDK Error: JDK 17 requires LDK_JDK_CLASSES to be set.~%")
+         (format *error-output* "  Extract JDK classes with: jmod extract --dir $LDK_JDK_CLASSES $JAVA_HOME/jmods/java.base.jmod~%")
+         (uiop:quit 1)))
+      ;; JDK 8 is no longer supported.
+      ((uiop:file-exists-p (concatenate 'string JAVA_HOME "/lib/rt.jar"))
+       (format *error-output* "~%OpenLDK Error: JDK 8 is no longer supported.~%")
+       (format *error-output* "  Please use JDK 17 and set LDK_JDK_CLASSES to the extracted classes.~%")
+       (uiop:quit 1))
+      (t
+       (format *error-output* "~%OpenLDK Error: Cannot find $JAVA_HOME/lib/modules~%")
+       (uiop:quit 1)))))
 
 (defun main (mainclass &optional (args (list)) &key dump-dir classpath aot)
   "Run a Java class with the given arguments.
@@ -1889,17 +2085,10 @@ get the same unified var-numbers."
   (unless classpath
     (setf classpath (or (uiop:getenv "CLASSPATH") (uiop:getenv "LDK_CLASSPATH") ".")))
 
-  ;; Always append JAVA_HOME jars to classpath
-  (setf classpath
-        (concatenate 'string
-                     classpath
-                     ":"
-                     (format nil "~{~A~^:~}"
-                             (mapcar #'namestring
-                                     (directory
-                                      (concatenate 'string
-                                                   (uiop:getenv "JAVA_HOME")
-                                                   "/lib/*.jar"))))))
+  ;; Append JDK 17 runtime classes to classpath
+  (when-let ((jdk-classes (uiop:getenv "LDK_JDK_CLASSES")))
+    (setf classpath
+          (concatenate 'string classpath ":" jdk-classes "/classes")))
 
   (let ((LDK_DEBUG (uiop:getenv "LDK_DEBUG")))
     (when LDK_DEBUG
@@ -1938,8 +2127,6 @@ get the same unified var-numbers."
   ;; build-time and run-time.
   (|java/lang/System.initProperties(Ljava/util/Properties;)|
    (slot-value |+static-java/lang/System+| '|props|))
-
-  (%clinit (%get-ldk-class-by-bin-name "sun/misc/Launcher"))
 
   ;; Apply -D system properties from command line
   (dolist (prop *cli-jvm-properties*)
@@ -2170,7 +2357,7 @@ get the same unified var-numbers."
                 (incf i))
                ;; -version
                ((string= arg "-version")
-                (format t "openldk version \"1.8.0\"~%")
+                (format t "openldk version \"17.0.0\"~%")
                 (format t "OpenLDK Runtime Environment~%")
                 (uiop:quit 0))
                ;; -help, -?, -h
@@ -2225,22 +2412,29 @@ get the same unified var-numbers."
     (unless mainclass
       (%print-usage)
       (uiop:quit 1))
-    (handler-case
-        (main mainclass args :classpath classpath :dump-dir dump-dir :aot aot)
-      (error (condition)
-        (cond
-          ((typep condition '|condition-java/lang/Throwable|)
-           (let ((throwable (and (slot-boundp condition '|objref|)
-                                 (slot-value condition '|objref|))))
-             (if (typep throwable '|java/lang/Throwable|)
-                 (progn
-                   (format *error-output* "~&Unhandled Java exception:~%")
-                   (%print-java-stack-trace throwable :stream *error-output*)
-                   (finish-output *error-output*))
-                 (format *error-output* "~&Unhandled Java condition: ~A~%" condition))))
-          (t
-           (format *error-output* "~&Error: ~A~%" condition)))
-        (uiop:quit 1)))))
+    (handler-bind
+        ((error (lambda (condition)
+                  (cond
+                    ((typep condition '|condition-java/lang/Throwable|)
+                     (let ((throwable (and (slot-boundp condition '|objref|)
+                                           (slot-value condition '|objref|))))
+                       (if (typep throwable '|java/lang/Throwable|)
+                           (progn
+                             (format *error-output* "~&Unhandled Java exception:~%")
+                             (%print-java-stack-trace throwable :stream *error-output*)
+                             ;; Print Go-specific fields
+                             (when (and (slot-exists-p throwable '|tagbody|)
+                                        (slot-boundp throwable '|tagbody|))
+                               (format *error-output* "~&Go.tagbody = ~A~%" (slot-value throwable '|tagbody|))
+                               (format *error-output* "~&Go.tag = ~A~%" (slot-value throwable '|tag|)))
+                             (format *error-output* "~&~%Lisp backtrace at throw site:~%")
+                             (trivial-backtrace:print-backtrace condition :output *error-output*)
+                             (finish-output *error-output*))
+                           (format *error-output* "~&Unhandled Java condition: ~A~%" condition))))
+                    (t
+                     (format *error-output* "~&Error: ~A~%" condition)))
+                  (uiop:quit 1))))
+      (main mainclass args :classpath classpath :dump-dir dump-dir :aot aot))))
 
 (defun app-main-wrapper ()
   "Generic entry point for pre-dumped app images.
@@ -2323,14 +2517,10 @@ get the same unified var-numbers."
 
   (let ((classpath
           (concatenate 'string
-                       (uiop:getenv "LDK_CLASSPATH")
+                       (or (uiop:getenv "LDK_CLASSPATH") "")
                        ":"
-                       (format nil "~{~A~^:~}"
-                               (mapcar #'namestring
-                                       (directory
-                                        (concatenate 'string
-                                                     (uiop:getenv "JAVA_HOME")
-                                                     "/lib/*.jar")))))))
+                       (uiop:getenv "LDK_JDK_CLASSES")
+                       "/classes")))
 
     (setf *classpath*
           (loop for cpe in (split-sequence:split-sequence (uiop:inter-directory-separator) classpath)
@@ -2343,6 +2533,22 @@ get the same unified var-numbers."
   (%clinit (classload "java/lang/String"))
   (%clinit (classload "java/lang/Class"))
   (%clinit (classload "java/lang/ClassLoader"))
+
+  ;; UnsafeConstants fields are normally pre-populated by the JVM
+  ;; before <clinit> runs (which deliberately sets them all to 0).
+  ;; We must set the real values after <clinit>.
+  (let ((uc (classload "jdk/internal/misc/UnsafeConstants")))
+    (%clinit uc)
+    (let* ((pkg (or (find-package "OPENLDK.SYSTEM")
+                    (make-package "OPENLDK.SYSTEM" :use '(:openldk))))
+           (static-sym (find-symbol (format nil "+static-~A+" (name uc)) pkg)))
+      (when (and static-sym (boundp static-sym))
+        (let ((s (symbol-value static-sym)))
+          (setf (slot-value s '|ADDRESS_SIZE0|) 8)
+          (setf (slot-value s '|PAGE_SIZE|) (sb-posix:getpagesize))
+          (setf (slot-value s '|BIG_ENDIAN|) 0)
+          (setf (slot-value s '|UNALIGNED_ACCESS|) 1)
+          (setf (slot-value s '|DATA_CACHE_LINE_FLUSH_SIZE|) 0)))))
 
   (handler-case
 
@@ -2404,8 +2610,11 @@ get the same unified var-numbers."
                       ("java.io.tmpdir" . "/tmp")))
           (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring (car kv)) (ijstring (cdr kv))))
 
-        ;; Also set java.home if provided by the environment for code that queries it early.
-        (when-let ((jh (uiop:getenv "JAVA_HOME")))
+        ;; Also set java.home for code that queries it early.
+        ;; For JDK 9+ use LDK_JDK_CLASSES (where modules/ lives); fall back to JAVA_HOME.
+        (when-let ((jh (or (and (eq *jdk-version* :jdk9+)
+                                (uiop:getenv "LDK_JDK_CLASSES"))
+                           (uiop:getenv "JAVA_HOME"))))
           (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring "java.home") (ijstring jh)))
 
         ;; Populate common user properties
@@ -2416,29 +2625,52 @@ get the same unified var-numbers."
         (when-let ((un (or (uiop:getenv "USER") (uiop:getenv "LOGNAME") "openldk")))
           (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring "user.name") (ijstring un)))
 
-        ;; Provide a reasonable sun.boot.class.path early for sun/misc/Launcher
-        ;; based on the jars in $JAVA_HOME/lib.
-        (when-let ((jh (uiop:getenv "JAVA_HOME")))
-          (let* ((boot-jars (directory (concatenate 'string jh "/lib/*.jar")))
-                 (bootcp (format nil "~{~A~^:~}" (mapcar #'namestring boot-jars))))
-            (when (> (length bootcp) 0)
-              (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring "sun.boot.class.path") (ijstring bootcp)))))
-
-        ;; Initialize baseline system properties now so subsequent init paths
-        ;; (e.g., charset setup) do not observe NIL values.
-        (|java/lang/System.initProperties(Ljava/util/Properties;)|
-         (slot-value |+static-java/lang/System+| '|props|))
-
         ;; Add user-provided properties...
         (dolist (prop property-alist)
           (assert (typep prop 'list))
           (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring (car prop)) (ijstring (cdr prop))))
 
-        (|java/lang/System.initializeSystemClass()|)
+        ;; Ensure AccessibleObject <clinit> runs before initPhase1,
+        ;; because ReflectionFactory reads langReflectAccess from SharedSecrets
+        ;; in its constructor, and AccessibleObject <clinit> is what sets it.
+        (%clinit (classload "java/lang/reflect/AccessibleObject"))
 
-        (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "sun/misc/Launcher") nil boot-class-loader nil)
+        ;; Call System.initPhase1() which sets up JavaLangAccess (JLA),
+        ;; system properties (via SystemProps$Raw native methods), I/O streams
+        ;; (System.in/out/err), and VM.initLevel(1).
+        (|java/lang/System.initPhase1()|)
 
-        (|<init>()| boot-class-loader)
+        ;; Create an unnamed Module for bootstrap classes.
+        ;; Class.getModule() returns the module field; if null, calls like
+        ;; getResourceAsStream() NPE.  An unnamed module (name=null) causes
+        ;; isNamed() to return false, which skips module access checks.
+        (classload "java/lang/Module")
+        (let ((mod (%make-java-instance "java/lang/Module")))
+          ;; Module(ClassLoader) constructor sets name=null, loader=classLoader
+          (when (slot-exists-p mod '|name|)
+            (setf (slot-value mod '|name|) nil))
+          (when (slot-exists-p mod '|loader|)
+            (setf (slot-value mod '|loader|) nil))
+          (setf *unnamed-module* mod)
+          ;; Set module on all existing Class objects
+          (maphash (lambda (name klass)
+                     (declare (ignore name))
+                     (when (slot-exists-p klass '|module|)
+                       (setf (slot-value klass '|module|) mod)))
+                   *java-classes-by-bin-name*))
+
+        ;; ClassLoader.<init> may trigger ClassLoaders.<clinit> which calls
+        ;; registerAsParallelCapable(). In JDK 17 this can throw InternalError
+        ;; "Unable to register as parallel capable" — non-fatal for our purposes.
+        (handler-case
+            (|<init>()| boot-class-loader)
+          (condition (c)
+            (format t "~&; Warning during ClassLoader init (non-fatal): ~A~%" c)))
+        ;; JDK 17's ClassLoader() calls getSystemClassLoader() which returns
+        ;; *boot-class-loader* — the same object! Clear parent to prevent
+        ;; infinite recursion in getResources() delegation.
+        (when (slot-exists-p boot-class-loader '|parent|)
+          (setf (slot-value boot-class-loader '|parent|) nil))
 
         ;; Functional interfaces used by lambda implementation classes in native.lisp.
         ;; These must be loaded before anything triggers finalize-inheritance on
@@ -2446,6 +2678,7 @@ get the same unified var-numbers."
         ;; with these interfaces as superclasses.
         (dolist (c '("java/util/function/Supplier"
                      "java/util/function/Predicate"
+                     "java/util/function/BiPredicate"
                      "java/util/function/Function"
                      "java/util/function/Consumer"
                      "java/util/function/BiConsumer"
@@ -2500,12 +2733,6 @@ get the same unified var-numbers."
            (finish-output *error-output*))
           (t
            (format *error-output* "~&Unhandled Java condition: ~A~%" c))))))
-;; Ensure the bootstrap launcher class is present even if earlier steps signalled.
-  (let ((launcher (or (gethash "sun/misc/Launcher" *ldk-classes-by-bin-name*)
-                      (ignore-errors (classload "sun/misc/Launcher")))))
-    (when launcher
-      (%clinit launcher)))
-
   (setf *debug-load* nil)
   (setf *debug-compile* nil))
 
@@ -2530,6 +2757,9 @@ get the same unified var-numbers."
    CLASSPATH:         Classpath string to bake in. If nil, reads CLASSPATH env var."
   (initialize)
   (let ((cp (or classpath (uiop:getenv "CLASSPATH") ".")))
+    ;; Append JDK 17 runtime classes so they are available at runtime.
+    (when-let ((jdk-classes (uiop:getenv "LDK_JDK_CLASSES")))
+      (setf cp (concatenate 'string cp ":" jdk-classes "/classes")))
     (setf *default-mainclass* default-mainclass)
     (setf *default-classpath* cp)
     (setf *classpath*
@@ -2548,4 +2778,3 @@ get the same unified var-numbers."
                             :executable t
                             :save-runtime-options t
                             :toplevel #'app-main-wrapper))
-

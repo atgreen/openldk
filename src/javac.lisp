@@ -9,24 +9,26 @@
   (sb-int:set-floating-point-modes :traps nil)
   (let* ((args (uiop:command-line-arguments))
          (cp (default-javac-classpath)))
-    (handler-case
-        (openldk::main "com.sun.tools.javac.Main"
-                       args
-                       :classpath cp)
-      (error (condition)
-        (cond
-          ((typep condition 'openldk::|condition-java/lang/Throwable|)
-           (let ((throwable (and (slot-boundp condition 'openldk::|objref|)
-                                 (slot-value condition 'openldk::|objref|))))
-             (if (typep throwable 'openldk::|java/lang/Throwable|)
-                 (progn
-                   (format *error-output* "~&Unhandled Java exception:~%")
-                   (openldk::%print-java-stack-trace throwable :stream *error-output*)
-                   (finish-output *error-output*))
-               (format *error-output* "~&Unhandled Java condition: ~A~%" condition))))
-          (t
-           (format *error-output* "~&Error: ~A~%" condition)))
-        (uiop:quit 1)))))
+    (handler-bind
+        ((error (lambda (condition)
+                  (cond
+                    ((typep condition 'openldk::|condition-java/lang/Throwable|)
+                     (let ((throwable (and (slot-boundp condition 'openldk::|objref|)
+                                           (slot-value condition 'openldk::|objref|))))
+                       (if (typep throwable 'openldk::|java/lang/Throwable|)
+                           (progn
+                             (format *error-output* "~&Unhandled Java exception:~%")
+                             (openldk::%print-java-stack-trace throwable :stream *error-output*)
+                             (finish-output *error-output*))
+                           (format *error-output* "~&Unhandled Java condition: ~A~%" condition))))
+                    (t
+                     (format *error-output* "~&Error: ~A~%" condition)
+                     (sb-debug:print-backtrace :stream *error-output* :count 50)))
+                  (finish-output *error-output*)
+                  (uiop:quit 1))))
+      (openldk::main "com.sun.tools.javac.Main"
+                     args
+                     :classpath cp))))
 
 (defun default-javac-classpath ()
   "Pick a sensible default classpath for javac: tools.jar if present, else env or \".\""
@@ -255,12 +257,23 @@
   (unwind-protect
        (let ((cp (default-javac-classpath)))
 	 (let ((openldk::*ignore-quit* t))
-	   (openldk::main "com.sun.tools.javac.Main" '() :classpath cp)
-	   (openldk::main "com.sun.tools.javac.Main" '("-version") :classpath cp)
-	   (openldk::main "com.sun.tools.javac.Main" '("-verbose" "Hello.java"))
-	   (openldk::main "com.sun.tools.javac.Main" '("-verbose" "-sourcepath" "testsuite/mauve" "testsuite/mauve/gnu/testlet/TestHarness.java"))))
+	   (flet ((safe-warmup (args desc &key (timeout 120))
+		    (handler-case
+			(sb-ext:with-timeout timeout
+			  (openldk::main "com.sun.tools.javac.Main" args :classpath cp))
+		      (sb-ext:timeout ()
+			(format *error-output* "~&;; WARMUP (~A) timed out after ~Ds~%" desc timeout))
+		      (condition (c)
+			(format *error-output* "~&;; WARMUP (~A) caught: ~A~%" desc c)))))
+	     (safe-warmup '() "no-args")
+	     (safe-warmup '("-version") "-version")
+	     (safe-warmup '("-verbose" "Hello.java") "Hello.java")
+	     (safe-warmup '("-verbose" "-sourcepath" "testsuite/mauve" "testsuite/mauve/gnu/testlet/TestHarness.java") "TestHarness.java"))))
     (progn
       (setf openldk::*ignore-quit* nil)
+      ;; Clear unsafe memory table — foreign heap pointers from warmup
+      ;; won't survive image save/load.
+      (clrhash openldk::*unsafe-memory-table*)
       ;; Kill helper threads before dumping the image.
       (loop for thread in (bt:all-threads)
             when (and (not (eq thread (bt:current-thread)))

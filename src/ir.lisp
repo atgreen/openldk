@@ -443,7 +443,8 @@
    (method-type)
    (args)
    (dynamic-args)
-   (bootstrap-method-name)))
+   (bootstrap-method-name)
+   (interface-type-name)))
 
 (defclass/std ir-call-static-method (ir-call-virtual-method)
   ((class :with)))

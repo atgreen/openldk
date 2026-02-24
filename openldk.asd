@@ -65,6 +65,7 @@
                (:file "src/ir")
                (:file "src/bc-to-ir")
                (:file "src/classpath")
+               (:file "src/jrt")
                (:file "src/basic-block")
                (:file "src/codegen")
                (:file "src/descriptors")

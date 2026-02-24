@@ -47,6 +47,8 @@
 
 (defvar *classpath* nil)
 
+(defvar *jdk-version* nil "Detected JDK version: :jdk8 or :jdk9+")
+
 ;; Counter for generating unique class loader IDs
 (defvar *next-loader-id* 0)
 (defvar *next-loader-id-lock* (bordeaux-threads:make-lock "loader-id-lock"))
@@ -180,6 +182,11 @@
             (slot-boundp class 'ldk-loader)
             (slot-value class 'ldk-loader))
        (loader-package (slot-value class 'ldk-loader)))
+      ;; Class found but no loader - check OPENLDK.SYSTEM (warm-up classes)
+      ((and class
+            (find-package "OPENLDK.SYSTEM")
+            (find-symbol (format nil "+static-~A+" class-name) (find-package "OPENLDK.SYSTEM")))
+       (find-package "OPENLDK.SYSTEM"))
       ;; Class found but no loader - use :openldk
       (class
        (find-package :openldk))
@@ -262,6 +269,7 @@
 (defvar *debug-codegen* nil)
 (defvar *debug-slynk* nil)
 (defvar *debug-trace* nil)
+(defvar *npe-fault-count* 0)
 (defvar *debug-trace-args* nil)
 (defvar *debug-exceptions* nil)
 (defvar *debug-x* nil)
@@ -292,6 +300,9 @@
   "List of (key . value) pairs from -D command line options.")
 
 (defvar *boot-class-loader* nil)
+
+(defvar *unnamed-module* nil
+  "An unnamed java.lang.Module for bootstrap classes (JDK 9+).")
 
 (defvar *default-mainclass* nil
   "Default main class baked into an app image by dump-app-image.")

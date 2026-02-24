@@ -70,7 +70,6 @@
     (when (or (< index 0) (>= index len))
       ;; Throw Java ArrayIndexOutOfBoundsException
       (let ((exc (%make-java-instance "java/lang/ArrayIndexOutOfBoundsException")))
-        ;; Initialize with message
         (|<init>(Ljava/lang/String;)| exc
          (jstring (format nil "~A" index)))
         (error (%lisp-condition exc))))

@@ -1544,6 +1544,11 @@
                  (parameter-count (count-parameters descriptor))
 ;                 (j7 (format t "DI7: parameter-count=~A~%" parameter-count))
                  (return-type (get-return-type descriptor))
+                 ;; Extract interface class name from return type (e.g. "Lcom/foo/Bar;" → "com/foo/Bar")
+                 (interface-type-name
+                   (let ((ret-str (subseq descriptor (1+ (position #\) descriptor)))))
+                     (when (and (> (length ret-str) 1) (char= (char ret-str 0) #\L))
+                       (subseq ret-str 1 (1- (length ret-str))))))
                  (bootstrap-method-name (emit-static-method-reference (aref constant-pool (reference-index bsm-method-handle)) constant-pool))
                  (dynamic-args (reverse (loop repeat parameter-count collect (pop (stack context))))))
 ;                 (j6 (format t "DI6: ~A~%" bootstrap-method-name))
@@ -1556,6 +1561,7 @@
                                          :bootstrap-method-name bootstrap-method-name
                                          :method-name method-name
                                          :return-type return-type
+                                         :interface-type-name interface-type-name
                                          :dynamic-args dynamic-args
                                          :args (cons
                                                 method-type

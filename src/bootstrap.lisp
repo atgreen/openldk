@@ -62,9 +62,12 @@
 (defclass |java/lang/String| (|java/lang/Object|)
   ((|value| :initform NIL :allocation :instance)
    (|hash| :initform NIL :allocation :instance)
+   (|coder| :initform 0 :allocation :instance)
+   (|hashIsZero| :initform 0 :allocation :instance)
    (|serialVersionUID| :initform NIL :allocation :class)
    (|serialPersistentFields| :initform NIL :allocation :class)
-   (CASE_INSENSITIVE_ORDER :initform NIL :allocation :class))
+   (CASE_INSENSITIVE_ORDER :initform NIL :allocation :class)
+   (COMPACT_STRINGS :initform NIL :allocation :class))
   (:documentation "Stub for java.lang.String"))
 
 (defclass |java/lang/Class| (|java/lang/Object|)
@@ -107,6 +110,11 @@
   ()
   (:documentation "Stub for sun.misc.Unsafe"))
 
+(defclass |jdk/internal/misc/Unsafe| (|sun/misc/Unsafe|)
+  ()
+  (:documentation "Stub for jdk.internal.misc.Unsafe (JDK 9+).
+   Inherits from sun/misc/Unsafe so existing native method stubs dispatch correctly."))
+
 (defclass |java/lang/ClassLoader| (|java/lang/Object|)
   ()
   (:documentation "Stub for java.lang.ClassLoader"))
@@ -114,6 +122,10 @@
 (defclass |java/io/InputStream| (|java/lang/Object|)
   ()
   (:documentation "Stub for java.io.InputStream"))
+
+(defclass |java/io/FileDescriptor| (|java/lang/Object|)
+  ()
+  (:documentation "Stub for java.io.FileDescriptor"))
 
 (defclass |java/io/FileInputStream| (|java/io/InputStream|)
   ()
@@ -135,6 +147,10 @@
   ()
   (:documentation "Stub for java.lang.Thread"))
 
+(defclass |java/lang/ref/Reference| (|java/lang/Object|)
+  ()
+  (:documentation "Stub for java.lang.ref.Reference"))
+
 (defclass |java/lang/Throwable| (|java/lang/Object|)
   ()
   (:documentation "Stub for java.lang.Throwable"))
@@ -142,6 +158,10 @@
 (defclass |sun/reflect/ConstantPool| (|java/lang/Object|)
   ()
   (:documentation "Stub for sun.reflect.ConstantPool"))
+
+(defclass |jdk/internal/reflect/ConstantPool| (|java/lang/Object|)
+  ()
+  (:documentation "Stub for jdk.internal.reflect.ConstantPool"))
 
 (ensure-generic-function '%lisp-condition
                          :generic-function-class 'java-generic-function

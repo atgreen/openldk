@@ -202,25 +202,25 @@
                             (setf (jaref arrayref index) value)))))
 
 (defmethod codegen ((insn ir-idiv) context)
-  ;; FIXME - handle all weird conditions
+  ;; Java integer division truncates toward zero (not floor toward -infinity)
   (make-instance '<expression>
                  :insn insn
                  :code `(handler-case
                             (let ((value2 ,(code (codegen (value2 insn) context)))
                                   (value1 ,(code (codegen (value1 insn) context))))
-                              (unsigned-to-signed-integer (logand (floor (/ value1 value2)) #xFFFFFFFF)))
+                              (unsigned-to-signed-integer (logand (truncate value1 value2) #xFFFFFFFF)))
                           (division-by-zero ()
                             (error (%lisp-condition (%make-throwable '|java/lang/ArithmeticException|)))))
                  :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-ldiv) context)
-  ;; FIXME - handle all weird conditions
+  ;; Java long division truncates toward zero (not floor toward -infinity)
   (make-instance '<expression>
                  :insn insn
                  :code `(handler-case
                             (let ((value2 ,(code (codegen (value2 insn) context)))
                                   (value1 ,(code (codegen (value1 insn) context))))
-                              (unsigned-to-signed-long (logand (floor (/ value1 value2)) #xFFFFFFFFFFFFFFFF)))
+                              (unsigned-to-signed-long (logand (truncate value1 value2) #xFFFFFFFFFFFFFFFF)))
                           (division-by-zero ()
                             (error (%lisp-condition (%make-throwable '|java/lang/ArithmeticException|)))))
                  :expression-type :LONG))
@@ -503,7 +503,8 @@
                                     (error (%lisp-condition (%make-throwable '|java/lang/ClassCastException|))))))
                              `(let ((objref ,(code (codegen (objref insn) context))))
                                 (when objref
-                                  (unless (or (typep objref (quote ,(intern (slot-value insn 'classname) (class-package classname))))
+                                  (unless (or (not (find-class (quote ,(intern (slot-value insn 'classname) (class-package classname))) nil))
+                                              (typep objref (quote ,(intern (slot-value insn 'classname) (class-package classname))))
                                               (%native-type-castable-p objref ,classname))
                                     (error (%lisp-condition (%make-throwable '|java/lang/ClassCastException|))))))))
                    :expression-type nil)))
@@ -1006,9 +1007,11 @@
 
 ;; Helper function for instanceof check
 (defun %instanceof-check (obj target-class-name target-class)
-  "Check instanceof. Returns 1 or 0."
+  "Check instanceof. Returns 1 or 0.
+   Returns 0 when the target class is not loaded (e.g. AWT classes not on classpath)."
   (cond
     ((%native-type-castable-p obj target-class-name) 1)
+    ((not (find-class target-class nil)) 0)
     ((typep obj target-class) 1)
     (t 0)))
 
@@ -1182,15 +1185,22 @@
     (make-instance '<expression>
                    :insn insn
                    :code (let* ((nargs (length args))
-                                (receiver `(%box-if-native ,(code (codegen (car args) context))))
+                                (receiver-code (code (codegen (car args) context)))
+                                (receiver-sym (gensym "recv"))
+                                (null-checked-receiver
+                                  `(let ((,receiver-sym (%box-if-native ,receiver-code)))
+                                     (when (null ,receiver-sym)
+                                       (error (%lisp-condition
+                                               (%make-throwable '|java/lang/NullPointerException|))))
+                                     ,receiver-sym))
                                 (call (cond
                                         ((eq nargs 0)
                                          (error "internal error"))
                                         ((eq nargs 1)
-                                         (list (intern (format nil "~A" method-name) :openldk) receiver))
+                                         (list (intern (format nil "~A" method-name) :openldk) null-checked-receiver))
                                         (t
                                          `(funcall (function ,(intern (format nil "~A" method-name) :openldk))
-                                                   ,receiver
+                                                   ,null-checked-receiver
                                                    ,@(mapcar (lambda (a) (code (codegen a context))) (cdr args)))))))
                            call))))
 
@@ -1215,40 +1225,101 @@
             (setf (gethash key *invokedynamic-cache*) resolved)
             resolved)))))
 
+(defun %extract-string-concat-recipe (args)
+  "Extract the recipe string from StringConcatFactory bootstrap args.
+The recipe is the second element (first bootstrap arg after the MethodType)."
+  (let ((recipe-node (second args)))
+    (when (typep recipe-node 'ir-string-literal)
+      (slot-value recipe-node 'value))))
+
+(defun %generate-string-concat-code (recipe dynamic-arg-codes)
+  "Generate Lisp code for StringConcatFactory.makeConcatWithConstants.
+RECIPE is the template string with \\x01 placeholders for dynamic args.
+DYNAMIC-ARG-CODES is a list of codegen'd expressions for the dynamic arguments."
+  (let ((parts nil)
+        (arg-idx 0)
+        (start 0))
+    (loop for i below (length recipe)
+          for ch = (char recipe i)
+          do (cond
+               ((char= ch (code-char 1))
+                (when (< start i)
+                  (push (subseq recipe start i) parts))
+                (when (< arg-idx (length dynamic-arg-codes))
+                  (push (nth arg-idx dynamic-arg-codes) parts))
+                (incf arg-idx)
+                (setf start (1+ i)))
+               ((char= ch (code-char 2))
+                (when (< start i)
+                  (push (subseq recipe start i) parts))
+                (setf start (1+ i)))))
+    (when (< start (length recipe))
+      (push (subseq recipe start (length recipe)) parts))
+    (setf parts (nreverse parts))
+    `(jstring (format nil "~{~A~}" (list ,@(mapcar (lambda (part)
+                                                     (if (stringp part)
+                                                         part
+                                                         `(%to-java-string ,part)))
+                                                   parts))))))
+
+(defun %to-java-string (val)
+  "Convert a value to its Java string representation for StringConcatFactory."
+  (cond
+    ((null val) "null")
+    ((typep val '|java/lang/String|) (lstring val))
+    ((integerp val) (format nil "~D" val))
+    ((floatp val) (format nil "~F" val))
+    ((characterp val) (string val))
+    ((typep val '|java/lang/Object|)
+     (let ((str (|toString()| val)))
+       (if str (lstring str) "null")))
+    (t (format nil "~A" val))))
+
 (defmethod codegen ((insn ir-call-dynamic-method) context)
-  (with-slots (method-name args dynamic-args bootstrap-method-name address) insn
-    (let ((constant-pool (constant-pool (<context>-class context)))
-          (pkg (context-package context)))
-      (make-instance '<expression>
-                     :insn insn
-                     :code
-                     `(let* ((fname ,(jstring method-name))
-                             (bootstrap-name (symbol-name ',(intern bootstrap-method-name pkg))))
-                        (if (starts-with? "java/lang/invoke/LambdaMetafactory.metafactory" bootstrap-name)
-                            ;; Fast path for Java 8 lambdas: build the functional object directly
-                            (openldk::%lambda-metafactory
-                             ,(code (codegen (third args) context))
-                             (list ,@(mapcar (lambda (a) (code (codegen a context))) dynamic-args))
-                             ,method-name
-                             ,(code (codegen (second args) context)))
-                            ;; Fallback: generic invokedynamic handling
-                            (let ((callsite (%resolve-invokedynamic ',(intern method-name pkg)
-                                                                    ',(intern bootstrap-method-name pkg)
-                                                                    ,address
-                                                                    fname
-                                                                    ,@(mapcar (lambda (a) (code (codegen a context))) args))))
-                              (format t "~&Getting target from CallSite...~%")
-                              (force-output)
-                              (let ((target (|getTarget()| callsite)))
-                                (format t "~&Got target: ~A~%" target)
-                                (format t "~&Creating args array for invokeWithArguments...~%")
-                                (force-output)
-                                (let ((args-array (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Object")
-                                                                   :initial-contents (list ,@(mapcar (lambda (a) (code (codegen a context))) dynamic-args)))))
-                                  (format t "~&Args array: ~A (length=~A)~%" args-array (java-array-length args-array))
-                                  (format t "~&Calling invokeWithArguments...~%")
-                                  (force-output)
-                                  (|invokeWithArguments([Ljava/lang/Object;)| target args-array))))))))))
+  (with-slots (method-name args dynamic-args bootstrap-method-name address interface-type-name) insn
+    (let ((pkg (context-package context)))
+      (cond
+        ;; Fast path for StringConcatFactory (JDK 9+ string concatenation)
+        ((search "StringConcatFactory.makeConcatWithConstants" bootstrap-method-name)
+         (let ((recipe (%extract-string-concat-recipe args)))
+           (if recipe
+               (let ((dyn-codes (mapcar (lambda (a) (code (codegen a context))) dynamic-args)))
+                 (make-instance '<expression>
+                                :insn insn
+                                :code (%generate-string-concat-code recipe dyn-codes)
+                                :expression-type :REFERENCE))
+               (make-instance '<expression>
+                              :insn insn
+                              :code `(jstring (format nil "~{~A~}"
+                                               (mapcar #'%to-java-string
+                                                       (list ,@(mapcar (lambda (a) (code (codegen a context))) dynamic-args)))))
+                              :expression-type :REFERENCE))))
+        ;; Fast path for LambdaMetafactory
+        ((search "LambdaMetafactory.metafactory" bootstrap-method-name)
+         (make-instance '<expression>
+                        :insn insn
+                        :code `(openldk::%lambda-metafactory
+                                ,(code (codegen (third args) context))
+                                (list ,@(mapcar (lambda (a) (code (codegen a context))) dynamic-args))
+                                ,method-name
+                                ,(code (codegen (second args) context))
+                                ,interface-type-name)))
+        ;; Fallback: generic invokedynamic handling
+        (t
+         (make-instance '<expression>
+                        :insn insn
+                        :code
+                        `(let ((callsite (%resolve-invokedynamic ',(intern method-name pkg)
+                                                                 ',(intern bootstrap-method-name pkg)
+                                                                 ,address
+                                                                 ,(jstring method-name)
+                                                                 ,@(remove nil (mapcar (lambda (a)
+                                                                                        (when a (code (codegen a context))))
+                                                                                      args)))))
+                           (let ((target (|getTarget()| callsite)))
+                             (let ((args-array (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Object")
+                                                                :initial-contents (list ,@(mapcar (lambda (a) (code (codegen a context))) dynamic-args)))))
+                               (|invokeWithArguments([Ljava/lang/Object;)| target args-array))))))))))
 
 (defmethod codegen ((insn ir-clinit) context)
   (with-slots (class) insn
@@ -1409,7 +1480,8 @@
                      :code `(slot-value
                              (let ((objref ,(code (codegen objref context))))
                                (when (null objref)
-                                 (error (format nil "Null Pointer Exception ~A" ,(slot-value insn 'address))))
+                                 (error (%lisp-condition
+                                         (%make-throwable '|java/lang/NullPointerException|))))
                                objref)
                              ;; Field names stay in :openldk for CLOS slot inheritance
                              (quote ,(intern (mangle-field-name member-name) :openldk)))))))
@@ -1421,11 +1493,13 @@
       ;; Ensure class is loaded before looking up its package
       ;; This is necessary because the class might be in a different loader's package
       (classload class-name)
-      (let ((pkg (class-package class-name)))
+      (let* ((pkg (class-package class-name))
+             (static-sym-name (format nil "+static-~A+" class-name))
+             (sym (intern static-sym-name pkg)))
         (make-instance '<expression>
                        :insn insn
                        :code `(slot-value
-                               ,(intern (format nil "+static-~A+" class-name) pkg)
+                               ,sym
                                ;; Field names stay in :openldk for CLOS slot inheritance
                                (quote ,(intern (mangle-field-name member-name) :openldk))))))))
 
@@ -1438,7 +1512,8 @@
 (defmethod codegen ((insn ir-throw) context)
   (make-instance '<expression>
                  :insn insn
-                 :code `(let ((c (%lisp-condition ,(code (codegen (slot-value insn 'objref) context)))))
+                 :code `(let* ((obj ,(code (codegen (slot-value insn 'objref) context)))
+                               (c (%lisp-condition obj)))
                           (setf |condition-cache| c)
                           (error c))))
 
