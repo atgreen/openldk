@@ -9,22 +9,23 @@ are mapped to CLOS (Common Lisp Object System) classes, enabling seamless
 integration between Java and Common Lisp.
 
 **Key Points:**
-- Only Java 8 bytecode is supported
+- Java 17 class files are supported (JDK 8 support has been dropped)
 - SBCL only (Linux tested)
 - Incremental JIT compilation: methods compiled lazily on first call
-- Uses OpenJDK runtime libraries via JAVA_HOME environment variable
+- Uses pre-extracted JDK 17 class files via LDK_JDK_CLASSES environment variable
 - Performance not competitive with modern JVMs - designed for embedding Java libraries in Lisp applications
 
 ## Environment Setup
 
 **Required Environment Variables:**
-- `JAVA_HOME`: Must point to Java 8 JRE (e.g., `/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.432.b06-3.fc40.x86_64/jre`)
+- `JAVA_HOME`: Must point to Java 17 JDK (e.g., `/home/linuxbrew/.linuxbrew/opt/openjdk@17/libexec`)
+- `LDK_JDK_CLASSES`: Path to pre-extracted JDK 17 class files (e.g., `/home/green/git/openldk/jdk17-classes/classes`)
 - `LDK_CLASSPATH`: Additional classpath elements (optional)
 - `LDK_DEBUG`: Debug flags (optional, see Debugging section)
 
 **Build Requirements:**
 - SBCL (Steel Bank Common Lisp)
-- Java 8 JDK/JRE
+- Java 17 JDK
 - ocicl package manager - run `ocicl install` before building
 
 ## Architecture
@@ -120,12 +121,12 @@ characters into commit strings, but properly formatted text.
 
 2. **While making changes:**
    - Lint after each significant change using `~/git/ocicl/ocicl lint openldk.asd`
-   - Run `make` to verify compilation (requires `JAVA_HOME=/usr/lib/jvm/temurin-8-jdk/jre/`)
+   - Run `make` to verify compilation (requires `JAVA_HOME=/home/linuxbrew/.linuxbrew/opt/openjdk@17/libexec`)
    - Test relevant functionality
 
 3. **Before committing:**
    - Final lint check with `~/git/ocicl/ocicl lint openldk.asd`
-   - Verify `JAVA_HOME=/usr/lib/jvm/temurin-8-jdk/jre/ make` succeeds
+   - Verify `JAVA_HOME=/home/linuxbrew/.linuxbrew/opt/openjdk@17/libexec make` succeeds
    - Ensure all tests still pass (if applicable)
    - Write a descriptive multi-line commit message
 
@@ -135,9 +136,13 @@ Set `LDK_DEBUG` environment variable to enable debug output:
 
 - `b` - trace bytecode compilation
 - `c` - dump all Lisp code prior to evaluation
+- `e` - trace exceptions
+- `l` - trace class loading
+- `L` - trace class loading and compilation (includes `l`)
+- `p` - trace data-flow propagation
+- `s` - start slynk server at startup (port 2025)
 - `t` - trace method entry/exit at runtime
 - `T` - trace method entry/exit with arguments and return values
-- `s` - start slynk server at startup (port 2025)
 - `u` - unmuffle the Lisp compiler
 - `x` - trace opcode execution (use with `t`)
 

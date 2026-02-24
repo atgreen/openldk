@@ -146,9 +146,69 @@ Lisp code uses appropriate comparison/conversion functions. Common issues:
 - Missing `unsigned-to-signed-integer`/`unsigned-to-signed-long` conversions
 - Incorrect type coercion between FLOAT and DOUBLE
 
+## JDK 17 Porting Notes
+
+OpenLDK targets JDK 17 (JDK 8 support has been dropped). JDK 17 introduced
+several changes that affect native method implementations and class loading.
+
+### JDK 17 Class Files
+
+JDK 17 classes come from jigsaw modules (`java.base`, etc.) rather than a flat
+`rt.jar`. OpenLDK uses pre-extracted class files from the `jdk17-classes/`
+directory, pointed to by the `LDK_JDK_CLASSES` environment variable. Classes
+from modules outside `java.base` (e.g., `java.desktop` for `java/awt/*`) are
+not available. Code must handle missing classes gracefully:
+
+- `classload` may return nil for unavailable classes
+- `emit` for `constant-class-reference` creates a stub `<class>` with just the name
+- `%instanceof-check` returns 0 when the target CLOS class doesn't exist
+- `checkcast` codegen skips the type check when `find-class` returns nil
+
+### Native Method Signature Changes (JDK 8 → 17)
+
+Several native methods changed signatures between JDK 8 and 17:
+
+- **`defineClass1`**: Changed from instance method on `ClassLoader` to a static
+  method with an explicit `ClassLoader` parameter.
+- **`initStackTraceElements`**: New static native in JDK 17 for populating
+  stack trace element arrays from throwable backtrace data.
+- **`Reference.refersTo0`**: New in JDK 16+. Used by `ThreadLocalMap.getEntry()`
+  for `WeakReference` key matching. Must perform identity comparison (`eq`).
+
+### sun.misc.Unsafe → jdk.internal.misc.Unsafe
+
+In JDK 17, `sun.misc.Unsafe` is a bytecoded wrapper that delegates to
+`jdk.internal.misc.Unsafe`. Raw memory operations (`allocateMemory0`,
+`freeMemory0`, `putLong0`, `getByte0`, `copyMemory0`) are native methods
+on `jdk/internal/misc/Unsafe`, not `sun/misc/Unsafe`.
+
+### DirectMethodHandle$Holder Trampolines
+
+The JVM dynamically generates `DirectMethodHandle$Holder` methods at startup
+via `GenerateJLIClassesHelper` — they don't exist in class files. OpenLDK
+defines trampolines for 6 method types × 10 arities:
+
+- `invokeStatic`, `invokeStaticInit`, `invokeSpecial`
+- `invokeVirtual`, `invokeInterface`, `newInvokeSpecial`
+
+Each trampoline extracts the target `MemberName` from the `DirectMethodHandle`
+(arg0 per LambdaForm calling convention) and dispatches via
+`%invoke-from-member-name`.
+
+### Class Loader Packages
+
+OpenLDK uses separate Lisp packages for different class loaders:
+
+- `OPENLDK.SYSTEM` — boot/system class loader
+- `:openldk` — default package (native methods are always found here first)
+- `OPENLDK.APP` — application class loader
+
+`static-method-symbol` checks `:openldk` first for native methods, then falls
+back to the loader's package. This is how native method overrides work.
+
 ## Reference Sources
 
-- **JDK 8 Source**: `~/git/jdk` - Use this to understand correct Java semantics
+- **JDK 17 Source**: Use OpenJDK 17 source to understand correct Java semantics
 - **Java VM Spec**: Essential for bytecode instruction behavior
 - **Java Language Spec**: For language-level semantics
 
@@ -190,27 +250,69 @@ It exercises many JVM features (reflection, class generation, module loading) an
 as a good integration test for OpenLDK.
 
 ```bash
-# Download Kawa 3.1.1 and extract to /tmp/kawa-3.1.1
+# Build the Kawa SBCL image (uses lib/kawa-3.1.1.jar)
+make kawa
 
-# Basic test
-./openldk -cp /tmp/kawa-3.1.1/lib/kawa.jar:/tmp/kawa-3.1.1/lib/jline.jar \
-  kawa.repl -e '(display 42)(newline)' 2>/dev/null
+# Run Kawa interactively
+./kawa
 
-# Arithmetic (exercises reflection on primitive types)
-./openldk -cp /tmp/kawa-3.1.1/lib/kawa.jar:/tmp/kawa-3.1.1/lib/jline.jar \
-  kawa.repl -e '(display (+ 2 3))(newline)' 2>/dev/null
+# Test arithmetic
+echo '(+ 2 3)' | ./kawa
 
 # Debug class loading during Kawa startup
-LDK_DEBUG=l ./openldk -cp /tmp/kawa-3.1.1/lib/kawa.jar:/tmp/kawa-3.1.1/lib/jline.jar \
-  kawa.repl -e '(display 42)(newline)'
+LDK_DEBUG=L ./kawa
+```
+
+## Extracting JDK 17 Class Files
+
+OpenLDK needs pre-extracted class files from the JDK 17 jmod archives. JDK 9+
+ships classes inside `.jmod` files rather than a flat `rt.jar`. The extraction
+produces two directory trees:
+
+- `jdk17-classes/classes/` — all modules merged into a single flat class tree
+  (used as the boot classpath via `LDK_JDK_CLASSES`)
+- `jdk17-classes/modules/<module>/` — per-module class trees (used by javac's
+  `SystemModulesLocationHandler` as a fallback when `jrt:/` is unavailable)
+
+To extract:
+
+```bash
+# Set JAVA_HOME to your JDK 17 installation
+export JAVA_HOME=/home/linuxbrew/.linuxbrew/opt/openjdk@17/libexec
+
+# Extract all jmods into jdk17-classes/
+mkdir -p jdk17-classes
+for jmod in $JAVA_HOME/jmods/*.jmod; do
+    modname=$(basename "$jmod" .jmod)
+    # Extract into the top-level dir (creates classes/, bin/, lib/, etc.)
+    jmod extract --dir jdk17-classes "$jmod"
+    # Also extract per-module class tree
+    mkdir -p "jdk17-classes/modules/$modname"
+    cd "jdk17-classes/modules/$modname"
+    jmod extract --dir . "$jmod"
+    # Keep only the class files (remove bin/, lib/, etc. from per-module)
+    rm -rf bin conf include legal lib man
+    # Move classes/ contents up to module root
+    mv classes/* . 2>/dev/null
+    rmdir classes 2>/dev/null
+    cd -
+done
+```
+
+Or use the Makefile target:
+
+```bash
+make jdk17-classes
 ```
 
 ## Build System Notes
 
 - **SBCL only**: Uses SBCL-specific features (sb-ext, sb-debug)
-- **Java 8 only**: Class file parser supports up to version 52.0
-- **JAVA_HOME required**: Must point to Java 8 JRE for boot classpath
+- **Java 17**: Class file parser supports JDK 17 class files (version 61.0)
+- **JAVA_HOME required**: Must point to Java 17 JDK (e.g., `/home/linuxbrew/.linuxbrew/opt/openjdk@17/libexec`)
+- **LDK_JDK_CLASSES required**: Path to pre-extracted JDK 17 class files (defaults to `jdk17-classes/`)
 - **ocicl**: Package manager - run `ocicl install` before building
+- **Build targets**: `make` builds openldk and javacl; `make kawa` builds the Kawa SBCL image; `make check` runs the test suite; `make jdk17-classes` extracts JDK 17 class files
 
 ## Code Organization
 
