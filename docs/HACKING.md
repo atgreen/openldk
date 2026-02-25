@@ -153,11 +153,10 @@ several changes that affect native method implementations and class loading.
 
 ### JDK 17 Class Files
 
-JDK 17 classes come from jigsaw modules (`java.base`, etc.) rather than a flat
-`rt.jar`. OpenLDK uses pre-extracted class files from the `jdk17-classes/`
-directory, pointed to by the `LDK_JDK_CLASSES` environment variable. Classes
-from modules outside `java.base` (e.g., `java.desktop` for `java/awt/*`) are
-not available. Code must handle missing classes gracefully:
+JDK 17+ classes come from jigsaw modules (`java.base`, etc.) rather than a flat
+`rt.jar`. OpenLDK reads class files directly from JMOD files in
+`$JAVA_HOME/jmods/`. All module classes are available. Code must still handle
+missing classes gracefully:
 
 - `classload` may return nil for unavailable classes
 - `emit` for `constant-class-reference` creates a stub `<class>` with just the name
@@ -263,56 +262,13 @@ echo '(+ 2 3)' | ./kawa
 LDK_DEBUG=L ./kawa
 ```
 
-## Extracting JDK 17 Class Files
-
-OpenLDK needs pre-extracted class files from the JDK 17 jmod archives. JDK 9+
-ships classes inside `.jmod` files rather than a flat `rt.jar`. The extraction
-produces two directory trees:
-
-- `jdk17-classes/classes/` — all modules merged into a single flat class tree
-  (used as the boot classpath via `LDK_JDK_CLASSES`)
-- `jdk17-classes/modules/<module>/` — per-module class trees (used by javac's
-  `SystemModulesLocationHandler` as a fallback when `jrt:/` is unavailable)
-
-To extract:
-
-```bash
-# Set JAVA_HOME to your JDK 17 installation
-export JAVA_HOME=/home/linuxbrew/.linuxbrew/opt/openjdk@17/libexec
-
-# Extract all jmods into jdk17-classes/
-mkdir -p jdk17-classes
-for jmod in $JAVA_HOME/jmods/*.jmod; do
-    modname=$(basename "$jmod" .jmod)
-    # Extract into the top-level dir (creates classes/, bin/, lib/, etc.)
-    jmod extract --dir jdk17-classes "$jmod"
-    # Also extract per-module class tree
-    mkdir -p "jdk17-classes/modules/$modname"
-    cd "jdk17-classes/modules/$modname"
-    jmod extract --dir . "$jmod"
-    # Keep only the class files (remove bin/, lib/, etc. from per-module)
-    rm -rf bin conf include legal lib man
-    # Move classes/ contents up to module root
-    mv classes/* . 2>/dev/null
-    rmdir classes 2>/dev/null
-    cd -
-done
-```
-
-Or use the Makefile target:
-
-```bash
-make jdk17-classes
-```
-
 ## Build System Notes
 
 - **SBCL only**: Uses SBCL-specific features (sb-ext, sb-debug)
-- **Java 17**: Class file parser supports JDK 17 class files (version 61.0)
-- **JAVA_HOME required**: Must point to Java 17 JDK (e.g., `/home/linuxbrew/.linuxbrew/opt/openjdk@17/libexec`)
-- **LDK_JDK_CLASSES required**: Path to pre-extracted JDK 17 class files (defaults to `jdk17-classes/`)
+- **Java 21**: Class file parser supports JDK 21 class files
+- **JAVA_HOME required**: Must point to JDK 21 (e.g., `/home/linuxbrew/.linuxbrew/opt/openjdk@21/libexec`). JDK classes are read directly from `$JAVA_HOME/jmods/*.jmod` files.
 - **ocicl**: Package manager - run `ocicl install` before building
-- **Build targets**: `make` builds openldk and javacl; `make kawa` builds the Kawa SBCL image; `make check` runs the test suite; `make jdk17-classes` extracts JDK 17 class files
+- **Build targets**: `make` builds openldk and javacl; `make kawa` builds the Kawa SBCL image; `make check` runs the test suite
 
 ## Code Organization
 

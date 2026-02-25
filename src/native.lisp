@@ -1937,8 +1937,7 @@ and its implementation."
 
 (defun |jdk/internal/util/SystemProps$Raw.vmProperties()| ()
   "Return String[] of key-value pairs for JDK 21 VM properties."
-  (let* ((pairs `(("java.home" ,(or (uiop:getenv "LDK_JDK_CLASSES")
-                                     (uiop:getenv "JAVA_HOME")))
+  (let* ((pairs `(("java.home" ,(uiop:getenv "JAVA_HOME"))
                   ("java.specification.version" "21")
                   ("java.specification.name" "Java Platform API Specification")
                   ("java.specification.vendor" "Oracle Corporation")
@@ -2001,8 +2000,7 @@ and its implementation."
                   ("java.class.path" . ,(or (uiop:getenv "LDK_CLASSPATH")
                                             (uiop:getenv "CLASSPATH")
                                             "."))
-                  ("java.home" . ,(or (uiop:getenv "LDK_JDK_CLASSES")
-                                      (uiop:getenv "JAVA_HOME")))
+                  ("java.home" . ,(uiop:getenv "JAVA_HOME"))
                   ("user.home" . ,(uiop:getenv "HOME"))
                   ("user.dir" . ,(namestring (uiop:getcwd)))
                   ("user.name" . ,(let ((uid (sb-posix:getuid)))

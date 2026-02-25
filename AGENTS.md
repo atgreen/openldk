@@ -9,23 +9,22 @@ are mapped to CLOS (Common Lisp Object System) classes, enabling seamless
 integration between Java and Common Lisp.
 
 **Key Points:**
-- Java 17 class files are supported (JDK 8 support has been dropped)
+- JDK 21 class files are supported
 - SBCL only (Linux tested)
 - Incremental JIT compilation: methods compiled lazily on first call
-- Uses pre-extracted JDK 17 class files via LDK_JDK_CLASSES environment variable
+- Reads JDK classes directly from JMOD files in `$JAVA_HOME/jmods/`
 - Performance not competitive with modern JVMs - designed for embedding Java libraries in Lisp applications
 
 ## Environment Setup
 
 **Required Environment Variables:**
-- `JAVA_HOME`: Must point to Java 17 JDK (e.g., `/home/linuxbrew/.linuxbrew/opt/openjdk@17/libexec`)
-- `LDK_JDK_CLASSES`: Path to pre-extracted JDK 17 class files (e.g., `/home/green/git/openldk/jdk17-classes/classes`)
+- `JAVA_HOME`: Must point to JDK 21 (e.g., `/home/linuxbrew/.linuxbrew/opt/openjdk@21/libexec`)
 - `LDK_CLASSPATH`: Additional classpath elements (optional)
 - `LDK_DEBUG`: Debug flags (optional, see Debugging section)
 
 **Build Requirements:**
 - SBCL (Steel Bank Common Lisp)
-- Java 17 JDK
+- JDK 21
 - ocicl package manager - run `ocicl install` before building
 
 ## Architecture

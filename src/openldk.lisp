@@ -2041,14 +2041,12 @@ get the same unified var-numbers."
       (uiop:quit 1))
 
     (cond
-      ;; JDK 9+: has lib/modules
-      ((uiop:file-exists-p (concatenate 'string JAVA_HOME "/lib/modules"))
-       (unless (uiop:getenv "LDK_JDK_CLASSES")
-         (format *error-output* "~%OpenLDK Error: JDK 21 requires LDK_JDK_CLASSES to be set.~%")
-         (format *error-output* "  Extract JDK classes with: make jdk21-classes~%")
+      ((uiop:directory-exists-p (concatenate 'string JAVA_HOME "/jmods/"))
+       (unless (directory (merge-pathnames "*.jmod" (concatenate 'string JAVA_HOME "/jmods/")))
+         (format *error-output* "~%OpenLDK Error: No .jmod files found in $JAVA_HOME/jmods/~%")
          (uiop:quit 1)))
       (t
-       (format *error-output* "~%OpenLDK Error: Cannot find $JAVA_HOME/lib/modules~%")
+       (format *error-output* "~%OpenLDK Error: Cannot find $JAVA_HOME/jmods/~%")
        (format *error-output* "  OpenLDK requires JDK 21. Set JAVA_HOME to your JDK 21 installation.~%")
        (uiop:quit 1)))))
 
@@ -2114,11 +2112,6 @@ get the same unified var-numbers."
   (unless classpath
     (setf classpath (or (uiop:getenv "CLASSPATH") (uiop:getenv "LDK_CLASSPATH") ".")))
 
-  ;; Append JDK runtime classes to classpath
-  (when-let ((jdk-classes (uiop:getenv "LDK_JDK_CLASSES")))
-    (setf classpath
-          (concatenate 'string classpath ":" jdk-classes "/classes")))
-
   (let ((LDK_DEBUG (uiop:getenv "LDK_DEBUG")))
     (when LDK_DEBUG
       (progn
@@ -2170,10 +2163,12 @@ get the same unified var-numbers."
   (setf *aot-dir* aot)
 
   (setf *classpath*
-        (loop for cpe in (split-sequence:split-sequence (uiop:inter-directory-separator) classpath)
-              collect (if (ends-with? ".jar" cpe)
-                          (make-instance 'jar-classpath-entry :jarfile cpe)
-                          (make-instance 'dir-classpath-entry :dir cpe))))
+        (append
+         (loop for cpe in (split-sequence:split-sequence (uiop:inter-directory-separator) classpath)
+               collect (if (ends-with? ".jar" cpe)
+                           (make-instance 'jar-classpath-entry :jarfile cpe)
+                           (make-instance 'dir-classpath-entry :dir cpe)))
+         (discover-jmod-classpath-entries)))
 
   ;; In AOT mode, handle JAR files, directories, or class names
   (when *aot-dir*
@@ -2557,18 +2552,16 @@ get the same unified var-numbers."
     (when (and LDK_DCE (plusp (length LDK_DCE)))
       (setf *enable-dce* t)))
 
-  (let ((classpath
-          (concatenate 'string
-                       (or (uiop:getenv "LDK_CLASSPATH") "")
-                       ":"
-                       (uiop:getenv "LDK_JDK_CLASSES")
-                       "/classes")))
+  (let ((classpath (or (uiop:getenv "LDK_CLASSPATH") "")))
 
     (setf *classpath*
-          (loop for cpe in (split-sequence:split-sequence (uiop:inter-directory-separator) classpath)
-                collect (if (ends-with? ".jar" cpe)
-                            (make-instance 'jar-classpath-entry :jarfile cpe)
-                            (make-instance 'dir-classpath-entry :dir cpe)))))
+          (append
+           (loop for cpe in (split-sequence:split-sequence (uiop:inter-directory-separator) classpath)
+                 when (plusp (length cpe))
+                 collect (if (ends-with? ".jar" cpe)
+                             (make-instance 'jar-classpath-entry :jarfile cpe)
+                             (make-instance 'dir-classpath-entry :dir cpe)))
+           (discover-jmod-classpath-entries))))
 
   ;; We need to hand load these before Class.forName0 will work.
   (%clinit (classload "java/lang/Object"))
@@ -2653,9 +2646,7 @@ get the same unified var-numbers."
           (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring (car kv)) (ijstring (cdr kv))))
 
         ;; Also set java.home for code that queries it early.
-        ;; For JDK 9+ use LDK_JDK_CLASSES (where modules/ lives); fall back to JAVA_HOME.
-        (when-let ((jh (or (uiop:getenv "LDK_JDK_CLASSES")
-                           (uiop:getenv "JAVA_HOME"))))
+        (when-let ((jh (uiop:getenv "JAVA_HOME")))
           (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring "java.home") (ijstring jh)))
 
         ;; Populate common user properties
@@ -2801,16 +2792,15 @@ get the same unified var-numbers."
    CLASSPATH:         Classpath string to bake in. If nil, reads CLASSPATH env var."
   (initialize)
   (let ((cp (or classpath (uiop:getenv "CLASSPATH") ".")))
-    ;; Append JDK runtime classes so they are available at runtime.
-    (when-let ((jdk-classes (uiop:getenv "LDK_JDK_CLASSES")))
-      (setf cp (concatenate 'string cp ":" jdk-classes "/classes")))
     (setf *default-mainclass* default-mainclass)
     (setf *default-classpath* cp)
     (setf *classpath*
-          (loop for cpe in (split-sequence:split-sequence (uiop:inter-directory-separator) cp)
-                collect (if (str:ends-with? ".jar" cpe)
-                            (make-instance 'jar-classpath-entry :jarfile cpe)
-                            (make-instance 'dir-classpath-entry :dir cpe)))))
+          (append
+           (loop for cpe in (split-sequence:split-sequence (uiop:inter-directory-separator) cp)
+                 collect (if (str:ends-with? ".jar" cpe)
+                             (make-instance 'jar-classpath-entry :jarfile cpe)
+                             (make-instance 'dir-classpath-entry :dir cpe)))
+           (discover-jmod-classpath-entries))))
   ;; Clear all monitor state to prevent deadlocks in the saved image.
   (clrhash *monitors*)
   ;; Clear stale thread mappings — after image restore the Lisp thread objects are different.

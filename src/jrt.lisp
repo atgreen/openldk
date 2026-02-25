@@ -39,24 +39,7 @@
 
 (in-package :openldk)
 
-;;; Placeholder for JRT (Java Runtime Image) filesystem support.
-;;; JDK 9+ stores classes in a custom jimage format accessed via jrt:/ URLs.
-;;; For the MVP, we use extracted classes via LDK_JDK_CLASSES instead.
-
-(defclass jrt-classpath-entry (classpath-entry)
-  ((modules-path :initarg :modules-path
-                 :documentation "Path to the JDK lib/modules file."))
-  (:documentation "Classpath entry for JDK 9+ jrt:/ filesystem (future)."))
-
-(defmethod open-java-classfile ((cpe jrt-classpath-entry) classname)
-  (declare (ignore classname))
-  ;; TODO: Implement jimage parsing for direct module access
-  nil)
-
-(defmethod open-resource ((cpe jrt-classpath-entry) resource-name)
-  (declare (ignore resource-name))
-  nil)
-
-(defmethod get-resource-url ((cpe jrt-classpath-entry) resource-name)
-  (declare (ignore resource-name))
-  nil)
+;;; JDK 9+ class access is handled by jmod-classpath-entry in classpath.lisp,
+;;; which reads classes directly from $JAVA_HOME/jmods/*.jmod files.
+;;; The jimage format (lib/modules, accessed via jrt:/ URLs) is not currently
+;;; supported; JMOD files provide equivalent class access as standard ZIP archives.
