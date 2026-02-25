@@ -241,6 +241,7 @@ and its implementation."
   (%remove-elements-with-substrings
    frames
    '("sun/reflect/NativeMethodAccessorImpl.invoke0"
+     "jdk/internal/reflect/DirectMethodHandleAccessor$NativeAccessor.invoke0"
      "%RESOLVE-INVOKEDYNAMIC"
      "METHOD invoke"
      "#<java/lang/reflect/Method "
@@ -601,8 +602,11 @@ and its implementation."
   (let* ((current-lisp-thread (bordeaux-threads:current-thread))
          (java-thread (gethash current-lisp-thread *lisp-to-java-threads*)))
     (or java-thread
-        ;; Fallback to main thread (for compatibility)
-        *current-thread*
+        ;; Fallback to main thread (for compatibility).
+        ;; Re-register the mapping so the current lisp thread is properly tracked.
+        (when *current-thread*
+          (setf (gethash current-lisp-thread *lisp-to-java-threads*) *current-thread*)
+          *current-thread*)
         ;; Create main thread if it doesn't exist
         (let ((thread (%make-java-instance "java/lang/Thread"))
               (thread-group (%make-java-instance "java/lang/ThreadGroup")))
@@ -610,10 +614,27 @@ and its implementation."
           (setf *current-thread* thread)
           ;; Register main thread in our mappings
           (setf (gethash current-lisp-thread *lisp-to-java-threads*) thread)
-          (setf (slot-value thread '|priority|) 1)
-          (|add(Ljava/lang/Thread;)| thread-group thread)
-          (|<init>(Ljava/lang/ThreadGroup;Ljava/lang/Runnable;Ljava/lang/String;J)|
-           thread thread-group nil (jstring "main") 0)
+          ;; Set priority — JDK 21 moved this to Thread$FieldHolder, but it may
+          ;; still be a direct slot on Thread depending on class version.
+          (when (slot-exists-p thread '|priority|)
+            (setf (slot-value thread '|priority|) 1))
+          ;; Initialize the FieldHolder for JDK 21+ Thread structure
+          (when (slot-exists-p thread '|holder|)
+            (when (classload "java/lang/Thread$FieldHolder")
+              (let ((holder (%make-java-instance "java/lang/Thread$FieldHolder")))
+                (when (slot-exists-p holder '|group|)
+                  (setf (slot-value holder '|group|) thread-group))
+                (when (slot-exists-p holder '|priority|)
+                  (setf (slot-value holder '|priority|) 5)) ;; NORM_PRIORITY
+                (when (slot-exists-p holder '|daemon|)
+                  (setf (slot-value holder '|daemon|) 0))
+                (setf (slot-value thread '|holder|) holder))))
+          (handler-case
+              (|<init>(Ljava/lang/ThreadGroup;Ljava/lang/Runnable;Ljava/lang/String;J)|
+               thread thread-group nil (jstring "main") 0)
+            (condition ()
+              ;; If the old constructor doesn't work, set name directly
+              (setf (slot-value thread '|name|) (jstring "main"))))
           thread))))
 
 (defmethod |setPriority0(I)| ((thread |java/lang/Thread|) priority)
@@ -634,12 +655,184 @@ and its implementation."
   (declare (ignore thread))
   nil)
 
+;;; JDK 21 Thread native methods for virtual thread support.
+;;; OpenLDK treats all threads as platform (carrier) threads.
+
+(defun |java/lang/Thread.currentCarrierThread()| ()
+  "Return the current carrier thread. Same as currentThread for OpenLDK."
+  (|java/lang/Thread.currentThread()|))
+
+(defun |java/lang/Thread.sleep0(J)| (milliseconds)
+  "JDK 21 private native sleep0 — replaces public native sleep(J)."
+  (|java/lang/Thread.sleep(J)| milliseconds))
+
+(defun |java/lang/Thread.yield0()| ()
+  "JDK 21 private native yield0 — replaces public native yield()."
+  nil)
+
+(defvar *scoped-value-cache* nil
+  "Thread-local scoped value cache for JDK 21 ScopedValue support.")
+
+(defun |java/lang/Thread.scopedValueCache()| ()
+  "Return the current thread's scoped value cache."
+  *scoped-value-cache*)
+
+(defun |java/lang/Thread.setScopedValueCache([Ljava/lang/Object;)| (cache)
+  "Set the current thread's scoped value cache."
+  (setf *scoped-value-cache* cache))
+
+(defun |java/lang/Thread.findScopedValueBindings()| ()
+  "Return scoped value bindings for the current thread."
+  nil)
+
+(defun |java/lang/Thread.ensureMaterializedForStackWalk(Ljava/lang/Object;)| (obj)
+  "No-op for platform threads."
+  (declare (ignore obj))
+  nil)
+
+(defvar *next-thread-id* 0
+  "Atomic thread ID counter for JDK 21 Thread$ThreadIdentifiers.")
+
+(defun |java/lang/Thread.getNextThreadIdOffset()| ()
+  "Return the field offset for the thread ID counter.
+   Returns a dummy value — OpenLDK doesn't use Unsafe for thread IDs."
+  0)
+
+;; Override Thread$ThreadIdentifiers.next() to use a simple Lisp counter
+;; instead of Unsafe atomic operations on a JVM-internal address.
+(setf (gethash "java/lang/Thread$ThreadIdentifiers.next()J" *native-overrides*)
+      (lambda ()
+        (bordeaux-threads:with-lock-held (*identity-hash-counter-lock*)
+          (incf *next-thread-id*))))
+
+(defmethod |setCurrentThread(Ljava/lang/Thread;)| ((thread |java/lang/Thread|) new-thread)
+  "Set the current thread reference. Used by virtual thread machinery."
+  (declare (ignore thread))
+  (let ((lisp-thread (bordeaux-threads:current-thread)))
+    (setf (gethash lisp-thread *lisp-to-java-threads*) new-thread)))
+
+(defmethod |getStackTrace0()| ((thread |java/lang/Thread|))
+  "Return stack trace elements for the thread."
+  (declare (ignore thread))
+  nil)
+
+;;; JDK 21: Object.wait0(J) — private native wait.
+;;; Must contain the actual wait logic (not delegate to wait(J) which calls wait0).
+(defmethod |wait0(J)| ((this |java/lang/Object|) timeout)
+  (let* ((monitor (%get-monitor this))
+         (mutex (mutex monitor))
+         (cv (condition-variable monitor))
+         (current-thread (bordeaux-threads:current-thread)))
+    (bordeaux-threads:with-lock-held (mutex)
+      (unless (eq (owner monitor) current-thread)
+        (error (%lisp-condition (%make-throwable '|java/lang/IllegalMonitorStateException|))))
+      (let ((saved-recursion (recursion-count monitor)))
+        (push current-thread (wait-set monitor))
+        (setf (owner monitor) nil (recursion-count monitor) 0)
+        (bordeaux-threads:condition-notify cv)
+        (loop while (member current-thread (wait-set monitor))
+              do (if (zerop timeout)
+                     (bordeaux-threads:condition-wait cv mutex)
+                     (unless (bordeaux-threads:condition-wait cv mutex :timeout (/ timeout 1000.0))
+                       (setf (wait-set monitor) (remove current-thread (wait-set monitor)))
+                       (return))))
+        (loop while (owner monitor)
+              do (bordeaux-threads:condition-wait cv mutex))
+        (setf (owner monitor) current-thread (recursion-count monitor) saved-recursion)))))
+
+;;; JDK 21 VirtualThread — JVMTI notification stubs.
+;;; OpenLDK doesn't support JVMTI, so all are no-ops.
+
+(defun |java/lang/VirtualThread.registerNatives()| ()
+  nil)
+
+(setf (gethash "java/lang/VirtualThread.notifyJvmtiStart()V" *native-overrides*)
+      (lambda (this) (declare (ignore this)) nil))
+
+(setf (gethash "java/lang/VirtualThread.notifyJvmtiEnd()V" *native-overrides*)
+      (lambda (this) (declare (ignore this)) nil))
+
+(setf (gethash "java/lang/VirtualThread.notifyJvmtiMount(Z)V" *native-overrides*)
+      (lambda (this first-mount) (declare (ignore this first-mount)) nil))
+
+(setf (gethash "java/lang/VirtualThread.notifyJvmtiUnmount(Z)V" *native-overrides*)
+      (lambda (this first-unmount) (declare (ignore this first-unmount)) nil))
+
+(setf (gethash "java/lang/VirtualThread.notifyJvmtiHideFrames(Z)V" *native-overrides*)
+      (lambda (this hide) (declare (ignore this hide)) nil))
+
+;;; JDK 21 Continuation — virtual thread continuation support stubs.
+;;; OpenLDK doesn't implement continuations; virtual threads run as platform threads.
+
+(defun |jdk/internal/vm/Continuation.registerNatives()| ()
+  nil)
+
+(defun |jdk/internal/vm/Continuation.doYield()| ()
+  "Stub: yield from continuation. Returns 0 (success)."
+  0)
+
+(setf (gethash "jdk/internal/vm/Continuation.enterSpecial(Ljdk/internal/vm/Continuation;ZZ)V" *native-overrides*)
+      (lambda (cont is-virtual-thread force-yield)
+        (declare (ignore cont is-virtual-thread force-yield))
+        nil))
+
+(defun |jdk/internal/vm/Continuation.pin()| ()
+  nil)
+
+(defun |jdk/internal/vm/Continuation.unpin()| ()
+  nil)
+
+(setf (gethash "jdk/internal/vm/Continuation.isPinned0(Ljdk/internal/vm/ContinuationScope;)I" *native-overrides*)
+      (lambda (scope)
+        (declare (ignore scope))
+        0))
+
+(defun |jdk/internal/vm/ContinuationSupport.isSupported0()| ()
+  "Continuations are not supported in OpenLDK. This causes the JDK to create
+   BoundVirtualThread (extends BaseVirtualThread) instead of VirtualThread.
+   BoundVirtualThread uses start0()/run() like platform threads."
+  0)
+
+;;; Virtual thread support: BoundVirtualThread (extends BaseVirtualThread).
+;;; When ContinuationSupport.isSupported0() returns 0, the JDK creates
+;;; BoundVirtualThread instead of VirtualThread. BoundVirtualThread uses
+;;; Thread.start() → start0() like platform threads. The task runs via
+;;; BoundVirtualThread.run() → runWith(bindings, task).
+;;;
+;;; These :around methods on BaseVirtualThread ensure isAlive() and join()
+;;; work correctly by checking the actual Lisp thread status. Thread.join()
+;;; in bytecode uses `while(isAlive()) { wait(0); }` for non-VirtualThread
+;;; instances, so correct isAlive() is critical. We also override join(J)
+;;; directly to use bordeaux-threads:join-thread for reliable waiting.
+
+(defmethod |isAlive()| :around ((thread |java/lang/BaseVirtualThread|))
+  "Check if the virtual thread's underlying platform thread is still running."
+  (let ((lisp-thread (gethash thread *java-threads*)))
+    (if (and lisp-thread (bordeaux-threads:thread-alive-p lisp-thread))
+        1
+        0)))
+
+(defmethod |join(J)| :around ((thread |java/lang/BaseVirtualThread|) millis)
+  "Wait for the virtual thread's platform thread to finish.
+   Overrides Thread.join(long) to use bordeaux-threads:join-thread directly."
+  (let ((lisp-thread (gethash thread *java-threads*)))
+    (cond
+      ((null lisp-thread) nil)
+      ((not (bordeaux-threads:thread-alive-p lisp-thread)) nil)
+      ((zerop millis)
+       (bordeaux-threads:join-thread lisp-thread)
+       nil)
+      (t
+       (let ((timeout-sec (/ millis 1000.0d0)))
+         (handler-case
+             (bordeaux-threads:join-thread lisp-thread :timeout timeout-sec)
+           (error () nil)))))))
+
 (defun |sun/misc/Unsafe.registerNatives()| ()
   ;; FIXME
   nil)
 
 (defun |jdk/internal/misc/Unsafe.registerNatives()| ()
-  ;; FIXME - JDK 9+ version of sun/misc/Unsafe
   nil)
 
 (defun |jdk/internal/misc/ScopedMemoryAccess.registerNatives()| ()
@@ -882,6 +1075,19 @@ and its implementation."
       (loop for i below bytes
             do (setf (jaref obj (+ offset i)) (logand value #xFF)))))
 
+;;; Unsafe park/unpark — used by LockSupport and virtual thread infrastructure.
+
+(defmethod |park(ZJ)| ((unsafe |jdk/internal/misc/Unsafe|) is-absolute time)
+  "Park the current thread. If time > 0, park with timeout."
+  (declare (ignore unsafe is-absolute))
+  (when (> time 0)
+    (sleep (/ time 1000000000.0d0))))
+
+(defmethod |unpark(Ljava/lang/Object;)| ((unsafe |jdk/internal/misc/Unsafe|) thread)
+  "Unpark a thread. Stub — Lisp threads don't support park/unpark natively."
+  (declare (ignore unsafe thread))
+  nil)
+
 ;;; JDK 9+ renamed Unsafe CAS and accessor methods.
 ;;; These delegate to the existing sun/misc/Unsafe implementations via inheritance.
 
@@ -944,7 +1150,22 @@ and its implementation."
 (defmethod |isHidden()| ((class |java/lang/Class|))
   0)
 
-;; JDK 9+: Module support stubs.
+;; JDK 21: Class.getClassAccessFlagsRaw0() — return raw access flags
+(defmethod |getClassAccessFlagsRaw0()| ((this |java/lang/Class|))
+  (let ((ldk-class (get-ldk-class-for-java-class this)))
+    (if ldk-class
+        (slot-value ldk-class 'access-flags)
+        0)))
+
+;; JDK 21: Class.getClassFileVersion0() — return class file major version
+(defmethod |getClassFileVersion0()| ((this |java/lang/Class|))
+  (let ((ldk-class (get-ldk-class-for-java-class this)))
+    (if (and ldk-class (slot-boundp ldk-class 'major-version)
+             (slot-value ldk-class 'major-version))
+        (slot-value ldk-class 'major-version)
+        65))) ;; Default to JDK 21 class file version
+
+;; Module support stubs.
 ;; We provide a single shared unnamed Module so that Class.getModule()
 ;; never returns nil and Module.isNamed() returns false.
 (defvar *unnamed-module* nil)
@@ -1077,12 +1298,8 @@ and its implementation."
   ((ldk-class)))
 
 (defmethod |getConstantPool()| ((this |java/lang/Class|))
-  (let ((cp-class-bin (ecase *jdk-version*
-                        (:jdk8  "sun/reflect/ConstantPool")
-                        (:jdk9+ "jdk/internal/reflect/ConstantPool")))
-        (cp-class-fq (ecase *jdk-version*
-                       (:jdk8  "sun.reflect.ConstantPool")
-                       (:jdk9+ "jdk.internal.reflect.ConstantPool"))))
+  (let ((cp-class-bin "jdk/internal/reflect/ConstantPool")
+        (cp-class-fq "jdk.internal.reflect.ConstantPool"))
     (unless (%get-ldk-class-by-fq-name cp-class-fq t)
       (%clinit (classload cp-class-bin)))
     (let ((ldk-class (get-ldk-class-for-java-class this)))
@@ -1254,6 +1471,13 @@ and its implementation."
             (apply (symbol-function sym) lisp-args)
             (apply (symbol-function sym) obj lisp-args))))))
 
+;; JDK 21 uses DirectMethodHandleAccessor$NativeAccessor instead of NativeMethodAccessorImpl
+(defun |jdk/internal/reflect/DirectMethodHandleAccessor$NativeAccessor.invoke0(Ljava/lang/reflect/Method;Ljava/lang/Object;[Ljava/lang/Object;)|
+    (method obj args)
+  "Native reflective method invocation for JDK 21."
+  (|jdk/internal/reflect/NativeMethodAccessorImpl.invoke0(Ljava/lang/reflect/Method;Ljava/lang/Object;[Ljava/lang/Object;)|
+   method obj args))
+
 (defun |jdk/internal/reflect/NativeConstructorAccessorImpl.newInstance0(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)|
     (constructor args)
   "Native reflective constructor invocation for JDK 9+."
@@ -1419,7 +1643,11 @@ and its implementation."
   (when (slot-exists-p this '|referent|)
     (setf (slot-value this '|referent|) nil)))
 
-;;; JDK 9+ Finalizer native stubs
+;;; Finalizer native stubs
+(defun |java/lang/ref/Finalizer.isFinalizationEnabled()| ()
+  "JDK 21: returns whether finalization is enabled. Always true for OpenLDK."
+  1)
+
 (defun |java/lang/ref/Finalizer.reportComplete(Ljava/lang/Object;)| (obj)
   (declare (ignore obj)) nil)
 
@@ -1708,27 +1936,27 @@ and its implementation."
                      :initial-contents arr)))
 
 (defun |jdk/internal/util/SystemProps$Raw.vmProperties()| ()
-  "Return String[] of key-value pairs for JDK 17 VM properties."
+  "Return String[] of key-value pairs for JDK 21 VM properties."
   (let* ((pairs `(("java.home" ,(or (uiop:getenv "LDK_JDK_CLASSES")
                                      (uiop:getenv "JAVA_HOME")))
-                  ("java.specification.version" "17")
+                  ("java.specification.version" "21")
                   ("java.specification.name" "Java Platform API Specification")
                   ("java.specification.vendor" "Oracle Corporation")
-                  ("java.vm.specification.version" "17")
+                  ("java.vm.specification.version" "21")
                   ("java.vm.specification.name" "Java Virtual Machine Specification")
                   ("java.vm.specification.vendor" "Oracle Corporation")
                   ("java.vm.name" "OpenLDK")
                   ("java.vm.version" "1.0")
                   ("java.vm.vendor" "OpenLDK")
                   ("java.vm.info" "interpreted mode")
-                  ("java.version" "17")
-                  ("java.version.date" "2021-09-14")
-                  ("java.runtime.version" "17+35")
+                  ("java.version" "21")
+                  ("java.version.date" "2024-09-17")
+                  ("java.runtime.version" "21+35")
                   ("java.runtime.name" "OpenLDK Runtime Environment")
                   ("java.vendor" "OpenLDK")
                   ("java.vendor.url" "https://github.com/atgreen/openldk")
                   ("java.vendor.url.bug" "https://github.com/atgreen/openldk/issues")
-                  ("java.class.version" "61.0")
+                  ("java.class.version" "65.0")
                   ("java.class.path" ,(or (uiop:getenv "LDK_CLASSPATH")
                                           (uiop:getenv "CLASSPATH")
                                           "."))
@@ -1755,43 +1983,26 @@ and its implementation."
 
 (defun |java/lang/System.initProperties(Ljava/util/Properties;)| (props)
   (dolist (prop `(("log4j2.disable.jmx" . "true")
-                  ("java.specification.version" . ,(ecase *jdk-version*
-                                                     (:jdk8 "1.8")
-                                                     (:jdk9+ "17")))
+                  ("java.specification.version" . "21")
                   ("java.specification.name" . "Java Platform API Specification")
                   ("java.specification.vendor" . "Oracle Corporation")
-                  ("java.vm.specification.version" . ,(ecase *jdk-version*
-                                                        (:jdk8 "1.8")
-                                                        (:jdk9+ "17")))
+                  ("java.vm.specification.version" . "21")
                   ("java.vm.specification.name" . "Java Virtual Machine Specification")
                   ("java.vm.specification.vendor" . "Oracle Corporation")
                   ("java.vm.name" . "OpenLDK")
                   ("java.vm.version" . "1.0")
                   ("java.vm.vendor" . "OpenLDK")
-                  ("java.version" . ,(ecase *jdk-version*
-                                       (:jdk8 "8.0")
-                                       (:jdk9+ "17")))
+                  ("java.version" . "21")
                   ("java.vendor" . "OpenLDK")
                   ("java.vendor.url" . "https://github.com/atgreen/openldk")
                   ("java.vendor.url.bug" . "https://github.com/atgreen/openldk/issues")
-                  ("java.class.version" . ,(ecase *jdk-version*
-                                             (:jdk8 "52.0")
-                                             (:jdk9+ "61.0")))
+                  ("java.class.version" . "65.0")
                   ("sun.cds.enableSharedLookupCache" . "1")
                   ("java.class.path" . ,(or (uiop:getenv "LDK_CLASSPATH")
                                             (uiop:getenv "CLASSPATH")
                                             "."))
-                  ,@(when (eq *jdk-version* :jdk8)
-                      `(("sun.boot.class.path" .
-                         ,(format nil "~{~A~^:~}"
-                                  (mapcar #'namestring
-                                          (directory
-                                           (concatenate 'string
-                                                        (uiop:getenv "JAVA_HOME")
-                                                        "/lib/*.jar")))))))
-                  ("java.home" . ,(or (and (eq *jdk-version* :jdk9+)
-                                          (uiop:getenv "LDK_JDK_CLASSES"))
-                                     (uiop:getenv "JAVA_HOME")))
+                  ("java.home" . ,(or (uiop:getenv "LDK_JDK_CLASSES")
+                                      (uiop:getenv "JAVA_HOME")))
                   ("user.home" . ,(uiop:getenv "HOME"))
                   ("user.dir" . ,(namestring (uiop:getcwd)))
                   ("user.name" . ,(let ((uid (sb-posix:getuid)))
@@ -1839,14 +2050,13 @@ and its implementation."
                                                        "/lib/"))
                   ("java.security.debug" . "0")
                   ("line.separator" . ,(format nil "~%"))
-                  ,@(when (eq *jdk-version* :jdk9+)
-                      '(("native.encoding" . "UTF-8")
-                        ("stdout.encoding" . "UTF-8")
-                        ("stderr.encoding" . "UTF-8")
-                        ("sun.stdout.encoding" . "UTF-8")
-                        ("sun.stderr.encoding" . "UTF-8")
-                        ("java.version.date" . "2021-09-14")
-                        ("java.runtime.version" . "17+35")))))
+                  ("native.encoding" . "UTF-8")
+                  ("stdout.encoding" . "UTF-8")
+                  ("stderr.encoding" . "UTF-8")
+                  ("sun.stdout.encoding" . "UTF-8")
+                  ("sun.stderr.encoding" . "UTF-8")
+                  ("java.version.date" . "2024-09-17")
+                  ("java.runtime.version" . "21+35")))
     (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring (car prop)) (ijstring (cdr prop))))
   props)
 
@@ -2033,6 +2243,25 @@ user.variant
      (let* ((field (gethash param-long *field-offset-table*))
             (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
        (slot-value param-object key)))))
+
+(defmethod |putIntVolatile(Ljava/lang/Object;JI)| ((unsafe |sun/misc/Unsafe|) obj offset value)
+  "Same as putInt for OpenLDK (no volatile semantics needed in Lisp)."
+  (declare (ignore unsafe))
+  (cond
+    ((typep obj 'java-array)
+     (setf (jaref obj offset) value))
+    ((null obj)
+     (let* ((field (gethash offset *field-offset-table*))
+            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk))
+            (clazz (slot-value field '|clazz|))
+            (lname (lstring (slot-value clazz '|name|)))
+            (bin-name (substitute #\/ #\. lname))
+            (pkg (class-package bin-name)))
+       (setf (slot-value (eval (intern (format nil "+static-~A+" bin-name) pkg)) key) value)))
+    (t
+     (let* ((field (gethash offset *field-offset-table*))
+            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
+       (setf (slot-value obj key) value)))))
 
 (defmethod |getCharVolatile(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) param-object param-long)
   (cond
@@ -2674,8 +2903,7 @@ user.variant
 
 (defmethod |interrupt0()| ((thread |java/lang/Thread|))
   "Interrupt the thread by signaling the underlying Lisp thread."
-  ;; In Java 8, the interrupted status is maintained by the VM, not as a field.
-  ;; We maintain it in the *thread-interrupted* hash table.
+  ;; The interrupted status is maintained in the *thread-interrupted* hash table.
   (setf (gethash thread *thread-interrupted*) t)
   ;; If the thread has an associated Lisp thread, interrupt it.
   (let ((lisp-thread (gethash thread *java-threads*)))

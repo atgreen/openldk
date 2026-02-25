@@ -551,8 +551,8 @@ stream."
             (bitio:read-integer bitio :unsignedp nil :byte-endian :be) ;; magic bytes
             (let ((minor-version (read-u2))
                   (major-version (read-u2)))
-              (when (> major-version 61)
-                (error "Unsupported class file version ~A.~A (max supported: 61.0)"
+              (when (> major-version 65)
+                (error "Unsupported class file version ~A.~A (max supported: 65.0)"
                        major-version minor-version))
               (setf (slot-value class 'major-version) major-version)
               (setf (slot-value class 'minor-version) minor-version)

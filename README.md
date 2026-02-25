@@ -36,16 +36,16 @@ only developing with sbcl for now.
 
 `openldk` has only been tested in Linux.
 
-`openldk` uses pre-extracted JDK 17 class files for its boot classpath.
-Set `JAVA_HOME` to point at your JDK 17 installation and extract the
+`openldk` uses pre-extracted JDK 21 class files for its boot classpath.
+Set `JAVA_HOME` to point at your JDK 21 installation and extract the
 class files:
 ```
-$ export JAVA_HOME=/home/linuxbrew/.linuxbrew/opt/openjdk@17/libexec
-$ make jdk17-classes
+$ export JAVA_HOME=/home/linuxbrew/.linuxbrew/opt/openjdk@21/libexec
+$ make jdk21-classes
 ```
 
 The `LDK_JDK_CLASSES` environment variable points to the extracted
-class files (defaults to `jdk17-classes/` in the project directory).
+class files (defaults to `jdk21-classes/` in the project directory).
 
 You can provide additional classpath elements through the
 `LDK_CLASSPATH` environment variable.

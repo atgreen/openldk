@@ -15,6 +15,7 @@ ocicl
 /testsuite/mauve/gnu/testlet/config.java
 rt
 jdk17-classes/
+jdk21-classes/
 *.log
 log.txt
 

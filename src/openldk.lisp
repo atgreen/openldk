@@ -1537,12 +1537,15 @@ get the same unified var-numbers."
                                        (slot-value class 'methods))))
                  ;; Per JVM spec: if class init is already in progress
                  ;; by the current thread, return immediately.
-                 (when (and <clinit>-method (not (initialized-p class)))
-                   (when (search "TwoWayStream" (slot-value class 'name))
-                     (format *error-output* "~&;; CLINIT: initializing ~A~%" (slot-value class 'name))
-                     (force-output *error-output*))
-                   (setf (initialized-p class) t)
-                   (handler-case
+                 ;; Use per-class lock to prevent concurrent initialization.
+                 (when <clinit>-method
+                   (bordeaux-threads:with-recursive-lock-held ((%get-class-lock (slot-value class 'name)))
+                     (when (not (initialized-p class))
+                       (when (search "TwoWayStream" (slot-value class 'name))
+                         (format *error-output* "~&;; CLINIT: initializing ~A~%" (slot-value class 'name))
+                         (force-output *error-output*))
+                       (setf (initialized-p class) t)
+                       (handler-case
                        ;; Get package from loader if available, else use OPENLDK.SYSTEM
                        ;; (classes loaded during warm-up may not have ldk-loader set)
                        (let ((pkg (if (and (slot-boundp class 'ldk-loader)
@@ -1585,7 +1588,7 @@ get the same unified var-numbers."
                            (if eiie
                                (error (%lisp-condition eiie))
                                ;; During early bootstrap, just re-signal the original error
-                               (error e))))))))))
+                               (error e))))))))))))
       (clinit class))))
 
 (defun open-java-classfile-on-classpath (class)
@@ -1971,52 +1974,65 @@ get the same unified var-numbers."
        (let ((class (gethash classname *ldk-classes-by-bin-name*)))
          (if class
              class
-             (let ((classfile-stream (open-java-classfile-on-classpath classname)))
-               (if classfile-stream
-                   (progn
-                     (when *debug-load*
-                       (format t "~&; LOADING   ~A~%" classname))
-                     ;; Create temporary boot loader for warm-up
-                     (let* ((system-pkg (or (find-package "OPENLDK.SYSTEM")
-                                            (make-package "OPENLDK.SYSTEM" :use '(:openldk))))
-                            (temp-loader (make-instance '<ldk-class-loader>
-                                                        :id 0
-                                                        :pkg system-pkg
-                                                        :parent-loader nil
-                                                        :java-loader nil
-                                                        :ldk-classes-by-bin-name *ldk-classes-by-bin-name*
-                                                        :ldk-classes-by-fq-name *ldk-classes-by-fq-name*
-                                                        :java-classes-by-bin-name *java-classes-by-bin-name*
-                                                        :java-classes-by-fq-name *java-classes-by-fq-name*)))
-                       (%classload-from-stream classname classfile-stream class-loader temp-loader)))
-                   nil)))))
+             (bordeaux-threads:with-recursive-lock-held ((%get-class-lock classname))
+               ;; Re-check after acquiring lock
+               (or (gethash classname *ldk-classes-by-bin-name*)
+                   (let ((classfile-stream (open-java-classfile-on-classpath classname)))
+                     (if classfile-stream
+                         (progn
+                           (when *debug-load*
+                             (format t "~&; LOADING   ~A~%" classname))
+                           ;; Create temporary boot loader for warm-up
+                           (let* ((system-pkg (or (find-package "OPENLDK.SYSTEM")
+                                                  (make-package "OPENLDK.SYSTEM" :use '(:openldk))))
+                                  (temp-loader (make-instance '<ldk-class-loader>
+                                                              :id 0
+                                                              :pkg system-pkg
+                                                              :parent-loader nil
+                                                              :java-loader nil
+                                                              :ldk-classes-by-bin-name *ldk-classes-by-bin-name*
+                                                              :ldk-classes-by-fq-name *ldk-classes-by-fq-name*
+                                                              :java-classes-by-bin-name *java-classes-by-bin-name*
+                                                              :java-classes-by-fq-name *java-classes-by-fq-name*)))
+                             (%classload-from-stream classname classfile-stream class-loader temp-loader)))
+                         nil)))))))
       ;; Check if already loaded by boot loader
       ((gethash classname (slot-value *boot-ldk-class-loader* 'ldk-classes-by-bin-name)))
       ;; Check global tables (classes loaded during warm-up before loaders were created)
       ((gethash classname *ldk-classes-by-bin-name*))
       ;; JDK classes always loaded by boot loader (into :openldk)
       ((jdk-class-p classname)
-       (let ((classfile-stream (open-java-classfile-on-classpath classname)))
-         (when classfile-stream
-           (when *debug-load*
-             (format t "~&; LOADING   ~A~%" classname))
-           (%classload-from-stream classname classfile-stream class-loader *boot-ldk-class-loader*))))
+       (bordeaux-threads:with-recursive-lock-held ((%get-class-lock classname))
+         ;; Re-check after acquiring lock
+         (or (gethash classname (slot-value *boot-ldk-class-loader* 'ldk-classes-by-bin-name))
+             (gethash classname *ldk-classes-by-bin-name*)
+             (let ((classfile-stream (open-java-classfile-on-classpath classname)))
+               (when classfile-stream
+                 (when *debug-load*
+                   (format t "~&; LOADING   ~A~%" classname))
+                 (%classload-from-stream classname classfile-stream class-loader *boot-ldk-class-loader*))))))
       ;; User classes loaded by app loader (into OPENLDK.APP)
       (*app-ldk-class-loader*
        ;; First check if already loaded by app loader
        (or (gethash classname (slot-value *app-ldk-class-loader* 'ldk-classes-by-bin-name))
-           (let ((classfile-stream (open-java-classfile-on-classpath classname)))
-             (when classfile-stream
-               (when *debug-load*
-                 (format t "~&; LOADING   ~A~%" classname))
-               (%classload-from-stream classname classfile-stream class-loader *app-ldk-class-loader*)))))
+           (bordeaux-threads:with-recursive-lock-held ((%get-class-lock classname))
+             ;; Re-check after acquiring lock
+             (or (gethash classname (slot-value *app-ldk-class-loader* 'ldk-classes-by-bin-name))
+                 (let ((classfile-stream (open-java-classfile-on-classpath classname)))
+                   (when classfile-stream
+                     (when *debug-load*
+                       (format t "~&; LOADING   ~A~%" classname))
+                     (%classload-from-stream classname classfile-stream class-loader *app-ldk-class-loader*)))))))
       ;; Fallback to boot loader if app loader not yet initialized
       (t
-       (let ((classfile-stream (open-java-classfile-on-classpath classname)))
-         (when classfile-stream
-           (when *debug-load*
-             (format t "~&; LOADING   ~A~%" classname))
-           (%classload-from-stream classname classfile-stream class-loader *boot-ldk-class-loader*)))))))
+       (bordeaux-threads:with-recursive-lock-held ((%get-class-lock classname))
+         ;; Re-check after acquiring lock
+         (or (gethash classname *ldk-classes-by-bin-name*)
+             (let ((classfile-stream (open-java-classfile-on-classpath classname)))
+               (when classfile-stream
+                 (when *debug-load*
+                   (format t "~&; LOADING   ~A~%" classname))
+                 (%classload-from-stream classname classfile-stream class-loader *boot-ldk-class-loader*)))))))))
 
 (defun ensure-JAVA_HOME ()
   (let ((JAVA_HOME (uiop:getenv "JAVA_HOME")))
@@ -2027,19 +2043,32 @@ get the same unified var-numbers."
     (cond
       ;; JDK 9+: has lib/modules
       ((uiop:file-exists-p (concatenate 'string JAVA_HOME "/lib/modules"))
-       (setf *jdk-version* :jdk9+)
        (unless (uiop:getenv "LDK_JDK_CLASSES")
-         (format *error-output* "~%OpenLDK Error: JDK 17 requires LDK_JDK_CLASSES to be set.~%")
-         (format *error-output* "  Extract JDK classes with: jmod extract --dir $LDK_JDK_CLASSES $JAVA_HOME/jmods/java.base.jmod~%")
+         (format *error-output* "~%OpenLDK Error: JDK 21 requires LDK_JDK_CLASSES to be set.~%")
+         (format *error-output* "  Extract JDK classes with: make jdk21-classes~%")
          (uiop:quit 1)))
-      ;; JDK 8 is no longer supported.
-      ((uiop:file-exists-p (concatenate 'string JAVA_HOME "/lib/rt.jar"))
-       (format *error-output* "~%OpenLDK Error: JDK 8 is no longer supported.~%")
-       (format *error-output* "  Please use JDK 17 and set LDK_JDK_CLASSES to the extracted classes.~%")
-       (uiop:quit 1))
       (t
        (format *error-output* "~%OpenLDK Error: Cannot find $JAVA_HOME/lib/modules~%")
+       (format *error-output* "  OpenLDK requires JDK 21. Set JAVA_HOME to your JDK 21 installation.~%")
        (uiop:quit 1)))))
+
+(defun %thread-daemon-p (thread)
+  "Check if a Java Thread is a daemon thread.
+   JDK 21: isDaemon() reads from holder.daemon, so check holder first."
+  (cond
+    ;; JDK 21: daemon flag lives in Thread$FieldHolder
+    ((and (slot-exists-p thread '|holder|)
+          (ignore-errors (slot-boundp thread '|holder|))
+          (slot-value thread '|holder|))
+     (let ((holder (slot-value thread '|holder|)))
+       (and (slot-exists-p holder '|daemon|)
+            (ignore-errors (slot-boundp holder '|daemon|))
+            (not (zerop (or (slot-value holder '|daemon|) 0))))))
+    ;; Fallback: direct daemon field (JDK 17 and earlier)
+    ((and (slot-exists-p thread '|daemon|)
+          (ignore-errors (slot-boundp thread '|daemon|)))
+     (not (zerop (or (slot-value thread '|daemon|) 0))))
+    (t nil)))
 
 (defun main (mainclass &optional (args (list)) &key dump-dir classpath aot)
   "Run a Java class with the given arguments.
@@ -2085,7 +2114,7 @@ get the same unified var-numbers."
   (unless classpath
     (setf classpath (or (uiop:getenv "CLASSPATH") (uiop:getenv "LDK_CLASSPATH") ".")))
 
-  ;; Append JDK 17 runtime classes to classpath
+  ;; Append JDK runtime classes to classpath
   (when-let ((jdk-classes (uiop:getenv "LDK_JDK_CLASSES")))
     (setf classpath
           (concatenate 'string classpath ":" jdk-classes "/classes")))
@@ -2278,18 +2307,29 @@ get the same unified var-numbers."
         (if main-symbol
             (progn
               (%eval (list main-symbol argv))
-              ;; Wait for all non-daemon Java threads to complete before exiting
-              (loop
-                (let ((java-threads (loop for java-thread being the hash-values of *lisp-to-java-threads*
-                                          when (not (slot-value java-thread '|daemon|))
-                                            collect java-thread)))
-                  (if java-threads
-                      (sleep 0.1)
-                      (progn
-                        ;; Give threads a moment to flush output buffers
-                        (sleep 0.1)
-                        (finish-output)
-                        (return))))))
+              ;; Wait for all non-daemon Java threads (other than the current one) to complete.
+              ;; Safety timeout of 30 seconds to prevent indefinite hangs.
+              (let ((current-lisp-thread (bordeaux-threads:current-thread))
+                    (deadline (+ (get-internal-real-time)
+                                 (* 30 internal-time-units-per-second))))
+                (loop
+                  (let ((java-threads
+                          (loop for lisp-thread being the hash-keys of *lisp-to-java-threads*
+                                  using (hash-value java-thread)
+                                when (and (not (eq lisp-thread current-lisp-thread))
+                                          (not (%thread-daemon-p java-thread))
+                                          (bordeaux-threads:thread-alive-p lisp-thread))
+                                  collect java-thread)))
+                    (cond
+                      ((null java-threads)
+                       (sleep 0.1)
+                       (finish-output)
+                       (return))
+                      ((> (get-internal-real-time) deadline)
+                       (finish-output)
+                       (return))
+                      (t
+                       (sleep 0.1)))))))
             (error "Main method not found in class ~A." (name class)))))))
 
 (defun %print-usage ()
@@ -2434,7 +2474,9 @@ get the same unified var-numbers."
                     (t
                      (format *error-output* "~&Error: ~A~%" condition)))
                   (uiop:quit 1))))
-      (main mainclass args :classpath classpath :dump-dir dump-dir :aot aot))))
+      (main mainclass args :classpath classpath :dump-dir dump-dir :aot aot))
+    ;; Force exit — daemon threads may be blocked in wait() and won't terminate
+    (sb-ext:exit :code 0 :abort t)))
 
 (defun app-main-wrapper ()
   "Generic entry point for pre-dumped app images.
@@ -2612,8 +2654,7 @@ get the same unified var-numbers."
 
         ;; Also set java.home for code that queries it early.
         ;; For JDK 9+ use LDK_JDK_CLASSES (where modules/ lives); fall back to JAVA_HOME.
-        (when-let ((jh (or (and (eq *jdk-version* :jdk9+)
-                                (uiop:getenv "LDK_JDK_CLASSES"))
+        (when-let ((jh (or (uiop:getenv "LDK_JDK_CLASSES")
                            (uiop:getenv "JAVA_HOME"))))
           (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring "java.home") (ijstring jh)))
 
@@ -2740,6 +2781,9 @@ get the same unified var-numbers."
   (initialize)
   ;; Clear all monitor state to prevent deadlocks in the saved image.
   (clrhash *monitors*)
+  ;; Clear stale thread mappings — after image restore the Lisp thread objects are different.
+  (clrhash *lisp-to-java-threads*)
+  (setf *current-thread* nil)
   ;; Kill all Java threads before saving core (SBCL can't save with threads running)
   (loop for thread in (bt:all-threads)
         when (and (not (eq thread (bt:current-thread)))
@@ -2757,7 +2801,7 @@ get the same unified var-numbers."
    CLASSPATH:         Classpath string to bake in. If nil, reads CLASSPATH env var."
   (initialize)
   (let ((cp (or classpath (uiop:getenv "CLASSPATH") ".")))
-    ;; Append JDK 17 runtime classes so they are available at runtime.
+    ;; Append JDK runtime classes so they are available at runtime.
     (when-let ((jdk-classes (uiop:getenv "LDK_JDK_CLASSES")))
       (setf cp (concatenate 'string cp ":" jdk-classes "/classes")))
     (setf *default-mainclass* default-mainclass)
@@ -2769,6 +2813,9 @@ get the same unified var-numbers."
                             (make-instance 'dir-classpath-entry :dir cpe)))))
   ;; Clear all monitor state to prevent deadlocks in the saved image.
   (clrhash *monitors*)
+  ;; Clear stale thread mappings — after image restore the Lisp thread objects are different.
+  (clrhash *lisp-to-java-threads*)
+  (setf *current-thread* nil)
   ;; Kill all Java threads before saving core (SBCL can't save with threads running)
   (loop for thread in (bt:all-threads)
         when (and (not (eq thread (bt:current-thread)))

@@ -46,61 +46,46 @@
   (when string
     (let ((value (slot-value string '|value|)))
       (when value
-        (ecase *jdk-version*
-          ((nil :jdk8)
-           (coerce (java-array-data value) 'string))
-          (:jdk9+
-           ;; JDK 9+ compact strings: value is byte[], coder is 0 (LATIN1) or 1 (UTF16)
-           (let ((data (java-array-data value))
-                 (coder (or (ignore-errors (slot-value string '|coder|)) 0)))
-             (if (zerop coder)
-                 ;; LATIN1: each byte is a char code
-                 (map 'string #'code-char data)
-                 ;; UTF16: pairs of bytes (little-endian)
-                 (let* ((len (floor (length data) 2))
-                        (result (make-string len)))
-                   (dotimes (i len result)
-                     (setf (char result i)
-                           (code-char (+ (aref data (* i 2))
-                                         (ash (aref data (1+ (* i 2))) 8)))))
-                   result)))))))))
+        ;; Compact strings: value is byte[], coder is 0 (LATIN1) or 1 (UTF16)
+        (let ((data (java-array-data value))
+              (coder (or (ignore-errors (slot-value string '|coder|)) 0)))
+          (if (zerop coder)
+              ;; LATIN1: each byte is a char code
+              (map 'string #'code-char data)
+              ;; UTF16: pairs of bytes (little-endian)
+              (let* ((len (floor (length data) 2))
+                     (result (make-string len)))
+                (dotimes (i len result)
+                  (setf (char result i)
+                        (code-char (+ (aref data (* i 2))
+                                      (ash (aref data (1+ (* i 2))) 8)))))
+                result)))))))
 
 (defun jstring (value)
   "Construct a |java/lang/String| from a Lisp string VALUE."
   (let ((s (%make-java-instance "java/lang/String")))
-    (ecase *jdk-version*
-      ((nil :jdk8)
-       (setf (slot-value s '|value|) (make-java-array :component-class
-                                                      (or (%get-java-class-by-bin-name "char" t) :early-placeholder)
-                                                      :initial-contents value)))
-      (:jdk9+
-       ;; JDK 9+ compact strings: store as byte[] with LATIN1 coder
-       (let ((bytes (make-array (length value) :element-type '(unsigned-byte 8))))
-         (dotimes (i (length value))
-           (setf (aref bytes i) (logand #xff (char-code (char value i)))))
-         (setf (slot-value s '|value|) (make-java-array :component-class
-                                                        (or (%get-java-class-by-bin-name "byte" t) :early-placeholder)
-                                                        :initial-contents bytes))
-         (setf (slot-value s '|coder|) 0))))
+    ;; Compact strings: store as byte[] with LATIN1 coder
+    (let ((bytes (make-array (length value) :element-type '(unsigned-byte 8))))
+      (dotimes (i (length value))
+        (setf (aref bytes i) (logand #xff (char-code (char value i)))))
+      (setf (slot-value s '|value|) (make-java-array :component-class
+                                                      (or (%get-java-class-by-bin-name "byte" t) :early-placeholder)
+                                                      :initial-contents bytes))
+      (setf (slot-value s '|coder|) 0))
     (setf (slot-value s '|hash|) 0)
     s))
 
 (defun ijstring (value)
   "Construct and intern a |java/lang/String| from Lisp string VALUE."
   (let ((s (%make-java-instance "java/lang/String")))
-    (ecase *jdk-version*
-      ((nil :jdk8)
-       (setf (slot-value s '|value|) (make-java-array :component-class
-                                                      (or (%get-java-class-by-bin-name "char" t) :early-placeholder)
-                                                      :initial-contents value)))
-      (:jdk9+
-       (let ((bytes (make-array (length value) :element-type '(unsigned-byte 8))))
-         (dotimes (i (length value))
-           (setf (aref bytes i) (logand #xff (char-code (char value i)))))
-         (setf (slot-value s '|value|) (make-java-array :component-class
-                                                        (or (%get-java-class-by-bin-name "byte" t) :early-placeholder)
-                                                        :initial-contents bytes))
-         (setf (slot-value s '|coder|) 0))))
+    ;; Compact strings: store as byte[] with LATIN1 coder
+    (let ((bytes (make-array (length value) :element-type '(unsigned-byte 8))))
+      (dotimes (i (length value))
+        (setf (aref bytes i) (logand #xff (char-code (char value i)))))
+      (setf (slot-value s '|value|) (make-java-array :component-class
+                                                      (or (%get-java-class-by-bin-name "byte" t) :early-placeholder)
+                                                      :initial-contents bytes))
+      (setf (slot-value s '|coder|) 0))
     (setf (slot-value s '|hash|) 0)
     (|intern()| s)))
 

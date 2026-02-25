@@ -47,7 +47,6 @@
 
 (defvar *classpath* nil)
 
-(defvar *jdk-version* nil "Detected JDK version: :jdk8 or :jdk9+")
 
 ;; Counter for generating unique class loader IDs
 (defvar *next-loader-id* 0)
@@ -328,6 +327,22 @@
 (defvar *identity-hash-counter* 0)
 (defvar *identity-hash-counter-lock* (bordeaux-threads:make-lock "identity-hash-lock"))
 (defvar *identity-hash-table* (make-hash-table :test #'eq :weakness :key :synchronized t))
+
+;; Per-class-name locks for thread-safe class loading.
+;; Maps class binary name (string) -> recursive lock.
+(defvar *class-load-locks* (make-hash-table :test #'equal :synchronized t))
+(defvar *class-load-locks-lock* (bordeaux-threads:make-lock "class-load-locks"))
+
+(defun %get-class-lock (classname)
+  "Get or create a recursive lock for loading CLASSNAME.
+   Uses double-checked locking: fast path reads from synchronized hash table,
+   slow path acquires global lock to create."
+  (or (gethash classname *class-load-locks*)
+      (bordeaux-threads:with-lock-held (*class-load-locks-lock*)
+        (or (gethash classname *class-load-locks*)
+            (setf (gethash classname *class-load-locks*)
+                  (bordeaux-threads:make-recursive-lock
+                   (format nil "classload-~A" classname)))))))
 
 (defun %get-java-class-by-bin-name (bin-name &optional fail-ok loader)
   "Look up a Java class by its binary name BIN-NAME.

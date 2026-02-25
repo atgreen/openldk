@@ -147,6 +147,14 @@
   ()
   (:documentation "Stub for java.lang.Thread"))
 
+(defclass |java/lang/BaseVirtualThread| (|java/lang/Thread|)
+  ()
+  (:documentation "Stub for java.lang.BaseVirtualThread"))
+
+(defclass |java/lang/VirtualThread| (|java/lang/BaseVirtualThread|)
+  ()
+  (:documentation "Stub for java.lang.VirtualThread"))
+
 (defclass |java/lang/ref/Reference| (|java/lang/Object|)
   ()
   (:documentation "Stub for java.lang.ref.Reference"))
