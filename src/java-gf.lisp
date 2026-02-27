@@ -87,9 +87,14 @@ Returns a function of one argument (the argument list)."
 
 (defmethod closer-mop:compute-discriminating-function ((gf java-generic-function))
   "Return a discriminating function that dispatches via a hash-table cache
-keyed on the receiver's class."
+keyed on the receiver's class.  Also clears stale caches, since SBCL's
+update-dfun calls this whenever the method set changes."
   (let ((cache (java-gf-dispatch-cache gf))
+        (special-cache (java-gf-invoke-special-cache gf))
         (lock (java-gf-cache-lock gf)))
+    (bordeaux-threads:with-lock-held (lock)
+      (clrhash cache)
+      (clrhash special-cache))
     (lambda (&rest args)
       (let* ((receiver (first args))
              (class (class-of receiver))
@@ -101,21 +106,3 @@ keyed on the receiver's class."
                 (setf (gethash class cache) new-emfun))
               (funcall new-emfun args)))))))
 
-;;; Override update-dfun to skip PCL's expensive discrimination-net
-;;; rebuilding for java-generic-function GFs.  This is the single
-;;; biggest win — prevents PCL from rebuilding dfuns when methods are
-;;; added/removed or new classes are defined.
-(let ((original-update-dfun (fdefinition 'sb-pcl::update-dfun)))
-  (sb-ext:without-package-locks
-    (setf (fdefinition 'sb-pcl::update-dfun)
-          (lambda (gf &rest args)
-            (if (and (typep gf 'java-generic-function)
-                     (slot-boundp gf 'dispatch-cache))
-                ;; Clear both caches and reinstall our fast DF
-                (progn
-                  (bordeaux-threads:with-lock-held ((java-gf-cache-lock gf))
-                    (clrhash (java-gf-dispatch-cache gf))
-                    (clrhash (java-gf-invoke-special-cache gf)))
-                  (sb-mop:set-funcallable-instance-function
-                   gf (closer-mop:compute-discriminating-function gf)))
-                (apply original-update-dfun gf args))))))
