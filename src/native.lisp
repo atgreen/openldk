@@ -83,7 +83,9 @@
   (let* ((monitor (%get-monitor this))
          (mutex (mutex monitor))
          (cv (condition-variable monitor))
-         (current-thread (bordeaux-threads:current-thread)))
+         (current-thread (current-thread-identity)))
+    ;; SBCL's condition-wait and condition-notify auto-dispatch to fiber-aware
+    ;; paths when running in a fiber, so no separate fiber code path is needed.
     (bordeaux-threads:with-lock-held (mutex)
       (unless (eq (owner monitor) current-thread)
         (error (%lisp-condition (%make-throwable '|java/lang/IllegalMonitorStateException|))))
@@ -597,7 +599,13 @@ and its implementation."
   (error "internal error"))
 
 (defmethod |java/lang/Thread.currentThread()| ()
-  "Return the Java Thread object for the current Lisp thread."
+  "Return the Java Thread object for the current Lisp thread (or fiber)."
+  ;; When in a fiber, check fiber mapping first
+  #+sb-fiber
+  (when (in-fiber-p)
+    (let ((java-thread (gethash (sb-thread:current-fiber) *fiber-to-java-threads*)))
+      (when java-thread
+        (return-from |java/lang/Thread.currentThread()| java-thread))))
   ;; Check if current Lisp thread has an associated Java Thread
   (let* ((current-lisp-thread (bordeaux-threads:current-thread))
          (java-thread (gethash current-lisp-thread *lisp-to-java-threads*)))
@@ -659,8 +667,11 @@ and its implementation."
 ;;; OpenLDK treats all threads as platform (carrier) threads.
 
 (defun |java/lang/Thread.currentCarrierThread()| ()
-  "Return the current carrier thread. Same as currentThread for OpenLDK."
-  (|java/lang/Thread.currentThread()|))
+  "Return the current carrier thread (always the OS thread, never a fiber)."
+  (let* ((current-lisp-thread (bordeaux-threads:current-thread))
+         (java-thread (gethash current-lisp-thread *lisp-to-java-threads*)))
+    (or java-thread
+        (|java/lang/Thread.currentThread()|))))
 
 (defun |java/lang/Thread.sleep0(J)| (milliseconds)
   "JDK 21 private native sleep0 — replaces public native sleep(J)."
@@ -668,6 +679,10 @@ and its implementation."
 
 (defun |java/lang/Thread.yield0()| ()
   "JDK 21 private native yield0 — replaces public native yield()."
+  #+sb-fiber
+  (when (in-fiber-p)
+    (sb-thread:fiber-yield)
+    (return-from |java/lang/Thread.yield0()|))
   nil)
 
 (defvar *scoped-value-cache* nil
@@ -708,6 +723,10 @@ and its implementation."
 (defmethod |setCurrentThread(Ljava/lang/Thread;)| ((thread |java/lang/Thread|) new-thread)
   "Set the current thread reference. Used by virtual thread machinery."
   (declare (ignore thread))
+  #+sb-fiber
+  (when (in-fiber-p)
+    (setf (gethash (sb-thread:current-fiber) *fiber-to-java-threads*) new-thread)
+    (return-from |setCurrentThread(Ljava/lang/Thread;)|))
   (let ((lisp-thread (bordeaux-threads:current-thread)))
     (setf (gethash lisp-thread *lisp-to-java-threads*) new-thread)))
 
@@ -722,7 +741,7 @@ and its implementation."
   (let* ((monitor (%get-monitor this))
          (mutex (mutex monitor))
          (cv (condition-variable monitor))
-         (current-thread (bordeaux-threads:current-thread)))
+         (current-thread (current-thread-identity)))
     (bordeaux-threads:with-lock-held (mutex)
       (unless (eq (owner monitor) current-thread)
         (error (%lisp-condition (%make-throwable '|java/lang/IllegalMonitorStateException|))))
@@ -806,15 +825,29 @@ and its implementation."
 ;;; directly to use bordeaux-threads:join-thread for reliable waiting.
 
 (defmethod |isAlive()| :around ((thread |java/lang/BaseVirtualThread|))
-  "Check if the virtual thread's underlying platform thread is still running."
+  "Check if the virtual thread's underlying thread (OS or fiber) is still running."
+  #+sb-fiber
+  (let ((fiber (gethash thread *java-to-fibers*)))
+    (when fiber
+      (return-from |isAlive()| (if (sb-thread:fiber-alive-p fiber) 1 0))))
   (let ((lisp-thread (gethash thread *java-threads*)))
     (if (and lisp-thread (bordeaux-threads:thread-alive-p lisp-thread))
         1
         0)))
 
 (defmethod |join(J)| :around ((thread |java/lang/BaseVirtualThread|) millis)
-  "Wait for the virtual thread's platform thread to finish.
-   Overrides Thread.join(long) to use bordeaux-threads:join-thread directly."
+  "Wait for the virtual thread to finish (OS thread or fiber)."
+  #+sb-fiber
+  (let ((fiber (gethash thread *java-to-fibers*)))
+    (when fiber
+      (cond
+        ((not (sb-thread:fiber-alive-p fiber)) (return-from |join(J)|))
+        (t
+         (if (zerop millis)
+             (sb-thread:fiber-join fiber)
+             (sb-thread:fiber-join fiber :timeout (/ millis 1000.0d0)))
+         (return-from |join(J)|)))))
+  ;; Fall through to OS thread join
   (let ((lisp-thread (gethash thread *java-threads*)))
     (cond
       ((null lisp-thread) nil)
@@ -827,6 +860,35 @@ and its implementation."
          (handler-case
              (bordeaux-threads:join-thread lisp-thread :timeout timeout-sec)
            (error () nil)))))))
+
+;;; Fiber-based start0 for virtual threads (when SBCL has fiber support).
+;;; Creates a fiber instead of an OS thread for BaseVirtualThread instances.
+#+sb-fiber
+(defmethod |start0()| :around ((thread |java/lang/BaseVirtualThread|))
+  "Start a virtual thread as a fiber on the fiber scheduler."
+  (let ((fiber (sb-thread:make-fiber
+                (lambda ()
+                  (let ((*scoped-value-cache* nil))
+                    (unwind-protect
+                         (progn
+                           ;; Register fiber-to-Java mapping
+                           (setf (gethash (sb-thread:current-fiber) *fiber-to-java-threads*) thread)
+                           ;; Call the Thread's run() method
+                           (handler-case
+                               (|run()| thread)
+                             (error (e)
+                               (format *error-output* "~&VThread ~A terminated with error: ~A~%" thread e))))
+                      ;; Cleanup mappings
+                      (remhash (sb-thread:current-fiber) *fiber-to-java-threads*)
+                      (remhash thread *java-to-fibers*)
+                      (remhash thread *fiber-park-flags*))))
+                :name (format nil "Java-VThread-~A"
+                              (if (slot-boundp thread '|name|)
+                                  (slot-value thread '|name|) "?")))))
+    ;; Store the fiber mapping
+    (setf (gethash thread *java-to-fibers*) fiber)
+    ;; Submit to the fiber scheduler
+    (submit-virtual-thread-fiber fiber)))
 
 (defun |sun/misc/Unsafe.registerNatives()| ()
   ;; FIXME
@@ -1080,12 +1142,36 @@ and its implementation."
 (defmethod |park(ZJ)| ((unsafe |jdk/internal/misc/Unsafe|) is-absolute time)
   "Park the current thread. If time > 0, park with timeout."
   (declare (ignore unsafe is-absolute))
+  #+sb-fiber
+  (when (in-fiber-p)
+    (let ((fiber (sb-thread:current-fiber)))
+      ;; Check and consume permit
+      (when (gethash fiber *fiber-park-flags*)
+        (remhash fiber *fiber-park-flags*)
+        (return-from |park(ZJ)|))
+      ;; Park with predicate: wake when permit is set
+      (if (> time 0)
+          (sb-thread:fiber-park (lambda () (gethash fiber *fiber-park-flags*))
+                                :timeout (/ time 1000000000.0d0))
+          (sb-thread:fiber-park (lambda () (gethash fiber *fiber-park-flags*))))
+      ;; Consume permit after waking
+      (remhash fiber *fiber-park-flags*))
+    (return-from |park(ZJ)|))
+  ;; Platform thread fallback
   (when (> time 0)
     (sleep (/ time 1000000000.0d0))))
 
 (defmethod |unpark(Ljava/lang/Object;)| ((unsafe |jdk/internal/misc/Unsafe|) thread)
-  "Unpark a thread. Stub — Lisp threads don't support park/unpark natively."
-  (declare (ignore unsafe thread))
+  "Unpark a thread by granting a permit."
+  (declare (ignore unsafe))
+  #+sb-fiber
+  (let ((fiber (gethash thread *java-to-fibers*)))
+    (when fiber
+      ;; Set the permit flag — the fiber's park predicate will see this
+      (setf (gethash fiber *fiber-park-flags*) t)
+      (return-from |unpark(Ljava/lang/Object;)|)))
+  ;; Platform thread fallback — no-op (Lisp threads don't support park/unpark natively)
+  thread
   nil)
 
 ;;; JDK 9+ renamed Unsafe CAS and accessor methods.
@@ -2559,7 +2645,7 @@ user.variant
   (let* ((monitor (%get-monitor objref))
          (mutex (mutex monitor))
          (cv (condition-variable monitor))
-         (current-thread (bordeaux-threads:current-thread)))
+         (current-thread (current-thread-identity)))
     (bordeaux-threads:with-lock-held (mutex)
       (unless (eq (owner monitor) current-thread)
         (error (%lisp-condition (%make-throwable '|java/lang/IllegalMonitorStateException|))))
@@ -2829,8 +2915,10 @@ user.variant
 (defun |java/lang/Thread.sleep(J)| (milliseconds)
   "Sleep for the specified milliseconds, checking for interruption."
   ;; Get current thread
-  (let* ((current-lisp-thread (bordeaux-threads:current-thread))
-         (current-java-thread (gethash current-lisp-thread *lisp-to-java-threads*)))
+  (let* ((current-java-thread (or #+sb-fiber
+                                  (when (in-fiber-p)
+                                    (gethash (current-thread-identity) *fiber-to-java-threads*))
+                                  (gethash (bordeaux-threads:current-thread) *lisp-to-java-threads*))))
     ;; Check if interrupted before sleeping
     (when (and current-java-thread
                (gethash current-java-thread *thread-interrupted*))
@@ -2839,7 +2927,12 @@ user.variant
       (let ((exc (%make-java-instance "java/lang/InterruptedException")))
         (|<init>()| exc)
         (error (%lisp-condition exc))))
-    ;; Sleep (this can be interrupted by interrupt0)
+    ;; Sleep — use fiber-sleep when in fiber context
+    #+sb-fiber
+    (if (in-fiber-p)
+        (sb-thread:fiber-sleep (/ milliseconds 1000.0))
+        (sleep (/ milliseconds 1000.0)))
+    #-sb-fiber
     (sleep (/ milliseconds 1000.0))
     ;; Check if interrupted after sleeping
     (when (and current-java-thread
@@ -2880,7 +2973,10 @@ user.variant
               hash)))))
 
 (defun |java/lang/Thread.yield()| ()
-  ;; FIXME
+  #+sb-fiber
+  (when (in-fiber-p)
+    (sb-thread:fiber-yield)
+    (return-from |java/lang/Thread.yield()|))
   nil)
 
 (defmethod |start0()| ((thread |java/lang/Thread|))
@@ -2900,9 +2996,15 @@ user.variant
     (setf (gethash thread *java-threads*) lisp-thread)))
 
 (defmethod |interrupt0()| ((thread |java/lang/Thread|))
-  "Interrupt the thread by signaling the underlying Lisp thread."
+  "Interrupt the thread by signaling the underlying Lisp thread (or fiber)."
   ;; The interrupted status is maintained in the *thread-interrupted* hash table.
   (setf (gethash thread *thread-interrupted*) t)
+  ;; If the thread has a fiber, set its park permit to wake it.
+  #+sb-fiber
+  (let ((fiber (gethash thread *java-to-fibers*)))
+    (when fiber
+      (setf (gethash fiber *fiber-park-flags*) t)
+      (return-from |interrupt0()|)))
   ;; If the thread has an associated Lisp thread, interrupt it.
   (let ((lisp-thread (gethash thread *java-threads*)))
     (when lisp-thread
@@ -2920,7 +3022,7 @@ user.variant
   (let* ((monitor (%get-monitor objref))
          (mutex (mutex monitor))
          (cv (condition-variable monitor))
-         (current-thread (bordeaux-threads:current-thread)))
+         (current-thread (current-thread-identity)))
     (bordeaux-threads:with-lock-held (mutex)
       (unless (eq (owner monitor) current-thread)
         (error (%lisp-condition (%make-throwable '|java/lang/IllegalMonitorStateException|))))
@@ -3318,7 +3420,7 @@ user.variant
 
 (defun |java/lang/Thread.holdsLock(Ljava/lang/Object;)| (objref)
   (let ((monitor (%get-monitor objref))
-        (current-thread (bordeaux-threads:current-thread)))
+        (current-thread (current-thread-identity)))
     (if (eq (owner monitor) current-thread)
         1 0)))
 

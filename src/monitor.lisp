@@ -62,27 +62,29 @@ via the weak hash table."
               monitor)))))
 
 (defun monitor-enter (object)
-  "Enter the monitor for OBJECT, acquiring its mutex."
+  "Enter the monitor for OBJECT, acquiring its mutex.
+SBCL's grab-mutex and condition-wait auto-dispatch to fiber-aware paths
+when running in a fiber, so no separate fiber code path is needed."
   (when object
     (let* ((monitor (%get-monitor object))
            (mutex (mutex monitor))
-           (current-thread (bordeaux-threads:current-thread)))
-    (bordeaux-threads:with-lock-held (mutex)
-      (cond
-        ((eq (owner monitor) current-thread)
-         (incf (recursion-count monitor)))
-        (t
-         (loop while (owner monitor)
-               do (bordeaux-threads:condition-wait (condition-variable monitor) mutex))
-         (setf (owner monitor) current-thread
-               (recursion-count monitor) 1)))))))
+           (current-thread (current-thread-identity)))
+      (bordeaux-threads:with-lock-held (mutex)
+        (cond
+          ((eq (owner monitor) current-thread)
+           (incf (recursion-count monitor)))
+          (t
+           (loop while (owner monitor)
+                 do (bordeaux-threads:condition-wait (condition-variable monitor) mutex))
+           (setf (owner monitor) current-thread
+                 (recursion-count monitor) 1)))))))
 
 (defun monitor-exit (object)
   "Exit the monitor for OBJECT, releasing its mutex."
   (when object
     (let* ((monitor (%get-monitor object))
            (mutex (mutex monitor))
-           (current-thread (bordeaux-threads:current-thread)))
+           (current-thread (current-thread-identity)))
       (bordeaux-threads:with-lock-held (mutex)
         (unless (eq (owner monitor) current-thread)
           (error "Current thread does not own the monitor"))

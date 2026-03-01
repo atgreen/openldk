@@ -65,7 +65,7 @@
   (values))
 
 (defun %dump-all-thread-stacks (&key (stream *error-output*))
-  "Dump backtraces for all threads to STREAM. Called on SIGQUIT."
+  "Dump backtraces for all threads and fibers to STREAM. Called on SIGQUIT."
   (format stream "~&~80,,,'-@<~>~%")
   (format stream "Thread dump at ~A~%" (get-universal-time))
   (format stream "~80,,,'-@<~>~%")
@@ -87,11 +87,44 @@
                (sb-debug:print-backtrace :stream stream :print-thread nil)))))
         ;; Give the thread a moment to print
         (sleep 0.05))))
+  ;; Dump fibers when sb-fiber is available
+  #+sb-fiber
+  (%dump-all-fiber-stacks :stream stream)
   (format stream "~&~80,,,'-@<~>~%")
   (format stream "End of thread dump~%")
   (format stream "~80,,,'-@<~>~%")
   (force-output stream)
   (values))
+
+#+sb-fiber
+(defun %dump-all-fiber-stacks (&key (stream *error-output*))
+  "Dump state and backtraces for all fibers to STREAM."
+  (let ((fibers (sb-thread:list-all-fibers)))
+    (when fibers
+      (format stream "~&~%~80,,,'=@<~>~%")
+      (format stream "Fiber dump (~D fiber~:P)~%" (length fibers))
+      (format stream "~80,,,'=@<~>~%")
+      (dolist (fiber fibers)
+        (let* ((state (sb-thread:fiber-state fiber))
+               (name (sb-thread:fiber-name fiber))
+               (java-thread (gethash fiber *fiber-to-java-threads*)))
+          (format stream "~&~%=== Fiber: ~A  state: ~A ===~%"
+                  (or name fiber) state)
+          (when java-thread
+            (format stream "  Java thread: ~A~%" java-thread))
+          (case state
+            ((:suspended :created)
+             (ignore-errors
+               (let ((bt (sb-thread:fiber-get-backtrace fiber)))
+                 (if bt
+                     (loop for frame in bt
+                           for i from 0
+                           do (format stream "  ~D: ~S~%" i frame))
+                     (format stream "  <no backtrace available>~%")))))
+            (:running
+             (format stream "  <running on carrier — see thread dump above>~%"))
+            (:dead
+             (format stream "  <dead>~%"))))))))
 
 (defun install-sigquit-handler ()
   "Install a SIGQUIT (signal 3) handler that dumps all thread stacks.
@@ -2308,23 +2341,33 @@ get the same unified var-numbers."
                     (deadline (+ (get-internal-real-time)
                                  (* 30 internal-time-units-per-second))))
                 (loop
-                  (let ((java-threads
+                  (let ((platform-threads
                           (loop for lisp-thread being the hash-keys of *lisp-to-java-threads*
                                   using (hash-value java-thread)
                                 when (and (not (eq lisp-thread current-lisp-thread))
                                           (not (%thread-daemon-p java-thread))
                                           (bordeaux-threads:thread-alive-p lisp-thread))
-                                  collect java-thread)))
-                    (cond
-                      ((null java-threads)
-                       (sleep 0.1)
-                       (finish-output)
-                       (return))
-                      ((> (get-internal-real-time) deadline)
-                       (finish-output)
-                       (return))
-                      (t
-                       (sleep 0.1)))))))
+                                  collect java-thread))
+                        #+sb-fiber
+                        (fiber-threads
+                          (loop for java-thread being the hash-values of *fiber-to-java-threads*
+                                when (and (not (%thread-daemon-p java-thread))
+                                          (let ((fiber (gethash java-thread *java-to-fibers*)))
+                                            (and fiber (sb-thread:fiber-alive-p fiber))))
+                                  collect java-thread))
+                        #-sb-fiber
+                        (fiber-threads nil))
+                    (let ((java-threads (append platform-threads fiber-threads)))
+                      (cond
+                        ((null java-threads)
+                         (sleep 0.1)
+                         (finish-output)
+                         (return))
+                        ((> (get-internal-real-time) deadline)
+                         (finish-output)
+                         (return))
+                        (t
+                         (sleep 0.1))))))))
             (error "Main method not found in class ~A." (name class)))))))
 
 (defun %print-usage ()
