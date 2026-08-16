@@ -1270,10 +1270,41 @@ The recipe is the second element (first bootstrap arg after the MethodType)."
     (when (typep recipe-node 'ir-string-literal)
       (slot-value recipe-node 'value))))
 
-(defun %generate-string-concat-code (recipe dynamic-arg-codes)
+(defun %descriptor-param-type-chars (descriptor)
+  "Return the top-level parameter type chars of a JVM method DESCRIPTOR, in order:
+one of Z B S C I J F D for primitives, #\\L for object refs, #\\[ for arrays."
+  (when descriptor
+    (let ((chars nil)
+          (i (1+ (position #\( descriptor)))
+          (end (position #\) descriptor)))
+      (loop while (< i end)
+            do (let ((ch (char descriptor i)))
+                 (cond
+                   ((find ch "ZBSCIJFD") (push ch chars) (incf i))
+                   ((char= ch #\L) (push #\L chars) (setf i (1+ (position #\; descriptor :start i))))
+                   ((char= ch #\[) (push #\[ chars)
+                    (loop while (char= (char descriptor i) #\[) do (incf i))
+                    (if (char= (char descriptor i) #\L)
+                        (setf i (1+ (position #\; descriptor :start i)))
+                        (incf i)))
+                   (t (incf i)))))
+      (nreverse chars))))
+
+(defun %string-concat-arg-form (code type-char)
+  "Wrap a dynamic string-concat argument CODE so it renders per its Java static
+TYPE-CHAR: boolean -> true/false, char -> the character; otherwise via
+%to-java-string (which handles numbers, strings, null, and Object.toString)."
+  (case type-char
+    (#\Z `(if (or (null ,code) (eql ,code 0)) "false" "true"))
+    (#\C `(let ((c ,code)) (string (if (characterp c) c (code-char c)))))
+    (t `(%to-java-string ,code))))
+
+(defun %generate-string-concat-code (recipe dynamic-arg-codes &optional type-chars)
   "Generate Lisp code for StringConcatFactory.makeConcatWithConstants.
 RECIPE is the template string with \\x01 placeholders for dynamic args.
-DYNAMIC-ARG-CODES is a list of codegen'd expressions for the dynamic arguments."
+DYNAMIC-ARG-CODES is a list of codegen'd expressions for the dynamic arguments.
+TYPE-CHARS, if given, are the call-site parameter type chars (aligned with
+DYNAMIC-ARG-CODES) used to render boolean/char args the Java way."
   (let ((parts nil)
         (arg-idx 0)
         (start 0))
@@ -1284,7 +1315,11 @@ DYNAMIC-ARG-CODES is a list of codegen'd expressions for the dynamic arguments."
                 (when (< start i)
                   (push (subseq recipe start i) parts))
                 (when (< arg-idx (length dynamic-arg-codes))
-                  (push (nth arg-idx dynamic-arg-codes) parts))
+                  ;; Pre-format each dynamic arg per its call-site static type so
+                  ;; boolean prints true/false and char prints the character.
+                  (push (%string-concat-arg-form (nth arg-idx dynamic-arg-codes)
+                                                 (nth arg-idx type-chars))
+                        parts))
                 (incf arg-idx)
                 (setf start (1+ i)))
                ((char= ch (code-char 2))
@@ -1294,11 +1329,9 @@ DYNAMIC-ARG-CODES is a list of codegen'd expressions for the dynamic arguments."
     (when (< start (length recipe))
       (push (subseq recipe start (length recipe)) parts))
     (setf parts (nreverse parts))
-    `(jstring (format nil "~{~A~}" (list ,@(mapcar (lambda (part)
-                                                     (if (stringp part)
-                                                         part
-                                                         `(%to-java-string ,part)))
-                                                   parts))))))
+    ;; PARTS holds string literals and pre-wrapped code forms (each yielding a
+    ;; string at runtime), so no further per-part conversion is needed.
+    `(jstring (format nil "~{~A~}" (list ,@parts)))))
 
 (defun %to-java-string (val)
   "Convert a value to its Java string representation for StringConcatFactory."
@@ -1446,7 +1479,7 @@ boolean prints true/false and char prints the character rather than an int."
       0))
 
 (defmethod codegen ((insn ir-call-dynamic-method) context)
-  (with-slots (method-name args dynamic-args bootstrap-method-name address interface-type-name) insn
+  (with-slots (method-name args dynamic-args bootstrap-method-name address interface-type-name call-site-descriptor) insn
     (let ((pkg (context-package context)))
       (cond
         ;; Fast path for ObjectMethods.bootstrap (record toString/hashCode/equals).
@@ -1495,18 +1528,24 @@ boolean prints true/false and char prints the character rather than an int."
                         :expression-type :INTEGER))
         ;; Fast path for StringConcatFactory (JDK 9+ string concatenation)
         ((search "StringConcatFactory.makeConcatWithConstants" bootstrap-method-name)
-         (let ((recipe (%extract-string-concat-recipe args)))
+         (let ((recipe (%extract-string-concat-recipe args))
+               (type-chars (%descriptor-param-type-chars call-site-descriptor))
+               (dyn-codes (mapcar (lambda (a) (code (codegen a context))) dynamic-args)))
            (if recipe
-               (let ((dyn-codes (mapcar (lambda (a) (code (codegen a context))) dynamic-args)))
-                 (make-instance '<expression>
-                                :insn insn
-                                :code (%generate-string-concat-code recipe dyn-codes)
-                                :expression-type :REFERENCE))
+               (make-instance '<expression>
+                              :insn insn
+                              :code (%generate-string-concat-code recipe dyn-codes type-chars)
+                              :expression-type :REFERENCE)
+               ;; No recipe: just concatenate the dynamic args in order (still
+               ;; honouring boolean/char static types).
                (make-instance '<expression>
                               :insn insn
                               :code `(jstring (format nil "~{~A~}"
-                                               (mapcar #'%to-java-string
-                                                       (list ,@(mapcar (lambda (a) (code (codegen a context))) dynamic-args)))))
+                                              (list ,@(loop for c in dyn-codes
+                                                            for tc in (append type-chars
+                                                                              (make-list (max 0 (- (length dyn-codes)
+                                                                                                   (length type-chars)))))
+                                                            collect (%string-concat-arg-form c tc)))))
                               :expression-type :REFERENCE))))
         ;; Fast path for LambdaMetafactory
         ((search "LambdaMetafactory.metafactory" bootstrap-method-name)

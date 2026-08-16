@@ -444,7 +444,8 @@
    (args)
    (dynamic-args)
    (bootstrap-method-name)
-   (interface-type-name)))
+   (interface-type-name)
+   (call-site-descriptor :std nil)))
 
 (defclass/std ir-call-static-method (ir-call-virtual-method)
   ((class :with)))

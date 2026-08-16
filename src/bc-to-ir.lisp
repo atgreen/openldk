@@ -1561,6 +1561,7 @@
                                          :method-name method-name
                                          :return-type return-type
                                          :interface-type-name interface-type-name
+                                         :call-site-descriptor descriptor
                                          :dynamic-args dynamic-args
                                          :args (cons
                                                 method-type
