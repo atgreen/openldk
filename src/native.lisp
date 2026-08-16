@@ -2962,6 +2962,25 @@ user.variant
       (let ((lclass (get-ldk-class-for-java-class class)))
         (if lclass (access-flags lclass) 0))))
 
+(defun %java-simple-name (class)
+  "Compute Class.getSimpleName() for CLASS: strip the package and any enclosing
+class ($-separated) and compiler-added local/anonymous digits; arrays get []
+suffixes. Java's own getSimpleName relies on getEnclosingClass(), which OpenLDK
+does not reconstruct, so we compute it from the name directly."
+  (if (eq (|isArray()| class) 1)
+      (concatenate 'string (%java-simple-name (|getComponentType()| class)) "[]")
+      (let* ((n (lstring (slot-value class '|name|)))
+             (dot (position #\. n :from-end t))
+             (n (if dot (subseq n (1+ dot)) n))
+             (dollar (position #\$ n :from-end t))
+             (n (if dollar (subseq n (1+ dollar)) n)))
+        (string-left-trim "0123456789" n))))
+
+;; Class.getSimpleName() is bytecoded and depends on getEnclosingClass(), which
+;; we don't reconstruct (so it would return e.g. "Outer$Inner"). Override it.
+(setf (gethash "java/lang/Class.getSimpleName()Ljava/lang/String;" *native-overrides*)
+      (lambda (class) (jstring (%java-simple-name class))))
+
 (defmethod |getSuperclass()| ((class |java/lang/Class|))
   (let ((lclass (get-ldk-class-for-java-class class)))
     (when (and lclass (super lclass))
