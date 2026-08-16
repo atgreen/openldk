@@ -1507,6 +1507,8 @@ get the same unified var-numbers."
             ;; Use plain Lisp errors (not Java exceptions) to avoid triggering
             ;; further class loading during error handling.
             (format *error-output* "~&;; JIT-ERROR in ~A: ~A~%" method-key c)
+            (when *debug-codegen*
+              (sb-debug:print-backtrace :stream *error-output* :count 60))
             (force-output *error-output*)
             (let* ((ldr (slot-value class 'ldk-loader))
                    (pkg (if ldr (loader-package ldr) (find-package :openldk)))

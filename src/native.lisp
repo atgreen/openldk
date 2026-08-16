@@ -3584,14 +3584,23 @@ does not reconstruct, so we compute it from the name directly."
 
 (defmethod |start0()| ((thread |java/lang/Thread|))
   "Start a new Lisp thread that executes the Thread's run() method."
-  (let ((lisp-thread
+  (let* ((debug-codegen *debug-codegen*)
+         (lisp-thread
           (bordeaux-threads:make-thread
            (lambda ()
              ;; Register this Lisp thread with the Java Thread
              (setf (gethash (bordeaux-threads:current-thread) *lisp-to-java-threads*) thread)
              ;; Call the Thread's run() method
              (handler-case
-                 (|run()| thread)
+                 (handler-bind
+                     ((error
+                        (lambda (e)
+                          (when debug-codegen
+                            (format *error-output*
+                                    "~&Error signalled in ~A: ~A~%" thread e)
+                            (sb-debug:print-backtrace
+                             :stream *error-output* :count 60)))))
+                   (|run()| thread))
                (error (e)
                  (format *error-output* "~&Thread ~A terminated with error: ~A~%" thread e))))
            :name (format nil "Java-Thread-~A" (slot-value thread '|name|)))))
