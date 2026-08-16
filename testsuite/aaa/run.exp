@@ -52,7 +52,7 @@ proc openldk-dg-test { prog do_what extra_tool_flags } {
     verbose "extra_tool_flags $extra_tool_flags" 2
 
     set JAVA_HOME [getenv "JAVA_HOME"]
-    set status [local_exec "$JAVA_HOME/../bin/javac $prog" "" "" $timeout]
+    set status [local_exec "[openldk_javac] $prog" "" "" $timeout]
     set classname [string map {".java" ""} $prog]
 
     set testargs "1 2 3 4 5"

@@ -1,8 +1,13 @@
-JAVA_HOME ?= /home/linuxbrew/.linuxbrew/opt/openjdk@21/libexec
+JAVA_HOME ?= /usr/lib/jvm/java-25-openjdk
+
+# Compiler used to build the testsuite's Java sources. Decoupled from JAVA_HOME
+# because a headless JDK ships no javac; a newer javac targeting release 25
+# produces class-file version 69, which OpenLDK accepts.
+JAVAC ?= javac --release 25
 
 XDG_CACHE_HOME ?= $(CURDIR)/.cache
 
-export JAVA_HOME XDG_CACHE_HOME
+export JAVA_HOME JAVAC XDG_CACHE_HOME
 
 KAWA_VERSION = 3.1.1
 KAWA_JAR = lib/kawa-$(KAWA_VERSION).jar
@@ -34,7 +39,7 @@ testsuite/mauve/gnu/testlet/config.class: testsuite/mauve/gnu/testlet/config.jav
 	    -e 's|@BUILDDIR@|$(BUILDDIR)|g' \
 	    -e 's|@TMPDIR@|/tmp)|g' \
 	    < testsuite/mauve/gnu/testlet/config.java.in > testsuite/mauve/gnu/testlet/config.java
-	(cd testsuite/mauve; javac gnu/testlet/config.java)
+	(cd testsuite/mauve; $(JAVAC) gnu/testlet/config.java)
 
 clean:
 	-rm -rf openldk .*~ *~

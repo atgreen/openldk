@@ -1,5 +1,14 @@
 
 
+# Compiler command for building testsuite sources. Decoupled from JAVA_HOME (a
+# headless JDK has no javac); honours the JAVAC environment variable, defaulting
+# to a javac targeting release 25 (class-file version 69, which OpenLDK accepts).
+proc openldk_javac {} {
+    set jc [getenv "JAVAC"]
+    if {$jc == ""} { set jc "javac --release 25" }
+    return $jc
+}
+
 proc is_expected_failure { classname } {
 
     global testname
