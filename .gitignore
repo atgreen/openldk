@@ -25,3 +25,14 @@ log.txt
 build_output.txt
 out.txt
 data/
+
+# Test-run artifacts generated at the testsuite root by File/IO/serialization
+# tests (the gcj/*.out and RAFTest.out files are tracked expected-output fixtures
+# and are intentionally NOT ignored).
+/testsuite/Dates.out
+/testsuite/FISTest.out
+/testsuite/FOSTest.out
+/testsuite/FTest.out
+/testsuite/LargeFile.tmp
+/testsuite/test.ser
+/testsuite/raftmpfile
