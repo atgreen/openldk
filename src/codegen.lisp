@@ -40,6 +40,16 @@
 
 (in-package :openldk)
 
+(declaim (notinline %java-slot-value (setf %java-slot-value)))
+
+(defun %java-slot-value (object slot-name)
+  "Read a dynamically defined Java field without baking in an SBCL global slot accessor."
+  (slot-value object slot-name))
+
+(defun (setf %java-slot-value) (value object slot-name)
+  "Write a dynamically defined Java field without baking in an SBCL global slot accessor."
+  (setf (slot-value object slot-name) value))
+
 (defclass/std <expression> ()
   ((insn
     code
@@ -1672,18 +1682,16 @@ boolean prints true/false and char prints the character rather than an int."
 
 (defmethod codegen ((insn ir-member) context)
   (with-slots (objref member-name) insn
-    ;; Field names use context package since they're accessed on objects
-    (let ((pkg (context-package context)))
-      (make-instance '<expression>
-                     :insn insn
-                     :code `(slot-value
-                             (let ((objref ,(code (codegen objref context))))
-                               (when (null objref)
-                                 (error (%lisp-condition
-                                         (%make-throwable '|java/lang/NullPointerException|))))
-                               objref)
-                             ;; Field names stay in :openldk for CLOS slot inheritance
-                             (quote ,(intern (mangle-field-name member-name) :openldk)))))))
+    (make-instance '<expression>
+                   :insn insn
+                   :code `(%java-slot-value
+                           (let ((objref ,(code (codegen objref context))))
+                             (when (null objref)
+                               (error (%lisp-condition
+                                       (%make-throwable '|java/lang/NullPointerException|))))
+                             objref)
+                           ;; Field names stay in :openldk for CLOS slot inheritance
+                           (quote ,(intern (mangle-field-name member-name) :openldk))))))
 
 (defmethod codegen ((insn ir-static-member) context)
   (declare (ignore context))
@@ -1697,7 +1705,7 @@ boolean prints true/false and char prints the character rather than an int."
              (sym (intern static-sym-name pkg)))
         (make-instance '<expression>
                        :insn insn
-                       :code `(slot-value
+                       :code `(%java-slot-value
                                ,sym
                                ;; Field names stay in :openldk for CLOS slot inheritance
                                (quote ,(intern (mangle-field-name member-name) :openldk))))))))
