@@ -65,12 +65,16 @@
 (define-math-functions ("abs(F)" (a))
   "Returns the absolute value of a float."
   (float-features:bits-single-float
-   (logand #x7FFFFFFF (float-features:single-float-bits a))))
+   (logand #x7FFFFFFF
+           (float-features:single-float-bits
+            (coerce a 'single-float)))))
 
 (define-math-functions ("abs(D)" (a))
   "Returns the absolute value of a double."
   (float-features:bits-double-float
-   (logand #x7FFFFFFFFFFFFFFF (float-features:double-float-bits a))))
+   (logand #x7FFFFFFFFFFFFFFF
+           (float-features:double-float-bits
+            (coerce a 'double-float)))))
 
 (define-math-functions ("acos(D)" (a))
   "Returns the arc cosine of a value, in radians."
@@ -96,7 +100,7 @@
 
 (define-math-functions ("ceil(D)" (a))
   "Returns the smallest integer greater than or equal to the given value."
-  (ceiling a))
+  (nth-value 0 (fceiling (coerce a 'double-float))))
 
 (define-math-functions ("cos(D)" (a))
   "Returns the cosine of an angle in radians."
@@ -130,7 +134,7 @@
 
 (define-math-functions ("floor(D)" (a))
   "Returns the largest integer less than or equal to the given value."
-  (floor a))
+  (nth-value 0 (ffloor (coerce a 'double-float))))
 
 (define-math-functions ("hypot(DD)" (a b))
   "Returns sqrt(a^2 + b^2) without intermediate overflow or underflow."
@@ -281,4 +285,3 @@
 (define-math-functions ("ulp(D)" (a))
   "Returns the unit in the last place (ULP) of a double."
   (float-epsilon a))
-

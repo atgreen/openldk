@@ -506,7 +506,7 @@ and its implementation."
     (%get-java-class-by-fq-name name)))
 
 (defmethod |java/lang/Float.floatToRawIntBits(F)| (float)
-  (float-features:single-float-bits float))
+  (float-features:single-float-bits (coerce float 'single-float)))
 
 (defmethod |java/lang/Double.doubleToRawLongBits(D)| (double)
   (float-features:double-float-bits (coerce double 'double-float)))

@@ -702,31 +702,36 @@
 (defmethod codegen ((insn ir-i2f) context)
   (make-instance '<expression>
                  :insn insn
-                 :code (list 'float (code (codegen (value insn) context)))
+                 :code `(coerce ,(code (codegen (value insn) context))
+                                'single-float)
                  :expression-type :FLOAT))
 
 (defmethod codegen ((insn ir-i2d) context)
   (make-instance '<expression>
                  :insn insn
-                 :code `(float ,(code (codegen (value insn) context)))
+                 :code `(coerce ,(code (codegen (value insn) context))
+                                'double-float)
                  :expression-type :DOUBLE))
 
 (defmethod codegen ((insn ir-l2d) context)
   (make-instance '<expression>
                  :insn insn
-                 :code `(float ,(code (codegen (value insn) context)))
+                 :code `(coerce ,(code (codegen (value insn) context))
+                                'double-float)
                  :expression-type :DOUBLE))
 
 (defmethod codegen ((insn ir-f2d) context)
   (make-instance '<expression>
                  :insn insn
-                 :code (code (codegen (value insn) context))
+                 :code `(coerce ,(code (codegen (value insn) context))
+                                'double-float)
                  :expression-type :DOUBLE))
 
 (defmethod codegen ((insn ir-d2f) context)
   (make-instance '<expression>
                  :insn insn
-                 :code (code (codegen (value insn) context))
+                 :code `(coerce ,(code (codegen (value insn) context))
+                                'single-float)
                  :expression-type :FLOAT))
 
 (defmethod codegen ((insn ir-d2i) context)
@@ -760,7 +765,8 @@
 (defmethod codegen ((insn ir-l2f) context)
   (make-instance '<expression>
                  :insn insn
-                 :code (list 'float (code (codegen (value insn) context)))
+                 :code `(coerce ,(code (codegen (value insn) context))
+                                'single-float)
                  :expression-type :FLOAT))
 
 (defmethod codegen ((insn ir-lneg) context)
