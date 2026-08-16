@@ -1850,11 +1850,6 @@ Used to consult block-local substitutions in addition to global ones.")
             ;; Emit code for successors if not stopping
             (unless stop-emitting-blocks?
               (when (fall-through-address basic-block)
-#|
-                (when (try-catch basic-block)
-                  (push (list) (emitted-block-scopes *context*))
-                (setf new-scope t))
-|#
                 (let* ((ft-block (fall-through-address basic-block))
                        (ft-tag (intern (format nil "branch-target-~A" (address (car (code ft-block)))))))
                   (setf lisp-code
@@ -1866,11 +1861,6 @@ Used to consult block-local substitutions in addition to global ones.")
                                    ;; generate a GO to the fall-through block's tag in an enclosing TAGBODY.
                                    (or (codegen-block ft-block (if (try-catch basic-block) basic-block dominator-block))
                                        (list (list 'go ft-tag))))))))
-#|
-              (when (and (not new-scope) (try-catch basic-block))
-                (push (list) (emitted-block-scopes *context*))
-                (setf new-scope t))
-|#
               (let ((successor-list (sort (fset:convert 'list (successors basic-block))
                                           (lambda (a b) (< (address a) (address b))))))
                 (dolist (successor successor-list)

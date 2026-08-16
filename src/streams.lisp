@@ -74,21 +74,6 @@
                 (+ start bytes-read))))))
     (incf *call-nesting-level* -1)))
 
-#|
-(defmethod trivial-gray-streams:stream-close ((stream <java-input-stream>))
-  "Close the underlying Java InputStream and then call the next method."
-  (unwind-protect
-      (progn
-        (when *debug-trace*
-          (format t "~&~V@A trace: <java-input-stream> stream-close(~A)"
-                  (incf *call-nesting-level* 1) "*" stream))
-        ;; Close the underlying Java stream
-        (|close(Ljava/io/InputStream;)| (java-stream stream))
-        ;; Call-next-method typically sets the stream's state to closed.
-        (call-next-method))
-    (incf *call-nesting-level* -1)))
-|#
-
 (defmethod trivial-gray-streams:stream-listen ((stream <java-input-stream>))
   "Return T if at least one byte is available immediately, else NIL."
   (unwind-protect
