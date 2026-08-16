@@ -124,7 +124,8 @@
 
 (defmethod |openStream()| ((url |java/net/URL|))
   "Open an InputStream for the URL."
-  (let ((url-string (lstring (|toString()| url))))
+  (let ((url-string (or (gethash url *native-url-strings*)
+                        (lstring (|toString()| url)))))
     (cond
       ;; Handle jar: URLs
       ((starts-with? "jar:" url-string)
@@ -147,3 +148,9 @@
              (make-instance '<resource-input-stream> :lisp-stream stream)))))
       ;; Fall through to Java implementation for other protocols
       (t nil))))
+
+(defmethod |toString()| :around ((url |java/net/URL|))
+  "Return the original spelling of an OpenLDK-constructed resource URL."
+  (if-let ((url-string (gethash url *native-url-strings*)))
+    (jstring url-string)
+    (call-next-method)))

@@ -3710,10 +3710,16 @@ user.variant
       (declare (ignore c))
       nil)))
 
+(defvar *native-url-strings* (make-hash-table :test #'eq)
+  "URL strings attached to resource URLs constructed by OpenLDK.")
+
 (defun %make-url-from-string (url-string)
   "Create a java.net.URL object from URL-STRING."
   (let ((url (%make-java-instance "java/net/URL")))
-    (|<init>(Ljava/lang/String;)| url (jstring url-string))
+    ;; Resource URLs are consumed by the native URL.openStream path.  Avoid
+    ;; relying on the overloaded URL constructors, whose invokespecial owner
+    ;; cannot be recovered from a direct Lisp call.
+    (setf (gethash url *native-url-strings*) url-string)
     url))
 
 (defmethod |getBootstrapResource(Ljava/lang/String;)| ((loader |java/lang/ClassLoader|) name)
