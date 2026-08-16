@@ -91,7 +91,20 @@
                :trivial-gray-streams :cl-murmurhash)
   :build-operation "program-op"
   :build-pathname "openldk"
-  :entry-point "openldk:make-image")
+  :entry-point "openldk:make-image"
+  :in-order-to ((test-op (test-op "openldk/tests"))))
+
+;; Unit tests for OpenLDK's pure helpers (FiveAM). Run with
+;; (asdf:test-system :openldk). Kept in a secondary system so the main runtime
+;; has no test-time dependencies.
+(defsystem "openldk/tests"
+  :description "Unit tests for OpenLDK."
+  :depends-on ("openldk" "fiveam")
+  :pathname "test"
+  :components ((:file "tests"))
+  :perform (test-op (o c)
+             (unless (uiop:symbol-call :fiveam '#:run! :openldk-tests)
+               (error "OpenLDK unit tests failed."))))
 
 #+sb-core-compression
 (defmethod asdf:perform ((o asdf:image-op) (c asdf:system))
