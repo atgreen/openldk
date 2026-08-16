@@ -72,14 +72,32 @@
               (setf (slot-value s '|UNALIGNED_ACCESS|) 1)
               (setf (slot-value s '|DATA_CACHE_LINE_FLUSH_SIZE|) 0))))))
 
-;; In Java, a method call on a NULL object results in a
-;; NullPointerException.  CLOS makes it easy to implement this
-;; behaviour by providing our own CLOS no-applicable-method method.
+(defun %java-method-gf-p (gf)
+  "True if GF represents a Java method, so a missing applicable method should map
+to Java semantics rather than an ordinary Lisp error. Java method GFs either use
+the java-generic-function metaclass or are named with a JVM method descriptor
+\(the name contains parentheses), e.g. |toString()| or |wait(J)|. Note some Java
+method GFs are plain standard-generic-functions (created by a hand-written
+defmethod before the JIT would upgrade them), which is why the name check matters."
+  (or (typep gf 'java-generic-function)
+      (let ((name (ignore-errors (closer-mop:generic-function-name gf))))
+        (and (symbolp name)
+             (let ((s (symbol-name name)))
+               (and (find #\( s) (find #\) s)))))))
 
+;; In Java, a method call on a NULL object results in a NullPointerException.
+;; CLOS lets us implement this via no-applicable-method -- but ONLY for Java
+;; method GFs. A genuine no-applicable-method on an ordinary Lisp generic
+;; function is an OpenLDK (or dependency) bug and must surface as a normal Lisp
+;; error with its real backtrace, not be masked as a Java NPE / "internal error".
 (defmethod no-applicable-method ((gf generic-function) &rest args)
-  (if (null (car args))
-      (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|)))
-      (error "internal error: no applicable method for invocation of ~A with arguments ~S" gf args)))
+  (cond
+    ((not (%java-method-gf-p gf))
+     (error "no applicable method for ~S with arguments ~S" gf args))
+    ((null (car args))
+     (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|))))
+    (t
+     (error "internal error: no applicable method for invocation of ~A with arguments ~S" gf args))))
 
 (defun |java/lang/Object.registerNatives()| ()
   ())
