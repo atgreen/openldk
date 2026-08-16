@@ -907,8 +907,10 @@ and its implementation."
        nil)
       (t
        (let ((timeout-sec (/ millis 1000.0d0)))
+         ;; bordeaux-threads 0.9.x join-thread has no timeout; use SBCL's, which
+         ;; supports :timeout/:default (bt1 threads are sb-thread:thread objects).
          (handler-case
-             (bordeaux-threads:join-thread lisp-thread :timeout timeout-sec)
+             (sb-thread:join-thread lisp-thread :timeout timeout-sec :default nil)
            (error () nil)))))))
 
 ;;; Fiber-based start0 for virtual threads (when SBCL has fiber support).
@@ -1697,29 +1699,9 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
           (write-string (%java-class-to-type-descriptor (jaref param-types-array i)) s))
         (write-char #\) s))))
 
-(defun |jdk/internal/reflect/DirectConstructorHandleAccessor$NativeAccessor.newInstance0(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)| (ctor args)
-  "Reflectively invoke a constructor. Creates an instance and calls <init>."
-  (let* ((clazz (slot-value ctor '|clazz|))
-         (class-name (lstring (slot-value clazz '|name|)))
-         (bin-name (substitute #\/ #\. class-name))
-         (param-types (slot-value ctor '|parameterTypes|))
-         (descriptor (%build-init-descriptor param-types)))
-    ;; Ensure the class is loaded and initialized
-    (classload bin-name)
-    (%clinit (or (%get-ldk-class-by-bin-name bin-name)
-                 (error "Class not found after loading: ~A" bin-name)))
-    (let* ((instance (%make-java-instance bin-name))
-           (init-name (format nil "<init>~A" descriptor))
-           (pkg (class-package bin-name))
-           (init-sym (or (find-symbol init-name pkg)
-                         (find-symbol init-name :openldk))))
-      (unless (and init-sym (fboundp init-sym))
-        (error "Cannot find constructor ~A.~A" bin-name init-name))
-      (if (or (null args) (zerop (java-array-length args)))
-          (funcall (fdefinition init-sym) instance)
-          (apply (fdefinition init-sym) instance
-                 (coerce (slot-value args 'data) 'list)))
-      instance)))
+;; NOTE: DirectConstructorHandleAccessor$NativeAccessor.newInstance0 is defined
+;; below (delegating to NativeConstructorAccessorImpl.newInstance0); the earlier
+;; standalone copy that lived here was a duplicate and has been removed.
 
 ;;; PreviewFeatures.isPreviewEnabled — always false (we don't support --enable-preview).
 (defun |jdk/internal/misc/PreviewFeatures.isPreviewEnabled()| ()
