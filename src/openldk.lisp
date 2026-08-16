@@ -1906,6 +1906,11 @@ get the same unified var-numbers."
                               (setf (slot-value klass '|module|) *unnamed-module*))
                             klass))))
            (setf (java-class class) klass)
+           ;; JDK 25: Class.getModifiers(), isInterface() and isEnum() read the
+           ;; `modifiers` field directly (these are no longer native methods), so
+           ;; populate it from the class file's access flags.
+           (when (slot-exists-p klass '|modifiers|)
+             (setf (slot-value klass '|modifiers|) (access-flags class)))
            (setf (slot-value klass '|classLoader|) class-loader)
            ;; Store in loader's java-class hash tables
            (setf (gethash classname (slot-value ldk-loader 'java-classes-by-bin-name)) klass)
@@ -2078,9 +2083,12 @@ get the same unified var-numbers."
        (unless (directory (merge-pathnames "*.jmod" (concatenate 'string JAVA_HOME "/jmods/")))
          (format *error-output* "~%OpenLDK Error: No .jmod files found in $JAVA_HOME/jmods/~%")
          (uiop:quit 1)))
+      ;; Headless JDK builds ship no jmods/ directory; the runtime classes live
+      ;; in the jimage container at $JAVA_HOME/lib/modules instead.
+      ((uiop:file-exists-p (concatenate 'string JAVA_HOME "/lib/modules")))
       (t
-       (format *error-output* "~%OpenLDK Error: Cannot find $JAVA_HOME/jmods/~%")
-       (format *error-output* "  OpenLDK requires JDK 21. Set JAVA_HOME to your JDK 21 installation.~%")
+       (format *error-output* "~%OpenLDK Error: Cannot find $JAVA_HOME/jmods/ or $JAVA_HOME/lib/modules~%")
+       (format *error-output* "  OpenLDK requires a JDK (21+). Set JAVA_HOME to your JDK installation.~%")
        (uiop:quit 1)))))
 
 (defun %thread-daemon-p (thread)
@@ -2640,6 +2648,11 @@ get the same unified var-numbers."
           (let ((jclass (%make-java-instance "java/lang/Class"))
                 (lclass (make-instance '<class>)))
             (setf (slot-value jclass '|name|) (ijstring (car p)))
+            ;; JDK 25: java.lang.Class.isPrimitive() reads the boolean `primitive`
+            ;; field directly (it is no longer a native method), so synthetic
+            ;; primitive Class objects must have it set.
+            (when (slot-exists-p jclass '|primitive|)
+              (setf (slot-value jclass '|primitive|) 1))
             (setf (name lclass) (car p))
             (setf (java-class lclass) jclass)
             (setf (gethash (car p) *ldk-classes-by-fq-name*) lclass)
@@ -2751,6 +2764,11 @@ get the same unified var-numbers."
         ;; These must be loaded before anything triggers finalize-inheritance on
         ;; LambdaSupplier/LambdaPredicate/etc., which are defined via defclass/std
         ;; with these interfaces as superclasses.
+        ;; Use classload (not forName0) here: the defclass/std forms in
+        ;; native.lisp create forward-referenced-class placeholders for these
+        ;; interfaces, which makes forName0 believe they are already loaded and
+        ;; skip generating the real CLOS class. classload always emits it, so
+        ;; the Lambda* subclasses can finalize their inheritance.
         (dolist (c '("java/util/function/Supplier"
                      "java/util/function/Predicate"
                      "java/util/function/BiPredicate"
@@ -2759,7 +2777,9 @@ get the same unified var-numbers."
                      "java/util/function/BiConsumer"
                      "java/util/function/BiFunction"
                      "java/util/function/BinaryOperator"))
-          (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil))
+          (handler-case (classload c)
+            (condition (e)
+              (format t "~&; Warning preloading ~A (non-fatal): ~A~%" c e))))
 
         ;; Minimal pre-load: only ASM bytecode generation classes
         ;; MethodHandle/LambdaForm classes have complex lazy initialization via ClassSpecializer
@@ -2808,6 +2828,22 @@ get the same unified var-numbers."
            (finish-output *error-output*))
           (t
            (format *error-output* "~&Unhandled Java condition: ~A~%" c))))))
+  ;; Ensure the functional interfaces backing native.lisp's Lambda* classes are
+  ;; fully defined (not forward-referenced). This must run after the main init
+  ;; body above has finished setting up the class loaders; done here (rather than
+  ;; inside the handler-case) it reliably emits the CLOS classes so that the
+  ;; Lambda* subclasses can finalize their inheritance at runtime.
+  (dolist (c '("java/util/function/Supplier"
+               "java/util/function/Predicate"
+               "java/util/function/BiPredicate"
+               "java/util/function/Function"
+               "java/util/function/Consumer"
+               "java/util/function/BiConsumer"
+               "java/util/function/BiFunction"
+               "java/util/function/BinaryOperator"))
+    (handler-case (classload c)
+      (condition (e)
+        (format t "~&; Warning finalizing ~A (non-fatal): ~A~%" c e))))
   (setf *debug-load* nil)
   (setf *debug-compile* nil))
 

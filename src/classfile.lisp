@@ -83,10 +83,19 @@
   (assert (classload "java/lang/invoke/MethodHandles$Lookup"))
   (let* ((ref-kind (reference-kind cmh))
          (m (aref cp (reference-index cmh)))
+         ;; Field-kind handles (getField/getStatic/putField/putStatic) reference a
+         ;; Fieldref, whose name-and-type slot is name-and-type-descriptor-index;
+         ;; method-kind handles reference a Methodref (method-descriptor-index).
+         (nat-index (if (typep m 'constant-field-reference)
+                        (name-and-type-descriptor-index m)
+                        (method-descriptor-index m)))
          (refc (java-class (ir-class-class (emit (aref cp (class-index m)) cp))))
-         (name (jstring (emit-name (aref cp (method-descriptor-index m)) cp)))
-         (type (|java/lang/invoke/MethodType.fromMethodDescriptorString(Ljava/lang/String;Ljava/lang/ClassLoader;)|
-                (jstring (emit-type (aref cp (method-descriptor-index m)) cp)) nil))
+         (name (jstring (emit-name (aref cp nat-index) cp)))
+         ;; Only method-kind handles have a MethodType; a field descriptor (e.g. "I")
+         ;; is not a valid method descriptor, so skip it for field kinds (1-4).
+         (type (unless (member ref-kind '(1 2 3 4))
+                 (|java/lang/invoke/MethodType.fromMethodDescriptorString(Ljava/lang/String;Ljava/lang/ClassLoader;)|
+                  (jstring (emit-type (aref cp nat-index) cp)) nil)))
          ;; Select the appropriate Lookup method based on reference kind
          ;; See JVM spec: REF_getField=1, REF_getStatic=2, REF_putField=3, REF_putStatic=4,
          ;;               REF_invokeVirtual=5, REF_invokeStatic=6, REF_invokeSpecial=7,
@@ -108,7 +117,10 @@
                    :value (case ref-kind
                             ;; Field getters/setters take field type, not MethodType
                             ((1 2 3 4)
-                             (let ((field-type (java-class (ir-class-class (emit (aref cp (descriptor-index (aref cp (method-descriptor-index m)))) cp)))))
+                             ;; For field handles the name-and-type's type slot is a
+                             ;; field descriptor (e.g. "I" or "Ljava/lang/String;");
+                             ;; turn it directly into the field-type Class.
+                             (let ((field-type (%bin-type-name-to-class (emit-type (aref cp nat-index) cp))))
                                `(let ((lookup (|java/lang/invoke/MethodHandles.lookup()|)))
                                   (,lookup-method lookup ,refc ,name ,field-type))))
                             ;; findSpecial needs an extra parameter (caller class)
@@ -551,8 +563,8 @@ stream."
             (bitio:read-integer bitio :unsignedp nil :byte-endian :be) ;; magic bytes
             (let ((minor-version (read-u2))
                   (major-version (read-u2)))
-              (when (> major-version 65)
-                (error "Unsupported class file version ~A.~A (max supported: 65.0)"
+              (when (> major-version 69)
+                (error "Unsupported class file version ~A.~A (max supported: 69.0)"
                        major-version minor-version))
               (setf (slot-value class 'major-version) major-version)
               (setf (slot-value class 'minor-version) minor-version)

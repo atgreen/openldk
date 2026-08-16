@@ -497,9 +497,10 @@
                              `(let ((objref ,(code (codegen (objref insn) context))))
                                 (when objref
                                   (unless (and (typep objref 'java-array)
-                                               (|isAssignableFrom(Ljava/lang/Class;)|
-                                                (java-array-component-class objref)
-                                                (%bin-type-name-to-class ,(subseq classname 1))))
+                                               (let ((cc (java-array-component-class objref)))
+                                                 (|isAssignableFrom(Ljava/lang/Class;)|
+                                                  (if (stringp cc) (%bin-type-name-to-class cc) cc)
+                                                  (%bin-type-name-to-class ,(subseq classname 1)))))
                                     (error (%lisp-condition (%make-throwable '|java/lang/ClassCastException|))))))
                              `(let ((objref ,(code (codegen (objref insn) context))))
                                 (when objref
@@ -1207,21 +1208,42 @@
 (defparameter *invokedynamic-cache* (make-hash-table :test #'equal))
 
 (defun %resolve-invokedynamic (method-name bootstrap-method-name address fname &rest args)
-  (format t "~&%resolve-invokedynamic: method=~A bootstrap=~A~%" method-name bootstrap-method-name)
-  (force-output)
+  "Resolve an invokedynamic call site by invoking its bootstrap method.
+BOOTSTRAP-METHOD-NAME is the full \"class/name.method(descriptor)\" string of the
+bootstrap method (e.g. java/lang/runtime/SwitchBootstraps.typeSwitch(...)). The
+bootstrap class is always a boot/library class, so we load it and resolve the
+static function in its own defining package rather than the caller's."
+  (declare (ignore method-name))
   (let* ((key (list bootstrap-method-name address))
          (cached (gethash key *invokedynamic-cache*)))
-    (if cached
-        (progn
-          (format t "  Using cached CallSite~%")
-          cached)
-        (progn
-          (format t "  Calling bootstrap method...~%")
-          (force-output)
-          (let ((resolved (apply bootstrap-method-name
-                                 (append (list (|java/lang/invoke/MethodHandles.lookup()|) fname)
-                                         args))))
-            (format t "  Bootstrap returned: ~A~%" resolved)
+    (or cached
+        (let* ((paren (position #\( bootstrap-method-name))
+               (dot (position #\. bootstrap-method-name :end paren :from-end t))
+               (bootstrap-class (subseq bootstrap-method-name 0 dot)))
+          (classload bootstrap-class)
+          (let* ((pkg (class-package bootstrap-class))
+                 (fn-sym (static-method-symbol (lispize-method-name bootstrap-method-name) pkg))
+                 (param-types (parse-parameter-types bootstrap-method-name))
+                 (nparams (length param-types))
+                 (full-args (append (list (|java/lang/invoke/MethodHandles.lookup()|) fname) args))
+                 ;; Bootstrap methods are frequently varargs (last parameter an
+                 ;; Object[]), e.g. SwitchBootstraps.typeSwitch and
+                 ;; ObjectMethods.bootstrap. Collect the trailing arguments into a
+                 ;; single Object[] so the fixed-arity Lisp function receives them
+                 ;; the way the JVM would after varargs packing.
+                 (final-args
+                   (if (and (plusp nparams)
+                            (let ((last (car (last param-types))))
+                              (and (stringp last) (>= (length last) 2)
+                                   (string= "[]" (subseq last (- (length last) 2)))))
+                            (>= (length full-args) nparams))
+                       (let ((fixed (1- nparams)))
+                         (append (subseq full-args 0 fixed)
+                                 (list (make-java-array
+                                        :component-class (%get-java-class-by-bin-name "java/lang/Object")
+                                        :initial-contents (coerce (nthcdr fixed full-args) 'vector)))))
+                       full-args))
+                 (resolved (apply fn-sym final-args)))
             (setf (gethash key *invokedynamic-cache*) resolved)
             resolved)))))
 
@@ -1275,10 +1297,181 @@ DYNAMIC-ARG-CODES is a list of codegen'd expressions for the dynamic arguments."
        (if str (lstring str) "null")))
     (t (format nil "~A" val))))
 
+(defun %type-switch-match (target label)
+  "True if TARGET matches a single SwitchBootstraps.typeSwitch LABEL, which is a
+Class (instanceof), a boxed integral constant, or a String constant."
+  (cond
+    ((typep label '|java/lang/Class|)
+     (= 1 (|isInstance(Ljava/lang/Object;)| label target)))
+    ((integerp label)
+     (and (typep target '(or |java/lang/Integer| |java/lang/Short|
+                          |java/lang/Byte| |java/lang/Character|))
+          (slot-boundp target '|value|)
+          (eql (slot-value target '|value|) label)))
+    ((typep label '|java/lang/String|)
+     (and (typep target '|java/lang/String|)
+          (string= (lstring target) (lstring label))))
+    (t (and target (typep target '|java/lang/Object|)
+            (= 1 (|equals(Ljava/lang/Object;)| target label))))))
+
+(defun %type-switch (target restart labels)
+  "Native implementation of java.lang.runtime.SwitchBootstraps.typeSwitch's target
+method handle: returns the index of the first LABEL (at or after RESTART) that
+matches TARGET, LABELS's length if none match, or -1 when TARGET is null."
+  (if (null target)
+      -1
+      (let ((n (length labels)))
+        (loop for i from (max restart 0) below n
+              when (%type-switch-match target (nth i labels))
+                do (return-from %type-switch i))
+        n)))
+
+(defun %enum-switch-match (target label)
+  "True if enum constant TARGET matches an enumSwitch LABEL (an enum constant name
+as a String, or an Enum$EnumDesc)."
+  (let ((name (cond
+                ((typep label '|java/lang/String|) (lstring label))
+                ((and (typep label '|java/lang/Object|)
+                      (slot-exists-p label '|constantName|)
+                      (slot-boundp label '|constantName|))
+                 (lstring (slot-value label '|constantName|)))
+                (t nil))))
+    (and name
+         (let ((tn (|name()| target)))
+           (and tn (string= (lstring tn) name))))))
+
+(defun %enum-switch (target restart labels)
+  "Native implementation of SwitchBootstraps.enumSwitch's target method handle."
+  (if (null target)
+      -1
+      (let ((n (length labels)))
+        (loop for i from (max restart 0) below n
+              when (%enum-switch-match target (nth i labels))
+                do (return-from %enum-switch i))
+        n)))
+
+(defun %record-component-names (names-jstring)
+  "Split a record's ';'-separated component-name string into a list of names."
+  (remove "" (uiop:split-string (lstring names-jstring) :separator ";") :test #'string=))
+
+(defun %record-component-value (record name)
+  (slot-value record (intern (mangle-field-name name) :openldk)))
+
+(defun %record-component-descriptor (class name)
+  "Return the field descriptor string for record component NAME in CLASS, or NIL."
+  (let ((lc (get-ldk-class-for-java-class class)))
+    (when lc
+      (loop for f in (coerce (fields lc) 'list)
+            when (string= (name f) name)
+              return (descriptor f)))))
+
+(defun %format-record-component (value descriptor)
+  "Render a record component VALUE for toString, honouring its DESCRIPTOR so that
+boolean prints true/false and char prints the character rather than an int."
+  (case (and descriptor (plusp (length descriptor)) (char descriptor 0))
+    (#\Z (if (or (null value) (eql value 0)) "false" "true"))
+    (#\C (string (if (characterp value) value (code-char value))))
+    (t (%to-java-string value))))
+
+(defun %class-simple-name (class)
+  "Return the simple (unqualified) name of a Class object."
+  (let* ((n (lstring (slot-value class '|name|)))
+         (dot (position #\. n :from-end t))
+         (n (if dot (subseq n (1+ dot)) n))
+         (dollar (position #\$ n :from-end t)))
+    (if dollar (subseq n (1+ dollar)) n)))
+
+(defun %record-to-string (record class names-jstring)
+  "Native implementation of a record's ObjectMethods-generated toString()."
+  (jstring
+   (format nil "~A[~{~A~^, ~}]"
+           (%class-simple-name class)
+           (loop for name in (%record-component-names names-jstring)
+                 collect (format nil "~A=~A" name
+                                 (%format-record-component
+                                  (%record-component-value record name)
+                                  (%record-component-descriptor class name)))))))
+
+(defun %record-field-hash (v)
+  (cond ((null v) 0)
+        ((typep v '|java/lang/Object|) (or (|hashCode()| v) 0))
+        ((integerp v) v)
+        ((characterp v) (char-code v))
+        (t (sxhash v))))
+
+(defun %record-hash-code (record class names-jstring)
+  "Native implementation of a record's ObjectMethods-generated hashCode()."
+  (declare (ignore class))
+  (let ((h 0))
+    (dolist (name (%record-component-names names-jstring))
+      (setf h (logand (+ (* 31 h) (%record-field-hash (%record-component-value record name)))
+                      #xFFFFFFFF)))
+    (if (>= h #x80000000) (- h #x100000000) h)))
+
+(defun %record-field-equal (a b)
+  (cond ((and (null a) (null b)) t)
+        ((or (null a) (null b)) nil)
+        ((typep a '|java/lang/Object|) (= 1 (|equals(Ljava/lang/Object;)| a b)))
+        (t (eql a b))))
+
+(defun %record-equals (record other class names-jstring)
+  "Native implementation of a record's ObjectMethods-generated equals()."
+  (if (and other (= 1 (|isInstance(Ljava/lang/Object;)| class other)))
+      (if (every (lambda (name)
+                   (%record-field-equal (%record-component-value record name)
+                                        (%record-component-value other name)))
+                 (%record-component-names names-jstring))
+          1 0)
+      0))
+
 (defmethod codegen ((insn ir-call-dynamic-method) context)
   (with-slots (method-name args dynamic-args bootstrap-method-name address interface-type-name) insn
     (let ((pkg (context-package context)))
       (cond
+        ;; Fast path for ObjectMethods.bootstrap (record toString/hashCode/equals).
+        ;; The real JDK generates a hidden class; instead we compute directly from
+        ;; the record's components. args[1] is the record Class, args[2] is the
+        ;; ';'-separated component-name string; dynamic-args are (this) or (this, other).
+        ((search "ObjectMethods.bootstrap" bootstrap-method-name)
+         (let ((mname (if (stringp method-name) method-name (lstring method-name)))
+               (class-code (code (codegen (second args) context)))
+               (names-code (code (codegen (third args) context)))
+               (this-code (code (codegen (first dynamic-args) context))))
+           (cond
+             ((string= mname "toString")
+              (make-instance '<expression> :insn insn
+                             :code `(%record-to-string ,this-code ,class-code ,names-code)
+                             :expression-type :REFERENCE))
+             ((string= mname "hashCode")
+              (make-instance '<expression> :insn insn
+                             :code `(%record-hash-code ,this-code ,class-code ,names-code)
+                             :expression-type :INTEGER))
+             ((string= mname "equals")
+              (make-instance '<expression> :insn insn
+                             :code `(%record-equals ,this-code
+                                                    ,(code (codegen (second dynamic-args) context))
+                                                    ,class-code ,names-code)
+                             :expression-type :INTEGER))
+             (t (error "Unsupported ObjectMethods bootstrap method: ~A" mname)))))
+        ;; Fast path for SwitchBootstraps.typeSwitch / enumSwitch (pattern-matching
+        ;; switch). The real JDK generates a hidden class via the ClassFile API;
+        ;; instead we compute the case index directly. args[0] is the call-site
+        ;; MethodType and (rest args) are the case labels; dynamic-args are
+        ;; (selector, restartIndex).
+        ((search "SwitchBootstraps.typeSwitch" bootstrap-method-name)
+         (make-instance '<expression>
+                        :insn insn
+                        :code `(%type-switch ,(code (codegen (first dynamic-args) context))
+                                             ,(code (codegen (second dynamic-args) context))
+                                             (list ,@(mapcar (lambda (a) (code (codegen a context))) (rest args))))
+                        :expression-type :INTEGER))
+        ((search "SwitchBootstraps.enumSwitch" bootstrap-method-name)
+         (make-instance '<expression>
+                        :insn insn
+                        :code `(%enum-switch ,(code (codegen (first dynamic-args) context))
+                                             ,(code (codegen (second dynamic-args) context))
+                                             (list ,@(mapcar (lambda (a) (code (codegen a context))) (rest args))))
+                        :expression-type :INTEGER))
         ;; Fast path for StringConcatFactory (JDK 9+ string concatenation)
         ((search "StringConcatFactory.makeConcatWithConstants" bootstrap-method-name)
          (let ((recipe (%extract-string-concat-recipe args)))
@@ -1309,8 +1502,8 @@ DYNAMIC-ARG-CODES is a list of codegen'd expressions for the dynamic arguments."
          (make-instance '<expression>
                         :insn insn
                         :code
-                        `(let ((callsite (%resolve-invokedynamic ',(intern method-name pkg)
-                                                                 ',(intern bootstrap-method-name pkg)
+                        `(let ((callsite (%resolve-invokedynamic ,method-name
+                                                                 ,bootstrap-method-name
                                                                  ,address
                                                                  ,(jstring method-name)
                                                                  ,@(remove nil (mapcar (lambda (a)

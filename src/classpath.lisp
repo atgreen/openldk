@@ -214,15 +214,205 @@
       (when (gethash (format nil "classes/~A" resource-name) zipfile-entries)
         (format nil "jmod:file:~A!/classes/~A" jmodfile resource-name)))))
 
+;; --- jimage-classpath-entry support ---
+
+;; Headless JDK builds (e.g. Fedora's java-NN-openjdk-headless) do not ship the
+;; jmods/ directory; the runtime classes live only in the jimage container at
+;; $JAVA_HOME/lib/modules. The jimage format (magic 0xCAFEDADA) is a container
+;; of resources ("/<module>/<path>") indexed by a perfect hash. Rather than
+;; reimplement the perfect-hash lookup, we scan every location record once at
+;; load time and build a plain path -> (module data-offset compressed-size
+;; uncompressed-size) index, which is all class/resource access needs.
+
+(defclass jimage-classpath-entry (classpath-entry)
+  ((imagefile :initarg :imagefile)
+   (stream :initform nil)               ; open binary stream for resource data reads
+   (index :initform nil)                ; hashtable: resource path -> location list
+   (data-base :initform 0)              ; file offset where the resource data begins
+   (lock :initform (bt:make-lock "jimage-classpath-lock")))
+  (:documentation "Classpath entry backed by a JDK jimage file ($JAVA_HOME/lib/modules)."))
+
+(defun %jimage-u4-le (vec i)
+  "Read a little-endian unsigned 32-bit integer from byte VECTOR VEC at index I."
+  (logior (aref vec i)
+          (ash (aref vec (+ i 1)) 8)
+          (ash (aref vec (+ i 2)) 16)
+          (ash (aref vec (+ i 3)) 24)))
+
+(defun %jimage-string (strings off)
+  "Read the NUL-terminated UTF-8 string in the STRINGS byte vector at offset OFF."
+  (let ((end (position 0 strings :start off)))
+    (sb-ext:octets-to-string strings :start off :end end :external-format :utf-8)))
+
+(defun %jimage-parse-location (locs off)
+  "Parse a jimage location record from the LOCS byte vector at offset OFF.
+Returns a simple-vector indexed by attribute kind (1=module 2=parent 3=base
+4=extension 5=offset 6=compressed-size 7=uncompressed-size)."
+  (let ((i off)
+        (attrs (make-array 8 :initial-element 0)))
+    (loop
+      (let ((data (aref locs i)))
+        (incf i)
+        (when (zerop data) (return))
+        (let ((kind (ash data -3))
+              (len (1+ (logand data 7)))
+              (val 0))
+          (dotimes (k len)
+            (setf val (logior (ash val 8) (aref locs i)))
+            (incf i))
+          (setf (aref attrs kind) val))))
+    attrs))
+
+(defun %jimage-open-stream (pathname)
+  (open pathname :element-type '(unsigned-byte 8)))
+
+(defun load-jimage-index (cpe)
+  "Open the jimage file for CPE, verify its header, and build the resource index.
+Leaves the data stream open (positioned arbitrarily) for later resource reads."
+  (with-slots (imagefile stream index data-base) cpe
+    (let ((s (%jimage-open-stream imagefile)))
+      (setf stream s)
+      (let ((header (make-array 28 :element-type '(unsigned-byte 8))))
+        (read-sequence header s)
+        (let ((magic (%jimage-u4-le header 0)))
+          (unless (= magic #xCAFEDADA)
+            (close s)
+            (error "Not a valid jimage file (bad magic ~8,'0X): ~A" magic imagefile)))
+        (let* ((table-length (%jimage-u4-le header 16))
+               (locations-size (%jimage-u4-le header 20))
+               (strings-size (%jimage-u4-le header 24))
+               (offsets-size (* table-length 4))
+               ;; redirect table (table-length u4) is not needed by the scan.
+               (offsets (make-array offsets-size :element-type '(unsigned-byte 8)))
+               (locations (make-array locations-size :element-type '(unsigned-byte 8)))
+               (strings (make-array strings-size :element-type '(unsigned-byte 8)))
+               (ht (make-hash-table :test 'equal :size table-length)))
+          ;; Skip the redirect table, then read offsets, locations and strings.
+          (file-position s (+ 28 offsets-size))
+          (read-sequence offsets s)
+          (read-sequence locations s)
+          (read-sequence strings s)
+          ;; The resource data section begins immediately after the strings.
+          (setf data-base (file-position s))
+          (dotimes (i table-length)
+            (let ((loc-off (%jimage-u4-le offsets (* i 4))))
+              (unless (zerop loc-off)
+                (let* ((attrs (%jimage-parse-location locations loc-off))
+                       (module (%jimage-string strings (aref attrs 1)))
+                       (parent (%jimage-string strings (aref attrs 2)))
+                       (base (%jimage-string strings (aref attrs 3)))
+                       (ext (%jimage-string strings (aref attrs 4)))
+                       (path (concatenate 'string
+                                          (if (plusp (length parent))
+                                              (concatenate 'string parent "/") "")
+                                          base
+                                          (if (plusp (length ext))
+                                              (concatenate 'string "." ext) ""))))
+                  ;; Only index real module resources; skip meta entries (empty module).
+                  (when (plusp (length module))
+                    (setf (gethash path ht)
+                          (list module
+                                (+ data-base (aref attrs 5)) ; absolute file offset
+                                (aref attrs 6)               ; compressed size (0 = stored)
+                                (aref attrs 7))))))))         ; uncompressed size
+          (setf index ht)))))
+  cpe)
+
+(defun ensure-jimage-loaded (cpe)
+  "Ensure CPE's index is built and its data stream is open (reopening after a
+saved image was dumped)."
+  (with-slots (stream index) cpe
+    (cond
+      ((null index) (load-jimage-index cpe))
+      ((null stream) (setf stream (%jimage-open-stream (slot-value cpe 'imagefile)))))))
+
+(defun %jimage-read-resource (cpe location)
+  "Read the bytes for a resource LOCATION (module offset comp unc) from CPE."
+  (destructuring-bind (module offset comp unc) location
+    (declare (ignore module))
+    (when (plusp comp)
+      (error "Compressed jimage resources are not supported: ~A" (slot-value cpe 'imagefile)))
+    (let ((bytes (make-array unc :element-type '(unsigned-byte 8))))
+      (file-position (slot-value cpe 'stream) offset)
+      (read-sequence bytes (slot-value cpe 'stream))
+      bytes)))
+
+(defmethod open-java-classfile :around ((cpe jimage-classpath-entry) classname)
+  (restart-case
+      (handler-case
+          (call-next-method)
+        (sb-int:closed-saved-stream-error ()
+          (invoke-restart 'reopen-jimage)))
+    (reopen-jimage ()
+      :report "Reopen the jimage stream and retry."
+      (with-slots (stream lock) cpe
+        (bt:with-lock-held (lock)
+          (setf stream (%jimage-open-stream (slot-value cpe 'imagefile))))
+        (open-java-classfile cpe classname)))))
+
+(defmethod open-java-classfile ((cpe jimage-classpath-entry) classname)
+  "Return an input stream for a java class, CLASSNAME, from a jimage file."
+  (with-slots (index lock) cpe
+    (bt:with-lock-held (lock)
+      (ensure-jimage-loaded cpe)
+      (when-let (location (gethash (format nil "~A.class" classname) index))
+        (let ((result (flexi-streams:make-in-memory-input-stream
+                       (%jimage-read-resource cpe location))))
+          (when-let (last-slash-position (position #\/ classname :from-end t))
+            (let ((package-name (take (1+ last-slash-position) classname)))
+              (unless (gethash package-name *packages*)
+                (setf (gethash package-name *packages*) (jstring (slot-value cpe 'imagefile))))))
+          result)))))
+
+(defmethod open-resource :around ((cpe jimage-classpath-entry) resource-name)
+  (restart-case
+      (handler-case
+          (call-next-method)
+        (sb-int:closed-saved-stream-error ()
+          (invoke-restart 'reopen-jimage)))
+    (reopen-jimage ()
+      :report "Reopen the jimage stream and retry."
+      (with-slots (stream lock) cpe
+        (bt:with-lock-held (lock)
+          (setf stream (%jimage-open-stream (slot-value cpe 'imagefile))))
+        (open-resource cpe resource-name)))))
+
+(defmethod open-resource ((cpe jimage-classpath-entry) resource-name)
+  "Return an input stream for a resource RESOURCE-NAME in this jimage, or NIL."
+  (with-slots (index lock) cpe
+    (bt:with-lock-held (lock)
+      (ensure-jimage-loaded cpe)
+      (when-let (location (gethash resource-name index))
+        (flexi-streams:make-in-memory-input-stream
+         (%jimage-read-resource cpe location))))))
+
+(defmethod get-resource-url ((cpe jimage-classpath-entry) resource-name)
+  "Return a jrt: URL string for a resource if it exists in this jimage, or NIL."
+  (with-slots (index lock) cpe
+    (bt:with-lock-held (lock)
+      (ensure-jimage-loaded cpe)
+      (when-let (location (gethash resource-name index))
+        (format nil "jrt:/~A/~A" (first location) resource-name)))))
+
 (defun discover-jmod-classpath-entries ()
-  "Scan $JAVA_HOME/jmods/*.jmod and return a list of jmod-classpath-entry instances."
+  "Return classpath entries for the JDK runtime modules.
+
+Prefer $JAVA_HOME/jmods/*.jmod files. When those are absent -- as in headless
+JDK builds (e.g. Fedora's java-NN-openjdk-headless) -- fall back to reading the
+jimage container at $JAVA_HOME/lib/modules directly."
   (let ((java-home (uiop:getenv "JAVA_HOME")))
     (when java-home
-      (let ((jmods-dir (format nil "~A/jmods/" java-home)))
-        (when (uiop:directory-exists-p jmods-dir)
-          (loop for jmod in (directory (merge-pathnames "*.jmod" jmods-dir))
-                collect (make-instance 'jmod-classpath-entry
-                                       :jmodfile (namestring jmod))))))))
+      (let* ((jmods-dir (format nil "~A/jmods/" java-home))
+             (jmod-entries
+               (when (uiop:directory-exists-p jmods-dir)
+                 (loop for jmod in (directory (merge-pathnames "*.jmod" jmods-dir))
+                       collect (make-instance 'jmod-classpath-entry
+                                              :jmodfile (namestring jmod))))))
+        (or jmod-entries
+            (let ((modules-file (format nil "~A/lib/modules" java-home)))
+              (when (uiop:file-exists-p modules-file)
+                (list (make-instance 'jimage-classpath-entry
+                                     :imagefile modules-file)))))))))
 
 (defmethod open-java-classfile ((cpe dir-classpath-entry) classname)
   "Return an input stream for a java class, CLASSNAME."

@@ -137,5 +137,13 @@
            (make-instance '<resource-input-stream>
                           :lisp-stream (flexi-streams:make-in-memory-input-stream
                                         (read-file-into-byte-vector path))))))
+      ;; Handle jrt: URLs (JDK jimage resources: jrt:/<module>/<resource>)
+      ((starts-with? "jrt:" url-string)
+       (let* ((rest (subseq url-string 4))            ; drop "jrt:"
+              (rest (string-left-trim "/" rest))      ; drop leading slash
+              (slash (position #\/ rest)))            ; split off <module>
+         (when slash
+           (when-let (stream (open-resource-on-classpath (subseq rest (1+ slash))))
+             (make-instance '<resource-input-stream> :lisp-stream stream)))))
       ;; Fall through to Java implementation for other protocols
       (t nil))))

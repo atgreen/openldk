@@ -1189,6 +1189,137 @@ and its implementation."
 (defmethod |compareAndSetObject(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)| ((unsafe |sun/misc/Unsafe|) obj field-id expected-value new-value)
   (|compareAndSwapObject(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)| unsafe obj field-id expected-value new-value))
 
+;;; Byte/boolean CAS — the JDK's Java implementation reads a surrounding int
+;;; from raw memory, which doesn't work with CLOS slots.  Override both
+;;; sun/misc/Unsafe and jdk/internal/misc/Unsafe (the JDK 21 bytecode calls
+;;; the latter directly).
+(defun %cas-byte-field (obj offset expected new-val)
+  "CAS a byte/boolean field using CLOS slots instead of raw memory."
+  (let* ((field (gethash offset *field-offset-table*))
+         (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk))
+         (current (slot-value obj key)))
+    (if (eql current expected)
+        (progn (setf (slot-value obj key) new-val) 1)
+        0)))
+
+(defun %cae-byte-field (obj offset expected new-val)
+  "Compare-and-exchange a byte/boolean field using CLOS slots."
+  (let* ((field (gethash offset *field-offset-table*))
+         (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk))
+         (current (slot-value obj key)))
+    (when (eql current expected)
+      (setf (slot-value obj key) new-val))
+    current))
+
+(defmethod |compareAndSetByte(Ljava/lang/Object;JBB)| ((unsafe |sun/misc/Unsafe|) obj offset expected new-val)
+  (declare (ignore unsafe))
+  (%cas-byte-field obj offset expected new-val))
+
+(defmethod |compareAndExchangeByte(Ljava/lang/Object;JBB)| ((unsafe |sun/misc/Unsafe|) obj offset expected new-val)
+  (declare (ignore unsafe))
+  (%cae-byte-field obj offset expected new-val))
+
+(defmethod |compareAndSetBoolean(Ljava/lang/Object;JZZ)| ((unsafe |sun/misc/Unsafe|) obj offset expected new-val)
+  (declare (ignore unsafe))
+  (%cas-byte-field obj offset expected new-val))
+
+;; Override jdk/internal/misc/Unsafe bytecode methods via *native-overrides*
+(setf (gethash "jdk/internal/misc/Unsafe.compareAndSetByte(Ljava/lang/Object;JBB)Z" *native-overrides*)
+      (lambda (unsafe obj offset expected new-val)
+        (declare (ignore unsafe))
+        (%cas-byte-field obj offset expected new-val)))
+
+(setf (gethash "jdk/internal/misc/Unsafe.compareAndExchangeByte(Ljava/lang/Object;JBB)B" *native-overrides*)
+      (lambda (unsafe obj offset expected new-val)
+        (declare (ignore unsafe))
+        (%cae-byte-field obj offset expected new-val)))
+
+(setf (gethash "jdk/internal/misc/Unsafe.compareAndSetBoolean(Ljava/lang/Object;JZZ)Z" *native-overrides*)
+      (lambda (unsafe obj offset expected new-val)
+        (declare (ignore unsafe))
+        (%cas-byte-field obj offset expected new-val)))
+
+;;; ArraysSupport.vectorizedMismatch — the JDK implementation reads arrays
+;;; as raw longs via Unsafe.getLongUnaligned, which doesn't work with CLOS
+;;; arrays.  Compare elements directly instead.
+(setf (gethash "jdk/internal/util/ArraysSupport.vectorizedMismatch(Ljava/lang/Object;JLjava/lang/Object;JII)I" *native-overrides*)
+      (lambda (a a-offset b b-offset length log2-scale)
+        (declare (ignore log2-scale))
+        ;; a-offset/b-offset are byte offsets; for OpenLDK ARRAY_*_BASE_OFFSET=0,
+        ;; so they are element indices (for byte arrays).
+        ;; Compare element by element and return first mismatch index,
+        ;; or ~length (= -(length+1)) meaning "all matched".
+        (let ((a-data (slot-value a 'data))
+              (b-data (slot-value b 'data)))
+          (dotimes (i length (lognot length))
+            (unless (eql (aref a-data (+ a-offset i))
+                         (aref b-data (+ b-offset i)))
+              (return i))))))
+
+;;; Reflective constructor invocation — JDK 21 uses
+;;; DirectConstructorHandleAccessor$NativeAccessor.newInstance0 (native).
+(defun %java-class-to-type-descriptor (java-class)
+  "Convert a java.lang.Class to its JVM type descriptor string."
+  (let ((name (lstring (slot-value java-class '|name|))))
+    (cond
+      ((string= name "int")     "I")
+      ((string= name "long")    "J")
+      ((string= name "byte")    "B")
+      ((string= name "boolean") "Z")
+      ((string= name "char")    "C")
+      ((string= name "short")   "S")
+      ((string= name "float")   "F")
+      ((string= name "double")  "D")
+      ((string= name "void")    "V")
+      ((char= (char name 0) #\[) (substitute #\/ #\. name))
+      (t (format nil "L~A;" (substitute #\/ #\. name))))))
+
+(defun %build-init-descriptor (param-types-array)
+  "Build the parameter portion of a constructor descriptor like (Ljava/lang/String;I)
+from a Class[] array.  Note: OpenLDK method symbols omit the return type."
+  (if (or (null param-types-array)
+          (zerop (java-array-length param-types-array)))
+      "()"
+      (with-output-to-string (s)
+        (write-char #\( s)
+        (dotimes (i (java-array-length param-types-array))
+          (write-string (%java-class-to-type-descriptor (jaref param-types-array i)) s))
+        (write-char #\) s))))
+
+(defun |jdk/internal/reflect/DirectConstructorHandleAccessor$NativeAccessor.newInstance0(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)| (ctor args)
+  "Reflectively invoke a constructor. Creates an instance and calls <init>."
+  (let* ((clazz (slot-value ctor '|clazz|))
+         (class-name (lstring (slot-value clazz '|name|)))
+         (bin-name (substitute #\/ #\. class-name))
+         (param-types (slot-value ctor '|parameterTypes|))
+         (descriptor (%build-init-descriptor param-types)))
+    ;; Ensure the class is loaded and initialized
+    (classload bin-name)
+    (%clinit (or (%get-ldk-class-by-bin-name bin-name)
+                 (error "Class not found after loading: ~A" bin-name)))
+    (let* ((instance (%make-java-instance bin-name))
+           (init-name (format nil "<init>~A" descriptor))
+           (pkg (class-package bin-name))
+           (init-sym (or (find-symbol init-name pkg)
+                         (find-symbol init-name :openldk))))
+      (unless (and init-sym (fboundp init-sym))
+        (error "Cannot find constructor ~A.~A" bin-name init-name))
+      (if (or (null args) (zerop (java-array-length args)))
+          (funcall (fdefinition init-sym) instance)
+          (apply (fdefinition init-sym) instance
+                 (coerce (slot-value args 'data) 'list)))
+      instance)))
+
+;;; PreviewFeatures.isPreviewEnabled — always false (we don't support --enable-preview).
+(defun |jdk/internal/misc/PreviewFeatures.isPreviewEnabled()| ()
+  0)
+
+;;; ProcessImpl.init — static native initializer for process spawning.
+;;; On a real JVM this sets up signal handling for child processes.
+;;; We stub it as a no-op; forkAndExec is handled separately.
+(defun |java/lang/ProcessImpl.init()| ()
+  nil)
+
 ;;; NOTE: In JDK 17, the compiled bytecode methods getObjectVolatile/putObject/etc.
 ;;; delegate to getReference/putReference/etc. (native methods).
 ;;; So the native "Reference" variants must contain the actual implementation,
@@ -1713,6 +1844,9 @@ and its implementation."
 (defun |jdk/internal/misc/CDS.isDumpingClassList0()| () 0)
 (defun |jdk/internal/misc/CDS.isDumpingArchive0()| () 0)
 (defun |jdk/internal/misc/CDS.isSharingEnabled0()| () 0)
+;; JDK 25: the individual CDS flag natives were folded into a single bitmask.
+;; Returning 0 means no CDS features are active, which is what we want.
+(defun |jdk/internal/misc/CDS.getCDSConfigStatus()| () 0)
 (defun |jdk/internal/misc/CDS.initializeFromArchive(Ljava/lang/Class;)| (class)
   (declare (ignore class)) nil)
 (defun |jdk/internal/misc/CDS.defineArchivedModules(Ljava/lang/ClassLoader;Ljava/lang/ClassLoader;)| (a b)
@@ -1933,50 +2067,53 @@ and its implementation."
   nil)
 
 ;; ---------------------------------------------------------------------------
-;; JDK 17: SystemProps$Raw native methods for System.initPhase1()
-;; platformProperties() returns a String[39] indexed by the _NDX constants.
+;; JDK 25: SystemProps$Raw native methods for System.initPhase1()
+;; platformProperties() returns a String[FIXED_LENGTH] indexed by the _NDX
+;; constants declared in jdk.internal.util.SystemProps.Raw. The index order
+;; changed relative to JDK 17/21 (file.encoding was replaced by native.encoding,
+;; and stdin/stdout/stderr encodings were added), so FIXED_LENGTH is now 40.
 ;; vmProperties() returns String[] of key-value pairs (like -D properties).
 
 (defun |jdk/internal/util/SystemProps$Raw.platformProperties()| ()
-  "Return a String[39] of indexed platform properties for JDK 17."
-  (let* ((len 39)
+  "Return a String[40] of indexed platform properties for JDK 25."
+  (let* ((len 40)
          (arr (make-array len :initial-element nil)))
-    ;; Index 0: _display_country_NDX
+    ;; 0: _display_country_NDX
     (setf (aref arr 0) (jstring "US"))
-    ;; Index 1: _display_language_NDX
+    ;; 1: _display_language_NDX
     (setf (aref arr 1) (jstring "en"))
-    ;; Index 2: _display_script_NDX  (empty)
+    ;; 2: _display_script_NDX (empty)
     (setf (aref arr 2) (jstring ""))
-    ;; Index 3: _display_variant_NDX (empty)
+    ;; 3: _display_variant_NDX (empty)
     (setf (aref arr 3) (jstring ""))
-    ;; Index 4: _file_encoding_NDX
-    (setf (aref arr 4) (jstring "UTF-8"))
-    ;; Index 5: _file_separator_NDX
-    (setf (aref arr 5) (jstring "/"))
-    ;; Index 6: _format_country_NDX
-    (setf (aref arr 6) (jstring "US"))
-    ;; Index 7: _format_language_NDX
-    (setf (aref arr 7) (jstring "en"))
-    ;; Index 8: _format_script_NDX (empty)
+    ;; 4: _file_separator_NDX
+    (setf (aref arr 4) (jstring "/"))
+    ;; 5: _format_country_NDX
+    (setf (aref arr 5) (jstring "US"))
+    ;; 6: _format_language_NDX
+    (setf (aref arr 6) (jstring "en"))
+    ;; 7: _format_script_NDX (empty)
+    (setf (aref arr 7) (jstring ""))
+    ;; 8: _format_variant_NDX (empty)
     (setf (aref arr 8) (jstring ""))
-    ;; Index 9: _format_variant_NDX (empty)
-    (setf (aref arr 9) (jstring ""))
-    ;; Indices 10-17: proxy settings (nil = not set)
-    ;; Index 18: _java_io_tmpdir_NDX
-    (setf (aref arr 18) (jstring (namestring (uiop:temporary-directory))))
-    ;; Index 19: _line_separator_NDX
-    (setf (aref arr 19) (jstring (format nil "~%")))
-    ;; Index 20: _os_arch_NDX
+    ;; 9-16: ftp/http/https proxy settings (nil = not set)
+    ;; 17: _java_io_tmpdir_NDX
+    (setf (aref arr 17) (jstring (namestring (uiop:temporary-directory))))
+    ;; 18: _line_separator_NDX
+    (setf (aref arr 18) (jstring (format nil "~%")))
+    ;; 19: _native_encoding_NDX
+    (setf (aref arr 19) (jstring "UTF-8"))
+    ;; 20: _os_arch_NDX
     (setf (aref arr 20) (jstring (cond
                                    ((find :X86-64 *features*) "amd64")
                                    ((find :ARM64 *features*) "aarch64")
                                    (t "unknown"))))
-    ;; Index 21: _os_name_NDX
+    ;; 21: _os_name_NDX
     (setf (aref arr 21) (jstring (cond
                                    ((find :LINUX *features*) "Linux")
                                    ((find :DARWIN *features*) "Mac OS X")
                                    (t "Unknown"))))
-    ;; Index 22: _os_version_NDX
+    ;; 22: _os_version_NDX
     (setf (aref arr 22) (jstring (cond
                                    ((find :LINUX *features*)
                                     (handler-case
@@ -1990,58 +2127,60 @@ and its implementation."
                                    ((find :DARWIN *features*)
                                     (string-trim '(#\Newline) (uiop:run-program "sw_vers --productVersion" :output :string)))
                                    (t "0.0"))))
-    ;; Index 23: _path_separator_NDX
+    ;; 23: _path_separator_NDX
     (setf (aref arr 23) (jstring ":"))
-    ;; Indices 24-26: SOCKS proxy (nil)
-    ;; Index 27: _sun_arch_abi_NDX (empty)
-    (setf (aref arr 27) (jstring ""))
-    ;; Index 28: _sun_arch_data_model_NDX
-    (setf (aref arr 28) (jstring "64"))
-    ;; Index 29: _sun_cpu_endian_NDX
-    (setf (aref arr 29) (jstring (if (find :LITTLE-ENDIAN *features*) "little" "big")))
-    ;; Index 30: _sun_cpu_isalist_NDX (empty)
+    ;; 24-26: SOCKS proxy (nil)
+    ;; 27: _stderr_encoding_NDX
+    (setf (aref arr 27) (jstring "UTF-8"))
+    ;; 28: _stdin_encoding_NDX
+    (setf (aref arr 28) (jstring "UTF-8"))
+    ;; 29: _stdout_encoding_NDX
+    (setf (aref arr 29) (jstring "UTF-8"))
+    ;; 30: _sun_arch_abi_NDX (empty)
     (setf (aref arr 30) (jstring ""))
-    ;; Index 31: _sun_io_unicode_encoding_NDX
-    (setf (aref arr 31) (jstring (if (find :LITTLE-ENDIAN *features*) "UnicodeLittle" "UnicodeBig")))
-    ;; Index 32: _sun_jnu_encoding_NDX
-    (setf (aref arr 32) (jstring "UTF-8"))
-    ;; Index 33: _sun_os_patch_level_NDX (empty)
+    ;; 31: _sun_arch_data_model_NDX
+    (setf (aref arr 31) (jstring "64"))
+    ;; 32: _sun_cpu_endian_NDX
+    (setf (aref arr 32) (jstring (if (find :LITTLE-ENDIAN *features*) "little" "big")))
+    ;; 33: _sun_cpu_isalist_NDX (empty)
     (setf (aref arr 33) (jstring ""))
-    ;; Index 34: _sun_stderr_encoding_NDX
-    (setf (aref arr 34) (jstring "UTF-8"))
-    ;; Index 35: _sun_stdout_encoding_NDX
+    ;; 34: _sun_io_unicode_encoding_NDX
+    (setf (aref arr 34) (jstring (if (find :LITTLE-ENDIAN *features*) "UnicodeLittle" "UnicodeBig")))
+    ;; 35: _sun_jnu_encoding_NDX
     (setf (aref arr 35) (jstring "UTF-8"))
-    ;; Index 36: _user_dir_NDX
-    (setf (aref arr 36) (jstring (namestring (uiop:getcwd))))
-    ;; Index 37: _user_home_NDX
-    (setf (aref arr 37) (jstring (uiop:getenv "HOME")))
-    ;; Index 38: _user_name_NDX
-    (setf (aref arr 38) (jstring (slot-value (sb-posix:getpwuid (sb-posix:getuid)) 'sb-posix::name)))
+    ;; 36: _sun_os_patch_level_NDX (empty)
+    (setf (aref arr 36) (jstring ""))
+    ;; 37: _user_dir_NDX
+    (setf (aref arr 37) (jstring (namestring (uiop:getcwd))))
+    ;; 38: _user_home_NDX
+    (setf (aref arr 38) (jstring (uiop:getenv "HOME")))
+    ;; 39: _user_name_NDX
+    (setf (aref arr 39) (jstring (slot-value (sb-posix:getpwuid (sb-posix:getuid)) 'sb-posix::name)))
     ;; Wrap as a java-array
     (make-java-array :component-class (gethash "java/lang/String" *java-classes-by-bin-name*)
                      :initial-contents arr)))
 
 (defun |jdk/internal/util/SystemProps$Raw.vmProperties()| ()
-  "Return String[] of key-value pairs for JDK 21 VM properties."
+  "Return String[] of key-value pairs for JDK 25 VM properties."
   (let* ((pairs `(("java.home" ,(uiop:getenv "JAVA_HOME"))
-                  ("java.specification.version" "21")
+                  ("java.specification.version" "25")
                   ("java.specification.name" "Java Platform API Specification")
                   ("java.specification.vendor" "Oracle Corporation")
-                  ("java.vm.specification.version" "21")
+                  ("java.vm.specification.version" "25")
                   ("java.vm.specification.name" "Java Virtual Machine Specification")
                   ("java.vm.specification.vendor" "Oracle Corporation")
                   ("java.vm.name" "OpenLDK")
                   ("java.vm.version" "1.0")
                   ("java.vm.vendor" "OpenLDK")
                   ("java.vm.info" "interpreted mode")
-                  ("java.version" "21")
-                  ("java.version.date" "2024-09-17")
-                  ("java.runtime.version" "21+35")
+                  ("java.version" "25")
+                  ("java.version.date" "2025-09-16")
+                  ("java.runtime.version" "25+36")
                   ("java.runtime.name" "OpenLDK Runtime Environment")
                   ("java.vendor" "OpenLDK")
                   ("java.vendor.url" "https://github.com/atgreen/openldk")
                   ("java.vendor.url.bug" "https://github.com/atgreen/openldk/issues")
-                  ("java.class.version" "65.0")
+                  ("java.class.version" "69.0")
                   ("java.class.path" ,(or (uiop:getenv "LDK_CLASSPATH")
                                           (uiop:getenv "CLASSPATH")
                                           "."))
@@ -2068,20 +2207,20 @@ and its implementation."
 
 (defun |java/lang/System.initProperties(Ljava/util/Properties;)| (props)
   (dolist (prop `(("log4j2.disable.jmx" . "true")
-                  ("java.specification.version" . "21")
+                  ("java.specification.version" . "25")
                   ("java.specification.name" . "Java Platform API Specification")
                   ("java.specification.vendor" . "Oracle Corporation")
-                  ("java.vm.specification.version" . "21")
+                  ("java.vm.specification.version" . "25")
                   ("java.vm.specification.name" . "Java Virtual Machine Specification")
                   ("java.vm.specification.vendor" . "Oracle Corporation")
                   ("java.vm.name" . "OpenLDK")
                   ("java.vm.version" . "1.0")
                   ("java.vm.vendor" . "OpenLDK")
-                  ("java.version" . "21")
+                  ("java.version" . "25")
                   ("java.vendor" . "OpenLDK")
                   ("java.vendor.url" . "https://github.com/atgreen/openldk")
                   ("java.vendor.url.bug" . "https://github.com/atgreen/openldk/issues")
-                  ("java.class.version" . "65.0")
+                  ("java.class.version" . "69.0")
                   ("sun.cds.enableSharedLookupCache" . "1")
                   ("java.class.path" . ,(or (uiop:getenv "LDK_CLASSPATH")
                                             (uiop:getenv "CLASSPATH")
@@ -2139,8 +2278,8 @@ and its implementation."
                   ("stderr.encoding" . "UTF-8")
                   ("sun.stdout.encoding" . "UTF-8")
                   ("sun.stderr.encoding" . "UTF-8")
-                  ("java.version.date" . "2024-09-17")
-                  ("java.runtime.version" . "21+35")))
+                  ("java.version.date" . "2025-09-16")
+                  ("java.runtime.version" . "25+36")))
     (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring (car prop)) (ijstring (cdr prop))))
   props)
 
@@ -3327,6 +3466,32 @@ user.variant
                (pkg (class-package bin-name)))
           (setf (slot-value (eval (intern (format nil "+static-~A+" bin-name) pkg)) key) value)))))
 
+;; JDK 25: StringConcatHelper and friends store into byte[] buffers via
+;; Unsafe.putByte(byte[], offset, value) / getByte(byte[], offset). Because
+;; OpenLDK reports arrayBaseOffset=0 and arrayIndexScale=1, the offset is used
+;; directly as an array index.
+(defmethod |putByte(Ljava/lang/Object;JB)| ((unsafe |sun/misc/Unsafe|) obj offset value)
+  (declare (ignore unsafe))
+  (cond
+    ((typep obj 'java-array)
+     (setf (jaref obj offset) value))
+    ((typep obj '|java/lang/Object|)
+     (let* ((field (gethash offset *field-offset-table*))
+            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
+       (setf (slot-value obj key) value)))
+    (t (error "internal error: unrecognized object type in putByte: ~A" obj))))
+
+(defmethod |getByte(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) obj offset)
+  (declare (ignore unsafe))
+  (cond
+    ((typep obj 'java-array)
+     (jaref obj offset))
+    ((typep obj '|java/lang/Object|)
+     (let* ((field (gethash offset *field-offset-table*))
+            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
+       (slot-value obj key)))
+    (t (error "internal error: unrecognized object type in getByte: ~A" obj))))
+
 (defmethod |getLong(Ljava/lang/Object;J)|((unsafe |sun/misc/Unsafe|) objref ptr)
   (declare (ignore unsafe))
   (let* ((field (gethash ptr *field-offset-table*))
@@ -3369,6 +3534,18 @@ user.variant
 
 (defun |java/lang/Shutdown.beforeHalt()| ()
   ;; FIXME
+  nil)
+
+;;; Shutdown.logRuntimeExit — JDK 21 tries to log via System.Logger which
+;;; triggers AccessController.doPrivileged and other heavy infrastructure.
+;;; Stub it out to avoid pulling in the entire security/logging stack.
+(setf (gethash "java/lang/Shutdown.logRuntimeExit(I)V" *native-overrides*)
+      (lambda (status) (declare (ignore status)) nil))
+
+;;; AccessController.getProtectionDomain — native method used by the
+;;; deprecated security manager.  Return nil (no protection domain).
+(defun |java/security/AccessController.getProtectionDomain(Ljava/lang/Class;)| (class)
+  (declare (ignore class))
   nil)
 
 (defun |java/lang/Shutdown.halt0(I)| (status)
@@ -4706,6 +4883,51 @@ user.variant
           (setf (slot-value info '|referenceKind|) ref-kind))
         info))))
 
+(defun %descriptor-param-prim-flags (descriptor)
+  "Return a list of booleans, one per parameter of DESCRIPTOR, true when that
+parameter has a primitive type (Z B S C I J F D)."
+  (let ((flags nil)
+        (index (1+ (position #\( descriptor)))
+        (end (position #\) descriptor)))
+    (loop while (< index end)
+          do (let ((ch (char descriptor index)))
+               (cond
+                 ((find ch "ZBSCIJFD") (push t flags) (incf index))
+                 ((char= ch #\L)
+                  (push nil flags)
+                  (setf index (1+ (position #\; descriptor :start index))))
+                 ((char= ch #\[)
+                  (loop while (char= (char descriptor index) #\[) do (incf index))
+                  (if (char= (char descriptor index) #\L)
+                      (setf index (1+ (position #\; descriptor :start index)))
+                      (incf index))
+                  (push nil flags))
+                 (t (incf index)))))
+    (nreverse flags)))
+
+(defun %maybe-unbox (arg)
+  "If ARG is a boxed primitive wrapper object, return its primitive value;
+otherwise return ARG unchanged."
+  (if (and arg
+           (typep arg '|java/lang/Object|)
+           (slot-exists-p arg '|value|)
+           (slot-boundp arg '|value|)
+           (typep arg '(or |java/lang/Integer| |java/lang/Long| |java/lang/Short|
+                        |java/lang/Byte| |java/lang/Character| |java/lang/Boolean|
+                        |java/lang/Float| |java/lang/Double|)))
+      (slot-value arg '|value|)
+      arg))
+
+(defun %unbox-args-for-descriptor (descriptor args)
+  "Unbox each element of ARGS whose corresponding parameter in DESCRIPTOR is a
+primitive type. ARGS must line up with the descriptor's declared parameters
+(i.e. any leading receiver has already been removed). Returns a fresh list."
+  (if (null descriptor)
+      args
+      (loop for prim in (%descriptor-param-prim-flags descriptor)
+            for arg in args
+            collect (if prim (%maybe-unbox arg) arg))))
+
 (defun %invoke-from-member-name (member-name &rest args)
   "Invoke a method described by a MemberName with the given arguments.
    This is the core implementation for linkToStatic, linkToVirtual, etc."
@@ -4783,12 +5005,21 @@ user.variant
                          (pkg (class-package class-name ldk-loader))
                          (full-method-sig (format nil "~A.~A~A" class-name method-name method-type))
                          (lisp-method-name (intern (lispize-method-name full-method-sig) pkg)))
-                    (apply lisp-method-name args))
+                    ;; Unbox primitive-typed arguments (e.g. Integer -> int) so that
+                    ;; method references adapted to functional interfaces (which pass
+                    ;; boxed Object arguments) reach primitive-parameter methods correctly.
+                    (apply lisp-method-name (%unbox-args-for-descriptor method-type args)))
                   ;; Virtual and special methods are generic functions with just the method name
                   ;; The first argument is the receiver (this)
                   (let* ((simple-method-name (format nil "~A~A" method-name method-type))
                          (lisp-method-name (intern (lispize-method-name simple-method-name) :openldk)))
-                    (apply lisp-method-name args))))))))
+                    ;; The receiver (first arg) is not part of the descriptor's
+                    ;; parameter list, so unbox only the trailing arguments.
+                    (apply lisp-method-name
+                           (if args
+                               (cons (first args)
+                                     (%unbox-args-for-descriptor method-type (rest args)))
+                               args)))))))))
 
 (defun |java/lang/invoke/MethodHandle.linkToStatic(Ljava/lang/invoke/MemberName;)| (&rest args)
   "MethodHandle intrinsic: invoke a static method via MemberName (no-arg variant).
@@ -5180,7 +5411,20 @@ INTERFACE-TYPE-NAME is the binary name of the target functional interface."
                                    (slot-value sam-method-type '|ptypes|))
                               (java-array-length (slot-value sam-method-type '|ptypes|))
                               nil))
+         (sam-has-primitive-param
+           (and sam-method-type
+                (ignore-errors
+                 (some #'identity
+                       (%descriptor-param-prim-flags
+                        (lstring (|toMethodDescriptorString()| sam-method-type)))))))
          (lambda-class (cond
+                         ;; A SAM with primitive parameters (e.g. a custom
+                         ;; interface `int apply(int,int)`) cannot use the generic
+                         ;; Object-based Lambda* helpers, whose method is
+                         ;; apply(Object,Object); generate a class carrying the
+                         ;; exact SAM descriptor method instead.
+                         ((and interface-type-name sam-has-primitive-param)
+                          (%ensure-dynamic-lambda-class method-str sam-method-type interface-type-name))
                          ((string= method-str "get") '|openldk/LambdaSupplier|)
                          ((and (string= method-str "test") sam-param-count (<= sam-param-count 1))
                           '|openldk/LambdaPredicate|)

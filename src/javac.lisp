@@ -274,6 +274,10 @@
       ;; Clear unsafe memory table — foreign heap pointers from warmup
       ;; won't survive image save/load.
       (clrhash openldk::*unsafe-memory-table*)
+      ;; Force ProcessEnvironment to re-initialize at runtime so it reads
+      ;; the actual runtime environment, not stale warmup state.
+      (let ((pe (openldk::%get-ldk-class-by-bin-name "java/lang/ProcessEnvironment" t)))
+        (when pe (setf (openldk::initialized-p pe) nil)))
       ;; Kill helper threads before dumping the image.
       (loop for thread in (bt:all-threads)
             when (and (not (eq thread (bt:current-thread)))
