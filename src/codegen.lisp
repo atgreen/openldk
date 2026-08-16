@@ -1781,19 +1781,26 @@ boolean prints true/false and char prints the character rather than an int."
   (let* ((fn-name (slot-value insn 'fn-name))
          (fn-pkg (if (find #\. fn-name)
                      (context-package context)
-                     (find-package :openldk))))
+                     (find-package :openldk)))
+         (ret-sym (intern fn-name fn-pkg))
+         (value-code (code (codegen (slot-value insn 'value) context))))
     (make-instance '<expression>
                    :insn insn
-                   :code `(let ((result ,(code (codegen (slot-value insn 'value) context))))
-                            (cond
-                              (*debug-trace-args*
-                               (format t "~&~V@A <~A> trace: ~A result = ~A~%"
-                                       *call-nesting-level* "*" *call-nesting-level*
-                                       ,(fn-name *context*) result))
-                              (*debug-trace*
-                               (format t "~&~V@A <~A> trace: ~A~%"
-                                       *call-nesting-level* "*" *call-nesting-level* ,(fn-name *context*))))
-                            (return-from ,(intern fn-name fn-pkg) result)))))
+                   ;; Only emit the per-return trace when a debug-trace flag is set
+                   ;; at (JIT) compile time; otherwise a bare return, so production
+                   ;; code doesn't pay two special-variable reads on every return.
+                   :code (if (or *debug-trace-args* *debug-trace*)
+                             `(let ((result ,value-code))
+                                (cond
+                                  (*debug-trace-args*
+                                   (format t "~&~V@A <~A> trace: ~A result = ~A~%"
+                                           *call-nesting-level* "*" *call-nesting-level*
+                                           ,(fn-name *context*) result))
+                                  (*debug-trace*
+                                   (format t "~&~V@A <~A> trace: ~A~%"
+                                           *call-nesting-level* "*" *call-nesting-level* ,(fn-name *context*))))
+                                (return-from ,ret-sym result))
+                             `(return-from ,ret-sym ,value-code)))))
 
 (defvar *current-block* nil
   "Dynamic variable holding the current <basic-block> during codegen.
