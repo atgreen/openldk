@@ -1910,7 +1910,10 @@ get the same unified var-numbers."
            ;; `modifiers` field directly (these are no longer native methods), so
            ;; populate it from the class file's access flags.
            (when (slot-exists-p klass '|modifiers|)
-             (setf (slot-value klass '|modifiers|) (access-flags class)))
+             ;; Class.getModifiers() reports source-level modifiers, not raw class
+             ;; access flags: mask out ACC_SUPER (0x20), set on every modern class,
+             ;; which would otherwise render as "synchronized".
+             (setf (slot-value klass '|modifiers|) (logandc2 (access-flags class) #x20)))
            (setf (slot-value klass '|classLoader|) class-loader)
            ;; Store in loader's java-class hash tables
            (setf (gethash classname (slot-value ldk-loader 'java-classes-by-bin-name)) klass)
