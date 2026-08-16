@@ -238,22 +238,21 @@
 (define-bytecode-transpiler :IINC (context code)
   (with-slots (pc) context
     (let ((pc-start pc))
-      (with-slots (constant-pool) class
-        (let* ((index (if (next-is-wide-p context)
-                          (+ (* (aref code (incf pc)) 256)
-                             (aref code (incf pc)))
-                          (aref code (incf pc))))
-               (const (if (next-is-wide-p context)
-                          (unsigned-to-signed-short (+ (* (aref code (incf pc)) 256)
-                                                       (aref code (incf pc))))
-                        (%unsigned-to-signed-byte (aref code (incf pc))))))
-          (setf (next-is-wide-p context) nil)
-          (incf pc)
-          (push pc (aref (next-insn-list context) pc-start))
-          (list (make-instance 'ir-iinc
-                               :address pc-start
-                               :index index
-                               :const const)))))))
+      (let* ((index (if (next-is-wide-p context)
+                        (+ (* (aref code (incf pc)) 256)
+                           (aref code (incf pc)))
+                        (aref code (incf pc))))
+             (const (if (next-is-wide-p context)
+                        (unsigned-to-signed-short (+ (* (aref code (incf pc)) 256)
+                                                     (aref code (incf pc))))
+                      (%unsigned-to-signed-byte (aref code (incf pc))))))
+        (setf (next-is-wide-p context) nil)
+        (incf pc)
+        (push pc (aref (next-insn-list context) pc-start))
+        (list (make-instance 'ir-iinc
+                             :address pc-start
+                             :index index
+                             :const const))))))
 
 (defun %transpile-xstore (context code jtype)
   (with-slots (pc) context
