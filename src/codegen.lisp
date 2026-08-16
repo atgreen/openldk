@@ -1904,6 +1904,16 @@ Used to consult block-local substitutions in addition to global ones.")
                                         collect `(,(intern (format nil "condition-~A" (or exception-type
                                                                                           "java/lang/Throwable")) :openldk)
                                                   (|condition|)
+                                                  (when *debug-exceptions*
+                                                    (format *error-output*
+                                                            "~&Caught Java exception in ~A.~A~%"
+                                                            ,(slot-value
+                                                              (slot-value *context* 'class)
+                                                              'name)
+                                                            ,(fn-name *context*))
+                                                    (%print-java-stack-trace
+                                                     (slot-value |condition| '|objref|)
+                                                     :stream *error-output*))
                                                   (setf |condition-cache| |condition|)
                                                   (go ,(intern (format nil "branch-target-~A" (address handler-block)))))))
                               ,@fall-through-go))
@@ -1916,6 +1926,16 @@ Used to consult block-local substitutions in addition to global ones.")
                                       collect `(,(intern (format nil "condition-~A" (or exception-type
                                                                                         "java/lang/Throwable")) :openldk)
                                                 (|condition|)
+                                                (when *debug-exceptions*
+                                                  (format *error-output*
+                                                          "~&Caught Java exception in ~A.~A~%"
+                                                          ,(slot-value
+                                                            (slot-value *context* 'class)
+                                                            'name)
+                                                          ,(fn-name *context*))
+                                                  (%print-java-stack-trace
+                                                   (slot-value |condition| '|objref|)
+                                                   :stream *error-output*))
                                                 (setf |condition-cache| |condition|)
                                                 (go ,(intern (format nil "branch-target-~A" (address handler-block)))))))
                             ,@fall-through-go))))))
