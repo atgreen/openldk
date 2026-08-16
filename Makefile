@@ -31,6 +31,12 @@ kawa: src/*.lisp *.asd Makefile $(KAWA_JAR)
 check: openldk testsuite/mauve/gnu/testlet/config.class
 	(cd testsuite; runtest --tool openldk $(RUNTESTFLAGS))
 
+# Fast regression gate: runs the core suites (aaa/df/gcj/jikestst) and compares
+# against testsuite/baseline.sum. Fails on any dropped pass or new failure.
+# Used by CI. Excludes the slow mauve suite (use `make check` for that).
+check-regression: openldk
+	testsuite/check-regression.sh
+
 SRCDIR := $(shell pwd)/testsuite/mauve
 BUILDDIR := $(shell pwd)
 

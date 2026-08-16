@@ -70,8 +70,12 @@ jobs:
           ocicl install
           make
 
-#      - name: Partial Test
-#        run: |
-#          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-#          export JAVA_HOME=/usr/lib/jvm/temurin-8-jdk-amd64/jre
-#          make check RUNTESTFLAGS="-v run.exp gcj.exp jikestst.exp"
+      # Regression gate: run the fast core suites and fail the build if any
+      # test that passed in testsuite/baseline.sum no longer passes, or a new
+      # unexpected failure appears. JAVA_HOME is provided by setup-java above;
+      # JAVAC defaults to "javac --release 25" (class-file v69).
+      - name: Regression gate (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          make check-regression
