@@ -528,11 +528,22 @@ and its implementation."
 
 (defvar *field-offset-table* (make-hash-table :test #'equal))
 
-(defmethod |objectFieldOffset(Ljava/lang/reflect/Field;)| ((unsafe |sun/misc/Unsafe|) field)
-  (declare (ignore unsafe))
-  (let ((offset (unsigned-to-signed-integer (cl-murmurhash:murmurhash (sxhash field)))))
+(defun %register-field-offset (field)
+  "Return an aligned synthetic Unsafe offset and associate it with FIELD."
+  ;; JDK byte/boolean atomic operations align an object offset down to the
+  ;; containing four-byte word before calling the integer CAS primitives.
+  ;; OpenLDK models fields as individual CLOS slots rather than packed memory,
+  ;; so give every synthetic field a word-aligned identity.
+  (let ((offset (logand
+                 (unsigned-to-signed-integer
+                  (cl-murmurhash:murmurhash (sxhash field)))
+                 -8)))
     (setf (gethash offset *field-offset-table*) field)
     offset))
+
+(defmethod |objectFieldOffset(Ljava/lang/reflect/Field;)| ((unsafe |sun/misc/Unsafe|) field)
+  (declare (ignore unsafe))
+  (%register-field-offset field))
 
 (defun |java/lang/Class$Atomic.objectFieldOffset([Ljava/lang/reflect/Field;Ljava/lang/String;)| (field name)
   (declare (ignore field)
@@ -547,15 +558,11 @@ and its implementation."
 
 (defmethod |staticFieldOffset(Ljava/lang/reflect/Field;)| ((unsafe |sun/misc/Unsafe|) field)
   (declare (ignore unsafe))
-  (let ((offset (sxhash field)))
-    (setf (gethash offset *field-offset-table*) field)
-    offset))
+  (%register-field-offset field))
 
 (defmethod |staticFieldOffset0(Ljava/lang/reflect/Field;)| ((unsafe |jdk/internal/misc/Unsafe|) field)
   (declare (ignore unsafe))
-  (let ((offset (sxhash field)))
-    (setf (gethash offset *field-offset-table*) field)
-    offset))
+  (%register-field-offset field))
 
 (defmethod |staticFieldBase0(Ljava/lang/reflect/Field;)| ((unsafe |jdk/internal/misc/Unsafe|) field)
   (declare (ignore unsafe field))
@@ -563,9 +570,7 @@ and its implementation."
 
 (defmethod |objectFieldOffset0(Ljava/lang/reflect/Field;)| ((unsafe |jdk/internal/misc/Unsafe|) field)
   (declare (ignore unsafe))
-  (let ((offset (unsigned-to-signed-integer (cl-murmurhash:murmurhash (sxhash field)))))
-    (setf (gethash offset *field-offset-table*) field)
-    offset))
+  (%register-field-offset field))
 
 (defun %stringize-array (array)
   "Convert an array of characters and integers (ASCII values) into a string."
@@ -973,8 +978,365 @@ and its implementation."
 (defmethod |arrayBaseOffset0(Ljava/lang/Class;)| ((unsafe |jdk/internal/misc/Unsafe|) array)
   0)
 
+(defun %unsafe-array-index-scale (array-class)
+  "Return the byte width of ARRAY-CLASS elements for Unsafe array access."
+  (let ((name (lstring (slot-value array-class '|name|))))
+    (if (and (plusp (length name)) (char= (char name 0) #\[))
+        (case (and (> (length name) 1) (char name 1))
+          ((#\B #\Z) 1)
+          ((#\C #\S) 2)
+          ((#\F #\I) 4)
+          ((#\D #\J) 8)
+          (otherwise 8))
+        1)))
+
+(defun %unsafe-array-element-scale (array)
+  "Return the storage width of ARRAY's component type in bytes."
+  (let ((name (%unsafe-array-component-name array)))
+    (cond
+      ((member name '("byte" "boolean") :test #'string=) 1)
+      ((member name '("char" "short") :test #'string=) 2)
+      ((member name '("float" "int") :test #'string=) 4)
+      ((member name '("double" "long") :test #'string=) 8)
+      (t 8))))
+
+(defun %unsafe-array-component-name (array)
+  "Return ARRAY's component class name as a Lisp string."
+  (lstring (slot-value (java-array-component-class array) '|name|)))
+
+(defun %unsafe-array-value-bits (array index)
+  "Return ARRAY element INDEX as its unsigned in-memory bit pattern."
+  (let ((name (%unsafe-array-component-name array))
+        (value (jaref array index)))
+    (cond
+      ((string= name "float")
+       (float-features:single-float-bits (coerce value 'single-float)))
+      ((string= name "double")
+       (float-features:double-float-bits (coerce value 'double-float)))
+      ((string= name "char")
+       (if (characterp value) (char-code value) value))
+      (t (logand value
+                 (1- (ash 1 (* 8 (%unsafe-array-element-scale array)))))))))
+
+(defun %unsafe-array-read-byte (array byte-offset)
+  "Read one byte from ARRAY's primitive in-memory representation."
+  (let* ((scale (%unsafe-array-element-scale array))
+         (index (truncate byte-offset scale))
+         (shift (* 8 (mod byte-offset scale))))
+    (ldb (byte 8 shift) (%unsafe-array-value-bits array index))))
+
+(defun %unsafe-array-write-byte (array byte-offset byte)
+  "Write BYTE into ARRAY's primitive in-memory representation."
+  (let* ((name (%unsafe-array-component-name array))
+         (scale (%unsafe-array-element-scale array))
+         (index (truncate byte-offset scale))
+         (shift (* 8 (mod byte-offset scale)))
+         (bit-count (* 8 scale))
+         (value-mask (1- (ash 1 bit-count)))
+         (byte-mask (ash #xff shift))
+         (old-bits (%unsafe-array-value-bits array index))
+         (new-bits (logand value-mask
+                           (logior (logand old-bits (lognot byte-mask))
+                                   (ash (logand byte #xff) shift))))
+         (new-value
+           (cond
+             ((string= name "float")
+              (float-features:bits-single-float new-bits))
+             ((string= name "double")
+              (float-features:bits-double-float new-bits))
+             ((string= name "byte") (%unsigned-to-signed-byte new-bits))
+             ((string= name "short") (unsigned-to-signed-short new-bits))
+             ((string= name "int") (unsigned-to-signed-integer new-bits))
+             ((string= name "long") (unsigned-to-signed-long new-bits))
+             ((string= name "boolean") (if (zerop new-bits) 0 1))
+             (t new-bits))))
+    (setf (jaref array index) new-value)))
+
+(defun %unsafe-array-index (array byte-offset)
+  "Translate Unsafe BYTE-OFFSET into ARRAY's element index."
+  (multiple-value-bind (index remainder)
+      (truncate byte-offset (%unsafe-array-element-scale array))
+    (unless (zerop remainder)
+      (error "Unaligned Unsafe array offset ~D" byte-offset))
+    index))
+
+;;; Common storage model for jdk.internal.misc.Unsafe.  Older native support
+;;; below grew around sun.misc.Unsafe, but Java 9+ NIO and atomics call the
+;;; internal Unsafe class directly.  Keep one implementation for fields,
+;;; primitive/reference arrays, and raw addresses so all access modes agree.
+
+(defvar *unsafe-reference-memory-table* (make-hash-table))
+
+(defun %unsafe-field-owner-and-key (object offset)
+  (let ((field (gethash offset *field-offset-table*)))
+    (when field
+      (let* ((key (intern (mangle-field-name
+                           (lstring (slot-value field '|name|)))
+                          :openldk))
+             (owner
+               (or object
+                   (let* ((clazz (slot-value field '|clazz|))
+                          (name (lstring (slot-value clazz '|name|)))
+                          (bin-name (substitute #\/ #\. name))
+                          (pkg (class-package bin-name)))
+                     (eval (intern (format nil "+static-~A+" bin-name)
+                                   pkg))))))
+        (values owner key t)))))
+
+(defun %unsafe-read-native-bits (address byte-count)
+  (let ((sap (sb-sys:int-sap address)))
+    (loop for index below byte-count
+          sum (ash (sb-sys:sap-ref-8 sap index) (* index 8)))))
+
+(defun %unsafe-write-native-bits (address byte-count bits)
+  (let ((sap (sb-sys:int-sap address)))
+    (dotimes (index byte-count)
+      (setf (sb-sys:sap-ref-8 sap index)
+            (ldb (byte 8 (* index 8)) bits))))
+  nil)
+
+(defun %unsafe-read-array-bits (array offset byte-count)
+  (loop for index below byte-count
+        sum (ash (%unsafe-array-read-byte array (+ offset index))
+                 (* index 8))))
+
+(defun %unsafe-write-array-bits (array offset byte-count bits)
+  (dotimes (index byte-count)
+    (%unsafe-array-write-byte array (+ offset index)
+                              (ldb (byte 8 (* index 8)) bits)))
+  nil)
+
+(defun %unsafe-normalize-scalar (value kind)
+  (ecase kind
+    (:boolean (if (or (null value) (eql value 0)) 0 1))
+    (:byte (%unsigned-to-signed-byte (logand value #xff)))
+    (:short (unsigned-to-signed-short (logand value #xffff)))
+    (:char (if (characterp value)
+               value
+               (code-char (logand value #xffff))))
+    (:int (unsigned-to-signed-integer (logand value #xffffffff)))
+    (:long (unsigned-to-signed-long (logand value #xffffffffffffffff)))
+    (:float (coerce value 'single-float))
+    (:double (coerce value 'double-float))))
+
+(defun %unsafe-bits-to-scalar (bits kind)
+  (ecase kind
+    (:boolean (if (zerop (logand bits #xff)) 0 1))
+    (:byte (%unsigned-to-signed-byte (logand bits #xff)))
+    (:short (unsigned-to-signed-short (logand bits #xffff)))
+    (:char (code-char (logand bits #xffff)))
+    (:int (unsigned-to-signed-integer (logand bits #xffffffff)))
+    (:long (unsigned-to-signed-long (logand bits #xffffffffffffffff)))
+    (:float (float-features:bits-single-float (logand bits #xffffffff)))
+    (:double (float-features:bits-double-float
+              (logand bits #xffffffffffffffff)))))
+
+(defun %unsafe-scalar-to-bits (value kind)
+  (ecase kind
+    (:boolean (if (or (null value) (eql value 0)) 0 1))
+    (:byte (logand value #xff))
+    (:short (logand value #xffff))
+    (:char (logand (if (characterp value) (char-code value) value) #xffff))
+    (:int (logand value #xffffffff))
+    (:long (logand value #xffffffffffffffff))
+    (:float (float-features:single-float-bits
+             (coerce value 'single-float)))
+    (:double (float-features:double-float-bits
+              (coerce value 'double-float)))))
+
+(defun %unsafe-scalar-byte-count (kind)
+  (ecase kind
+    ((:boolean :byte) 1)
+    ((:short :char) 2)
+    ((:int :float) 4)
+    ((:long :double) 8)))
+
+(defun %unsafe-get-scalar (object offset kind)
+  (let ((byte-count (%unsafe-scalar-byte-count kind)))
+    (cond
+      ((typep object 'java-array)
+       (%unsafe-bits-to-scalar
+        (%unsafe-read-array-bits object offset byte-count) kind))
+      (t
+       (multiple-value-bind (owner key field-p)
+           (%unsafe-field-owner-and-key object offset)
+         (cond
+           (field-p
+            (%unsafe-normalize-scalar (slot-value owner key) kind))
+           ((null object)
+            (%unsafe-bits-to-scalar
+             (%unsafe-read-native-bits offset byte-count) kind))
+           (t
+            (error "Unsafe ~A read has no field at offset ~D on ~A"
+                   kind offset object))))))))
+
+(defun %unsafe-put-scalar (object offset value kind)
+  (let* ((byte-count (%unsafe-scalar-byte-count kind))
+         (normalized (%unsafe-normalize-scalar value kind)))
+    (cond
+      ((typep object 'java-array)
+       (%unsafe-write-array-bits object offset byte-count
+                                 (%unsafe-scalar-to-bits normalized kind)))
+      (t
+       (multiple-value-bind (owner key field-p)
+           (%unsafe-field-owner-and-key object offset)
+         (cond
+           (field-p (setf (slot-value owner key) normalized))
+           ((null object)
+            (%unsafe-write-native-bits
+             offset byte-count (%unsafe-scalar-to-bits normalized kind)))
+           (t
+            (error "Unsafe ~A write has no field at offset ~D on ~A"
+                   kind offset object)))))))
+  nil)
+
+(defun %unsafe-get-reference (object offset)
+  (cond
+    ((typep object 'java-array)
+     (jaref object (%unsafe-array-index object offset)))
+    (t
+     (multiple-value-bind (owner key field-p)
+         (%unsafe-field-owner-and-key object offset)
+       (cond
+         (field-p (slot-value owner key))
+         ((null object) (gethash offset *unsafe-reference-memory-table*))
+         (t (error "Unsafe reference read has no field at offset ~D on ~A"
+                   offset object)))))))
+
+(defun %unsafe-put-reference (object offset value)
+  (cond
+    ((typep object 'java-array)
+     (setf (jaref object (%unsafe-array-index object offset)) value))
+    (t
+     (multiple-value-bind (owner key field-p)
+         (%unsafe-field-owner-and-key object offset)
+       (cond
+         (field-p (setf (slot-value owner key) value))
+         ((null object)
+          (setf (gethash offset *unsafe-reference-memory-table*) value))
+         (t (error "Unsafe reference write has no field at offset ~D on ~A"
+                   offset object))))))
+  nil)
+
+(defmacro %define-internal-unsafe-scalar-accessors (stem descriptor kind)
+  ;; OpenLDK's Lisp entry-point names contain only the JVM parameter
+  ;; descriptor.  The return descriptor is deliberately not part of the
+  ;; symbol (matching every other native method in this file).
+  (let ((get (intern (format nil "get~A(Ljava/lang/Object;J)"
+                             stem) :openldk))
+        (put (intern (format nil "put~A(Ljava/lang/Object;J~A)"
+                             stem descriptor) :openldk))
+        (get-volatile
+          (intern (format nil "get~AVolatile(Ljava/lang/Object;J)"
+                          stem) :openldk))
+        (put-volatile
+          (intern (format nil "put~AVolatile(Ljava/lang/Object;J~A)"
+                          stem descriptor) :openldk)))
+    `(progn
+       (defmethod ,get ((unsafe |jdk/internal/misc/Unsafe|) object offset)
+         (declare (ignore unsafe))
+         (%unsafe-get-scalar object offset ,kind))
+       (defmethod ,put ((unsafe |jdk/internal/misc/Unsafe|) object offset value)
+         (declare (ignore unsafe))
+         (%unsafe-put-scalar object offset value ,kind))
+       (defmethod ,get-volatile
+           ((unsafe |jdk/internal/misc/Unsafe|) object offset)
+         (declare (ignore unsafe))
+         (%unsafe-get-scalar object offset ,kind))
+       (defmethod ,put-volatile
+           ((unsafe |jdk/internal/misc/Unsafe|) object offset value)
+         (declare (ignore unsafe))
+         (%unsafe-put-scalar object offset value ,kind)))))
+
+(%define-internal-unsafe-scalar-accessors "Boolean" "Z" :boolean)
+(%define-internal-unsafe-scalar-accessors "Byte" "B" :byte)
+(%define-internal-unsafe-scalar-accessors "Short" "S" :short)
+(%define-internal-unsafe-scalar-accessors "Char" "C" :char)
+(%define-internal-unsafe-scalar-accessors "Int" "I" :int)
+(%define-internal-unsafe-scalar-accessors "Long" "J" :long)
+(%define-internal-unsafe-scalar-accessors "Float" "F" :float)
+(%define-internal-unsafe-scalar-accessors "Double" "D" :double)
+
+(defmethod |getReference(Ljava/lang/Object;J)|
+    ((unsafe |jdk/internal/misc/Unsafe|) object offset)
+  (declare (ignore unsafe))
+  (%unsafe-get-reference object offset))
+
+(defmethod |putReference(Ljava/lang/Object;JLjava/lang/Object;)|
+    ((unsafe |jdk/internal/misc/Unsafe|) object offset value)
+  (declare (ignore unsafe))
+  (%unsafe-put-reference object offset value))
+
+(defmethod |getReferenceVolatile(Ljava/lang/Object;J)|
+    ((unsafe |jdk/internal/misc/Unsafe|) object offset)
+  (declare (ignore unsafe))
+  (%unsafe-get-reference object offset))
+
+(defmethod |putReferenceVolatile(Ljava/lang/Object;JLjava/lang/Object;)|
+    ((unsafe |jdk/internal/misc/Unsafe|) object offset value)
+  (declare (ignore unsafe))
+  (%unsafe-put-reference object offset value))
+
+(defun %unsafe-compare-and-exchange-scalar
+    (object offset expected replacement kind)
+  (let ((old (%unsafe-get-scalar object offset kind)))
+    (when (eql old (%unsafe-normalize-scalar expected kind))
+      (%unsafe-put-scalar object offset replacement kind))
+    old))
+
+(defun %unsafe-compare-and-exchange-reference
+    (object offset expected replacement)
+  (let ((old (%unsafe-get-reference object offset)))
+    (when (eq old expected)
+      (%unsafe-put-reference object offset replacement))
+    old))
+
+(defmethod |compareAndSetInt(Ljava/lang/Object;JII)|
+    ((unsafe |jdk/internal/misc/Unsafe|) object offset expected replacement)
+  (declare (ignore unsafe))
+  (if (eql expected (%unsafe-compare-and-exchange-scalar
+                     object offset expected replacement :int))
+      1 0))
+
+(defmethod |compareAndExchangeInt(Ljava/lang/Object;JII)|
+    ((unsafe |jdk/internal/misc/Unsafe|) object offset expected replacement)
+  (declare (ignore unsafe))
+  (%unsafe-compare-and-exchange-scalar
+   object offset expected replacement :int))
+
+(defmethod |compareAndSetLong(Ljava/lang/Object;JJJ)|
+    ((unsafe |jdk/internal/misc/Unsafe|) object offset expected replacement)
+  (declare (ignore unsafe))
+  (if (eql expected (%unsafe-compare-and-exchange-scalar
+                     object offset expected replacement :long))
+      1 0))
+
+(defmethod |compareAndExchangeLong(Ljava/lang/Object;JJJ)|
+    ((unsafe |jdk/internal/misc/Unsafe|) object offset expected replacement)
+  (declare (ignore unsafe))
+  (%unsafe-compare-and-exchange-scalar
+   object offset expected replacement :long))
+
+(defmethod |compareAndSetReference(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)|
+    ((unsafe |jdk/internal/misc/Unsafe|) object offset expected replacement)
+  (declare (ignore unsafe))
+  (if (eq expected (%unsafe-compare-and-exchange-reference
+                    object offset expected replacement))
+      1 0))
+
+(defmethod |compareAndExchangeReference(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)|
+    ((unsafe |jdk/internal/misc/Unsafe|) object offset expected replacement)
+  (declare (ignore unsafe))
+  (%unsafe-compare-and-exchange-reference
+   object offset expected replacement))
+
+(defmethod |fullFence()| ((unsafe |jdk/internal/misc/Unsafe|))
+  (declare (ignore unsafe))
+  nil)
+
 (defmethod |arrayIndexScale0(Ljava/lang/Class;)| ((unsafe |jdk/internal/misc/Unsafe|) array)
-  1)
+  (declare (ignore unsafe))
+  (%unsafe-array-index-scale array))
 
 (defmethod |addressSize0()| ((unsafe |jdk/internal/misc/Unsafe|))
   8)
@@ -991,10 +1353,8 @@ and its implementation."
   (let* ((field-str (lstring field-name))
          (f (make-instance '%synthetic-field
                            :name (ijstring field-str)
-                           :clazz clazz))
-         (offset (unsigned-to-signed-integer (cl-murmurhash:murmurhash (sxhash f)))))
-    (setf (gethash offset *field-offset-table*) f)
-    offset))
+                           :clazz clazz)))
+    (%register-field-offset f)))
 
 ;;; JDK 9+ native Unsafe memory methods (0-suffixed variants).
 ;;; In JDK 17, the public Unsafe methods (allocateMemory, copyMemory, etc.)
@@ -1074,18 +1434,23 @@ and its implementation."
   (setf (sb-sys:sap-ref-8 (sb-sys:int-sap address) 0) (logand value #xFF)))
 
 (defmethod |copyMemory0(Ljava/lang/Object;JLjava/lang/Object;JJ)| ((unsafe |jdk/internal/misc/Unsafe|) source source-offset dest dest-offset length)
+  (declare (ignore unsafe))
   (cond
     ;; Native memory → Java array (common for ICU data loading)
     ((and (null source) dest)
      (let ((sap (sb-sys:int-sap source-offset)))
        (loop for i below length
-             do (setf (jaref dest (+ dest-offset i))
-                      (sb-sys:sap-ref-8 sap i)))))
+             do (%unsafe-array-write-byte
+                 dest (+ dest-offset i) (sb-sys:sap-ref-8 sap i)))))
     ;; Java array → Java array
     ((and source dest)
-     (loop for i below length
-           do (setf (jaref dest (+ dest-offset i))
-                    (jaref source (+ source-offset i)))))
+     (let ((bytes (make-array length :element-type '(unsigned-byte 8))))
+       (loop for i below length
+             do (setf (aref bytes i)
+                      (%unsafe-array-read-byte source (+ source-offset i))))
+       (loop for i below length
+             do (%unsafe-array-write-byte dest (+ dest-offset i)
+                                          (aref bytes i)))))
     ;; Native memory → native memory
     ((and (null source) (null dest))
      (let ((src-sap (sb-sys:int-sap source-offset))
@@ -1098,7 +1463,8 @@ and its implementation."
      (let ((dst-sap (sb-sys:int-sap dest-offset)))
        (loop for i below length
              do (setf (sb-sys:sap-ref-8 dst-sap i)
-                      (jaref source (+ source-offset i))))))))
+                      (%unsafe-array-read-byte source
+                                               (+ source-offset i))))))))
 
 (defmethod |reallocateMemory0(JJ)| ((unsafe |jdk/internal/misc/Unsafe|) address new-size)
   (if (zerop address)
@@ -1337,7 +1703,8 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
 ;  (make-instance '%array-base-offset :array array))
 
 (defmethod |arrayIndexScale(Ljava/lang/Class;)| ((unsafe |sun/misc/Unsafe|) array)
-  1)
+  (declare (ignore unsafe))
+  (%unsafe-array-index-scale array))
 
 (defmethod |addressSize()| ((unsafe |sun/misc/Unsafe|))
   ;; FIXME
@@ -1875,9 +2242,21 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
   ;; FIXME
   (cond
     ((typep obj 'java-array)
-     (if (equal (jaref obj field-id) expected-value)
+     (let ((index (%unsafe-array-index obj field-id)))
+       (if (equal (jaref obj index) expected-value)
          (progn
-           (setf (jaref obj field-id) new-value)
+           (setf (jaref obj index) new-value)
+           1)
+           0)))
+    ((null obj)
+     ;; Unsafe represents a static field as a null base plus a synthetic
+     ;; offset in OpenLDK.  Go through the ordinary accessors so that the
+     ;; declaring class's static storage object is selected.
+     (if (equal (|getObject(Ljava/lang/Object;J)| unsafe obj field-id)
+                expected-value)
+         (progn
+           (|putObject(Ljava/lang/Object;JLjava/lang/Object;)|
+            unsafe obj field-id new-value)
            1)
          0))
     (t
@@ -1891,22 +2270,53 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
 
 (defmethod |compareAndSwapInt(Ljava/lang/Object;JII)| ((unsafe |sun/misc/Unsafe|) obj field-id expected-value new-value)
   ;; FIXME: use atomics package
-  (let* ((field (gethash field-id *field-offset-table*))
-         (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
-    (if (equal (slot-value obj key) expected-value)
-        (progn
-          (setf (slot-value obj key) new-value)
-          1)
-        0)))
+  (if (typep obj 'java-array)
+      (let ((index (%unsafe-array-index obj field-id)))
+        (if (equal (jaref obj index) expected-value)
+            (progn
+              (setf (jaref obj index) new-value)
+              1)
+            0))
+      (if (null obj)
+      (if (equal (|getInt(Ljava/lang/Object;J)| unsafe obj field-id)
+                 expected-value)
+          (progn
+            (|putInt(Ljava/lang/Object;JI)| unsafe obj field-id new-value)
+            1)
+          0)
+      (let* ((field (gethash field-id *field-offset-table*))
+             (key (intern (mangle-field-name
+                           (lstring (slot-value field '|name|)))
+                          :openldk)))
+        (if (equal (slot-value obj key) expected-value)
+            (progn
+              (setf (slot-value obj key) new-value)
+              1)
+            0)))))
 
 (defmethod |compareAndSwapLong(Ljava/lang/Object;JJJ)| ((unsafe |sun/misc/Unsafe|) obj field-id expected-value new-value)
-  (|compareAndSwapInt(Ljava/lang/Object;JII)| unsafe obj field-id expected-value new-value))
+  (if (typep obj 'java-array)
+      (let ((index (%unsafe-array-index obj field-id)))
+        (if (equal (jaref obj index) expected-value)
+            (progn
+              (setf (jaref obj index) new-value)
+              1)
+            0))
+      (if (null obj)
+      (if (equal (|getLong(Ljava/lang/Object;J)| unsafe obj field-id)
+                 expected-value)
+          (progn
+            (|putLong(Ljava/lang/Object;JJ)| unsafe obj field-id new-value)
+            1)
+          0)
+          (|compareAndSwapInt(Ljava/lang/Object;JII)|
+           unsafe obj field-id expected-value new-value))))
 
 (defmethod |getObjectVolatile(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) obj l)
   ;; FIXME
   (cond
     ((typep obj 'java-array)
-     (jaref obj l))
+     (jaref obj (%unsafe-array-index obj l)))
     ((typep obj '|java/lang/Object|)
     (let* ((field (gethash l *field-offset-table*))
             (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
@@ -1926,7 +2336,7 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
 (defmethod |putObjectVolatile(Ljava/lang/Object;JLjava/lang/Object;)| ((unsafe |sun/misc/Unsafe|) obj l value)
   (cond
     ((typep obj 'java-array)
-     (setf (jaref obj l) value))
+     (setf (jaref obj (%unsafe-array-index obj l)) value))
     ((typep obj '|java/lang/Object|)
      (let* ((field (gethash l *field-offset-table*))
             (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
@@ -1946,7 +2356,7 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
 (defmethod |getObject(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) obj l)
   (cond
     ((typep obj 'java-array)
-     (jaref obj l))
+     (jaref obj (%unsafe-array-index obj l)))
     ((typep obj '|java/lang/Object|)
     (let* ((field (gethash l *field-offset-table*))
             (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
@@ -1973,7 +2383,7 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
 (defmethod |getLongVolatile(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) obj l)
   (cond
     ((typep obj 'java-array)
-     (jaref obj l))
+     (jaref obj (%unsafe-array-index obj l)))
     ((typep obj '|java/lang/Object|)
     (let* ((field (gethash l *field-offset-table*))
             (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
@@ -1983,7 +2393,7 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
 (defmethod |putObject(Ljava/lang/Object;JLjava/lang/Object;)| ((unsafe |sun/misc/Unsafe|) obj l value)
   (cond
     ((typep obj 'java-array)
-     (setf (jaref obj l) value))
+     (setf (jaref obj (%unsafe-array-index obj l)) value))
     ((typep obj '|java/lang/Object|)
      (let* ((field (gethash l *field-offset-table*))
             (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
@@ -2008,7 +2418,7 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
 
 (defmethod |getReference(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) obj l)
   (cond
-    ((typep obj 'java-array) (jaref obj l))
+    ((typep obj 'java-array) (jaref obj (%unsafe-array-index obj l)))
     ((typep obj '|java/lang/Object|)
      (let* ((field (gethash l *field-offset-table*))
             (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
@@ -2030,7 +2440,8 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
 
 (defmethod |putReference(Ljava/lang/Object;JLjava/lang/Object;)| ((unsafe |sun/misc/Unsafe|) obj l value)
   (cond
-    ((typep obj 'java-array) (setf (jaref obj l) value))
+    ((typep obj 'java-array)
+     (setf (jaref obj (%unsafe-array-index obj l)) value))
     ((typep obj '|java/lang/Object|)
      (let* ((field (gethash l *field-offset-table*))
             (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
@@ -2452,7 +2863,7 @@ user.variant
 (defmethod |getIntVolatile(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) param-object param-long)
   (cond
     ((typep param-object 'java-array)
-     (jaref param-object param-long))
+     (jaref param-object (%unsafe-array-index param-object param-long)))
     ((null param-object)
      ;; Static field access: look up the static singleton
      (let* ((field (gethash param-long *field-offset-table*))
@@ -2472,7 +2883,7 @@ user.variant
   (declare (ignore unsafe))
   (cond
     ((typep obj 'java-array)
-     (setf (jaref obj offset) value))
+     (setf (jaref obj (%unsafe-array-index obj offset)) value))
     ((null obj)
      (let* ((field (gethash offset *field-offset-table*))
             (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk))
@@ -2489,7 +2900,7 @@ user.variant
 (defmethod |getCharVolatile(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) param-object param-long)
   (cond
     ((typep param-object 'java-array)
-     (jaref param-object param-long))
+     (jaref param-object (%unsafe-array-index param-object param-long)))
     ((null param-object)
      ;; Static field access: look up the static singleton
      (let* ((field (gethash param-long *field-offset-table*))
@@ -3427,44 +3838,112 @@ user.variant
                (v (slot-value (eval (intern (format nil "+static-~A+" bin-name) pkg)) key)))
           (if v (if (eql v 0) 0 1) 0)))))
 
+(defun %unsafe-byte-array-p (object)
+  "Return true when OBJECT is a Java byte array."
+  (and (typep object 'java-array)
+       (let ((component (java-array-component-class object)))
+         (and component
+              (string= (lstring (slot-value component '|name|)) "byte")))))
+
+(defun %unsafe-read-byte-array (array offset byte-count)
+  "Read BYTE-COUNT native-order bytes from ARRAY at OFFSET as an integer."
+  ;; OpenLDK is currently supported on little-endian SBCL/Linux systems.
+  (unless (and (<= 0 offset)
+               (<= (+ offset byte-count) (length (java-array-data array))))
+    (error "Unsafe byte-array read of ~D bytes at ~D exceeds length ~D"
+           byte-count offset (length (java-array-data array))))
+  (loop for index below byte-count
+        sum (ash (logand (jaref array (+ offset index)) #xff)
+                 (* index 8))))
+
+(defmethod |getByte(Ljava/lang/Object;J)|
+    ((unsafe |sun/misc/Unsafe|) objref ptr)
+  (declare (ignore unsafe))
+  (cond
+    ((%unsafe-byte-array-p objref)
+     (%unsigned-to-signed-byte (logand (jaref objref ptr) #xff)))
+    ((null objref)
+     (sb-sys:signed-sap-ref-8 (sb-sys:int-sap ptr) 0))
+    (t
+     (let* ((field (gethash ptr *field-offset-table*))
+            (key (intern (mangle-field-name
+                          (lstring (slot-value field '|name|)))
+                         :openldk)))
+       (slot-value objref key)))))
+
+(defmethod |getShort(Ljava/lang/Object;J)|
+    ((unsafe |sun/misc/Unsafe|) objref ptr)
+  (declare (ignore unsafe))
+  (cond
+    ((%unsafe-byte-array-p objref)
+     (unsigned-to-signed-short (%unsafe-read-byte-array objref ptr 2)))
+    ((null objref)
+     (sb-sys:signed-sap-ref-16 (sb-sys:int-sap ptr) 0))
+    (t
+     (let* ((field (gethash ptr *field-offset-table*))
+            (key (intern (mangle-field-name
+                          (lstring (slot-value field '|name|)))
+                         :openldk)))
+       (slot-value objref key)))))
+
 (defmethod |getInt(Ljava/lang/Object;J)|((unsafe |sun/misc/Unsafe|) objref ptr)
   (declare (ignore unsafe))
-  (let* ((field (gethash ptr *field-offset-table*))
-         (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
-    (if objref
-        (slot-value objref key)
-        ;; Static field access: look up the static singleton
-        (let* ((clazz (slot-value field '|clazz|))
-               (lname (lstring (slot-value clazz '|name|)))
-               (bin-name (substitute #\/ #\. lname))
-               (pkg (class-package bin-name)))
-          (slot-value (eval (intern (format nil "+static-~A+" bin-name) pkg)) key)))))
+  (if (%unsafe-byte-array-p objref)
+      (unsigned-to-signed-integer (%unsafe-read-byte-array objref ptr 4))
+      (let* ((field (gethash ptr *field-offset-table*))
+             (key (when field
+                    (intern (mangle-field-name
+                             (lstring (slot-value field '|name|)))
+                            :openldk))))
+        (if objref
+            (slot-value objref key)
+            (if field
+                ;; Static field access: look up the static singleton.
+                (let* ((clazz (slot-value field '|clazz|))
+                       (lname (lstring (slot-value clazz '|name|)))
+                       (bin-name (substitute #\/ #\. lname))
+                       (pkg (class-package bin-name)))
+                  (slot-value
+                   (eval (intern (format nil "+static-~A+" bin-name) pkg)) key))
+                (sb-sys:signed-sap-ref-32 (sb-sys:int-sap ptr) 0))))))
 
 (defmethod |putLong(Ljava/lang/Object;JJ)|((unsafe |sun/misc/Unsafe|) objref ptr value)
   (declare (ignore unsafe))
   (let* ((field (gethash ptr *field-offset-table*))
-         (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
+         (key (when field
+                (intern (mangle-field-name (lstring (slot-value field '|name|)))
+                        :openldk))))
     (if objref
         (setf (slot-value objref key) value)
-        ;; Static field access: look up the static singleton
-        (let* ((clazz (slot-value field '|clazz|))
-               (lname (lstring (slot-value clazz '|name|)))
-               (bin-name (substitute #\/ #\. lname))
-               (pkg (class-package bin-name)))
-          (setf (slot-value (eval (intern (format nil "+static-~A+" bin-name) pkg)) key) value)))))
+        (if field
+            ;; Static field access: look up the static singleton.
+            (let* ((clazz (slot-value field '|clazz|))
+                   (lname (lstring (slot-value clazz '|name|)))
+                   (bin-name (substitute #\/ #\. lname))
+                   (pkg (class-package bin-name)))
+              (setf (slot-value
+                     (eval (intern (format nil "+static-~A+" bin-name) pkg)) key)
+                    value))
+            (setf (sb-sys:signed-sap-ref-64 (sb-sys:int-sap ptr) 0) value)))))
 
 (defmethod |putInt(Ljava/lang/Object;JI)|((unsafe |sun/misc/Unsafe|) objref ptr value)
   (declare (ignore unsafe))
   (let* ((field (gethash ptr *field-offset-table*))
-         (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
+         (key (when field
+                (intern (mangle-field-name (lstring (slot-value field '|name|)))
+                        :openldk))))
     (if objref
         (setf (slot-value objref key) value)
-        ;; Static field access: look up the static singleton
-        (let* ((clazz (slot-value field '|clazz|))
-               (lname (lstring (slot-value clazz '|name|)))
-               (bin-name (substitute #\/ #\. lname))
-               (pkg (class-package bin-name)))
-          (setf (slot-value (eval (intern (format nil "+static-~A+" bin-name) pkg)) key) value)))))
+        (if field
+            ;; Static field access: look up the static singleton.
+            (let* ((clazz (slot-value field '|clazz|))
+                   (lname (lstring (slot-value clazz '|name|)))
+                   (bin-name (substitute #\/ #\. lname))
+                   (pkg (class-package bin-name)))
+              (setf (slot-value
+                     (eval (intern (format nil "+static-~A+" bin-name) pkg)) key)
+                    value))
+            (setf (sb-sys:signed-sap-ref-32 (sb-sys:int-sap ptr) 0) value)))))
 
 ;; JDK 25: StringConcatHelper and friends store into byte[] buffers via
 ;; Unsafe.putByte(byte[], offset, value) / getByte(byte[], offset). Because
@@ -3494,16 +3973,70 @@ user.variant
 
 (defmethod |getLong(Ljava/lang/Object;J)|((unsafe |sun/misc/Unsafe|) objref ptr)
   (declare (ignore unsafe))
-  (let* ((field (gethash ptr *field-offset-table*))
-         (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
-    (if objref
-        (slot-value objref key)
-        ;; Static field access: look up the static singleton
-        (let* ((clazz (slot-value field '|clazz|))
-               (lname (lstring (slot-value clazz '|name|)))
-               (bin-name (substitute #\/ #\. lname))
-               (pkg (class-package bin-name)))
-          (slot-value (eval (intern (format nil "+static-~A+" bin-name) pkg)) key)))))
+  (if (%unsafe-byte-array-p objref)
+      (unsigned-to-signed-long (%unsafe-read-byte-array objref ptr 8))
+      (let* ((field (gethash ptr *field-offset-table*))
+             (key (when field
+                    (intern (mangle-field-name
+                             (lstring (slot-value field '|name|)))
+                            :openldk))))
+        (if objref
+            (slot-value objref key)
+            (if field
+                ;; Static field access: look up the static singleton.
+                (let* ((clazz (slot-value field '|clazz|))
+                       (lname (lstring (slot-value clazz '|name|)))
+                       (bin-name (substitute #\/ #\. lname))
+                       (pkg (class-package bin-name)))
+                  (slot-value
+                   (eval (intern (format nil "+static-~A+" bin-name) pkg)) key))
+                (sb-sys:signed-sap-ref-64 (sb-sys:int-sap ptr) 0))))))
+
+(defmethod |getFloat(Ljava/lang/Object;J)|
+    ((unsafe |sun/misc/Unsafe|) objref ptr)
+  (declare (ignore unsafe))
+  (if objref
+      (let* ((field (gethash ptr *field-offset-table*))
+             (key (intern (mangle-field-name
+                           (lstring (slot-value field '|name|)))
+                          :openldk)))
+        (slot-value objref key))
+      (sb-sys:sap-ref-single (sb-sys:int-sap ptr) 0)))
+
+(defmethod |putFloat(Ljava/lang/Object;JF)|
+    ((unsafe |sun/misc/Unsafe|) objref ptr value)
+  (declare (ignore unsafe))
+  (if objref
+      (let* ((field (gethash ptr *field-offset-table*))
+             (key (intern (mangle-field-name
+                           (lstring (slot-value field '|name|)))
+                          :openldk)))
+        (setf (slot-value objref key) value))
+      (setf (sb-sys:sap-ref-single (sb-sys:int-sap ptr) 0)
+            (coerce value 'single-float))))
+
+(defmethod |getDouble(Ljava/lang/Object;J)|
+    ((unsafe |sun/misc/Unsafe|) objref ptr)
+  (declare (ignore unsafe))
+  (if objref
+      (let* ((field (gethash ptr *field-offset-table*))
+             (key (intern (mangle-field-name
+                           (lstring (slot-value field '|name|)))
+                          :openldk)))
+        (slot-value objref key))
+      (sb-sys:sap-ref-double (sb-sys:int-sap ptr) 0)))
+
+(defmethod |putDouble(Ljava/lang/Object;JD)|
+    ((unsafe |sun/misc/Unsafe|) objref ptr value)
+  (declare (ignore unsafe))
+  (if objref
+      (let* ((field (gethash ptr *field-offset-table*))
+             (key (intern (mangle-field-name
+                           (lstring (slot-value field '|name|)))
+                          :openldk)))
+        (setf (slot-value objref key) value))
+      (setf (sb-sys:sap-ref-double (sb-sys:int-sap ptr) 0)
+            (coerce value 'double-float))))
 
 (defmethod |getLong(J)| ((unsafe |sun/misc/Unsafe|) ptr)
   (declare (ignore unsafe))
@@ -5516,3 +6049,88 @@ INTERFACE-TYPE-NAME is the binary name of the target functional interface."
 (defmethod |getProtectionDomain0()| ((clazz |java/lang/Class|))
   ;; FIXME
   nil)
+
+;;; Remaining native entry points on JDK 21's internal Unsafe.  These are
+;;; uncommon in the game itself, but are part of the transitive NIO/atomic
+;;; surface and should fail neither linkage nor lazy compilation.
+
+(defmethod |getUncompressedObject(J)|
+    ((unsafe |jdk/internal/misc/Unsafe|) address)
+  (declare (ignore unsafe))
+  (gethash address *unsafe-reference-memory-table*))
+
+(defmethod |writeback0(J)|
+    ((unsafe |jdk/internal/misc/Unsafe|) address)
+  (declare (ignore unsafe address))
+  nil)
+
+(defmethod |writebackPreSync0()| ((unsafe |jdk/internal/misc/Unsafe|))
+  (declare (ignore unsafe))
+  nil)
+
+(defmethod |writebackPostSync0()| ((unsafe |jdk/internal/misc/Unsafe|))
+  (declare (ignore unsafe))
+  nil)
+
+(defmethod |defineClass0(Ljava/lang/String;[BIILjava/lang/ClassLoader;Ljava/security/ProtectionDomain;)|
+    ((unsafe |jdk/internal/misc/Unsafe|) class-name data offset length
+     class-loader protection-domain)
+  (declare (ignore unsafe protection-domain))
+  (let* ((ldk-loader (get-ldk-loader-for-java-loader class-loader))
+         (stream (make-instance 'byte-array-input-stream
+                                :array data :start offset :end (+ offset length)))
+         (result (%classload-from-stream
+                  (substitute #\/ #\. (lstring class-name))
+                  stream class-loader ldk-loader)))
+    (unless result
+      (let ((exception (%make-java-instance "java/lang/NoClassDefFoundError")))
+        (|<init>(Ljava/lang/String;)| exception class-name)
+        (error (%lisp-condition exception))))
+    (java-class result)))
+
+(defmethod |allocateInstance(Ljava/lang/Class;)|
+    ((unsafe |jdk/internal/misc/Unsafe|) class)
+  (declare (ignore unsafe))
+  (let* ((bin-name (substitute #\/ #\.
+                               (lstring (slot-value class '|name|))))
+         (pkg (class-package bin-name)))
+    (make-instance (intern bin-name pkg))))
+
+(defmethod |throwException(Ljava/lang/Throwable;)|
+    ((unsafe |jdk/internal/misc/Unsafe|) throwable)
+  (declare (ignore unsafe))
+  (error (%lisp-condition throwable)))
+
+(defun %unsafe-read-storage-byte (object offset)
+  (if object
+      (%unsafe-array-read-byte object offset)
+      (sb-sys:sap-ref-8 (sb-sys:int-sap offset) 0)))
+
+(defun %unsafe-write-storage-byte (object offset value)
+  (if object
+      (%unsafe-array-write-byte object offset value)
+      (setf (sb-sys:sap-ref-8 (sb-sys:int-sap offset) 0)
+            (logand value #xff))))
+
+(defmethod |copySwapMemory0(Ljava/lang/Object;JLjava/lang/Object;JJJ)|
+    ((unsafe |jdk/internal/misc/Unsafe|)
+     source source-offset destination destination-offset bytes element-size)
+  (declare (ignore unsafe))
+  (unless (and (plusp element-size) (zerop (mod bytes element-size)))
+    (error "Invalid copySwapMemory size ~D for ~D-byte elements"
+           bytes element-size))
+  (let ((snapshot (make-array bytes :element-type '(unsigned-byte 8))))
+    (dotimes (index bytes)
+      (setf (aref snapshot index)
+            (%unsafe-read-storage-byte source (+ source-offset index))))
+    (loop for base from 0 below bytes by element-size
+          do (dotimes (index element-size)
+               (%unsafe-write-storage-byte
+                destination (+ destination-offset base index)
+                (aref snapshot (+ base (- element-size index 1)))))))
+  nil)
+
+(defmethod |getLoadAverage0([DI)|
+    ((unsafe |jdk/internal/misc/Unsafe|) load-averages count)
+  (declare (ignore unsafe load-averages count))
+  -1)
