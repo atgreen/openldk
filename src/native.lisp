@@ -5483,98 +5483,89 @@ primitive type. ARGS must line up with the descriptor's declared parameters
             for arg in args
             collect (if prim (%maybe-unbox arg) arg))))
 
+(defvar *member-name-invoke-cache*
+  (make-hash-table :test 'eq :weakness :key :synchronized t)
+  "Memoized invocation plans keyed by MemberName instance (eq, weak on key) so
+that linkTo*/%invoke-from-member-name resolves the target symbol once per call
+site instead of on every invocation.")
+
+(defun %resolve-member-name (member-name)
+  "Resolve MEMBER-NAME to a cached invocation plan (kind a b):
+   (:constructor class-symbol init-symbol)
+   (:static      fn-symbol   descriptor)
+   (:instance    fn-symbol   descriptor)
+The plan depends only on the (stable) MemberName, so it is memoized."
+  (or (gethash member-name *member-name-invoke-cache*)
+      (setf (gethash member-name *member-name-invoke-cache*)
+            (let* ((clazz (when (and (slot-exists-p member-name '|clazz|)
+                                     (slot-boundp member-name '|clazz|))
+                            (slot-value member-name '|clazz|)))
+                   (name (when (and (slot-exists-p member-name '|name|)
+                                    (slot-boundp member-name '|name|))
+                           (slot-value member-name '|name|)))
+                   (type (when (and (slot-exists-p member-name '|type$|)
+                                    (slot-boundp member-name '|type$|))
+                           (slot-value member-name '|type$|)))
+                   (flags (when (and (slot-exists-p member-name '|flags|)
+                                     (slot-boundp member-name '|flags|))
+                            (slot-value member-name '|flags|))))
+              (unless (and clazz name)
+                (error "linkTo*: incomplete MemberName ~A" member-name))
+              (let* ((class-name (substitute #\/ #\. (lstring (slot-value clazz '|name|))))
+                     (method-name (lstring name))
+                     ;; type is a String descriptor or a MethodType
+                     (method-type (if (and type (typep type '|java/lang/String|))
+                                      (lstring type)
+                                      (when type
+                                        (let ((rtype (slot-value type '|rtype|))
+                                              (ptypes (when (slot-exists-p type '|ptypes|)
+                                                        (slot-value type '|ptypes|))))
+                                          (%build-method-descriptor rtype ptypes)))))
+                     ;; REF_invokeVirtual=5 Static=6 Special=7 newInvokeSpecial=8
+                     (ref-kind (ash (logand flags #x0F000000) -24)))
+                (cond
+                  ((= ref-kind 8)       ; constructor
+                   (classload class-name)
+                   (let* ((pkg (class-package class-name))
+                          (lisp-class-name (intern class-name pkg))
+                          ;; <init> is void; normalise any return type to V
+                          (desc (cond
+                                  ((null method-type) "()V")
+                                  ((position #\) method-type)
+                                   (format nil "~AV" (subseq method-type 0 (1+ (position #\) method-type)))))
+                                  (t (format nil "~AV" method-type))))
+                          (init-method-name (format nil "<init>~A" (subseq desc 0 (1+ (position #\) desc)))))
+                          (lisp-init-name (intern init-method-name :openldk)))
+                     (list :constructor lisp-class-name lisp-init-name)))
+                  ((= ref-kind 6)       ; static: name is class.method(desc) in the loader package
+                   (let* ((java-loader (slot-value clazz '|classLoader|))
+                          (ldk-loader (get-ldk-loader-for-java-loader java-loader))
+                          (pkg (class-package class-name ldk-loader))
+                          (full-method-sig (format nil "~A.~A~A" class-name method-name method-type)))
+                     (list :static (intern (lispize-method-name full-method-sig) pkg) method-type)))
+                  (t                    ; virtual/special/interface: GF named by method+descriptor
+                   (list :instance
+                         (intern (lispize-method-name (format nil "~A~A" method-name method-type)) :openldk)
+                         method-type))))))))
+
 (defun %invoke-from-member-name (member-name &rest args)
-  "Invoke a method described by a MemberName with the given arguments.
-   This is the core implementation for linkToStatic, linkToVirtual, etc."
-  ;; Extract method information from the MemberName
-  (let* ((clazz (when (and (slot-exists-p member-name '|clazz|)
-                          (slot-boundp member-name '|clazz|))
-                 (slot-value member-name '|clazz|)))
-         (name (when (and (slot-exists-p member-name '|name|)
-                         (slot-boundp member-name '|name|))
-                (slot-value member-name '|name|)))
-         (type (when (and (slot-exists-p member-name '|type$|)
-                         (slot-boundp member-name '|type$|))
-                (slot-value member-name '|type$|)))
-         (flags (when (and (slot-exists-p member-name '|flags|)
-                          (slot-boundp member-name '|flags|))
-                 (slot-value member-name '|flags|))))
-
-    (unless (and clazz name)
-      (error "linkTo*: incomplete MemberName ~A" member-name))
-
-    ;; Get the class name and method name as strings
-    (let* ((class-name-raw (lstring (slot-value clazz '|name|)))
-           ;; Class names from Class.getName() use . separator, but we need /
-           (class-name (substitute #\/ #\. class-name-raw))
-           (method-name (lstring name))
-           ;; type can be either a String (descriptor) or a MethodType
-           (method-type (if (and type (typep type '|java/lang/String|))
-                            ;; It's already a string descriptor
-                            (lstring type)
-                            ;; It's a MethodType, build descriptor from rtype/ptypes
-                            (when type
-                              (let ((rtype (slot-value type '|rtype|))
-                                    (ptypes (when (slot-exists-p type '|ptypes|)
-                                              (slot-value type '|ptypes|))))
-                                (%build-method-descriptor rtype ptypes)))))
-           ;; Extract the reference kind from flags
-           ;; REF_invokeStatic = 6, REF_invokeSpecial = 7, REF_newInvokeSpecial = 8
-           (ref-kind (ash (logand flags #x0F000000) -24))
-           (is-constructor (= ref-kind 8)))
-
-      ;; Handle constructors specially - create instance, call init, return instance
-      (if is-constructor
-            (progn
-              ;; Load the class and create a new instance
-              (classload class-name)
-              (let* ((pkg (class-package class-name))
-                     (lisp-class-name (intern class-name pkg))
-                     (instance (make-instance lisp-class-name)))
-                ;; Constructor descriptors always return void - replace any return type with V
-                ;; The MethodType from findConstructor has the class as return type, but
-                ;; <init> methods have void return type
-                (let* ((desc (cond
-                               ((null method-type) "()V")
-                               ;; Extract params portion and append V
-                               ((position #\) method-type)
-                                (format nil "~AV" (subseq method-type 0 (1+ (position #\) method-type)))))
-                               (t (format nil "~AV" method-type))))
-                       ;; Instance methods like constructors are defined as generic functions
-                       ;; with just the method name, not the fully qualified class.method name
-                       (init-method-name (format nil "<init>~A" (subseq desc 0 (1+ (position #\) desc)))))
-                       (lisp-init-name (intern init-method-name :openldk)))
-                  (apply lisp-init-name instance args))
-                ;; Return the constructed instance
-                instance))
-            ;; Normal method invocation
-            ;; REF_invokeVirtual = 5, REF_invokeStatic = 6, REF_invokeSpecial = 7
-            (let ((is-static (= ref-kind 6))
-                  (is-virtual (= ref-kind 5))
-                  (is-special (= ref-kind 7)))
-              (if is-static
-                  ;; Static methods use fully qualified names like class.method(desc)
-                  ;; They live in the loader's package - get loader from the Class object
-                  (let* ((java-loader (slot-value clazz '|classLoader|))
-                         (ldk-loader (get-ldk-loader-for-java-loader java-loader))
-                         (pkg (class-package class-name ldk-loader))
-                         (full-method-sig (format nil "~A.~A~A" class-name method-name method-type))
-                         (lisp-method-name (intern (lispize-method-name full-method-sig) pkg)))
-                    ;; Unbox primitive-typed arguments (e.g. Integer -> int) so that
-                    ;; method references adapted to functional interfaces (which pass
-                    ;; boxed Object arguments) reach primitive-parameter methods correctly.
-                    (apply lisp-method-name (%unbox-args-for-descriptor method-type args)))
-                  ;; Virtual and special methods are generic functions with just the method name
-                  ;; The first argument is the receiver (this)
-                  (let* ((simple-method-name (format nil "~A~A" method-name method-type))
-                         (lisp-method-name (intern (lispize-method-name simple-method-name) :openldk)))
-                    ;; The receiver (first arg) is not part of the descriptor's
-                    ;; parameter list, so unbox only the trailing arguments.
-                    (apply lisp-method-name
-                           (if args
-                               (cons (first args)
-                                     (%unbox-args-for-descriptor method-type (rest args)))
-                               args)))))))))
+  "Invoke a method described by a MemberName with the given ARGS. Core of
+linkToStatic/linkToVirtual/linkToSpecial; resolution is memoized per MemberName.
+Primitive-typed args are unboxed so method references adapted to functional
+interfaces (which pass boxed Object args) reach primitive-parameter methods."
+  (destructuring-bind (kind a b) (%resolve-member-name member-name)
+    (ecase kind
+      (:constructor                     ; a=class-symbol, b=init-symbol
+       (let ((instance (make-instance a)))
+         (apply b instance args)
+         instance))
+      (:static                          ; a=fn-symbol, b=descriptor
+       (apply a (%unbox-args-for-descriptor b args)))
+      (:instance                        ; a=fn-symbol, b=descriptor; first arg is the receiver
+       (apply a (if args
+                    (cons (first args)
+                          (%unbox-args-for-descriptor b (rest args)))
+                    args))))))
 
 (defun |java/lang/invoke/MethodHandle.linkToStatic(Ljava/lang/invoke/MemberName;)| (&rest args)
   "MethodHandle intrinsic: invoke a static method via MemberName (no-arg variant).
