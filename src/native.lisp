@@ -44,6 +44,16 @@
 ;; (e.g. "java/lang/System.console()Ljava/io/Console;").
 (defvar *native-overrides* (make-hash-table :test #'equal))
 
+;; OpenLDK supplies JDK native entry points as Lisp methods.  Loading the
+;; corresponding HotSpot JNI libraries (awt, javajpeg, zip, and friends) into
+;; SBCL would neither register nor satisfy those methods, so treat the Java
+;; library-load notification as already fulfilled.
+(setf (gethash "java/lang/System.loadLibrary(Ljava/lang/String;)V"
+               *native-overrides*)
+      (lambda (library-name)
+        (declare (ignore library-name))
+        nil))
+
 ;;; Post-<clinit> hooks: functions called after a class's static initializer runs.
 ;;; Used for classes whose fields are pre-populated by the JVM before <clinit>.
 (defvar *post-clinit-hooks* (make-hash-table :test #'equal))
@@ -215,6 +225,23 @@ Accepts native CL integers and Java numeric wrapper instances."
          (n (min (length data) (length bt))))
     (dotimes (i n)
       (setf (aref data i) (|getStackTraceElement(I)| throwable i)))))
+
+;; JDK 21 passes Throwable.backtrace and depth separately instead of passing
+;; the Throwable itself.
+(defun |java/lang/StackTraceElement.initStackTraceElements([Ljava/lang/StackTraceElement;Ljava/lang/Object;I)|
+    (ste-array backtrace depth)
+  "Populate STE-ARRAY from a JDK 21 Throwable backtrace object."
+  (let* ((data (java-array-data ste-array))
+         (frames (if (listp backtrace) backtrace nil))
+         (count (min (length data) depth (length frames))))
+    (dotimes (index count)
+      (let ((ste (%make-java-instance "java/lang/StackTraceElement"))
+            (frame (nth index frames)))
+        (|<init>(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;I)|
+         ste
+         (jstring (%caller-class-name-from-stack-frame frame))
+         (ijstring "unknown") (jstring (format nil "~A" frame)) -1)
+        (setf (aref data index) ste)))))
 
 (defun %remove-adjacent-repeats (list)
   "Remove all adjacent repeated objects from LIST."
@@ -2083,6 +2110,13 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
           (error "Reflective newInstance0: constructor ~A not found for class ~A"
                  lispized class-name))
       instance)))
+
+;; JDK 21 routes Constructor.newInstance through this accessor class.
+(defun |jdk/internal/reflect/DirectConstructorHandleAccessor$NativeAccessor.newInstance0(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)|
+    (constructor args)
+  "Invoke a constructor through the JDK 21 direct reflection accessor."
+  (|jdk/internal/reflect/NativeConstructorAccessorImpl.newInstance0(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)|
+   constructor args))
 
 ;; Guard against null dispatch on gnu.bytecode.Type methods.
 ;; Kawa's PrimProcedure sometimes has a null retType, causing isVoid() and
@@ -4068,6 +4102,10 @@ user.variant
   ;; FIXME
   nil)
 
+(defun |java/awt/Toolkit.initIDs()| ()
+  "No-op HotSpot field-ID cache initialization for the Lisp object model."
+  nil)
+
 (defun |java/net/InetAddressImplFactory.isIPv6Supported()| ()
   0)
 
@@ -4081,6 +4119,15 @@ user.variant
 
 (defun |java/awt/image/SampleModel.initIDs()| ()
   ;; FIXME
+  nil)
+
+(defun |sun/awt/image/ByteComponentRaster.initIDs()| ()
+  nil)
+
+(defun |sun/awt/image/BytePackedRaster.initIDs()| ()
+  nil)
+
+(defun |sun/awt/image/IntegerComponentRaster.initIDs()| ()
   nil)
 
 (defun |java/util/zip/Deflater.initIDs()| ()
