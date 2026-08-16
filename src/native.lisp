@@ -3945,32 +3945,6 @@ user.variant
                     value))
             (setf (sb-sys:signed-sap-ref-32 (sb-sys:int-sap ptr) 0) value)))))
 
-;; JDK 25: StringConcatHelper and friends store into byte[] buffers via
-;; Unsafe.putByte(byte[], offset, value) / getByte(byte[], offset). Because
-;; OpenLDK reports arrayBaseOffset=0 and arrayIndexScale=1, the offset is used
-;; directly as an array index.
-(defmethod |putByte(Ljava/lang/Object;JB)| ((unsafe |sun/misc/Unsafe|) obj offset value)
-  (declare (ignore unsafe))
-  (cond
-    ((typep obj 'java-array)
-     (setf (jaref obj offset) value))
-    ((typep obj '|java/lang/Object|)
-     (let* ((field (gethash offset *field-offset-table*))
-            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
-       (setf (slot-value obj key) value)))
-    (t (error "internal error: unrecognized object type in putByte: ~A" obj))))
-
-(defmethod |getByte(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) obj offset)
-  (declare (ignore unsafe))
-  (cond
-    ((typep obj 'java-array)
-     (jaref obj offset))
-    ((typep obj '|java/lang/Object|)
-     (let* ((field (gethash offset *field-offset-table*))
-            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
-       (slot-value obj key)))
-    (t (error "internal error: unrecognized object type in getByte: ~A" obj))))
-
 (defmethod |getLong(Ljava/lang/Object;J)|((unsafe |sun/misc/Unsafe|) objref ptr)
   (declare (ignore unsafe))
   (if (%unsafe-byte-array-p objref)
