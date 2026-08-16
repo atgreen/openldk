@@ -1336,9 +1336,10 @@ method handle: returns the index of the first LABEL (at or after RESTART) that
 matches TARGET, LABELS's length if none match, or -1 when TARGET is null."
   (if (null target)
       -1
-      (let ((n (length labels)))
+      (let* ((v (coerce labels 'simple-vector))
+             (n (length v)))
         (loop for i from (max restart 0) below n
-              when (%type-switch-match target (nth i labels))
+              when (%type-switch-match target (svref v i))
                 do (return-from %type-switch i))
         n)))
 
@@ -1360,9 +1361,10 @@ as a String, or an Enum$EnumDesc)."
   "Native implementation of SwitchBootstraps.enumSwitch's target method handle."
   (if (null target)
       -1
-      (let ((n (length labels)))
+      (let* ((v (coerce labels 'simple-vector))
+             (n (length v)))
         (loop for i from (max restart 0) below n
-              when (%enum-switch-match target (nth i labels))
+              when (%enum-switch-match target (svref v i))
                 do (return-from %enum-switch i))
         n)))
 
@@ -1394,8 +1396,11 @@ boolean prints true/false and char prints the character rather than an int."
   (let* ((n (lstring (slot-value class '|name|)))
          (dot (position #\. n :from-end t))
          (n (if dot (subseq n (1+ dot)) n))
-         (dollar (position #\$ n :from-end t)))
-    (if dollar (subseq n (1+ dollar)) n)))
+         (dollar (position #\$ n :from-end t))
+         (n (if dollar (subseq n (1+ dollar)) n)))
+    ;; Local/anonymous classes have binary names like Outer$1Name; getSimpleName
+    ;; strips the compiler-added leading digits (Outer$1Name -> Name, Outer$1 -> "").
+    (string-left-trim "0123456789" n)))
 
 (defun %record-to-string (record class names-jstring)
   "Native implementation of a record's ObjectMethods-generated toString()."
