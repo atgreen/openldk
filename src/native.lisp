@@ -4097,11 +4097,6 @@ user.variant
 (defun |java/lang/Package.getSystemPackage0(Ljava/lang/String;)| (name)
   (gethash (lstring name) *packages*))
 
-(defun |java/util/zip/Inflater.init(Z)| (v)
-  (declare (ignore v))
-  ;; FIXME
-  nil)
-
 (defun |java/lang/Thread.holdsLock(Ljava/lang/Object;)| (objref)
   (let ((monitor (%get-monitor objref))
         (current-thread (current-thread-identity)))
