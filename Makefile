@@ -7,7 +7,11 @@ JAVAC ?= javac --release 25
 
 XDG_CACHE_HOME ?= $(CURDIR)/.cache
 
-export JAVA_HOME JAVAC XDG_CACHE_HOME
+# Let ASDF find this project's systems without a manual central-registry push.
+# The trailing ':' keeps the inherited (ocicl) source registry.
+CL_SOURCE_REGISTRY ?= $(CURDIR)//:
+
+export JAVA_HOME JAVAC XDG_CACHE_HOME CL_SOURCE_REGISTRY
 
 KAWA_VERSION = 3.1.1
 KAWA_JAR = lib/kawa-$(KAWA_VERSION).jar
