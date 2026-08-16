@@ -2343,15 +2343,26 @@ get the same unified var-numbers."
         (if main-symbol
             (progn
               (%eval (list main-symbol argv))
-              ;; Wait for all non-daemon Java threads (other than the current one) to complete.
-              ;; Safety timeout of 30 seconds to prevent indefinite hangs.
+              ;; Wait for all non-daemon Java threads (other than the current
+              ;; one) to complete.  Interactive applications can disable the
+              ;; default safety timeout with LDK_THREAD_WAIT_SECONDS=0.
               (let ((current-lisp-thread (bordeaux-threads:current-thread))
-                    (deadline (+ (get-internal-real-time)
-                                 (* 30 internal-time-units-per-second))))
+                    (deadline
+                      (let* ((setting (uiop:getenv "LDK_THREAD_WAIT_SECONDS"))
+                             (seconds (if setting
+                                          (parse-integer setting :junk-allowed t)
+                                          30)))
+                        (when (and seconds (plusp seconds))
+                          (+ (get-internal-real-time)
+                             (* seconds internal-time-units-per-second))))))
                 (loop
                   (let ((platform-threads
-                          (loop for lisp-thread being the hash-keys of *lisp-to-java-threads*
-                                  using (hash-value java-thread)
+                          ;; start0 records this mapping in the parent after
+                          ;; MAKE-THREAD returns.  The reverse mapping is
+                          ;; installed by the child and can therefore still be
+                          ;; empty when a short Java main method returns.
+                          (loop for java-thread being the hash-keys of *java-threads*
+                                  using (hash-value lisp-thread)
                                 when (and (not (eq lisp-thread current-lisp-thread))
                                           (not (%thread-daemon-p java-thread))
                                           (bordeaux-threads:thread-alive-p lisp-thread))
@@ -2371,7 +2382,7 @@ get the same unified var-numbers."
                          (sleep 0.1)
                          (finish-output)
                          (return))
-                        ((> (get-internal-real-time) deadline)
+                        ((and deadline (> (get-internal-real-time) deadline))
                          (finish-output)
                          (return))
                         (t
