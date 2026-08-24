@@ -1,4 +1,3 @@
-FAIL: aaa/ni.java execution test
 FAIL: gcj/bytearray.java execution test
 FAIL: gcj/ExtraClassLoader.java execution test
 FAIL: gcj/initexc.java execution test

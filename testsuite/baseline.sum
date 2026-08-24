@@ -154,7 +154,8 @@ PASS: aaa/icmpeq.java (test for excess errors)
 PASS: aaa/icmpeq.java execution test
 PASS: aaa/icmpeq.java output pattern test
 PASS: aaa/ni.java (test for excess errors)
-XPASS: aaa/ni.java execution test
+PASS: aaa/ni.java execution test
+PASS: aaa/ni.java output pattern test
 PASS: aaa/sp.java (test for excess errors)
 PASS: aaa/sp.java execution test
 PASS: aaa/switchindy.java (test for excess errors)

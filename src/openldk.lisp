@@ -515,6 +515,24 @@ elimination.  Returns the optimized block list."
       (loop while (eliminate-dead-stack-assignments blocks)))
     blocks))
 
+(defun %wrap-method-body (static-p fn-sym impl-sym class-spec args body-forms)
+  "Build the installable definition form for a compiled method body.
+Static methods become a DEFUN.  Instance methods put BODY-FORMS in a
+plain DEFUN on IMPL-SYM and install a one-line DEFMETHOD trampoline:
+PCL's DEFMETHOD expansion walks the entire body (sb-walker) looking for
+call-next-method, which is quadratic on large generated bodies and pure
+waste since compiled Java methods never use it."
+  (let ((this-sym (intern "this" :openldk)))
+    (if static-p
+        `(defun ,fn-sym ,args ,@body-forms)
+        `(progn
+           (defun ,impl-sym (,this-sym ,@args)
+             ;; Generated code returns via (return-from <method-name> ...),
+             ;; matching the block DEFMETHOD used to establish.
+             (block ,fn-sym ,@body-forms))
+           (defmethod ,fn-sym ((,this-sym ,class-spec) ,@args)
+             (,impl-sym ,this-sym ,@args))))))
+
 (defun %build-method-definition (class method blocks-after-dce parameter-hints max-locals)
   "Build the complete DEFUN/DEFMETHOD form for METHOD from its optimized
 BLOCKS-AFTER-DCE: generate each block's code, then wrap it with debug
@@ -584,14 +602,19 @@ entry/exit as required."
                            (loader-package (ldk-loader *context*))
                            (or (find-package "OPENLDK.SYSTEM")
                                (make-package "OPENLDK.SYSTEM" :use '(:openldk))))))
-        `(progn
-           ,(append (if (static-p method)
-                        (list 'defun (intern (fn-name *context*) class-pkg) args)
-                        (list 'defmethod
-                              (intern (fn-name *context*) :openldk)
-                              (cons (list (intern "this" :openldk) (intern (slot-value class 'name) class-pkg))
-                                    args)))
-                    (when *debug-trace*
+        ;; Instance methods compile their body as a plain DEFUN and install a
+        ;; one-line DEFMETHOD trampoline.  PCL's DEFMETHOD expansion walks the
+        ;; whole body (sb-walker) looking for call-next-method — quadratic on
+        ;; the huge generated bodies of methods like CLDR resource-bundle
+        ;; getContents() (23s for TimeZoneNames_en) — and generated Java
+        ;; methods never use call-next-method, so the walk is pure waste.
+        (%wrap-method-body
+         (static-p method)
+         (intern (fn-name *context*) (if (static-p method) class-pkg :openldk))
+         (intern (format nil "%jimpl:~A.~A" (slot-value class 'name) (fn-name *context*)) class-pkg)
+         (intern (slot-value class 'name) class-pkg)
+         args
+         (append (when *debug-trace*
                       (list (list 'format 't "~&~V@A <~A> trace: entering ~A.~A(~{~A~^ ~}) ~A~%"
                                   (list 'incf '*call-nesting-level* 1) "*" '*call-nesting-level*
                                   (slot-value class 'name) (fn-name *context*)
@@ -678,13 +701,20 @@ compilation fails silently (leaving the self-compiling stub in place)."
                                         (first (sb-mop:method-specializers m)))
                                  :test #'eq)))
           ;; Check if the method's source-name still references
-          ;; %compile-method — i.e. the stub was never replaced.
+          ;; %compile-method — i.e. the stub was never replaced — or the
+          ;; trampoline's impl defun (see %wrap-method-body) never got
+          ;; installed.
           (when (or (null our-method)
                     (let ((mf (sb-mop:method-function our-method)))
                       (and mf
                            (search "%COMPILE-METHOD"
                                    (princ-to-string
-                                    (sb-kernel:%fun-name mf))))))
+                                    (sb-kernel:%fun-name mf)))))
+                    (let ((impl-sym (find-symbol (format nil "%jimpl:~A.~A"
+                                                         (slot-value class 'name)
+                                                         (fn-name *context*))
+                                                 (%class-specializer-package class))))
+                      (and impl-sym (not (fboundp impl-sym)))))
             (format *error-output*
                     "~&;; COMPILE-FALLBACK: native compilation failed silently for ~A, retrying interpreted~%"
                     method-key)

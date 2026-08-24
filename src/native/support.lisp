@@ -227,6 +227,11 @@ arguments (that pretty-prints arbitrarily large Java object graphs)."
            ((and (string-equal n "%clinit")
                  (typep (cadr frame) '<class>))
             (name (cadr frame)))
+           ;; Instance-method impl defuns (see %wrap-method-body):
+           ;; |%jimpl:java/util/Date.toString()| -> "java/util/Date"
+           ((and (> (length n) 7) (string= n "%jimpl:" :end1 7))
+            (let ((qualified (subseq n 7)))
+              (subseq qualified 0 (position #\. qualified))))
            ((find #\. n)
             (subseq n 0 (position #\. n)))
            ;; FIXME: maybe use an OpenLDK internal class to indicate internal frame
