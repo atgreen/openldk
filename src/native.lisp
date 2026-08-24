@@ -3817,18 +3817,26 @@ attribute; nil for top-level, local, and anonymous classes."
         (|<init>()| exc)
         (error (%lisp-condition exc))))))
 
+(defun %string-to-signed-byte-array (string)
+  "Encode STRING as a Java byte[] using the platform encoding.  OpenLDK
+pins sun.jnu.encoding/native.encoding to UTF-8 (+encoding-properties+),
+so UTF-8 here matches what Java code reads from those properties.
+Java byte[] data stores signed bytes, so octets are converted."
+  (make-java-array
+   :component-class "B"
+   :initial-contents (map 'list
+                          (lambda (b) (if (> b 127) (- b 256) b))
+                          (flexi-streams:string-to-octets string :external-format :utf-8))))
+
 (defun |java/lang/ProcessEnvironment.environ()| ()
-  ;; FIXME: don't force utf-8 encoding
   (let ((env (remove-if (lambda (e) (not (find #\= e))) (sb-ext:posix-environ))))
     (let ((jenvs (make-java-array :component-class "[B" :size (* 2 (length env)))))
       (loop for kv in env
             for i from 0 by 2
             for p = (position #\= kv)
             do (progn
-                 (setf (jaref jenvs i)
-                       (make-java-array :component-class "B" :initial-contents (flexi-streams:string-to-octets (subseq kv 0 p) :external-format :utf-8)))
-                 (setf (jaref jenvs (+ i 1))
-                       (make-java-array :component-class "B" :initial-contents (flexi-streams:string-to-octets (subseq kv (1+ p)) :external-format :utf-8)))))
+                 (setf (jaref jenvs i) (%string-to-signed-byte-array (subseq kv 0 p)))
+                 (setf (jaref jenvs (+ i 1)) (%string-to-signed-byte-array (subseq kv (1+ p))))))
       jenvs)))
 
 (defun |java/lang/System.identityHashCode(Ljava/lang/Object;)| (objref)
