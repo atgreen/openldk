@@ -4892,16 +4892,53 @@ compiled Java readdir wrapper may overwrite the old readdir(J) symbol."
           (setf (slot-value ux '|errno|) (sb-posix:syscall-errno e)))
         (error (%lisp-condition ux))))))
 
+(defun %throw-unix-exception (errno)
+  "Throw a sun.nio.fs.UnixException carrying ERRNO."
+  (let ((ux (%make-java-instance "sun/nio/fs/UnixException")))
+    (when (slot-exists-p ux '|errno|)
+      (setf (slot-value ux '|errno|) errno))
+    (error (%lisp-condition ux))))
+
 (defun |sun/nio/fs/UnixNativeDispatcher.unlink0(J)| (address)
   "unlink(2) — delete a file."
   (let ((path (%read-c-string-from-sap address)))
     (handler-case
         (sb-posix:unlink path)
       (sb-posix:syscall-error (e)
-        (let ((ux (%make-java-instance "sun/nio/fs/UnixException")))
-          (when (slot-exists-p ux '|errno|)
-            (setf (slot-value ux '|errno|) (sb-posix:syscall-errno e)))
-          (error (%lisp-condition ux)))))))
+        (%throw-unix-exception (sb-posix:syscall-errno e))))))
+
+(defun |sun/nio/fs/UnixNativeDispatcher.mkdir0(JI)| (address mode)
+  "mkdir(2) — create a directory."
+  (let ((path (%read-c-string-from-sap address)))
+    (handler-case
+        (sb-posix:mkdir path mode)
+      (sb-posix:syscall-error (e)
+        (%throw-unix-exception (sb-posix:syscall-errno e))))))
+
+(defun |sun/nio/fs/UnixNativeDispatcher.rmdir0(J)| (address)
+  "rmdir(2) — remove a directory."
+  (let ((path (%read-c-string-from-sap address)))
+    (handler-case
+        (sb-posix:rmdir path)
+      (sb-posix:syscall-error (e)
+        (%throw-unix-exception (sb-posix:syscall-errno e))))))
+
+(defun |sun/nio/fs/UnixNativeDispatcher.rename0(JJ)| (from-address to-address)
+  "rename(2) — rename a file."
+  (let ((from (%read-c-string-from-sap from-address))
+        (to (%read-c-string-from-sap to-address)))
+    (handler-case
+        (sb-posix:rename from to)
+      (sb-posix:syscall-error (e)
+        (%throw-unix-exception (sb-posix:syscall-errno e))))))
+
+(defun |sun/nio/fs/UnixNativeDispatcher.chmod0(JI)| (address mode)
+  "chmod(2) — change file permissions."
+  (let ((path (%read-c-string-from-sap address)))
+    (handler-case
+        (sb-posix:chmod path mode)
+      (sb-posix:syscall-error (e)
+        (%throw-unix-exception (sb-posix:syscall-errno e))))))
 
 (defmethod |getUTF8At0(Ljava/lang/Object;I)| ((this |sun/reflect/ConstantPool|) cp index)
   (let* ((cp (constant-pool (ldk-class cp)))

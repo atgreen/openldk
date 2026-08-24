@@ -310,8 +310,19 @@
 			  (sb-debug:print-backtrace :stream *error-output* :count 40))))))
 	     (safe-warmup '() "no-args")
 	     (safe-warmup '("-version") "-version")
-	     (safe-warmup '("-verbose" "Hello.java") "Hello.java")
-	     (safe-warmup '("-verbose" "-sourcepath" "testsuite/mauve" "testsuite/mauve/gnu/testlet/TestHarness.java") "TestHarness.java"))))
+	     ;; -d into a scratch directory: without it warmups litter the
+	     ;; build tree and overwrite the checked-in .class fixtures
+	     ;; under testsuite/mauve/.
+	     (let ((scratch (namestring
+			     (ensure-directories-exist
+			      (merge-pathnames "javacl-warmup-classes/"
+					       (uiop:temporary-directory))))))
+	       (safe-warmup (list "-verbose" "-d" scratch "Hello.java")
+			    "Hello.java")
+	       (safe-warmup (list "-verbose" "-d" scratch
+				  "-sourcepath" "testsuite/mauve"
+				  "testsuite/mauve/gnu/testlet/TestHarness.java")
+			    "TestHarness.java")))))
     (progn
       (setf openldk::*ignore-quit* nil)
       ;; Clear unsafe memory table — foreign heap pointers from warmup
