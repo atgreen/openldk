@@ -1214,11 +1214,18 @@ shadows a superclass field and needs its own storage."
                (%write-aot-class classname class-defs)))
            (%eval code))
 
+         ;; Record this class's MEMBER classes (Class.getDeclaredClasses):
+         ;; InnerClasses entries whose outer class is this class.  Entries
+         ;; with outer index 0 are local/anonymous classes, which are not
+         ;; declared members.
          (dolist (ic (gethash "InnerClasses" (attributes class)))
-           (when (zerop (outer-class-info-index ic))
-             (let* ((class-reference (aref (constant-pool class) (inner-class-info-index ic)))
-                    (class-name (aref (constant-pool class) (index class-reference))))
-               (push class-name (inner-classes class)))))
+           (unless (zerop (outer-class-info-index ic))
+             (let* ((outer-ref (aref (constant-pool class) (outer-class-info-index ic)))
+                    (outer-name (slot-value (aref (constant-pool class) (index outer-ref)) 'value)))
+               (when (string= outer-name (name class))
+                 (let ((inner-ref (aref (constant-pool class) (inner-class-info-index ic))))
+                   (push (aref (constant-pool class) (index inner-ref))
+                         (inner-classes class)))))))
 
          ;; Populate NestHost/NestMembers from class attributes (JDK 11+)
          (when-let ((host-index (gethash "NestHost" (attributes class))))

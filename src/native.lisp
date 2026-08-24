@@ -3667,10 +3667,44 @@ does not reconstruct, so we compute it from the name directly."
   nil)
 
 (defmethod |getEnclosingMethod0()| ((this |java/lang/Class|))
-  nil)
+  "Return Object[3] {enclosing Class, method name, method descriptor} from
+the EnclosingMethod attribute, or nil for classes that aren't local or
+anonymous.  Name/descriptor are null when enclosed by an initializer."
+  (let ((lclass (get-ldk-class-for-java-class this)))
+    (when lclass
+      (when-let ((em (gethash "EnclosingMethod" (attributes lclass))))
+        (let* ((cp (constant-pool lclass))
+               (outer-ref (aref cp (car em)))
+               (outer-name (slot-value (aref cp (index outer-ref)) 'value))
+               (outer-class (%get-java-class-by-bin-name outer-name t)))
+          (when outer-class
+            (multiple-value-bind (mname mdesc)
+                (if (zerop (cdr em))
+                    (values nil nil)
+                    (let ((nat (aref cp (cdr em))))
+                      (values (slot-value (aref cp (slot-value nat 'name-index)) 'value)
+                              (slot-value (aref cp (slot-value nat 'type-descriptor-index)) 'value))))
+              (make-java-array
+               :component-class (%get-java-class-by-bin-name "java/lang/Object")
+               :initial-contents (vector outer-class
+                                         (and mname (jstring mname))
+                                         (and mdesc (jstring mdesc)))))))))))
 
 (defmethod |getDeclaringClass0()| ((this |java/lang/Class|))
-  nil)
+  "Return the class that declares THIS as a member, from the InnerClasses
+attribute; nil for top-level, local, and anonymous classes."
+  (let ((lclass (get-ldk-class-for-java-class this)))
+    (when lclass
+      (loop for ic in (gethash "InnerClasses" (attributes lclass))
+            when (and (not (zerop (outer-class-info-index ic)))
+                      (let* ((inner-ref (aref (constant-pool lclass) (inner-class-info-index ic)))
+                             (inner-name (slot-value (aref (constant-pool lclass) (index inner-ref))
+                                                     'value)))
+                        (string= inner-name (name lclass))))
+              return (let* ((outer-ref (aref (constant-pool lclass) (outer-class-info-index ic)))
+                            (outer-name (slot-value (aref (constant-pool lclass) (index outer-ref))
+                                                    'value)))
+                       (%get-java-class-by-bin-name outer-name t))))))
 
 (defmethod |getBooleanAttributes0(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
   (handler-case
@@ -4029,12 +4063,6 @@ Java byte arrays hold SIGNED bytes; read-byte yields 0..255."
 
 (defun |java/io/UnixFileSystem.initIDs()| ()
   nil)
-
-(defun |java/util/LinkedHashMap.hash(Ljava/lang/Object;)| (obj)
-  ;; FIXME: the compiler should not generate calls to LinkedHashMap.hash.
-  ;; It's provided by the parent class.
-  ;; This is a temp workaround.
-  (|java/util/HashMap.hash(Ljava/lang/Object;)| obj))
 
 (defmethod |canonicalize0(Ljava/lang/String;)| ((ufs |java/io/UnixFileSystem|) filename)
   (declare (ignore ufs))

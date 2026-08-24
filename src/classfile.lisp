@@ -436,7 +436,10 @@ stream."
           ("Deprecated"
            (read-buffer attributes-length))
           ("EnclosingMethod"
-           (read-buffer attributes-length))
+           ;; (class_index . method_index) -- method_index 0 means the class
+           ;; is enclosed by a field initializer or instance/static block.
+           (setf (gethash "EnclosingMethod" attributes)
+                 (cons (read-u2) (read-u2))))
           ("Exceptions"
            (read-buffer attributes-length))
           ("InnerClasses"
