@@ -282,6 +282,7 @@
     nest-members
     attributes
     java-class
+    method-name-table  ; lazy hash set of lispized name+descriptor strings
     ldk-loader)))  ; <ldk-class-loader> that loaded this class
 
 (defclass/std <inner-class> ()

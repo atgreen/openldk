@@ -352,19 +352,28 @@ result always stays in range (bitwise ops, floats, doubles)."
                             (|<init>(Ljava/lang/Class;)| lookup ,class)
                             (unimplemented "IR-CALL-DYNAMIC codegen")))))
 
+(defun %class-method-name-table (ldk-class)
+  "Hash set of LDK-CLASS's own methods' lispized name+descriptor
+strings, built on first use.  A class's method vector never changes
+after load, so the table is cached on the <class> object."
+  (or (method-name-table ldk-class)
+      (setf (method-name-table ldk-class)
+            (let ((table (make-hash-table :test #'equal)))
+              (map nil (lambda (method)
+                         (setf (gethash (lispize-method-name
+                                         (format nil "~A~A" (name method) (descriptor method)))
+                                        table)
+                                t))
+                   (or (methods ldk-class) #()))
+              table))))
+
 (defun %find-declaring-class (class method-name &optional loader)
   "Find the class that declares METHOD-NAME, searching class hierarchy.
    LOADER is the <ldk-class-loader> to use for class lookups."
-  (let* ((ldk-class (%get-ldk-class-by-bin-name class t loader))
-         (method (when ldk-class
-                   (find method-name (methods ldk-class)
-                         :test (lambda (method-name method)
-                                 (string= method-name
-                                          (lispize-method-name
-                                           (format nil "~A~A" (name method) (descriptor method)))))))))
-    (if method
-        class
-        (when ldk-class
+  (let ((ldk-class (%get-ldk-class-by-bin-name class t loader)))
+    (when ldk-class
+      (if (gethash method-name (%class-method-name-table ldk-class))
+          class
           (loop for parent in (remove nil (cons (super ldk-class) (coerce (interfaces ldk-class) 'list)))
                 for result = (%find-declaring-class parent method-name loader)
                 when result return result)))))
