@@ -322,1239 +322,486 @@ the normal call-next-method chain for the owner's superclasses."
             do (setf (gethash (handler-pc ete) exception-handler-table) t)))
     exception-handler-table))
 
-(defun fix-stack-variables (stack-vars)
-  "Merge stack variable groups that share var-numbers across STACK-VARS.
-Uses union-find with transitive closure to ensure all connected stack-vars
-get the same unified var-numbers."
+(defun %method-fn-name (class method)
+  "Lisp function name for METHOD: \"Class.name(desc)\" for static methods,
+\"name(desc)\" for instance methods (which dispatch on a shared GF)."
+  (let ((mangled (lispize-method-name
+                  (format nil "~A~A"
+                          (slot-value method 'name)
+                          (slot-value method 'descriptor)))))
+    (if (static-p method)
+        (format nil "~A.~A" (slot-value class 'name) mangled)
+        mangled)))
 
-  ;; Use union-find to group all stack-vars that should be unified
-  (let ((parent (make-hash-table :test 'eq))
-        (rank (make-hash-table :test 'eq)))
+(defun %class-loader-package (class)
+  "Package for CLASS's loader-scoped function symbols, defaulting to :openldk."
+  (if (slot-value class 'ldk-loader)
+      (loader-package (slot-value class 'ldk-loader))
+      (find-package :openldk)))
 
-    ;; Initialize each stack-var as its own parent
-    (dolist (sv stack-vars)
-      (setf (gethash sv parent) sv)
-      (setf (gethash sv rank) 0))
+(defun %class-specializer-package (class)
+  "Package holding CLASS's CLOS class symbol (per-loader, or OPENLDK.SYSTEM)."
+  (if (slot-value class 'ldk-loader)
+      (loader-package (slot-value class 'ldk-loader))
+      (or (find-package "OPENLDK.SYSTEM")
+          (find-package :openldk))))
 
-    ;; Find with path compression
-    (labels ((find-root (sv)
-               (let ((p (gethash sv parent)))
-                 (if (eq p sv)
-                     sv
-                     (let ((root (find-root p)))
-                       (setf (gethash sv parent) root)
-                       root))))
-             ;; Union by rank
-             (union-sets (sv1 sv2)
-               (let ((root1 (find-root sv1))
-                     (root2 (find-root sv2)))
-                 (unless (eq root1 root2)
-                   (let ((rank1 (gethash root1 rank))
-                         (rank2 (gethash root2 rank)))
-                     (cond
-                       ((< rank1 rank2)
-                        (setf (gethash root1 parent) root2))
-                       ((> rank1 rank2)
-                        (setf (gethash root2 parent) root1))
-                       (t
-                        (setf (gethash root2 parent) root1)
-                        (incf (gethash root1 rank)))))))))
-
-      ;; Group stack-vars by var-numbers and union those that share any number
-      (let ((by-num (make-hash-table :test 'eql)))
-        (dolist (sv stack-vars)
-          (dolist (num (slot-value sv 'var-numbers))
-            (let ((existing (gethash num by-num)))
-              (when existing
-                (union-sets sv existing))
-              (setf (gethash num by-num) sv)))))
-
-      ;; Collect all stack-vars by their final root
-      (let ((groups (make-hash-table :test 'eq)))
-        (dolist (sv stack-vars)
-          (push sv (gethash (find-root sv) groups)))
-
-        ;; Update var-numbers for each unified group
-        (maphash (lambda (root group)
-                   (declare (ignore root))
-                   (let ((all-var-numbers ()))
-                     (dolist (sv group)
-                       (setf all-var-numbers
-                             (union all-var-numbers (slot-value sv 'var-numbers) :test 'eql)))
-                     (dolist (sv group)
-                       (setf (slot-value sv 'var-numbers) all-var-numbers))))
-                 groups))))
-
-  stack-vars)
-
-;; Unify all <stack-variable> instances that represent the same logical variable
-;; (i.e., their var-number sets overlap), so downstream passes (like DCE) that
-;; rely on EQ identity will see reads and definitions as the same object.
-;; Removed attempted unify-stack-variables implementation — replaced with
-;; a var-number keyed DCE read-tracking to avoid identity mismatches.
-
-(defun stack-variable-is-live-p (stack-var blocks)
-  "Returns T if STACK-VAR has at least one non-dead assignment in BLOCKS."
-  (dolist (block blocks)
-    (dolist (insn (slot-value block 'code))
-      (when (and (typep insn 'ir-assign)
-                 (eq (slot-value insn 'lvalue) stack-var)
-                 (not (slot-value insn 'dead-p)))
-        (return-from stack-variable-is-live-p t))))
-  nil)
-
-(defun eliminate-dead-stack-assignments (blocks)
-  "Remove assignments to stack variables that are never read.
-   Only removes assignments where rvalue is a literal or another stack var (no side effects).
-   Returns T if any assignments were removed."
-  (labels ((sv-key (sv)
-             (let* ((nums (slot-value sv 'var-numbers))
-                    (lst (if (listp nums) (copy-list nums) (list nums))))
-               (format nil "~{~A~^,~}" (sort lst #'<)))))
-    (let ((changed nil)
-          ;; Key reads by var-number set to avoid EQ identity issues
-          (read-keys (make-hash-table :test #'equal)))
-
-    ;; First pass: collect ALL stack variables that are read (as rvalues)
-    ;; IMPORTANT: Check specific types BEFORE generic ir-node!
-    (labels ((collect-reads (ir)
-               (cond
-                 ((typep ir '<stack-variable>)
-                  (when (and *debug-codegen*
-                             (search "HashMap.resize" (fn-name *context*))
-                             (search "s{5}" (format nil "~A" ir)))
-                    (format t "; DCE: Recording read of ~A~%" ir))
-                  (setf (gethash (sv-key ir) read-keys) t))
-                 ((typep ir 'ir-assign)
-                  ;; Check rvalue for reads
-                  (when-let ((rval (slot-value ir 'rvalue)))
-                    (when (and *debug-codegen*
-                               (search "HashMap.resize" (fn-name *context*))
-                               (typep rval '<stack-variable>)
-                               (search "s{5}" (format nil "~A" rval)))
-                      (format t "; DCE: IR-ASSIGN with lvalue=~A reads rvalue=~A~%"
-                              (type-of (slot-value ir 'lvalue)) rval))
-                    (collect-reads rval))
-                  ;; Check lvalue - for ir-member, the objref is a READ
-                  (when-let ((lval (slot-value ir 'lvalue)))
-                    (when (and (typep lval 'ir-member)
-                               (slot-boundp lval 'objref))
-                      (collect-reads (slot-value lval 'objref)))))
-                 ;; Explicit handling for array access patterns (before generic ir-node)
-                 ((typep ir 'ir-xastore)
-                  ;; Array stores read: arrayref, index, value
-                  (when (slot-boundp ir 'arrayref)
-                    (collect-reads (slot-value ir 'arrayref)))
-                  (when (slot-boundp ir 'index)
-                    (collect-reads (slot-value ir 'index)))
-                  (when (slot-boundp ir 'value)
-                    (collect-reads (slot-value ir 'value))))
-                 ((typep ir 'ir-aaload)
-                  ;; Array loads read: arrayref, index
-                  (when (slot-boundp ir 'arrayref)
-                    (collect-reads (slot-value ir 'arrayref)))
-                  (when (slot-boundp ir 'index)
-                    (collect-reads (slot-value ir 'index))))
-                 ;; Explicit handling for method calls (before generic ir-node)
-                 ((typep ir 'ir-call-special-method)
-                  ;; Special methods (constructors, super): read all args including objref
-                  (when (slot-boundp ir 'args)
-                    (dolist (arg (slot-value ir 'args))
-                      (collect-reads arg))))
-                 ((typep ir 'ir-call-virtual-method)
-                  ;; Virtual methods (includes static as subclass): args[0] is objref for virtual
-                  (when (slot-boundp ir 'args)
-                    (dolist (arg (slot-value ir 'args))
-                      (collect-reads arg))))
-                 ;; Generic fallback for other ir-node types (MUST BE LAST)
-                 ((typep ir 'ir-node)
-                  (dolist (slot-def (closer-mop:class-slots (class-of ir)))
-                    (let ((slot-name (closer-mop:slot-definition-name slot-def)))
-                      (when (and (slot-boundp ir slot-name)
-                                 (not (eq slot-name 'address))
-                                 (not (eq slot-name 'dead-p)))  ; Skip dead-p slot
-                        (let ((val (slot-value ir slot-name)))
-                          (cond
-                            ((typep val 'ir-node) (collect-reads val))
-                            ((listp val)
-                             (dolist (item val)
-                               (when (typep item 'ir-node)
-                                 (collect-reads item)))))))))))))
-      (dolist (block blocks)
-        (dolist (insn (slot-value block 'code))
-          (collect-reads insn))))
-
-    ;; Second pass: mark dead assignments (skip already-dead instructions)
-    (dolist (block blocks)
-      (dolist (insn (slot-value block 'code))
-        (when (and (typep insn 'ir-assign)
-                   (typep (slot-value insn 'lvalue) '<stack-variable>)
-                   (not (slot-value insn 'dead-p)))  ; Don't re-process dead instructions
-          (let* ((stack-var (slot-value insn 'lvalue))
-                 (rvalue (slot-value insn 'rvalue))
-                 ;; Only safe to remove if rvalue has no side effects
-                 ;; IMPORTANT: Don't eliminate assignments from local vars, as propagation
-                 ;; may have already substituted uses of the stack var, making it appear unused.
-                 (safe-rvalue? (or (typep rvalue 'ir-literal)
-                                  (typep rvalue '<stack-variable>))))
-            (when (and safe-rvalue?
-                      (not (gethash (sv-key stack-var) read-keys)))
-              (when *debug-codegen*
-                (format t "; DCE: Marking dead assignment to ~A (rvalue: ~A ~S, block: ~A)~%"
-                        stack-var
-                        (type-of rvalue)
-                        rvalue
-                        (id block)))
-              (setf (slot-value insn 'dead-p) t)
-              (setf changed t))))))
-    changed)))
-
-(defun build-def-use-chains (ir-code)
-  "Build def-use and use-def chains for dataflow analysis.
-   Returns (values def-table use-list-table use-def-table)
-   - def-table: variable -> defining instruction
-   - use-list-table: variable -> list of instructions that use it
-   - use-def-table: instruction -> variables it uses"
-  (let ((def-table (make-hash-table :test 'eq))           ; var -> defining insn
-        (use-list-table (make-hash-table :test 'eq))      ; var -> list of using insns
-        (use-def-table (make-hash-table :test 'eq)))      ; insn -> list of vars used
-
-    (labels ((collect-uses (ir insn)
-               "Collect all variables used in IR, associate with INSN"
-               (cond
-                 ((typep ir '<stack-variable>)
-                  ;; Record that this instruction uses this variable
-                  (push insn (gethash ir use-list-table nil))
-                  (pushnew ir (gethash insn use-def-table nil) :test 'eq))
-                 ((typep ir 'ir-node)
-                  ;; Walk all slots
-                  (dolist (slot (closer-mop:class-slots (class-of ir)))
-                    (let* ((slot-name (closer-mop:slot-definition-name slot)))
-                      (when (slot-boundp ir slot-name)
-                        (let ((slot-value (slot-value ir slot-name)))
-                          (cond
-                            ((typep slot-value 'ir-node)
-                             (collect-uses slot-value insn))
-                            ((listp slot-value)
-                             (dolist (item slot-value)
-                               (when (typep item 'ir-node)
-                                 (collect-uses item insn)))))))))))))
-
-      ;; Build the chains
-      (dolist (insn ir-code)
-        (cond
-          ;; Assignments define a variable
-          ((typep insn 'ir-assign)
-           (let ((lvalue (slot-value insn 'lvalue))
-                 (rvalue (slot-value insn 'rvalue)))
-             (when (typep lvalue '<stack-variable>)
-               (setf (gethash lvalue def-table) insn))
-             ;; Collect uses in the rvalue
-             (collect-uses rvalue insn)))
-          ;; Other instructions may use variables
-          ((typep insn 'ir-node)
-           (collect-uses insn insn)))))
-
-    (values def-table use-list-table use-def-table)))
-
-(defun count-variable-uses (ir-code)
-  "Count how many times each variable is used (read from) in IR-CODE."
-  (multiple-value-bind (def-table use-list-table use-def-table)
-      (build-def-use-chains ir-code)
-    (declare (ignore def-table use-def-table))
-    (let ((use-counts (make-hash-table :test 'eq)))
-      (maphash (lambda (var use-list)
-                 (setf (gethash var use-counts) (length use-list)))
-               use-list-table)
-      use-counts)))
-
-(defun substitute-in-ir (ir subst-table)
-  "Recursively substitute variables in IR using SUBST-TABLE."
-  (cond
-    ;; If this is a variable with a substitution, return the substitution
-    ((and (typep ir '<stack-variable>)
-          (gethash ir subst-table))
-     (gethash ir subst-table))
-    ;; If this is an IR node, recursively substitute in all slots
-    ((typep ir 'ir-node)
-     (dolist (slot (closer-mop:class-slots (class-of ir)))
-       (let* ((slot-name (closer-mop:slot-definition-name slot)))
-         (when (and (slot-boundp ir slot-name)
-                    ;; Don't substitute in the lvalue of an assignment
-                    (not (and (typep ir 'ir-assign) (eq slot-name 'lvalue))))
-           (let ((slot-value (slot-value ir slot-name)))
-             (cond
-               ((typep slot-value 'ir-node)
-                (setf (slot-value ir slot-name)
-                      (substitute-in-ir slot-value subst-table)))
-               ((listp slot-value)
-                (setf (slot-value ir slot-name)
-                      (mapcar (lambda (item)
-                                (if (typep item 'ir-node)
-                                    (substitute-in-ir item subst-table)
-                                    item))
-                              slot-value))))))))
-     ir)
-    ;; Otherwise return as-is
-    (t ir)))
-
-;;; ============================================================================
-;;; Phase 3: Reaching Definitions Analysis (Inter-block propagation)
-;;; ============================================================================
-
-(defun compute-local-definitions (block)
-  "Return a hash table mapping local-index -> list of IR-ASSIGN instructions that define
-   stack variables which are then assigned to that local.
-
-   Pattern: We track assignments of form 'local-X = s{Y}' and record the defining
-   assignment 's{Y} = value' (if it exists in this block)."
-  (let ((defs (make-hash-table :test #'eql))
-        ;; First pass: collect stack-var -> definition mapping in this block
-        (stack-defs (make-hash-table :test #'eq)))
-    (dolist (insn (slot-value block 'code))
-      (when (typep insn 'ir-assign)
-        (let ((lvalue (slot-value insn 'lvalue)))
-          (when (typep lvalue '<stack-variable>)
-            (setf (gethash lvalue stack-defs) insn)))))
-
-    ;; Second pass: for each 'local-X = s{Y}', record s{Y}'s definition
-    (dolist (insn (slot-value block 'code))
-      (when (typep insn 'ir-assign)
-        (let ((lvalue (slot-value insn 'lvalue))
-              (rvalue (slot-value insn 'rvalue)))
-          (when (and (or (typep lvalue 'ir-local-variable)
-                         (typep lvalue 'ir-long-local-variable))
-                     (typep rvalue '<stack-variable>))
-            (let ((idx (slot-value lvalue 'index))
-                  (stack-def (gethash rvalue stack-defs)))
-              (when stack-def
-                (push stack-def (gethash idx defs))))))))
-    defs))
-
-(defun compute-gen-kill-sets (block all-local-defs)
-  "Compute GEN and KILL sets for reaching definitions analysis.
-   GEN: definitions created in this block
-   KILL: definitions to the same local index created elsewhere
-   Returns (values gen-set kill-set) as fset:sets of instructions."
-  (let ((gen-set (fset:empty-set))
-        (kill-set (fset:empty-set))
-        (block-defs (compute-local-definitions block)))
-
-    ;; For each local index defined in this block
-    (maphash (lambda (idx insns)
-               ;; Add this block's definitions to GEN
-               (dolist (insn insns)
-                 (setf gen-set (fset:with gen-set insn)))
-
-               ;; Add all OTHER blocks' definitions to same index to KILL
-               (let ((all-defs-for-idx (gethash idx all-local-defs)))
-                 (dolist (def all-defs-for-idx)
-                   (unless (member def insns :test #'eq)
-                     (setf kill-set (fset:with kill-set def))))))
-             block-defs)
-
-    (values gen-set kill-set)))
-
-(defun reaching-definitions-fixpoint (blocks)
-  "Compute reaching definitions for all blocks using iterative dataflow analysis.
-   Returns a hash table mapping block -> IN set (fset:set of IR-ASSIGN instructions)."
-
-  ;; First, collect all local definitions across all blocks
-  (let ((all-local-defs (make-hash-table :test #'eql)))
-    (dolist (block blocks)
-      (let ((block-defs (compute-local-definitions block)))
-        (maphash (lambda (idx insns)
-                   (setf (gethash idx all-local-defs)
-                         (append insns (gethash idx all-local-defs))))
-                 block-defs)))
-
-    ;; Compute GEN/KILL for each block
-    (let ((gen-kill (make-hash-table :test #'eq))
-          (in-sets (make-hash-table :test #'eq))
-          (out-sets (make-hash-table :test #'eq)))
-
-      (dolist (block blocks)
-        (multiple-value-bind (gen kill)
-            (compute-gen-kill-sets block all-local-defs)
-          (setf (gethash block gen-kill) (cons gen kill)))
-        (setf (gethash block in-sets) (fset:empty-set))
-        (setf (gethash block out-sets) (fset:empty-set)))
-
-      ;; Iterate to fixpoint
-      (loop
-        (let ((changed nil))
-          (dolist (block blocks)
-            (let* ((gen (car (gethash block gen-kill)))
-                   (kill (cdr (gethash block gen-kill)))
-                   ;; IN[B] = union of OUT[P] for all predecessors P
-                   (new-in (fset:reduce #'fset:union
-                                       (fset:image (lambda (pred)
-                                                    (gethash pred out-sets (fset:empty-set)))
-                                                  (slot-value block 'predecessors))
-                                       :initial-value (fset:empty-set)))
-                   ;; OUT[B] = GEN[B] ∪ (IN[B] - KILL[B])
-                   (new-out (fset:union gen (fset:set-difference new-in kill))))
-
-              (unless (fset:equal? new-in (gethash block in-sets))
-                (setf changed t)
-                (setf (gethash block in-sets) new-in))
-
-              (unless (fset:equal? new-out (gethash block out-sets))
-                (setf changed t)
-                (setf (gethash block out-sets) new-out))))
-
-          (unless changed
-            (return))))
-
-      ;; Return IN sets
-      in-sets)))
-
-(defun has-intervening-assignment-p (local-var def-insn use-insn block-code)
-  "Check if LOCAL-VAR is assigned between DEF-INSN and USE-INSN in BLOCK-CODE.
-   Uses instruction identity (eq) for precise tracking within a basic block.
-   Detects both explicit assignments (ir-assign) and iinc (ir-iinc).
-   Returns T if there is an intervening assignment, NIL if safe to propagate."
-  (let ((idx (slot-value local-var 'index))
-        (between nil))
-    (dolist (insn block-code)
-      (cond
-        ;; Found the definition - start checking
-        ((eq insn def-insn)
-         (setf between t))
-        ;; Found the use - no intervening assignment
-        ((eq insn use-insn)
-         (return-from has-intervening-assignment-p nil))
-        ;; Between def and use - check for writes to same local
-        ((and between
-              (or
-               ;; Explicit assignment to local variable
-               (and (typep insn 'ir-assign)
-                    (or (typep (slot-value insn 'lvalue) 'ir-local-variable)
-                        (typep (slot-value insn 'lvalue) 'ir-long-local-variable))
-                    (= (slot-value (slot-value insn 'lvalue) 'index) idx))
-               ;; IINC increments a local in place - also a write!
-               (and (typep insn 'ir-iinc)
-                    (= (slot-value insn 'index) idx))))
-         (return-from has-intervening-assignment-p t))))
-    ;; Didn't find use - be conservative
+(defun %install-native-override (class method method-key)
+  "If METHOD-KEY has a native override, install it in place of the stub and
+return T.  Instance methods are installed as CLOS methods so other classes'
+methods on the same generic function survive."
+  (when-let ((native-fn (gethash method-key *native-overrides*)))
+    (let ((fn-symbol (intern (%method-fn-name class method)
+                             (%class-loader-package class))))
+      (if (static-p method)
+          (setf (symbol-function fn-symbol) native-fn)
+          (let* ((class-sym (intern (slot-value class 'name)
+                                    (%class-specializer-package class)))
+                 (n-params (count-parameters (slot-value method 'descriptor)))
+                 (param-names (loop for i from 1 upto n-params
+                                    collect (intern (format nil "arg~A" i) :openldk)))
+                 (this-sym (intern "this" :openldk)))
+            (%eval `(defmethod ,fn-symbol
+                        ((,this-sym ,class-sym) ,@param-names)
+                      (funcall ,native-fn ,this-sym ,@param-names))))))
+    (setf (gethash method-key *methods-being-compiled*) :done)
     t))
 
-(defun apply-reaching-definitions (block reaching-in global-table)
-  "Apply inter-block local propagation using reaching definitions.
+(defun %claim-method-compilation (method-key)
+  "Atomically claim METHOD-KEY for compilation by this thread.  Return T if
+the caller should compile it, NIL if it is already compiled (or, in AOT mode,
+being compiled elsewhere).  Blocks while another thread is compiling it."
+  (bt:with-lock-held (*method-compilation-lock*)
+    (loop
+      (let ((status (gethash method-key *methods-being-compiled*)))
+        (cond
+          ((eq status :done)
+           ;; Already compiled by another thread
+           (return nil))
+          ((eq status t)
+           ;; In AOT mode, don't wait - just skip methods being compiled to
+           ;; avoid recursion; in normal mode, wait for the other thread.
+           (if *aot-dir*
+               (return nil)
+               (bt:condition-wait *method-compilation-cv* *method-compilation-lock*)))
+          (t
+           (setf (gethash method-key *methods-being-compiled*) t)
+           (return t)))))))
 
-   Strategy: For each instruction 'local-X = s{Y}' in BLOCK, if exactly ONE
-   stack-variable definition 's{Y} = value' reaches (tracked via reaching-in),
-   and that value is safe (literal or SSA stack-var), add s{Y} -> value
-   to the global table to enable cross-block propagation.
+(defun %transpile-method-bytecode (method-key code length)
+  "Transpile METHOD-KEY's bytecode CODE into IR: run the per-opcode
+transpilers, tracking reachability and per-PC stack state in *CONTEXT*;
+then unify stack variables across control-flow joins and batch array
+initializations.  Returns the IR instruction list."
+  (let* ((exception-handler-table (make-exception-handler-table *context*))
+         (branch-targets (%find-branch-targets code length))
+         (in-dead-code nil) ;; Track unreachable code after unconditional branches
+         (ir-code
+           (apply #'append
+                  (loop
+                    while (< (pc *context*) length)
+                    for no-record-stack-state? = (find (aref *opcodes*
+                                                            (aref code (pc *context*)))
+                                                       '(:GOTO :ATHROW :RETURN :IRETURN
+                                                         :LRETURN :FRETURN :DRETURN :ARETURN
+                                                         :TABLESWITCH :LOOKUPSWITCH))
+                    for was-in-dead-code = in-dead-code
+                    for result = (progn
+                                   ;; Check if we're at a branch target - exit dead code mode
+                                   (let ((stk (gethash (pc *context*) (stack-state-table *context*))))
+                                     (when stk
+                                       (setf (stack *context*) (car stk))
+                                       (setf in-dead-code nil)
+                                       (setf (in-dead-code *context*) nil)
+                                       (setf was-in-dead-code nil)))
+                                   ;; Check if we're at an exception handler - exit dead code mode
+                                   (let ((pc-start (pc *context*)))
+                                     (when (gethash pc-start exception-handler-table)
+                                       (setf in-dead-code nil)
+                                       (setf (in-dead-code *context*) nil)
+                                       (setf was-in-dead-code nil)))
+                                   (when (and *debug-bytecode* (not was-in-dead-code))
+                                     (format t "~&; ~A c[~A] ~A ~@<~A~:@>"
+                                             method-key
+                                             (pc *context*)
+                                             (aref *opcodes* (aref code (pc *context*)))
+                                             (stack *context*)))
+                                   ;; Always call transpiler to populate insn-size and next-insn-list
+                                   (let* ((pc-start (pc *context*)))
+                                     (if (and (gethash pc-start exception-handler-table)
+                                              (not was-in-dead-code))
+                                         (let ((var (make-stack-variable *context* pc-start :REFERENCE)))
+                                           (push var (stack *context*))
+                                           (cons (make-instance 'ir-assign
+                                                                :address pc-start
+                                                                :lvalue var
+                                                                :rvalue (make-instance 'ir-condition-exception))
+                                                 (mapcar (lambda (insn)
+                                                           (with-slots (address) insn
+                                                             (setf address (+ address 0.1)))
+                                                           insn)
+                                                         (funcall
+                                                          (aref *opcodes* (aref code (pc *context*)))
+                                                          *context* code))))
+                                         (funcall
+                                          (aref *opcodes* (aref code (pc *context*)))
+                                          *context* code))))
+                    ;; Enter dead code mode after unconditional branches,
+                    ;; but NOT if the next instruction is a branch target
+                    ;; (it may be reachable via a backward branch that
+                    ;; hasn't been processed yet in this forward pass).
+                    when no-record-stack-state?
+                      do (unless (gethash (pc *context*) branch-targets)
+                           (setf in-dead-code t)
+                           (setf (in-dead-code *context*) t))
+                    unless (or was-in-dead-code no-record-stack-state?)
+                      do (%record-stack-state (pc *context*) *context*)
+                    unless (or (null result) was-in-dead-code)
+                      collect result))))
+    ;; Do stack analysis to merge stack variables
+    ;; When multiple control flow paths reach the same PC, we need to
+    ;; unify the stack variables. merge-stacks has side effects - it
+    ;; mutates the var-numbers slot of stack variables to include the
+    ;; union of all paths. The return value is discarded; the important
+    ;; work is the mutation of shared stack-variable objects.
+    (handler-bind
+        ((error (lambda (e)
+                  (format *error-output* "~&Error in method ~A: ~A~%"
+                          method-key e))))
+      (maphash (lambda (k v)
+                 (when (> (length v) 1)
+                   (reduce (lambda (list1 list2) (merge-stacks list1 list2 k)) v)))
+               (stack-state-table *context*)))
+    (fix-stack-variables (stack-variables *context*))
+    (loop
+      (multiple-value-bind (new-code changed?)
+          (initialize-arrays ir-code *context*)
+        (unless changed?
+          (return))
+        (setf ir-code new-code)))
+    ir-code))
 
-   Pattern:
-     Block A: s{3} = 42         (this is the reaching definition)
-              local-5 = s{3}
-     Block B: local-6 = s{3}    (s{3} = 42 reaches here)
-              x = s{3}           (will be substituted by Phase 2)
+(defun %optimize-method-blocks (ir-code)
+  "Build basic blocks from IR-CODE and run the optimizer passes selected by
+the *ENABLE-* flags: reaching definitions, copy propagation, and dead-store
+elimination.  Returns the optimized block list."
+  (let* ((blocks-before-prop (build-basic-blocks ir-code))
+         ;; Phase 3: Compute reaching definitions for inter-block propagation
+         (reaching-in (when (and *enable-copy-propagation*
+                                 *enable-reaching-definitions*)
+                        (reaching-definitions-fixpoint blocks-before-prop)))
+         ;; Per-block propagation with separate scopes for locals vs globals
+         (blocks (if *enable-copy-propagation*
+                     (let ((global-table (single-assignment-table *context*)))
+                       ;; Phase 3: Apply reaching definitions before per-block propagation
+                       (when *enable-reaching-definitions*
+                         (dolist (block blocks-before-prop)
+                           (apply-reaching-definitions block reaching-in global-table)))
+                       ;; Phase 2: Per-block local propagation
+                       (mapcar (lambda (block)
+                                 (let ((block-code (slot-value block 'code))
+                                       ;; Per-block table for local variables only
+                                       (block-local-table (when *enable-local-propagation*
+                                                            (make-hash-table :test #'eq))))
+                                   (setf (slot-value block 'code)
+                                         (propagate-copies block-code global-table
+                                                           :allow-locals *enable-local-propagation*
+                                                           :local-table block-local-table))
+                                   block))
+                               blocks-before-prop))
+                     blocks-before-prop)))
+    ;; Dead code elimination: remove assignments to stack vars that are never read
+    (when *enable-dce*
+      (loop while (eliminate-dead-stack-assignments blocks)))
+    blocks))
 
-   Result: We add s{3} -> 42 to global table for cross-block uses."
-  (let ((in-set (gethash block reaching-in (fset:empty-set))))
-    ;; Build a map from stack-var -> list of reaching definitions
-    (let ((stack-var-reaching (make-hash-table :test #'eq)))
-      (fset:do-set (def-insn in-set)
-        ;; def-insn is a stack-var assignment 's{Y} = value'
-        (let* ((stack-var (slot-value def-insn 'lvalue)))
-          (when (typep stack-var '<stack-variable>)
-            (push def-insn (gethash stack-var stack-var-reaching)))))
+(defun %build-method-definition (class method blocks-after-dce parameter-hints max-locals)
+  "Build the complete DEFUN/DEFMETHOD form for METHOD from its optimized
+BLOCKS-AFTER-DCE: generate each block's code, then wrap it with debug
+tracing, the NPE/array-bounds handler-binds, and ACC_SYNCHRONIZED monitor
+entry/exit as required."
+  (let* ((lisp-code
+           (list (list 'block nil
+                       (append (list 'tagbody)
+                               (mapcan (lambda (x) (if (listp x) x (list x)))
+                                       (loop for block in blocks-after-dce
+                                             for code = (codegen-block block block)
+                                             when code
+                                               collect code))))))
+         (traced-lisp-code (if *debug-trace* `((unwind-protect
+                                                    ,(car lisp-code)
+                                                 (incf *call-nesting-level* -1)))
+                               lisp-code))
+         ;; Always install memory-fault-error and type-error handlers
+         ;; to convert null pointer dereferences (SIGSEGV at NIL+offset)
+         ;; to Java NullPointerException.  Array bounds handler is only
+         ;; needed when the method contains array operations.
+         (null-checked-lisp-code
+           `((handler-bind
+                 (,@(when (needs-array-bounds-check *context*)
+                      `((sb-int:invalid-array-index-error
+                          (lambda (e)
+                            (declare (ignore e))
+                            (error (openldk::%lisp-condition
+                                    (openldk::%make-throwable
+                                     'openldk::|java/lang/ArrayIndexOutOfBoundsException|)))))))
+                  (sb-sys:memory-fault-error
+                    (lambda (e)
+                      (declare (ignore e))
+                      (error (openldk::%lisp-condition
+                              (openldk::%make-throwable
+                               'openldk::|java/lang/NullPointerException|)))))
+                  (type-error
+                    (lambda (e)
+                      (declare (ignore e))
+                      (error (openldk::%lisp-condition
+                              (openldk::%make-throwable
+                               'openldk::|java/lang/NullPointerException|))))))
+               ,(car traced-lisp-code))))
+         ;; For ACC_SYNCHRONIZED methods, wrap body with monitor-enter/exit.
+         ;; Instance methods synchronize on 'this'; static methods on the Class object.
+         (synchronized-lisp-code
+           (if (synchronized-p method)
+               (let ((monitor-obj
+                       (if (static-p method)
+                           `(openldk::|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
+                             (openldk::jstring ,(slot-value class 'name)) nil nil nil)
+                           (intern "this" :openldk))))
+                 `((let ((%sync-monitor-obj% ,monitor-obj))
+                     (monitor-enter %sync-monitor-obj%)
+                     (unwind-protect
+                          ,(car null-checked-lisp-code)
+                       (monitor-exit %sync-monitor-obj%)))))
+               null-checked-lisp-code)))
+    (let ((parameter-count (count-parameters (slot-value method 'descriptor))))
+      (let ((args (if (static-p method)
+                      (loop for i from 1 upto parameter-count
+                            collect (intern (format nil "arg~A" (1- i)) :openldk))
+                      (loop for i from 1 upto parameter-count
+                            collect (intern (format nil "arg~A" i) :openldk))))
+            ;; Get class package from loader - for class specializers
+            (class-pkg (if (ldk-loader *context*)
+                           (loader-package (ldk-loader *context*))
+                           (or (find-package "OPENLDK.SYSTEM")
+                               (make-package "OPENLDK.SYSTEM" :use '(:openldk))))))
+        `(progn
+           ,(append (if (static-p method)
+                        (list 'defun (intern (fn-name *context*) class-pkg) args)
+                        (list 'defmethod
+                              (intern (fn-name *context*) :openldk)
+                              (cons (list (intern "this" :openldk) (intern (slot-value class 'name) class-pkg))
+                                    args)))
+                    (when *debug-trace*
+                      (list (list 'format 't "~&~V@A <~A> trace: entering ~A.~A(~{~A~^ ~}) ~A~%"
+                                  (list 'incf '*call-nesting-level* 1) "*" '*call-nesting-level*
+                                  (slot-value class 'name) (fn-name *context*)
+                                  (if *debug-trace-args*
+                                      (cons 'list args)
+                                      ())
+                                  (if (not (static-p method)) (intern "this" :openldk) ""))))
+                    (when (not (static-p method))
+                      (list (list 'setf '*force-this-to-be-used* (intern "this" :openldk))))
+                    (let ((i 0)
+                          (pc -1))
+                      (list (format nil "bridge=~A" (bridge-p method))
+                            (append (list 'let (if (static-p method)
+                                                   (append
+                                                    (list (list '|condition-cache|))
+                                                    (remove-duplicates
+                                                     (loop for var in (stack-variables *context*)
+                                                           unless (or (gethash var (single-assignment-table *context*))
+                                                                      (not (stack-variable-is-live-p var blocks-after-dce)))
+                                                             collect (list (intern (format nil "s{~{~A~^,~}}"
+                                                                                           (sort (copy-list (var-numbers var)) #'<))
+                                                                           :openldk)))
+                                                     :test #'equal)
+                                                    (loop for ph in parameter-hints
+                                                          collect (list (intern (format nil "local-~A" i) :openldk)
+                                                                        (intern (format nil "arg~A" (incf pc)) :openldk))
+                                                          do (if (eq ph t) (incf i) (incf i 2)))
+                                                    (loop for pc from (- parameter-count 2) upto max-locals
+                                                          collect (list (intern (format nil "local-~A" (1- (incf i))) :openldk))))
+                                                   (append
+                                                    (list (list '|condition-cache|))
+                                                    (remove-duplicates
+                                                     (loop for var in (stack-variables *context*)
+                                                           unless (or (gethash var (single-assignment-table *context*))
+                                                                      (not (stack-variable-is-live-p var blocks-after-dce)))
+                                                             collect (list (intern (format nil "s{~{~A~^,~}}"
+                                                                                           (sort (copy-list (var-numbers var)) #'<))
+                                                                           :openldk)))
+                                                     :test #'equal)
+                                                    (append
+                                                     (list (list (intern "local-0" :openldk) (intern "this" :openldk)))
+                                                     (loop for ph in parameter-hints
+                                                           collect (list (intern (format nil "local-~A" (1+ i)) :openldk)
+                                                                         (intern (format nil "arg~A" (1+ (incf pc))) :openldk))
+                                                           do (if (eq ph t) (incf i) (incf i 2)))
+                                                     (loop for x from parameter-count upto (1+ max-locals)
+                                                           collect (list (intern (format nil "local-~A" (incf i)) :openldk)))))))
+                                    synchronized-lisp-code)))))))))
 
-      ;; For each instruction in this block that uses a stack-var with reaching def
-      (dolist (insn (slot-value block 'code))
-        (when (typep insn 'ir-assign)
-          (let ((lvalue (slot-value insn 'lvalue))
-                (rvalue (slot-value insn 'rvalue)))
-            ;; Pattern: 'local-X = s{Y}' or any use of s{Y}
-            (when (typep rvalue '<stack-variable>)
-              (let ((reaching-defs (gethash rvalue stack-var-reaching)))
-                ;; If exactly one definition of s{Y} reaches here
-                (when (and reaching-defs
-                           (= (length reaching-defs) 1))
-                  (let* ((unique-def (car reaching-defs))
-                         (def-rvalue (slot-value unique-def 'rvalue)))
-                    ;; Dereference the rvalue through global table if it's a stack-var
-                    (let ((ultimate-value (if (typep def-rvalue '<stack-variable>)
-                                             (gethash def-rvalue global-table def-rvalue)
-                                             def-rvalue)))
-                      ;; Add cross-block mapping: s{Y} -> ultimate-value
-                      (when (and ultimate-value
-                                 (or (typep ultimate-value 'ir-literal)
-                                     (typep ultimate-value '<stack-variable>))
-                                 (not (side-effect-p ultimate-value)))
-                        (setf (gethash rvalue global-table) ultimate-value)))))))))))))
+(defun %install-method-definition (class method method-key definition-code length)
+  "Evaluate DEFINITION-CODE to install METHOD's compiled function, working
+around SBCL native-compiler limits on very large method bodies: interpret
+huge bytecode outright, and fall back to interpretation when native
+compilation fails silently (leaving the self-compiling stub in place)."
+  (handler-case
+      ;; Very large bytecode (e.g. 1000+ element array initializers)
+      ;; can cause SBCL's native compiler to hang or abort.  Use the
+      ;; interpreter directly for those methods.
+      (if (> length 5000)
+          (let ((sb-ext:*evaluator-mode* :interpret))
+            (eval definition-code))
+          (%eval definition-code))
+    (error (c)
+      (format *error-output* "~&;; COMPILE-ERROR in ~A: ~A~%" method-key c)
+      (force-output *error-output*)
+      (error c)))
+  ;; SBCL's native compiler can silently fail on very large method
+  ;; bodies (e.g. 1000+ element array initializations).  When this
+  ;; happens, eval returns without error but the defmethod is never
+  ;; installed on the GF — leaving the self-compiling stub in place,
+  ;; which causes infinite recursion via invoke-special.  Detect
+  ;; this by checking whether the stub was actually replaced, and
+  ;; fall back to interpreted evaluation if not.
+  (when (not (static-p method))
+    (let* ((gf-sym (intern (fn-name *context*) :openldk))
+           (gf (and (fboundp gf-sym) (symbol-function gf-sym)))
+           (class-sym (intern (slot-value class 'name)
+                              (%class-specializer-package class)))
+           (class-obj (find-class class-sym nil)))
+      (when (and gf class-obj (typep gf 'generic-function))
+        (let* ((methods (sb-mop:generic-function-methods gf))
+               (our-method (find class-obj methods
+                                 :key (lambda (m)
+                                        (first (sb-mop:method-specializers m)))
+                                 :test #'eq)))
+          ;; Check if the method's source-name still references
+          ;; %compile-method — i.e. the stub was never replaced.
+          (when (or (null our-method)
+                    (let ((mf (sb-mop:method-function our-method)))
+                      (and mf
+                           (search "%COMPILE-METHOD"
+                                   (princ-to-string
+                                    (sb-kernel:%fun-name mf))))))
+            (format *error-output*
+                    "~&;; COMPILE-FALLBACK: native compilation failed silently for ~A, retrying interpreted~%"
+                    method-key)
+            (force-output *error-output*)
+            (handler-case
+                (let ((sb-ext:*evaluator-mode* :interpret))
+                  (eval definition-code)) ; lint:suppress eval-usage
+              (error (c)
+                (format *error-output*
+                        "~&;; COMPILE-FALLBACK-ERROR in ~A: ~A~%"
+                        method-key c)
+                (force-output *error-output*)
+                (error c)))))))))
 
-(defun can-propagate-p (var rvalue def-insn use-list-table ir-code &key allow-locals)
-  "Determine if we can safely propagate VAR's definition (RVALUE) to all use sites.
-   Uses def-use chains for precise analysis.
-
-   Propagation is safe when:
-   1. RValue is a pure value (literal or SSA variable) - always safe
-   2. RValue is side-effect-free and used only once - safe to inline
-   3. RValue is a local variable AND allow-locals=T AND no intervening assignments
-
-   When allow-locals is NIL (Phase 1):
-   - Only propagates literals and stack variables
-
-   When allow-locals is T (Phase 2, intra-block):
-   - Also propagates local variables if no intervening assignment exists"
-  (declare (ignore def-insn ir-code))
-  (let ((use-list (gethash var use-list-table)))
-    (and
-     ;; Must be a stack variable (SSA)
-     (typep var '<stack-variable>)
-     ;; Must have single static assignment (SSA property)
-     (= (length (slot-value var 'var-numbers)) 1)
-     ;; Check if we can propagate based on rvalue type
-     (or
-      ;; Case 1: Pure values - always safe to propagate
-      ;; Literals (constants) can be duplicated without changing semantics
-      (typep rvalue 'ir-literal)
-      ;; Stack variables are SSA - no aliasing, safe to substitute
-      (typep rvalue '<stack-variable>)
-
-      ;; Case 2: Local variables - only if allow-locals=T
-      ;; Will be checked for intervening assignments in propagate-copies
-      (and allow-locals
-           (or (typep rvalue 'ir-local-variable)
-               (typep rvalue 'ir-long-local-variable)))
-
-      ;; Case 3: Side-effect-free expression used once
-      ;; Safe to inline since we're not duplicating computation
-      (and (= (length use-list) 1)
-           (not (side-effect-p rvalue)))))))
-
-(defun propagate-copies (ir-code global-table &key allow-locals local-table)
-  "Aggressively propagate copies using def-use chains.
-
-   When allow-locals is NIL (default, Phase 1):
-   - Only propagates literals and stack variables into global-table
-
-   When allow-locals is T (Phase 2, per-block):
-   - Propagates literals/SSA into global-table (safe cross-block)
-   - Propagates local variables into local-table ONLY (intra-block only)
-   - local-table must be provided when allow-locals is T"
-  ;; Build dataflow information
-  (multiple-value-bind (def-table use-list-table use-def-table)
-      (build-def-use-chains ir-code)
-    (declare (ignore use-def-table))
-
-    (when *debug-propagation*
-      (format t "~&; PROPAGATE: Processing ~A instructions (allow-locals=~A)~%"
-              (length ir-code) allow-locals))
-
-    ;; First pass: identify which assignments can be propagated
-    (maphash (lambda (var def-insn)
-               (when (typep def-insn 'ir-assign)
-                 (let ((rvalue (slot-value def-insn 'rvalue)))
-                   (when (can-propagate-p var rvalue def-insn use-list-table ir-code
-                                         :allow-locals allow-locals)
-                     ;; For local variables, check each use site for intervening assignments
-                     (let ((safe-to-propagate t)
-                           (is-local (or (typep rvalue 'ir-local-variable)
-                                        (typep rvalue 'ir-long-local-variable))))
-                       (when (and allow-locals is-local)
-                         ;; Check every use site
-                         (dolist (use-insn (gethash var use-list-table))
-                           (when (has-intervening-assignment-p rvalue def-insn use-insn ir-code)
-                             (when *debug-propagation*
-                               (format t "~&; PROPAGATE: SKIP ~A = ~A (intervening assignment)~%"
-                                       var rvalue))
-                             (setf safe-to-propagate nil)
-                             (return))))
-                       ;; Only propagate if safe
-                       (when safe-to-propagate
-                         (when *debug-propagation*
-                           (format t "~&; PROPAGATE: ~A = ~A (type: ~A, uses: ~A, scope: ~A)~%"
-                                   var rvalue (type-of rvalue)
-                                   (length (gethash var use-list-table))
-                                   (if is-local "local" "global")))
-                         ;; Put locals in local-table, everything else in global-table
-                         (if is-local
-                             (when local-table
-                               (setf (gethash var local-table) rvalue))
-                             (setf (gethash var global-table) rvalue))))))))
-             def-table)
-
-    ;; Merge both tables for substitution (local overrides global for this block)
-    (let ((combined-table (make-hash-table :test #'eq)))
-      ;; First add global mappings
-      (maphash (lambda (k v) (setf (gethash k combined-table) v)) global-table)
-      ;; Then add local mappings (overrides global if same key)
-      (when local-table
-        (maphash (lambda (k v) (setf (gethash k combined-table) v)) local-table))
-
-      ;; Second pass: substitute and remove assignments
-      (mapcar (lambda (insn)
-                ;; Substitute in all instructions using combined table
-                (let ((new-insn (substitute-in-ir insn combined-table)))
-                  ;; Only remove assignments that are in the GLOBAL table (cross-block safe)
-                  ;; Keep assignments in local-table only (other blocks may need them)
-                  (if (and (typep new-insn 'ir-assign)
-                           (gethash (slot-value new-insn 'lvalue) global-table))
-                      (progn
-                        (when *debug-propagation*
-                          (format t "~&; PROPAGATE: Removing assignment ~A (global scope)~%" insn))
-                        (make-instance 'ir-nop :address (address new-insn)))
-                      new-insn)))
-              ir-code))))
-
-(defun %get-constant-int (ir context)
-  "If IR is or becomes an IR-INT-LITERAL in CONTEXT, return its integer value."
-  (let ((ir (or (gethash ir (single-assignment-table context))
-                ir)))
-    (cond
-     ((typep ir 'ir-int-literal)
-      (value ir))
-     (t
-      nil))))
-
-(defun initialize-arrays (ir-code context)
-  (let ((code-array (coerce ir-code 'vector))
-        (changed nil))
-    (loop for i below (length ir-code)
-          for insn = (aref code-array i)
-          when (and (typep insn 'ir-assign)
-                    (let ((rvalue (slot-value insn 'rvalue)))
-                      (and (typep rvalue 'ir-new-array)
-                           (%get-constant-int (size rvalue) context))))
-            do (let* ((rvalue (slot-value insn 'rvalue))
-                      (component-class (component-class rvalue))
-                      (init-element
-                        (case (atype rvalue)
-                          ;; Determine the initial element based on the array type
-                          (4 0)        ; Byte
-                          (5 #\Null)   ; Character
-                          (6 0.0)      ; Single-precision float
-                          (7 0.0d0)    ; Double-precision float
-                          ((8 9 10 11) 0) ; Byte/Short/Int/Long (default to 0)
-                          (t nil))))   ; Default to nil for unknown types
-                 (let* ((pc (1+ i))
-                        (ir-values (loop for array-index from 0 below (%get-constant-int (size rvalue) context)
-                                         collect (progn
-                                                   (loop until (not (typep (aref code-array pc) 'ir-nop))
-                                                         do (incf pc))
-                                                   (let ((insn (aref code-array pc)))
-                                                     (incf pc)
-                                                     (if (typep insn 'ir-xastore)
-                                                         (value insn)
-                                                         (return nil))))))
-                        (array (cond
-                                 ((zerop (%get-constant-int (size rvalue) context))
-                                  #())
-                                 (ir-values
-                                  ;; Keep IR nodes (will codegen later)
-                                  (loop for nop-pc from (1+ i) below pc
-                                        do (setf (aref code-array nop-pc) (make-instance 'ir-nop :address (address (aref code-array nop-pc)))))
-                                  (setf changed t)
-                                  ir-values)
-                                 (t
-                                  ;; Pattern didn't match - use default initialization
-                                  (make-array (%get-constant-int (size rvalue) context)
-                                              :initial-element init-element)))))
-                   (setf (slot-value insn 'rvalue)
-                         (make-instance 'ir-array-literal
-                                        :address (address insn)
-                                        :component-class component-class
-                                        :value array)))
-                 (assert (typep (aref code-array (1- i)) 'ir-nop))))
-    (values (coerce code-array 'list) changed)))
-
-(defun %write-aot-method (class-name method-name definition-code)
-  "Write AOT compiled Lisp code to a file in the top-level AOT directory."
-  (when *aot-dir*
-    (let* ((path-parts (split-sequence:split-sequence #\/ class-name))
-           (dir-path (format nil "~A/~{~A~^/~}"
-                           *aot-dir*
-                           (butlast path-parts)))
-           (filename (format nil "~A/~A.lisp"
-                           dir-path
-                           (car (last path-parts))))
-           (method-str (with-output-to-string (s)
-                        (let ((*print-case* :downcase))
-                          (pprint definition-code s)))))
-      (ensure-directories-exist filename)
-      ;; Append to file if it exists (multiple methods per class)
-      (with-open-file (out filename
-                          :direction :output
-                          :if-exists :append
-                          :if-does-not-exist :create)
-        (format out "~%~A~%" method-str)))))
-
-(defun %write-aot-class (class-name class-definition-code)
-  "Store AOT class definitions in memory for later topological sorting and writing."
-  (when *aot-dir*
-    ;; Store the class definition along with its parent class name for sorting
-    (let* ((class (gethash class-name *ldk-classes-by-bin-name*))
-           (parent-name (when class (slot-value class 'super))))
-      (setf (gethash class-name *aot-class-definitions*)
-            (list :code class-definition-code :parent parent-name)))))
-
-(defun %topological-sort-classes (class-defs-hash)
-  "Topologically sort classes so parents come before children."
-  (let ((sorted nil)
-        (visited (make-hash-table :test #'equal))
-        (visiting (make-hash-table :test #'equal)))
-    (labels ((visit (class-name)
-               (cond
-                 ((gethash class-name visited)
-                  ;; Already processed
-                  nil)
-                 ((gethash class-name visiting)
-                  ;; Circular dependency - skip
-                  (format t ";   Warning: Circular dependency detected for ~A~%" class-name)
-                  nil)
-                 (t
-                  (setf (gethash class-name visiting) t)
-                  (let ((class-info (gethash class-name class-defs-hash)))
-                    (when class-info
-                      (let ((parent (getf class-info :parent)))
-                        ;; Visit parent first if it exists and is in our set
-                        (when (and parent (gethash parent class-defs-hash))
-                          (visit parent)))
-                      ;; Now add this class
-                      (push (cons class-name class-info) sorted)
-                      (setf (gethash class-name visited) t)))
-                  (remhash class-name visiting)))))
-      ;; Visit all classes
-      (maphash (lambda (class-name class-info)
-                 (declare (ignore class-info))
-                 (visit class-name))
-               class-defs-hash)
-      (reverse sorted))))
-
-(defun %write-all-aot-classes (aot-dir)
-  "Write all collected class definitions to a single classes.lisp file in topological order."
-  (when (and *aot-class-definitions* (> (hash-table-count *aot-class-definitions*) 0))
-    (let* ((sorted-classes (%topological-sort-classes *aot-class-definitions*))
-           (classes-file (format nil "~A/classes.lisp" aot-dir)))
-      (with-open-file (out classes-file
-                          :direction :output
-                          :if-exists :supersede
-                          :if-does-not-exist :create)
-        (format out ";;;; AOT-compiled class definitions~%")
-        (format out ";;;; Classes are topologically sorted (parents before children)~%~%")
-        (dolist (class-entry sorted-classes)
-          (let ((class-name (car class-entry))
-                (class-code (getf (cdr class-entry) :code)))
-            (format out "~%; Class: ~A~%" class-name)
-            (let ((*print-case* :downcase))
-              (pprint class-code out))
-            (format out "~%~%"))))
-      (format t "; Wrote ~A class definitions to ~A~%"
-              (length sorted-classes) classes-file))))
-
-(defun %generate-aot-asdf-file (aot-dir system-name)
-  "Generate an ASDF system definition file that loads classes.lisp then all method files."
-  (let* ((aot-dir-path (uiop:ensure-directory-pathname aot-dir))
-         (method-files nil))
-    ;; Collect all .lisp files in aot-dir (excluding classes.lisp)
-    (dolist (file (directory (merge-pathnames "**/*.lisp" aot-dir-path)))
-      (let ((filename (file-namestring file)))
-        (unless (string= filename "classes.lisp")
-          (let* ((file-truename (truename file))
-                 (dir-truename (truename aot-dir-path))
-                 (relative-path (uiop:enough-pathname file-truename dir-truename))
-                 ;; Remove .lisp extension and convert to forward slashes
-                 (file-path (substitute #\/ (uiop:directory-separator-for-host)
-                                       (subseq (uiop:native-namestring relative-path) 0
-                                               (- (length (uiop:native-namestring relative-path)) 5)))))
-            (push file-path method-files)))))
-    ;; Generate the ASDF file
-    (let ((asdf-file (format nil "~A/~A.asd" aot-dir system-name)))
-      (with-open-file (out asdf-file
-                          :direction :output
-                          :if-exists :supersede
-                          :if-does-not-exist :create)
-        (format out ";;;; ASDF system definition for AOT-compiled Java classes~%~%")
-        (format out "(defsystem ~S~%" system-name)
-        (format out "  :description \"AOT-compiled Java bytecode to Common Lisp\"~%")
-        (format out "  :serial t~%")
-        (format out "  :components~%")
-        (format out "  (")
-        ;; First, load classes.lisp with all class definitions
-        (format out "~%   ;; Class definitions (topologically sorted)~%")
-        (format out "   (:file \"classes\")~%")
-        ;; Then, load all method definitions
-        (when method-files
-          (format out "~%   ;; Method definitions (loaded after classes)~%")
-          (dolist (method-file (sort method-files #'string<))
-            (format out "   (:file ~S)~%" method-file)))
-        (format out "))~%"))
-      (format t "~%; Generated ASDF file: ~A~%" asdf-file))))
+(defun %install-jit-error-stub (class method method-key)
+  "Install a function that signals on invocation, so a failed JIT compile
+doesn't leave a self-recursing compilation stub behind.  Uses plain Lisp
+errors (not Java exceptions) to avoid triggering further class loading
+during error handling."
+  (let ((fn-symbol (intern (%method-fn-name class method)
+                           (%class-loader-package class))))
+    (if (static-p method)
+        (when (fboundp fn-symbol)
+          (setf (symbol-function fn-symbol)
+                (lambda (&rest args)
+                  (declare (ignore args))
+                  (error "JIT compilation failed for ~A" method-key))))
+        ;; Instance method: install a defmethod that throws an error.
+        ;; Use CL:EVAL (not %eval) to avoid re-entering the JIT.
+        (let* ((class-sym (intern (slot-value class 'name)
+                                  (%class-specializer-package class)))
+               (this-sym (intern "this" :openldk))
+               (n-params (count-parameters (slot-value method 'descriptor)))
+               (param-names (loop for i from 1 upto n-params
+                                  collect (gensym (format nil "P~A-" i)))))
+          (when (find-class class-sym nil)
+            (eval `(defmethod ,fn-symbol ((,this-sym ,class-sym) ,@param-names)
+                     (declare (ignore ,this-sym ,@param-names))
+                     (error "JIT compilation failed for ~A" ,method-key))))))))
 
 (defun %compile-method (class-name method-index)
+  "JIT-compile method METHOD-INDEX of CLASS-NAME: transpile its bytecode to
+IR, optimize, generate Lisp code, and install the resulting function
+(or write it out in AOT mode).  Thread-safe; concurrent callers wait for
+or skip in-progress compilations."
   (let* ((class (%get-ldk-class-by-bin-name class-name))
          (method (aref (slot-value class 'methods) (1- method-index)))
          (method-key (format nil "~A.~A~A" class-name (slot-value method 'name) (slot-value method 'descriptor))))
     ;; Skip bytecode compilation for methods with native overrides.
     ;; Replace the stub with the native function so the stub doesn't loop.
-    (when-let ((native-fn (gethash method-key *native-overrides*)))
-      (let* ((pkg (if (slot-value class 'ldk-loader)
-                     (loader-package (slot-value class 'ldk-loader))
-                     (find-package :openldk)))
-             (fn-name (if (static-p method)
-                          (format nil "~A.~A"
-                                  (slot-value class 'name)
-                                  (lispize-method-name
-                                   (format nil "~A~A"
-                                           (slot-value method 'name)
-                                           (slot-value method 'descriptor))))
-                          (lispize-method-name
-                           (format nil "~A~A"
-                                   (slot-value method 'name)
-                                   (slot-value method 'descriptor)))))
-             (fn-symbol (intern fn-name pkg)))
-        (if (static-p method)
-            (setf (symbol-function fn-symbol) native-fn)
-            ;; For instance methods, install as a CLOS method via defmethod
-            ;; so we don't destroy the generic function (which other classes
-            ;; may also have methods on).
-            (let* ((class-pkg (if (slot-value class 'ldk-loader)
-                                  (loader-package (slot-value class 'ldk-loader))
-                                  (or (find-package "OPENLDK.SYSTEM")
-                                      (find-package :openldk))))
-                   (class-sym (intern (slot-value class 'name) class-pkg))
-                   (n-params (count-parameters (slot-value method 'descriptor)))
-                   (param-names (loop for i from 1 upto n-params
-                                      collect (intern (format nil "arg~A" i) :openldk)))
-                   (this-sym (intern "this" :openldk)))
-              (%eval `(defmethod ,fn-symbol
-                          ((,this-sym ,class-sym) ,@param-names)
-                        (funcall ,native-fn ,this-sym ,@param-names))))))
-      (setf (gethash method-key *methods-being-compiled*) :done)
+    (when (%install-native-override class method method-key)
       (return-from %compile-method nil))
-    ;; Use a lock to atomically check if method is being compiled and claim it if not
-    (bt:with-lock-held (*method-compilation-lock*)
-      (loop
-        (let ((status (gethash method-key *methods-being-compiled*)))
-          (cond
-            ((eq status :done)
-             ;; Already compiled by another thread
-             (return-from %compile-method nil))
-            ((eq status t)
-             ;; In AOT mode, don't wait - just skip methods being compiled to avoid recursion
-             (if *aot-dir*
-                 (return-from %compile-method nil)
-                 ;; In normal mode, wait for the other thread
-                 (bt:condition-wait *method-compilation-cv* *method-compilation-lock*)))
-            (t
-             ;; Not being compiled - claim it and proceed
-             (setf (gethash method-key *methods-being-compiled*) t)
-             (return))))))
+    (unless (%claim-method-compilation method-key)
+      (return-from %compile-method nil))
     (let ((compilation-completed nil))
-    (unwind-protect
-        (handler-case
-        (progn
-        (when (gethash "Code" (slot-value method 'attributes)) ; otherwise it is abstract
-      (let* ((compile-start-time (get-internal-real-time))
-             (parameter-hints (gen-parameter-hints (descriptor method)))
-             (exception-table (slot-value (gethash "Code" (slot-value method 'attributes)) 'exceptions))
-             (code (slot-value (gethash "Code" (slot-value method 'attributes)) 'code))
-             (max-locals (slot-value (gethash "Code" (slot-value method 'attributes)) 'max-locals))
-             (length (length code))
-             (*context* (make-instance '<context>
-                                       :class class
-                                       :ldk-loader (slot-value class 'ldk-loader)
-                                       :classes *ldk-classes-by-bin-name*
-                                       :exception-table exception-table
-                                       :bytecode code
-                                       :insn-size (make-array (length code) :element-type 'fixnum :initial-element -1)
-                                       :next-insn-list (make-array (length code) :initial-element nil)
-                                       :stack-state-table (make-hash-table)
-                                       :pc 0
-                                       :is-clinit-p (string= "<clinit>" (slot-value method 'name)))))
-        (setf (svcount *context*) 0)
-        (when *debug-bytecode*
-          (format t "~&; COMPILING ~A~%" method-key))
-        (if (static-p method)
-            (setf (fn-name *context*)
-                  (format nil "~A.~A"
-                          (slot-value class 'name)
-                          (lispize-method-name
-                           (format nil "~A~A"
-                                   (slot-value method 'name)
-                                   (slot-value method 'descriptor)))))
-            (setf (fn-name *context*)
-                  (format nil "~A"
-                          (lispize-method-name
-                           (format nil "~A~A"
-                                   (slot-value method 'name)
-                                   (slot-value method 'descriptor))))))
-        (let* ((exception-handler-table (make-exception-handler-table *context*))
-               (branch-targets (%find-branch-targets code length))
-               (in-dead-code nil) ;; Track unreachable code after unconditional branches
-               (ir-code-0
-                 (setf (ir-code *context*)
-                       (let ((code (apply #'append
-                                          (loop
-                                            while (and (< (pc *context*) length))
-                                            for no-record-stack-state? = (find (aref *opcodes*
-                                                                                     (aref code (pc *context*)))
-                                                                               '(:GOTO :ATHROW :RETURN :IRETURN
-                                                                                 :LRETURN :FRETURN :DRETURN :ARETURN
-                                                                                 :TABLESWITCH :LOOKUPSWITCH))
-                                            for was-in-dead-code = in-dead-code
-                                            for result = (progn
-                                                           ;; Check if we're at a branch target - exit dead code mode
-                                                           (let ((stk (gethash (pc *context*) (stack-state-table *context*))))
-                                                             (when stk
-                                                               (setf (stack *context*) (car stk))
-                                                               (setf in-dead-code nil)
-                                                               (setf (in-dead-code *context*) nil)
-                                                               (setf was-in-dead-code nil)))
-                                                           ;; Check if we're at an exception handler - exit dead code mode
-                                                           (let ((pc-start (pc *context*)))
-                                                             (when (gethash pc-start exception-handler-table)
-                                                               (setf in-dead-code nil)
-                                                               (setf (in-dead-code *context*) nil)
-                                                               (setf was-in-dead-code nil)))
-                                                           (when (and *debug-bytecode* (not was-in-dead-code))
-                                                             (format t "~&; ~A c[~A] ~A ~@<~A~:@>"
-                                                                     method-key
-                                                                     (pc *context*)
-                                                                     (aref *opcodes* (aref code (pc *context*)))
-                                                                     (stack *context*)))
-                                                           ;; Always call transpiler to populate insn-size and next-insn-list
-                                                           (let* ((pc-start (pc *context*)))
-                                                             (if (and (gethash pc-start exception-handler-table)
-                                                                      (not was-in-dead-code))
-                                                                 (let ((var (make-stack-variable *context* pc-start :REFERENCE)))
-                                                                   (push var (stack *context*))
-                                                                   (cons (make-instance 'ir-assign
-                                                                                        :address pc-start
-                                                                                        :lvalue var
-                                                                                        :rvalue (make-instance 'ir-condition-exception))
-                                                                         (mapcar (lambda (insn)
-                                                                                   (with-slots (address) insn
-                                                                                     (setf address (+ address 0.1)))
-                                                                                   insn)
-                                                                                 (funcall
-                                                                                  (aref *opcodes* (aref code (pc *context*)))
-                                                                                  *context* code))))
-                                                                 (funcall
-                                                                  (aref *opcodes* (aref code (pc *context*)))
-                                                                  *context* code))))
-                                            ;; Enter dead code mode after unconditional branches,
-                                            ;; but NOT if the next instruction is a branch target
-                                            ;; (it may be reachable via a backward branch that
-                                            ;; hasn't been processed yet in this forward pass).
-                                            when no-record-stack-state?
-                                              do (unless (gethash (pc *context*) branch-targets)
-                                                   (setf in-dead-code t)
-                                                   (setf (in-dead-code *context*) t))
-                                            unless (or was-in-dead-code no-record-stack-state?)
-                                              do (%record-stack-state (pc *context*) *context*)
-                                            unless (or (null result) was-in-dead-code)
-                                              collect result))))
-                         ;; Do stack analysis to merge stack variables
-                         ;; When multiple control flow paths reach the same PC, we need to
-                         ;; unify the stack variables. merge-stacks has side effects - it
-                         ;; mutates the var-numbers slot of stack variables to include the
-                         ;; union of all paths. The return value is discarded; the important
-                         ;; work is the mutation of shared stack-variable objects.
-                         (handler-bind
-                             ((error (lambda (e)
-                                       (format *error-output* "~&Error in method ~A.~A~A: ~A~%"
-                                               class-name (slot-value method 'name) (slot-value method 'descriptor) e))))
-                           (maphash (lambda (k v)
-                                      (when (> (length v) 1)
-                                        (reduce (lambda (list1 list2) (merge-stacks list1 list2 k)) v)))
-                                    (stack-state-table *context*)))
-                         (fix-stack-variables (stack-variables *context*))
-                         (loop
-                           (multiple-value-bind (new-code changed?)
-                               (initialize-arrays code *context*)
-                             (unless changed?
-                               (return))
-                             (setf code new-code)))
-                         code)))
-               ;; (sdfdfd (print ir-code-0))
-               ;; Build basic blocks first for CFG-safe propagation
-               (blocks-before-prop (build-basic-blocks ir-code-0))
-               ;; Phase 3: Compute reaching definitions for inter-block propagation
-               (reaching-in (when (and *enable-copy-propagation*
-                                      *enable-reaching-definitions*)
-                              (reaching-definitions-fixpoint blocks-before-prop)))
-               ;; Per-block propagation with separate scopes for locals vs globals
-               (blocks (if *enable-copy-propagation*
-                           (let ((global-table (single-assignment-table *context*)))
-                             ;; Phase 3: Apply reaching definitions before per-block propagation
-                             (when *enable-reaching-definitions*
-                               (dolist (block blocks-before-prop)
-                                 (apply-reaching-definitions block reaching-in global-table)))
-                             ;; Phase 2: Per-block local propagation
-                             (mapcar (lambda (block)
-                                       (let ((block-code (slot-value block 'code))
-                                             ;; Per-block table for local variables only
-                                             (block-local-table (when *enable-local-propagation*
-                                                                  (make-hash-table :test #'eq))))
-                                         (setf (slot-value block 'code)
-                                               (propagate-copies block-code global-table
-                                                               :allow-locals *enable-local-propagation*
-                                                               :local-table block-local-table))
-                                         block))
-                                     blocks-before-prop))
-                           blocks-before-prop))
-               ;; Dead code elimination: remove assignments to stack vars that are never read
-               (blocks-after-dce (let ((blks blocks))
-                                  (when *enable-dce*
-                                    (loop while (eliminate-dead-stack-assignments blks)))
-                                  blks))
-               (lisp-code
-                 (list (list 'block nil
-                             (append (list 'tagbody)
-                                     (mapcan (lambda (x) (if (listp x) x (list x)))
-                                             (loop for block in blocks-after-dce
-                                                   for code = (codegen-block block block)
-                                                   when code
-                                                     collect (progn
-                                                               code)))))))
-               (traced-lisp-code (if *debug-trace* `((unwind-protect
-                                                          ,(car lisp-code)
-                                                       (incf *call-nesting-level* -1)))
-                                     lisp-code))
-               ;; Always install memory-fault-error and type-error handlers
-               ;; to convert null pointer dereferences (SIGSEGV at NIL+offset)
-               ;; to Java NullPointerException.  Array bounds handler is only
-               ;; needed when the method contains array operations.
-               (null-checked-lisp-code
-                `((handler-bind
-                      (,@(when (needs-array-bounds-check *context*)
-                           `((sb-int:invalid-array-index-error
-                               (lambda (e)
-                                 (declare (ignore e))
-                                 (error (openldk::%lisp-condition
-                                         (openldk::%make-throwable
-                                          'openldk::|java/lang/ArrayIndexOutOfBoundsException|)))))))
-                       (sb-sys:memory-fault-error
-                         (lambda (e)
-                           (declare (ignore e))
-                           (error (openldk::%lisp-condition
-                                   (openldk::%make-throwable
-                                    'openldk::|java/lang/NullPointerException|)))))
-                       (type-error
-                         (lambda (e)
-                           (declare (ignore e))
-                           (error (openldk::%lisp-condition
-                                   (openldk::%make-throwable
-                                    'openldk::|java/lang/NullPointerException|))))))
-                    ,(car traced-lisp-code))))
-               ;; For ACC_SYNCHRONIZED methods, wrap body with monitor-enter/exit.
-               ;; Instance methods synchronize on 'this'; static methods on the Class object.
-               (synchronized-lisp-code
-                 (if (synchronized-p method)
-                     (let ((monitor-obj
-                             (if (static-p method)
-                                 `(openldk::|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
-                                   (openldk::jstring ,(slot-value class 'name)) nil nil nil)
-                                 (intern "this" :openldk))))
-                       `((let ((%sync-monitor-obj% ,monitor-obj))
-                           (monitor-enter %sync-monitor-obj%)
-                           (unwind-protect
-                                ,(car null-checked-lisp-code)
-                             (monitor-exit %sync-monitor-obj%)))))
-                     null-checked-lisp-code))
-               (definition-code
-                 (let ((parameter-count (count-parameters (slot-value method 'descriptor))))
-                   (let ((args (if (static-p method)
-                                   (loop for i from 1 upto parameter-count
-                                         collect (intern (format nil "arg~A" (1- i)) :openldk))
-                                   (loop for i from 1 upto parameter-count
-                                         collect (intern (format nil "arg~A" i) :openldk))))
-                         ;; Get class package from loader - for class specializers
-                         (class-pkg (if (ldk-loader *context*)
-                                        (loader-package (ldk-loader *context*))
-                                        (or (find-package "OPENLDK.SYSTEM")
-                                            (make-package "OPENLDK.SYSTEM" :use '(:openldk))))))
-                     `(progn
-                        ,(append (if (static-p method)
-                                    (list 'defun (intern (fn-name *context*) class-pkg) args)
-                                    (list 'defmethod
-                                          (intern (fn-name *context*) :openldk)
-                                          (cons (list (intern "this" :openldk) (intern (slot-value class 'name) class-pkg))
-                                                args)))
-                                (when *debug-trace*
-                                  (list (list 'format 't "~&~V@A <~A> trace: entering ~A.~A(~{~A~^ ~}) ~A~%"
-                                              (list 'incf '*call-nesting-level* 1) "*" '*call-nesting-level*
-                                              class-name (fn-name *context*) (if *debug-trace-args*
-                                                                                 (cons 'list args)
-                                                                                 ())
-                                              (if (not (static-p method)) (intern "this" :openldk) ""))))
-                                (when (not (static-p method))
-                                  (list (list 'setf '*force-this-to-be-used* (intern "this" :openldk))))
-;;                                        (list 'describe (intern "this" :openldk))))
-                                (let ((i 0)
-                                      (pc -1))
-                                  (list (format nil "bridge=~A" (bridge-p method))
-                                        (append (list 'let (if (static-p method)
-                                        (append
-                                         (list (list '|condition-cache|))
-                                         (remove-duplicates
-                                          (loop for var in (stack-variables *context*)
-                                                unless (or (gethash var (single-assignment-table *context*))
-                                                          (not (stack-variable-is-live-p var blocks-after-dce)))
-                                                  collect (list (intern (format nil "s{~{~A~^,~}}"
-                                                                                (sort (copy-list (var-numbers var)) #'<))
-                                                                       :openldk)))
-                                          :test #'equal)
-                                         (loop for ph in parameter-hints
-                                               collect (list (intern (format nil "local-~A" i) :openldk)
-                                                             (intern (format nil "arg~A" (incf pc)) :openldk))
-                                               do (if (eq ph t) (incf i) (incf i 2)))
-                                         (loop for pc from (- parameter-count 2) upto max-locals
-                                               collect (list (intern (format nil "local-~A" (1- (incf i))) :openldk))))
-                                        (append
-                                         (list (list '|condition-cache|))
-                                         (remove-duplicates
-                                          (loop for var in (stack-variables *context*)
-                                                unless (or (gethash var (single-assignment-table *context*))
-                                                          (not (stack-variable-is-live-p var blocks-after-dce)))
-                                                  collect (list (intern (format nil "s{~{~A~^,~}}"
-                                                                                (sort (copy-list (var-numbers var)) #'<))
-                                                                       :openldk)))
-                                          :test #'equal)
-                                         (append
-                                          (list (list (intern "local-0" :openldk) (intern "this" :openldk)))
-                                          (loop for ph in parameter-hints
-                                                collect (list (intern (format nil "local-~A" (1+ i)) :openldk)
-                                                              (intern (format nil "arg~A" (1+ (incf pc))) :openldk))
-                                                do (if (eq ph t) (incf i) (incf i 2)))
-                                          (loop for x from parameter-count upto (1+ max-locals)
-                                                collect (list (intern (format nil "local-~A" (incf i)) :openldk)))))))
-                                                synchronized-lisp-code)))))))))
-          (when (search "require" method-key)
-            (format *error-output* "~&;; COMPILING METHOD: ~A~%" method-key)
-            (force-output *error-output*))
-          (if *aot-dir*
-              (%write-aot-method class-name
-                               (lispize-method-name (format nil "~A~A" (name method) (descriptor method)))
-                               definition-code)
-              (progn
-                (handler-case
-                    ;; Very large bytecode (e.g. 1000+ element array initializers)
-                    ;; can cause SBCL's native compiler to hang or abort.  Use the
-                    ;; interpreter directly for those methods.
-                    (if (> length 5000)
-                        (let ((sb-ext:*evaluator-mode* :interpret))
-                          (eval definition-code))
-                        (%eval definition-code))
-                  (error (c)
-                    (format *error-output* "~&;; COMPILE-ERROR in ~A.~A~A: ~A~%"
-                            class-name (name method) (descriptor method) c)
-                    (force-output *error-output*)
-                    (error c)))
-                ;; SBCL's native compiler can silently fail on very large method
-                ;; bodies (e.g. 1000+ element array initializations).  When this
-                ;; happens, eval returns without error but the defmethod is never
-                ;; installed on the GF — leaving the self-compiling stub in place,
-                ;; which causes infinite recursion via invoke-special.  Detect
-                ;; this by checking whether the stub was actually replaced, and
-                ;; fall back to interpreted evaluation if not.
-                (when (not (static-p method))
-                  (let* ((cpkg (if (ldk-loader *context*)
-                                   (loader-package (ldk-loader *context*))
-                                   (or (find-package "OPENLDK.SYSTEM")
-                                       (find-package :openldk))))
-                         (gf-sym (intern (fn-name *context*) :openldk))
-                         (gf (and (fboundp gf-sym) (symbol-function gf-sym)))
-                         (class-sym (intern (slot-value class 'name) cpkg))
-                         (class-obj (find-class class-sym nil)))
-                    (when (and gf class-obj (typep gf 'generic-function))
-                      (let* ((methods (sb-mop:generic-function-methods gf))
-                             (our-method (find class-obj methods
-                                               :key (lambda (m)
-                                                      (first (sb-mop:method-specializers m)))
-                                               :test #'eq)))
-                        ;; Check if the method's source-name still references
-                        ;; %compile-method — i.e. the stub was never replaced.
-                        (when (or (null our-method)
-                                  (let ((mf (sb-mop:method-function our-method)))
-                                    (and mf
-                                         (search "%COMPILE-METHOD"
-                                                 (princ-to-string
-                                                  (sb-kernel:%fun-name mf))))))
-                          (format *error-output*
-                                  "~&;; COMPILE-FALLBACK: native compilation failed silently for ~A, retrying interpreted~%"
-                                  method-key)
-                          (force-output *error-output*)
-                          (handler-case
-                              (let ((sb-ext:*evaluator-mode* :interpret))
-                                (eval definition-code)) ; lint:suppress eval-usage
-                            (error (c)
-                              (format *error-output*
-                                      "~&;; COMPILE-FALLBACK-ERROR in ~A: ~A~%"
-                                      method-key c)
-                              (force-output *error-output*)
-                              (error c))))))))))
-          (when (or *debug-compile* *debug-codegen*)
-            (format t "; COMPILING ~A.~A (~Dms)~%"
-                    class-name
-                    (lispize-method-name (format nil "~A~A" (name method) (descriptor method)))
-                    (round (* 1000 (/ (- (get-internal-real-time) compile-start-time)
-                                      internal-time-units-per-second))))
-            (force-output)))))
-          (setf compilation-completed t))
-          (error (c)
-            ;; Compilation failed (IR translation, codegen, or eval error).
-            ;; Install an error-throwing function on the stub to prevent infinite
-            ;; self-call loops — without this, the stub calls %compile-method
-            ;; (which returns immediately since status is :done), then self-calls,
-            ;; causing control stack exhaustion.
-            ;; Use plain Lisp errors (not Java exceptions) to avoid triggering
-            ;; further class loading during error handling.
-            (format *error-output* "~&;; JIT-ERROR in ~A: ~A~%" method-key c)
-            (when *debug-codegen*
-              (sb-debug:print-backtrace :stream *error-output* :count 60))
-            (force-output *error-output*)
-            (let* ((ldr (slot-value class 'ldk-loader))
-                   (pkg (if ldr (loader-package ldr) (find-package :openldk)))
-                   (key method-key))
-              (if (static-p method)
-                  (let* ((fn-name (format nil "~A.~A"
-                                          (slot-value class 'name)
-                                          (lispize-method-name
-                                           (format nil "~A~A"
-                                                   (slot-value method 'name)
-                                                   (slot-value method 'descriptor)))))
-                         (fn-symbol (intern fn-name pkg)))
-                    (when (fboundp fn-symbol)
-                      (setf (symbol-function fn-symbol)
-                            (lambda (&rest args)
-                              (declare (ignore args))
-                              (error "JIT compilation failed for ~A" key)))))
-                  ;; Instance method: install a defmethod that throws an error.
-                  ;; Use CL:EVAL (not %eval) to avoid re-entering the JIT.
-                  (let* ((fn-name (lispize-method-name
-                                   (format nil "~A~A"
-                                           (slot-value method 'name)
-                                           (slot-value method 'descriptor))))
-                         (fn-symbol (intern fn-name pkg))
-                         (class-pkg (if ldr
-                                        (loader-package ldr)
-                                        (or (find-package "OPENLDK.SYSTEM")
-                                            (find-package :openldk))))
-                         (class-sym (intern (slot-value class 'name) class-pkg))
-                         (this-sym (intern "this" :openldk))
-                         (n-params (count-parameters (slot-value method 'descriptor)))
-                         (param-names (loop for i from 1 upto n-params
-                                            collect (gensym (format nil "P~A-" i)))))
-                    (when (find-class class-sym nil)
-                      (eval `(defmethod ,fn-symbol ((,this-sym ,class-sym) ,@param-names)
-                               (declare (ignore ,this-sym ,@param-names))
-                               (error "JIT compilation failed for ~A" ,key)))))))
-            (setf compilation-completed t)))
-      ;; Cleanup: mark compilation as done and notify waiting threads.
-      ;; If compilation was interrupted (e.g. by timeout or stack overflow),
-      ;; clear the status so a future call can retry.
-      (bt:with-lock-held (*method-compilation-lock*)
-        (if compilation-completed
-            (setf (gethash method-key *methods-being-compiled*) :done)
-            (remhash method-key *methods-being-compiled*))
-        (bt:condition-notify *method-compilation-cv*))))))
+      (unwind-protect
+           (handler-case
+               (progn
+                 (when (gethash "Code" (slot-value method 'attributes)) ; otherwise it is abstract
+                   (let* ((compile-start-time (get-internal-real-time))
+                          (code-attribute (gethash "Code" (slot-value method 'attributes)))
+                          (parameter-hints (gen-parameter-hints (descriptor method)))
+                          (code (slot-value code-attribute 'code))
+                          (max-locals (slot-value code-attribute 'max-locals))
+                          (length (length code))
+                          (*context* (make-instance '<context>
+                                                    :class class
+                                                    :ldk-loader (slot-value class 'ldk-loader)
+                                                    :classes *ldk-classes-by-bin-name*
+                                                    :exception-table (slot-value code-attribute 'exceptions)
+                                                    :bytecode code
+                                                    :insn-size (make-array (length code) :element-type 'fixnum :initial-element -1)
+                                                    :next-insn-list (make-array (length code) :initial-element nil)
+                                                    :stack-state-table (make-hash-table)
+                                                    :pc 0
+                                                    :is-clinit-p (string= "<clinit>" (slot-value method 'name)))))
+                     (setf (svcount *context*) 0)
+                     (when *debug-bytecode*
+                       (format t "~&; COMPILING ~A~%" method-key))
+                     (setf (fn-name *context*) (%method-fn-name class method))
+                     (let* ((ir-code (setf (ir-code *context*)
+                                           (%transpile-method-bytecode method-key code length)))
+                            (blocks-after-dce (%optimize-method-blocks ir-code))
+                            (definition-code (%build-method-definition class method blocks-after-dce
+                                                                       parameter-hints max-locals)))
+                       (when (search "require" method-key)
+                         (format *error-output* "~&;; COMPILING METHOD: ~A~%" method-key)
+                         (force-output *error-output*))
+                       (if *aot-dir*
+                           (%write-aot-method class-name
+                                              (lispize-method-name (format nil "~A~A" (name method) (descriptor method)))
+                                              definition-code)
+                           (%install-method-definition class method method-key definition-code length))
+                       (when (or *debug-compile* *debug-codegen*)
+                         (format t "; COMPILING ~A.~A (~Dms)~%"
+                                 class-name
+                                 (lispize-method-name (format nil "~A~A" (name method) (descriptor method)))
+                                 (round (* 1000 (/ (- (get-internal-real-time) compile-start-time)
+                                                   internal-time-units-per-second))))
+                         (force-output)))))
+                 (setf compilation-completed t))
+             (error (c)
+               ;; Compilation failed (IR translation, codegen, or eval error).
+               (format *error-output* "~&;; JIT-ERROR in ~A: ~A~%" method-key c)
+               (when *debug-codegen*
+                 (sb-debug:print-backtrace :stream *error-output* :count 60))
+               (force-output *error-output*)
+               (%install-jit-error-stub class method method-key)
+               (setf compilation-completed t)))
+        ;; Cleanup: mark compilation as done and notify waiting threads.
+        ;; If compilation was interrupted (e.g. by timeout or stack overflow),
+        ;; clear the status so a future call can retry.
+        (bt:with-lock-held (*method-compilation-lock*)
+          (if compilation-completed
+              (setf (gethash method-key *methods-being-compiled*) :done)
+              (remhash method-key *methods-being-compiled*))
+          (bt:condition-notify *method-compilation-cv*))))))
 
 
 (defun %clinit (class)
@@ -1721,6 +968,36 @@ get the same unified var-numbers."
                                      (return)))))))
     result))
 
+(defun %field-shadows-super-p (class field ldk-loader)
+  "True when instance FIELD of CLASS shadows an instance field of the same
+name declared somewhere in CLASS's superclass chain (distinct fields in
+the JVM -- javac's synthetic this$0 outer references do this routinely)."
+  (and (zerop (logand 8 (slot-value field 'access-flags)))   ; instance field
+       (let ((field-name (slot-value field 'name)))
+         (loop with cname = (slot-value class 'super)
+               while cname
+               for super-class = (find-class-in-loader-hierarchy cname ldk-loader)
+               while super-class
+               when (find-if (lambda (sf)
+                               (and (string= (slot-value sf 'name) field-name)
+                                    (zerop (logand 8 (slot-value sf 'access-flags)))))
+                             (fields super-class))
+                 return t
+               do (setf cname (slot-value super-class 'super))))))
+
+(defun %field-slot-symbol (class field ldk-loader)
+  "CLOS slot symbol for FIELD of CLASS: the plain mangled name, or a
+class-qualified symbol (recorded in *FIELD-SHADOW-SLOTS*) when the field
+shadows a superclass field and needs its own storage."
+  (let ((mangled (mangle-field-name (slot-value field 'name))))
+    (if (%field-shadows-super-p class field ldk-loader)
+        (let ((sym (intern (format nil "~A$~A" mangled (slot-value class 'name)) :openldk)))
+          (setf (gethash (format nil "~A.~A" (slot-value class 'name) (slot-value field 'name))
+                         *field-shadow-slots*)
+                sym)
+          sym)
+        (intern mangled :openldk))))
+
 (defun emit-<class> (class ldk-loader)
   "Emit CLOS class and method definitions for a Java class.
    LDK-LOADER is the class loader that will own this class.
@@ -1755,7 +1032,7 @@ get the same unified var-numbers."
                ;; Field names stay in :openldk (slots are inherited across packages)
                (map 'list
                     (lambda (f)
-                      (list (intern (mangle-field-name (slot-value f 'name)) :openldk)
+                      (list (%field-slot-symbol class f ldk-loader)
                             :initform (let ((cf (gethash "ConstantValue" (slot-value f 'attributes))))
                                         (if cf
                                             (value (emit (aref (constant-pool class) cf) (constant-pool class)))
@@ -2077,11 +1354,35 @@ get the same unified var-numbers."
                    (format t "~&; LOADING   ~A~%" classname))
                  (%classload-from-stream classname classfile-stream class-loader *boot-ldk-class-loader*)))))))))
 
+(defun %java-home-major-version (java-home)
+  "Parse the JDK major version from $JAVA_HOME/release, or NIL if unknown."
+  (let ((release (merge-pathnames "release" (uiop:ensure-directory-pathname java-home))))
+    (when (uiop:file-exists-p release)
+      (with-open-file (in release :if-does-not-exist nil)
+        (when in
+          (loop for line = (read-line in nil)
+                while line
+                when (str:starts-with? "JAVA_VERSION=" line)
+                  return (let* ((q1 (position #\" line))
+                                (q2 (and q1 (position #\" line :start (1+ q1))))
+                                (version (and q2 (subseq line (1+ q1) q2))))
+                           (when version
+                             (parse-integer version
+                                            :end (position #\. version)
+                                            :junk-allowed t)))))))))
+
 (defun ensure-JAVA_HOME ()
   (let ((JAVA_HOME (uiop:getenv "JAVA_HOME")))
     (unless JAVA_HOME
       (format *error-output* "~%OpenLDK Error: JAVA_HOME environment variable not set~%")
+      (format *error-output* "  Set JAVA_HOME to a JDK 25 installation (e.g. /usr/lib/jvm/java-25-openjdk).~%")
       (uiop:quit 1))
+
+    (let ((major (%java-home-major-version JAVA_HOME)))
+      (when (and major (/= major 25))
+        (format *error-output* "~%OpenLDK Error: JAVA_HOME points at a JDK ~A installation:~%  ~A~%" major JAVA_HOME)
+        (format *error-output* "  OpenLDK requires JDK 25. Set JAVA_HOME to a JDK 25 installation.~%")
+        (uiop:quit 1)))
 
     (cond
       ((uiop:directory-exists-p (concatenate 'string JAVA_HOME "/jmods/"))
@@ -2093,7 +1394,7 @@ get the same unified var-numbers."
       ((uiop:file-exists-p (concatenate 'string JAVA_HOME "/lib/modules")))
       (t
        (format *error-output* "~%OpenLDK Error: Cannot find $JAVA_HOME/jmods/ or $JAVA_HOME/lib/modules~%")
-       (format *error-output* "  OpenLDK requires a JDK (21+). Set JAVA_HOME to your JDK installation.~%")
+       (format *error-output* "  OpenLDK requires JDK 25. Set JAVA_HOME to a JDK 25 installation.~%")
        (uiop:quit 1)))))
 
 (defun %thread-daemon-p (thread)
@@ -2394,180 +1695,6 @@ get the same unified var-numbers."
                          (sleep 0.1))))))))
             (error "Main method not found in class ~A." (name class)))))))
 
-(defun %print-usage ()
-  "Print Java-style usage message."
-  (format *error-output* "~%Usage: openldk [options] <mainclass> [args...]~%")
-  (format *error-output* "       openldk [options] -jar <jarfile> [args...]~%~%")
-  (format *error-output* "where options include:~%")
-  (format *error-output* "    -cp <class search path>~%")
-  (format *error-output* "    -classpath <class search path>~%")
-  (format *error-output* "                  A : separated list of directories, JAR archives,~%")
-  (format *error-output* "                  and ZIP archives to search for class files.~%")
-  (format *error-output* "    -D<name>=<value>~%")
-  (format *error-output* "                  set a system property~%")
-  (format *error-output* "    -verbose:[class|gc|jni]~%")
-  (format *error-output* "                  enable verbose output~%")
-  (format *error-output* "    -version      print product version and exit~%")
-  (format *error-output* "    -? -help      print this help message~%")
-  (format *error-output* "    --dump-dir <dir>~%")
-  (format *error-output* "                  Directory for internal debug info~%")
-  (format *error-output* "    --aot <dir>   Ahead-of-time compilation directory~%~%"))
-
-(defun %parse-java-args ()
-  "Parse Java-style command line arguments.
-   Returns (values mainclass args classpath dump-dir aot).
-   Sets *cli-jvm-properties* as a side effect."
-  (let ((raw-args (rest sb-ext:*posix-argv*)) ; skip program name
-        (classpath nil)
-        (dump-dir nil)
-        (aot nil)
-        (mainclass nil)
-        (program-args nil)
-        (properties nil)
-        (i 0))
-    ;; Parse options until we hit mainclass
-    (loop while (< i (length raw-args))
-          for arg = (nth i raw-args)
-          do (cond
-               ;; -classpath <path> or -cp <path>
-               ((or (string= arg "-classpath") (string= arg "-cp"))
-                (incf i)
-                (when (< i (length raw-args))
-                  (setf classpath (nth i raw-args)))
-                (incf i))
-               ;; -Dkey=value sets a system property
-               ((str:starts-with? "-D" arg)
-                (let* ((prop-str (subseq arg 2))
-                       (eq-pos (position #\= prop-str)))
-                  (if eq-pos
-                      (push (cons (subseq prop-str 0 eq-pos)
-                                  (subseq prop-str (1+ eq-pos)))
-                            properties)
-                      ;; -Dkey with no value sets empty string
-                      (push (cons prop-str "") properties)))
-                (incf i))
-               ;; -XX options are consumed and ignored
-               ((str:starts-with? "-XX" arg)
-                (incf i))
-               ;; -X options are consumed and ignored
-               ((str:starts-with? "-X" arg)
-                (incf i))
-               ;; -verbose options
-               ((str:starts-with? "-verbose" arg)
-                (when (str:contains? "class" arg)
-                  (setf *debug-load* t))
-                (incf i))
-               ;; -version
-               ((string= arg "-version")
-                (format t "openldk version \"17.0.0\"~%")
-                (format t "OpenLDK Runtime Environment~%")
-                (uiop:quit 0))
-               ;; -help, -?, -h
-               ((or (string= arg "-help") (string= arg "-?") (string= arg "-h")
-                    (string= arg "--help"))
-                (%print-usage)
-                (uiop:quit 0))
-               ;; OpenLDK-specific: --dump-dir <dir>
-               ((string= arg "--dump-dir")
-                (incf i)
-                (when (< i (length raw-args))
-                  (setf dump-dir (nth i raw-args)))
-                (incf i))
-               ;; OpenLDK-specific: --aot <dir>
-               ((string= arg "--aot")
-                (incf i)
-                (when (< i (length raw-args))
-                  (setf aot (nth i raw-args)))
-                (incf i))
-               ;; -jar <jarfile>
-               ((string= arg "-jar")
-                (incf i)
-                (when (< i (length raw-args))
-                  ;; For -jar, the jarfile IS the mainclass (will be handled specially)
-                  (setf mainclass (nth i raw-args)))
-                (incf i)
-                ;; Everything after -jar <jarfile> is program args
-                (setf program-args (subseq raw-args i))
-                (return))
-               ;; Unknown option starting with -
-               ((and (> (length arg) 0) (char= (char arg 0) #\-))
-                (format *error-output* "Unrecognized option: ~A~%" arg)
-                (%print-usage)
-                (uiop:quit 1))
-               ;; First non-option is the mainclass
-               (t
-                (setf mainclass arg)
-                (incf i)
-                ;; Everything after mainclass is program args
-                (setf program-args (subseq raw-args i))
-                (return))))
-    (setf *cli-jvm-properties* (nreverse properties))
-    (values mainclass program-args classpath dump-dir aot)))
-
-(defun main-wrapper ()
-  "Main entry point into OpenLDK. Process command line errors here."
-  ;; Disable floating-point traps to match Java semantics (NaN/Infinity instead of errors)
-  (sb-int:set-floating-point-modes :traps nil)
-  ;; Parse Java-style command line arguments
-  (multiple-value-bind (mainclass args classpath dump-dir aot)
-      (%parse-java-args)
-    (unless mainclass
-      (%print-usage)
-      (uiop:quit 1))
-    (handler-bind
-        ((error (lambda (condition)
-                  (cond
-                    ((typep condition '|condition-java/lang/Throwable|)
-                     (let ((throwable (and (slot-boundp condition '|objref|)
-                                           (slot-value condition '|objref|))))
-                       (if (typep throwable '|java/lang/Throwable|)
-                           (progn
-                             (format *error-output* "~&Unhandled Java exception:~%")
-                             (%print-java-stack-trace throwable :stream *error-output*)
-                             ;; Print Go-specific fields
-                             (when (and (slot-exists-p throwable '|tagbody|)
-                                        (slot-boundp throwable '|tagbody|))
-                               (format *error-output* "~&Go.tagbody = ~A~%" (slot-value throwable '|tagbody|))
-                               (format *error-output* "~&Go.tag = ~A~%" (slot-value throwable '|tag|)))
-                             (format *error-output* "~&~%Lisp backtrace at throw site:~%")
-                             (trivial-backtrace:print-backtrace condition :output *error-output*)
-                             (finish-output *error-output*))
-                           (format *error-output* "~&Unhandled Java condition: ~A~%" condition))))
-                    (t
-                     (format *error-output* "~&Error: ~A~%" condition)))
-                  (uiop:quit 1))))
-      (main mainclass args :classpath classpath :dump-dir dump-dir :aot aot))
-    ;; Force exit — daemon threads may be blocked in wait() and won't terminate
-    (sb-ext:exit :code 0 :abort t)))
-
-(defun app-main-wrapper ()
-  "Generic entry point for pre-dumped app images.
-   Uses *default-mainclass* and *default-classpath* baked at build time.
-   CLI -cp overrides the baked classpath; a CLI mainclass overrides the default."
-  (sb-int:set-floating-point-modes :traps nil)
-  (multiple-value-bind (cli-mainclass args cli-classpath dump-dir aot)
-      (%parse-java-args)
-    (let ((mainclass (or cli-mainclass *default-mainclass*))
-          (classpath (or cli-classpath *default-classpath*)))
-      (unless mainclass
-        (%print-usage)
-        (uiop:quit 1))
-      (handler-case
-          (main mainclass args :classpath classpath :dump-dir dump-dir :aot aot)
-        (error (condition)
-          (cond
-            ((typep condition '|condition-java/lang/Throwable|)
-             (let ((throwable (and (slot-boundp condition '|objref|)
-                                   (slot-value condition '|objref|))))
-               (if (typep throwable '|java/lang/Throwable|)
-                   (progn
-                     (format *error-output* "~&Unhandled Java exception:~%")
-                     (%print-java-stack-trace throwable :stream *error-output*)
-                     (finish-output *error-output*))
-                   (format *error-output* "~&Unhandled Java condition: ~A~%" condition))))
-            (t
-             (format *error-output* "~&Error: ~A~%" condition)))
-          (uiop:quit 1))))))
 
 (defun %java-string (value)
   (cond
@@ -2862,51 +1989,3 @@ get the same unified var-numbers."
         (format t "~&; Warning finalizing ~A (non-fatal): ~A~%" c e))))
   (setf *debug-load* nil)
   (setf *debug-compile* nil))
-
-(defun make-image (&optional (output-path "openldk"))
-  (initialize)
-  ;; Clear all monitor state to prevent deadlocks in the saved image.
-  (clrhash *monitors*)
-  ;; Clear stale thread mappings — after image restore the Lisp thread objects are different.
-  (clrhash *lisp-to-java-threads*)
-  (setf *current-thread* nil)
-  ;; Kill all Java threads before saving core (SBCL can't save with threads running)
-  (loop for thread in (bt:all-threads)
-        when (and (not (eq thread (bt:current-thread)))
-                  (search "Java-Thread" (bt:thread-name thread)))
-        do (bt:destroy-thread thread))
-  (sb-ext:save-lisp-and-die output-path
-                            :executable t
-                            :save-runtime-options t
-                            :toplevel #'main-wrapper))
-
-(defun dump-app-image (output-path default-mainclass &key classpath)
-  "Build a generic executable image for a Java application.
-   OUTPUT-PATH:       Path for the saved executable.
-   DEFAULT-MAINCLASS: The Java class to run when no class is given on the CLI.
-   CLASSPATH:         Classpath string to bake in. If nil, reads CLASSPATH env var."
-  (initialize)
-  (let ((cp (or classpath (uiop:getenv "CLASSPATH") ".")))
-    (setf *default-mainclass* default-mainclass)
-    (setf *default-classpath* cp)
-    (setf *classpath*
-          (append
-           (loop for cpe in (split-sequence:split-sequence (uiop:inter-directory-separator) cp)
-                 collect (if (str:ends-with? ".jar" cpe)
-                             (make-instance 'jar-classpath-entry :jarfile cpe)
-                             (make-instance 'dir-classpath-entry :dir cpe)))
-           (discover-jmod-classpath-entries))))
-  ;; Clear all monitor state to prevent deadlocks in the saved image.
-  (clrhash *monitors*)
-  ;; Clear stale thread mappings — after image restore the Lisp thread objects are different.
-  (clrhash *lisp-to-java-threads*)
-  (setf *current-thread* nil)
-  ;; Kill all Java threads before saving core (SBCL can't save with threads running)
-  (loop for thread in (bt:all-threads)
-        when (and (not (eq thread (bt:current-thread)))
-                  (search "Java-Thread" (bt:thread-name thread)))
-        do (bt:destroy-thread thread))
-  (sb-ext:save-lisp-and-die output-path
-                            :executable t
-                            :save-runtime-options t
-                            :toplevel #'app-main-wrapper))

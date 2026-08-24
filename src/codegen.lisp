@@ -40,6 +40,15 @@
 
 (in-package :openldk)
 
+;;; Lower the IR produced by bc-to-ir.lisp to Lisp forms.  Each IR node
+;;; class has a CODEGEN method returning an <EXPRESSION> whose CODE slot
+;;; is the Lisp form to evaluate; codegen-block stitches these together
+;;; per basic block, wrapping try/catch scopes as HANDLER-CASE.
+
+(defgeneric codegen (insn context)
+  (:documentation "Return an <EXPRESSION> containing the Lisp form that
+implements IR node INSN, generating operand code recursively."))
+
 (declaim (notinline %java-slot-value (setf %java-slot-value)))
 
 (defun %java-slot-value (object slot-name)
@@ -236,6 +245,7 @@
                  :expression-type :LONG))
 
 (defun %codegen-binop (insn operator jtype context)
+  "Codegen a plain two-operand op: (OPERATOR value1 value2), typed JTYPE."
   (make-instance '<expression>
                  :insn insn
                  :code (list 'let (list (list 'value2 (code (codegen (value2 insn) context)))
@@ -244,6 +254,7 @@
                  :expression-type jtype))
 
 (defun %codegen-integer-binop (insn operator context)
+  "Codegen an int op with Java 32-bit wrap-around overflow semantics."
   (make-instance '<expression>
                  :insn insn
                  :code (list 'let* (list (list 'value2 (code (codegen (value2 insn) context)))
@@ -252,11 +263,11 @@
                                          (list 'sresult (list 'if (list '> 'result 2147483647)
                                                               (list '- 'result 4294967296)
                                                               'result)))
-                             ;; (list 'format t "~&~A: ~A ~A ~A = ~A" (list 'quote operator) 'value1 (list 'quote operator) 'value2 'sresult)
                              'sresult)
                  :expression-type :INTEGER))
 
 (defun %codegen-long-binop (insn operator context)
+  "Codegen a long op with Java 64-bit wrap-around overflow semantics."
   (make-instance '<expression>
                  :insn insn
                  :code (list 'let* (list (list 'value2 (code (codegen (value2 insn) context)))
@@ -265,83 +276,58 @@
                                          (list 'sresult (list 'if (list '> 'result 9223372036854775807)
                                                               (list '- 'result 18446744073709551616)
                                                               'result)))
-                             ;; (list 'format t "~&~A: ~A ~A ~A = ~A" (list 'quote operator) 'value1 (list 'quote operator) 'value2 'sresult)
                              'sresult)
                  :expression-type :LONG))
 
 (defmacro %define-binop-codegen-methods (&rest opcodes)
+  "Define CODEGEN methods for two-operand arithmetic and logical opcodes.
+Each entry is (IR-CLASS OPERATOR JTYPE KIND) where KIND is :WRAPPING for
+ops that must wrap around on 32/64-bit overflow, or :PLAIN for ops whose
+result always stays in range (bitwise ops, floats, doubles)."
   `(progn
      ,@(mapcar (lambda (opcode)
-                 (let ((ir-class (car opcode))
-                       (operator (cadr opcode))
-                       (jtype (caddr opcode)))
-                   (cond
-                     ((eq jtype :INTEGER)
-                      `(defmethod codegen ((insn ,ir-class) context)
-                         (%codegen-integer-binop insn ,operator context)))
-                     ((eq jtype :LONG)
-                      `(defmethod codegen ((insn ,ir-class) context)
-                         (%codegen-long-binop insn ,operator context)))
-                     (t
-                      `(defmethod codegen ((insn ,ir-class) context)
-                         (%codegen-binop insn ,operator ,jtype context))))))
+                 (destructuring-bind (ir-class operator jtype kind) opcode
+                   (if (eq kind :WRAPPING)
+                       (ecase jtype
+                         (:INTEGER
+                          `(defmethod codegen ((insn ,ir-class) context)
+                             (%codegen-integer-binop insn ,operator context)))
+                         (:LONG
+                          `(defmethod codegen ((insn ,ir-class) context)
+                             (%codegen-long-binop insn ,operator context))))
+                       `(defmethod codegen ((insn ,ir-class) context)
+                          (%codegen-binop insn ,operator ,jtype context)))))
                opcodes)))
 
 (%define-binop-codegen-methods
-  (ir-dmul '* :DOUBLE nil)
-  (ir-dadd '+ :DOUBLE nil)
-  (ir-dsub '- :DOUBLE nil)
-  (ir-fadd '+ :FLOAT nil)
-  (ir-fdiv '/ :FLOAT nil)
-  (ir-fmul '* :FLOAT nil)
-  (ir-fsub '- :FLOAT nil)
-  (ir-iadd '+ :INTEGER #xFFFFFFFF)
-  (ir-imul '* :INTEGER #xFFFFFFFF)
-  (ir-isub '- :INTEGER #xFFFFFFFF)
-  (ir-ladd '+ :LONG #xFFFFFFFFFFFFFFFF)
-  (ir-lmul '* :LONG #xFFFFFFFFFFFFFFFF)
-  (ir-lsub '- :LONG #xFFFFFFFFFFFFFFFF))
-
-(defmethod codegen ((insn ir-ixor) context)
-  (make-instance '<expression>
-                 :insn insn
-                 :code (list 'logxor (code (codegen (value1 insn) context)) (code (codegen (value2 insn) context)))
-                 :expression-type :INTEGER))
-
-(defmethod codegen ((insn ir-lxor) context)
-  (make-instance '<expression>
-                 :insn insn
-                 :code (list 'logxor (code (codegen (value1 insn) context)) (code (codegen (value2 insn) context)))
-                 :expression-type :LONG))
-
-(defmethod codegen ((insn ir-ior) context)
-  (make-instance '<expression>
-                 :insn insn
-                 :code (list 'logior (code (codegen (value1 insn) context)) (code (codegen (value2 insn) context)))
-                 :expression-type :INTEGER))
+  (ir-dmul '* :DOUBLE :PLAIN)
+  (ir-dadd '+ :DOUBLE :PLAIN)
+  (ir-dsub '- :DOUBLE :PLAIN)
+  (ir-fadd '+ :FLOAT :PLAIN)
+  (ir-fdiv '/ :FLOAT :PLAIN)
+  (ir-fmul '* :FLOAT :PLAIN)
+  (ir-fsub '- :FLOAT :PLAIN)
+  (ir-iadd '+ :INTEGER :WRAPPING)
+  (ir-imul '* :INTEGER :WRAPPING)
+  (ir-isub '- :INTEGER :WRAPPING)
+  (ir-ladd '+ :LONG :WRAPPING)
+  (ir-lmul '* :LONG :WRAPPING)
+  (ir-lsub '- :LONG :WRAPPING)
+  (ir-iand 'logand :INTEGER :PLAIN)
+  (ir-ior 'logior :INTEGER :PLAIN)
+  (ir-ixor 'logxor :INTEGER :PLAIN)
+  (ir-land 'logand :LONG :PLAIN)
+  (ir-lxor 'logxor :LONG :PLAIN))
 
 (defmethod codegen ((insn ir-lor) context)
+  ;; Unlike LAND/LXOR, LOR masks its operands to their unsigned 64-bit
+  ;; representation before combining; some producers hand it non-canonical
+  ;; (unsigned) long values.
   (make-instance '<expression>
                  :insn insn
                  :code `(let ((op1 (logand ,(code (codegen (value1 insn) context)) #xFFFFFFFFFFFFFFFF))
                               (op2 (logand ,(code (codegen (value2 insn) context)) #xFFFFFFFFFFFFFFFF)))
-                          ;; (format t "~&~A | ~A = ~A~%" op1 op2 (logior op1 op2))
                           (logior op1 op2))
-                 :expression-type :LONG))
-
-(defmethod codegen ((insn ir-iand) context)
-  (make-instance '<expression>
-                 :insn insn
-                 :code (list 'logand (code (codegen (value1 insn) context)) (code (codegen (value2 insn) context)))
-                 :expression-type :INTEGER))
-
-(defmethod codegen ((insn ir-land) context)
-  (make-instance '<expression>
-                 :insn insn
-                 :code `(let ((op1 ,(code (codegen (value1 insn) context)))
-                              (op2 ,(code (codegen (value2 insn) context))))
-                          ;; (format t "~%land: ~A & ~A = ~A~%" op1 op2 (logand op1 op2))
-                          (logand op1 op2))
                  :expression-type :LONG))
 
 (defmethod codegen ((insn ir-array-length) context)
@@ -365,8 +351,7 @@
                    :insn insn
                    :code `(let ((lookup (%make-java-instance "java/lang/invoke/MethodHandles$Lookup")))
                             (|<init>(Ljava/lang/Class;)| lookup ,class)
-                            (print lookup)
-                            (error "unimplemented")))))
+                            (unimplemented "IR-CALL-DYNAMIC codegen")))))
 
 (defun %find-declaring-class (class method-name &optional loader)
   "Find the class that declares METHOD-NAME, searching class hierarchy.
@@ -492,7 +477,6 @@
                    :code `(let ((value ,(code (codegen value context)))
                                 (index ,(code (codegen index context)))
                                 (arrayref ,(code (codegen arrayref context))))
-;;                            (format t "~&castore[~A] = ~A in ~A~%" index (code-char value) arrayref)
                             (setf (jaref arrayref index) (code-char value))))))
 
 (defmethod codegen ((insn ir-checkcast) context)
@@ -507,10 +491,9 @@
                              `(let ((objref ,(code (codegen (objref insn) context))))
                                 (when objref
                                   (unless (and (typep objref 'java-array)
-                                               (let ((cc (java-array-component-class objref)))
-                                                 (|isAssignableFrom(Ljava/lang/Class;)|
-                                                  (if (stringp cc) (%bin-type-name-to-class cc) cc)
-                                                  (%bin-type-name-to-class ,(subseq classname 1)))))
+                                               (|isAssignableFrom(Ljava/lang/Class;)|
+                                                (%array-component-class objref)
+                                                (%bin-type-name-to-class ,(subseq classname 1))))
                                     (error (%lisp-condition (%make-throwable '|java/lang/ClassCastException|))))))
                              `(let ((objref ,(code (codegen (objref insn) context))))
                                 (when objref
@@ -782,10 +765,8 @@
 (defmethod codegen ((insn ir-lneg) context)
   (make-instance '<expression>
                  :insn insn
-                 :code `(progn
-                          (let ((value ,(code (codegen (value insn) context))))
-                            ;; (format t "~&lneg ~A = ~A~%" value (unsigned-to-signed-long (- value)))
-                            (unsigned-to-signed-long (- value))))
+                 :code `(let ((value ,(code (codegen (value insn) context))))
+                          (unsigned-to-signed-long (- value)))
                  :expression-type :LONG))
 
 (defmethod codegen ((insn ir-ineg) context)
@@ -1212,7 +1193,7 @@
                                      ,receiver-sym))
                                 (call (cond
                                         ((eq nargs 0)
-                                         (error "internal error"))
+                                         (internal-error "virtual call ~A has no receiver argument" method-name))
                                         ((eq nargs 1)
                                          (list (intern (format nil "~A" method-name) :openldk) null-checked-receiver))
                                         (t
@@ -1724,8 +1705,40 @@ boolean prints true/false and char prints the character rather than an int."
                      :code `(openldk::invoke-special ',method-symbol ',owner-symbol
                                                      (list ,@arg-code))))))
 
+(defun %resolve-field-slot (ref-class-name member-name)
+  "Resolve a Fieldref (REF-CLASS-NAME, MEMBER-NAME) to its CLOS slot
+symbol, honoring JVM field resolution: walk up from the referenced class
+to the first class declaring the field; a shadowing declaration has its
+own class-qualified slot recorded in *FIELD-SHADOW-SLOTS*."
+  (let ((plain (intern (mangle-field-name member-name) :openldk))
+        ;; The Fieldref's class arrives as whatever EMIT produced for the
+        ;; class constant: an IR-CLASS wrapping <CLASS> metadata (or, in
+        ;; principle, a bare string) -- normalize to the binary name.
+        (ref-class-name (typecase ref-class-name
+                          (string ref-class-name)
+                          (ir-class (let ((c (ir-class-class ref-class-name)))
+                                      (and c (name c))))
+                          (<class> (name ref-class-name))
+                          (t nil))))
+    (if (null ref-class-name)
+        plain
+        (loop with cname = ref-class-name
+              for depth from 0 below 64
+              while cname
+              do (let ((shadow (gethash (format nil "~A.~A" cname member-name)
+                                        *field-shadow-slots*)))
+                   (when shadow (return shadow))
+                   (let ((cls (gethash cname *ldk-classes-by-bin-name*)))
+                     (unless cls (return plain))
+                     (when (find member-name (fields cls)
+                                 :key (lambda (fl) (slot-value fl 'name))
+                                 :test #'string=)
+                       (return plain))
+                     (setf cname (slot-value cls 'super))))
+              finally (return plain)))))
+
 (defmethod codegen ((insn ir-member) context)
-  (with-slots (objref member-name) insn
+  (with-slots (objref member-name ref-class) insn
     (make-instance '<expression>
                    :insn insn
                    :code `(%java-slot-value
@@ -1735,7 +1748,7 @@ boolean prints true/false and char prints the character rather than an int."
                                        (%make-throwable '|java/lang/NullPointerException|))))
                              objref)
                            ;; Field names stay in :openldk for CLOS slot inheritance
-                           (quote ,(intern (mangle-field-name member-name) :openldk))))))
+                           (quote ,(%resolve-field-slot ref-class member-name))))))
 
 (defmethod codegen ((insn ir-static-member) context)
   (declare (ignore context))
@@ -1753,12 +1766,6 @@ boolean prints true/false and char prints the character rather than an int."
                                ,sym
                                ;; Field names stay in :openldk for CLOS slot inheritance
                                (quote ,(intern (mangle-field-name member-name) :openldk))))))))
-
-(define-condition java-lang-throwable (error)
-  ((throwable :initarg :throwable :reader throwable)))
-
-(defun make-java-condition (e)
-  (make-condition (gethash (class-of e) *condition-table*) :objref e))
 
 (defmethod codegen ((insn ir-throw) context)
   (make-instance '<expression>

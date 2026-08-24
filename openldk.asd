@@ -52,6 +52,7 @@
   :version "1"
   :serial t
   :components ((:file "src/package")
+               (:file "src/conditions")
                (:file "src/global-state")
                (:file "src/fiber")
                (:file "src/java-gf")
@@ -77,7 +78,10 @@
                (:file "src/streams")
                (:file "src/zip")
                (:file "src/reflection")
-               (:file "src/openldk"))
+               (:file "src/optimizer")
+               (:file "src/aot")
+               (:file "src/openldk")
+               (:file "src/cli"))
   :around-compile
   "(lambda (thunk)
      (cl-annot:enable-annot-syntax)

@@ -40,11 +40,19 @@
 (in-package :openldk)
 
 (defclass/std ir-node ()
-  ((address :std -1)
+  ((address :std -1
+            :doc "Bytecode program counter this node was transpiled from.")
    (dead-p :std nil
-           :doc "T if this instruction has been eliminated by DCE.")))
+           :doc "T if this instruction has been eliminated by DCE."))
+  (:documentation "Base class for all OpenLDK IR nodes.  Java bytecode is
+transpiled into a tree of these (bc-to-ir.lisp), optimized, and then
+compiled to Lisp forms by the CODEGEN methods in codegen.lisp.  Most
+subclasses correspond one-to-one with a JVM opcode and are named after
+it (e.g. IR-IADD for iadd)."))
 
 (defmethod side-effect-p ((node ir-node))
+  "Whether evaluating NODE can have side effects.  Nodes default to T;
+pure expression nodes override this so DCE can eliminate them."
   (declare (ignore node))
   t)
 
@@ -59,13 +67,11 @@
 (defmethod dot-dump-string ((node ir-node))
   (format nil "~3A: ~A" (address node) (class-name (class-of node))))
 
-(defmethod uses-stack-p ((node ir-node))
-  nil)
-
 (defclass/std ir-xastore (ir-node)
   ((arrayref)
    (index)
-   (value)))
+   (value))
+  (:documentation "Base class for the *astore array-store opcodes."))
 
 (defmethod print-object ((node ir-xastore) out)
   (print-unreadable-object (node out :type t)
@@ -85,7 +91,8 @@
 
 (defclass/std ir-literal (ir-node)
   ((value)
-   (type :with)))
+   (type :with))
+  (:documentation "A constant value pushed by ldc/const/push opcodes."))
 
 (defmethod side-effect-p ((node ir-literal))
   (declare (ignore node))
@@ -93,10 +100,6 @@
 
 (defmethod emit ((v ir-literal) cp)
   (slot-value v 'value))
-
-(defmethod side-effect-p ((node ir-literal))
-  (declare (ignore node))
-  nil)
 
 (defclass/std ir-local-variable (ir-node)
   ((index)
@@ -156,9 +159,6 @@
 (defclass/std ir-float-literal (ir-literal)
   ())
 
-(defclass/std ir-double-literal (ir-literal)
-  ())
-
 (defclass/std ir-int-literal (ir-literal)
   ())
 
@@ -167,7 +167,8 @@
 
 (defclass/std ir-array-index (ir-node)
   ((index)
-   (arrayref)))
+   (arrayref))
+  (:documentation "Base class for the *aload array-load opcodes."))
 
 (defclass/std ir-caload (ir-array-index)
   ())
@@ -216,7 +217,9 @@
 
 (defclass/std ir-binop (ir-node)
   ((value1)
-   (value2)))
+   (value2))
+  (:documentation "Base class for two-operand opcodes (arithmetic, logical,
+shift, and compare).  VALUE1/VALUE2 follow JVM operand-stack order."))
 
 (defmethod side-effect-p ((node ir-binop))
   (declare (ignore node))
@@ -246,11 +249,9 @@
 (defclass/std ir-lor (ir-binop)
   ())
 
-(defmethod uses-stack-p (ir-add)
-  t)
-
 (defclass/std ir-branch (ir-node)
-  ((offset successors)))
+  ((offset successors))
+  (:documentation "Base class for control-transfer opcodes."))
 
 (defclass/std ir-imul (ir-binop)
   ())
@@ -283,7 +284,9 @@
   ())
 
 (defclass/std ir-unop (ir-node)
-  ((value)))
+  ((value))
+  (:documentation "Base class for one-operand opcodes (negation and the
+primitive x2y conversions)."))
 
 (defmethod side-effect-p ((node ir-unop))
   (declare (ignore node))
@@ -351,7 +354,8 @@
 
 (defclass/std ir-if-xcmp<cond> (ir-branch)
   ((value1)
-   (value2)))
+   (value2))
+  (:documentation "Base class for the two-operand if_icmp*/if_acmp* branches."))
 
 (defclass/std ir-if-acmpeq (ir-if-xcmp<cond>)
   ())
@@ -378,7 +382,9 @@
   ())
 
 (defclass/std ir-if<cond> (ir-branch)
-  ((value)))
+  ((value))
+  (:documentation "Base class for the one-operand if* branches (compare
+against zero or null)."))
 
 (defclass/std ir-ifeq (ir-if<cond>)
   ())
@@ -463,7 +469,10 @@
 
 (defclass/std ir-member (ir-node)
   ((objref)
-   (member-name)))
+   (member-name)
+   (ref-class :std nil
+              :doc "Binary name of the class the Fieldref names -- needed to
+resolve shadowed fields to their declaring class's slot.")))
 
 (defmethod initialize-instance :after ((insn ir-member) &key)
   (with-slots (objref member-name) insn
@@ -520,9 +529,6 @@
 (defclass/std ir-dadd (ir-binop)
   ())
 
-(defclass/std ir-dsub (ir-binop)
-  ())
-
 (defclass/std ir-ddiv (ir-binop)
   ())
 
@@ -534,9 +540,6 @@
 
 (defclass/std ir-fmul (ir-binop)
   ())
-
-(defmethod uses-stack-p ((node ir-node))
-  t)
 
 (defclass/std ir-return (ir-node)
   ())

@@ -19,10 +19,18 @@ KAWA_URL = https://repo1.maven.org/maven2/com/github/arvyy/kawa/$(KAWA_VERSION)/
 
 all: openldk javacl
 
-openldk: src/*.lisp *.asd Makefile
+# Fail fast when JAVA_HOME is not a JDK 25 (e.g. the environment exports an
+# older JDK) instead of erroring deep inside the Lisp build.  Order-only
+# prerequisite so it never makes the image targets out of date.
+.PHONY: check-jdk
+check-jdk:
+	@test -n "$(JAVA_HOME)" || { echo "error: JAVA_HOME is not set; OpenLDK requires a JDK 25 (e.g. /usr/lib/jvm/java-25-openjdk)"; exit 1; }
+	@grep -qs '^JAVA_VERSION="25' "$(JAVA_HOME)/release" || { echo "error: JAVA_HOME=$(JAVA_HOME) is not a JDK 25 installation (OpenLDK requires JDK 25)"; exit 1; }
+
+openldk: src/*.lisp *.asd Makefile | check-jdk
 	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))" --eval "(openldk::make-image)"
 
-javacl: src/*.lisp *.asd Makefile
+javacl: src/*.lisp *.asd Makefile | check-jdk
 	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"javacl\"))" --eval "(openldk::make-javac-image)"
 
 $(KAWA_JAR):

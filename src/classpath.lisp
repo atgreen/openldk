@@ -61,42 +61,74 @@
   ((dir :initarg :dir))
   (:documentation "Classpath entry for a directory tree."))
 
-;; Modify the :around method to establish the restart at the right time
-(defmethod open-java-classfile :around ((cpe jar-classpath-entry) classname)
-  (restart-case
-      (handler-case
-          (call-next-method)
-        (sb-int:closed-saved-stream-error ()
-          (invoke-restart 'reopen-zipfile)))
-    (reopen-zipfile ()
-      :report "Reopen the zipfile and retry."
-      (with-slots (zipfile zipfile-entries jarfile lock) cpe
-        (bt:with-lock-held (lock)
-          (setf zipfile (zip:open-zipfile jarfile))
-          (setf zipfile-entries (zip:zipfile-entries zipfile)))
-        (open-java-classfile cpe classname)))))
+;;; Container-backed entries (jar/jmod/jimage) share three concerns:
+;;; lazily opening their container under the entry's lock, reopening it
+;;; when a dumped image left the stream closed, and registering a class's
+;;; package on first load.  %ENSURE-ENTRY-OPEN, %REOPEN-ENTRY, and the
+;;; %DEFINE-REOPEN-RETRY macro centralize them.
 
-;; And simplify the primary method - no restart needed here
+(defgeneric %ensure-entry-open (cpe)
+  (:documentation "Open CPE's backing container if it isn't open yet.
+Caller must hold the entry's lock."))
+
+(defgeneric %reopen-entry (cpe)
+  (:documentation "Unconditionally reopen CPE's backing container.
+Caller must hold the entry's lock."))
+
+(defmethod %ensure-entry-open ((cpe jar-classpath-entry))
+  (with-slots (zipfile) cpe
+    (unless zipfile
+      (%reopen-entry cpe))))
+
+(defmethod %reopen-entry ((cpe jar-classpath-entry))
+  (with-slots (zipfile zipfile-entries jarfile) cpe
+    (setf zipfile (zip:open-zipfile jarfile))
+    (setf zipfile-entries (zip:zipfile-entries zipfile))))
+
+(defmethod %ensure-entry-open ((cpe jmod-classpath-entry))
+  (with-slots (zipfile) cpe
+    (unless zipfile
+      (%reopen-entry cpe))))
+
+(defmacro %define-reopen-retry (generic class arg)
+  "Define an :around method on GENERIC for CLASS that reopens the entry's
+backing container and retries once when a saved-and-restarted image left
+its stream closed."
+  `(defmethod ,generic :around ((cpe ,class) ,arg)
+     (handler-case
+         (call-next-method)
+       (sb-int:closed-saved-stream-error ()
+         (bt:with-lock-held ((slot-value cpe 'lock))
+           (%reopen-entry cpe))
+         (,generic cpe ,arg)))))
+
+(%define-reopen-retry open-java-classfile jar-classpath-entry classname)
+(%define-reopen-retry open-resource jar-classpath-entry resource-name)
+
+(defun %register-classfile-package (classname source-path)
+  "Record CLASSNAME's package in *PACKAGES*, attributed to SOURCE-PATH."
+  (when-let (last-slash-position (position #\/ classname :from-end t))
+    (let ((package-name (take (1+ last-slash-position) classname)))
+      (unless (gethash package-name *packages*)
+        (setf (gethash package-name *packages*) (jstring source-path))))))
+
+(defun %zipfile-classfile-stream (cpe classname prefix source-path)
+  "Look up PREFIX<CLASSNAME>.class (or .cls) in CPE's open zipfile and
+return an in-memory stream of its contents, or NIL.  Caller must hold the
+entry's lock with the zipfile open."
+  (with-slots (zipfile-entries) cpe
+    (when-let (ze (or (gethash (format nil "~A~A.class" prefix classname) zipfile-entries)
+                      (gethash (format nil "~A~A.cls" prefix classname) zipfile-entries)))
+      (let ((result (flexi-streams:make-in-memory-input-stream (zip:zipfile-entry-contents ze))))
+        (%register-classfile-package classname source-path)
+        result))))
+
 (defmethod open-java-classfile ((cpe jar-classpath-entry) classname)
   "Return an input stream for a java class, CLASSNAME."
-  (with-slots (jarfile zipfile zipfile-entries lock) cpe
+  (with-slots (jarfile lock) cpe
     (bt:with-lock-held (lock)
-      ;; Ensure the zipfile is open
-      (unless zipfile
-        (setf zipfile (zip:open-zipfile jarfile))
-        (setf zipfile-entries (zip:zipfile-entries zipfile)))
-      ;; Look up the class file in the zipfile entries (try .class then .cls)
-      (when-let (ze (or (gethash (format nil "~A.class" classname) zipfile-entries)
-                        (gethash (format nil "~A.cls" classname) zipfile-entries)))
-        ;; Create an in-memory input stream for the class file contents
-        (let ((result (flexi-streams:make-in-memory-input-stream (zip:zipfile-entry-contents ze))))
-          ;; Add the package to the *PACKAGE* hashtable if it doesn't already exist
-          (when-let (last-slash-position (position #\/ classname :from-end t))
-            (let ((package-name (take (1+ last-slash-position) classname)))
-              (unless (gethash package-name *packages*)
-                (setf (gethash package-name *packages*) (jstring jarfile)))))
-          ;; Return the input stream
-          result)))))
+      (%ensure-entry-open cpe)
+      (%zipfile-classfile-stream cpe classname "" jarfile))))
 
 ;; --- jmod-classpath-entry support ---
 
@@ -149,68 +181,34 @@
 
 ;; --- jmod-classpath-entry methods ---
 
-(defmethod open-java-classfile :around ((cpe jmod-classpath-entry) classname)
-  (restart-case
-      (handler-case
-          (call-next-method)
-        (sb-int:closed-saved-stream-error ()
-          (invoke-restart 'reopen-zipfile)))
-    (reopen-zipfile ()
-      :report "Reopen the zipfile and retry."
-      (with-slots (zipfile zipfile-entries jmodfile lock) cpe
-        (bt:with-lock-held (lock)
-          (setf zipfile (open-jmod-zipfile jmodfile))
-          (setf zipfile-entries (zip:zipfile-entries zipfile)))
-        (open-java-classfile cpe classname)))))
+(defmethod %reopen-entry ((cpe jmod-classpath-entry))
+  (with-slots (zipfile zipfile-entries jmodfile) cpe
+    (setf zipfile (open-jmod-zipfile jmodfile))
+    (setf zipfile-entries (zip:zipfile-entries zipfile))))
+
+(%define-reopen-retry open-java-classfile jmod-classpath-entry classname)
+(%define-reopen-retry open-resource jmod-classpath-entry resource-name)
 
 (defmethod open-java-classfile ((cpe jmod-classpath-entry) classname)
   "Return an input stream for a java class, CLASSNAME, from a JMOD file."
-  (with-slots (jmodfile zipfile zipfile-entries lock) cpe
+  (with-slots (jmodfile lock) cpe
     (bt:with-lock-held (lock)
-      (unless zipfile
-        (setf zipfile (open-jmod-zipfile jmodfile))
-        (setf zipfile-entries (zip:zipfile-entries zipfile)))
-      (when-let (ze (or (gethash (format nil "classes/~A.class" classname) zipfile-entries)
-                        (gethash (format nil "classes/~A.cls" classname) zipfile-entries)))
-        (let ((result (flexi-streams:make-in-memory-input-stream (zip:zipfile-entry-contents ze))))
-          (when-let (last-slash-position (position #\/ classname :from-end t))
-            (let ((package-name (take (1+ last-slash-position) classname)))
-              (unless (gethash package-name *packages*)
-                (setf (gethash package-name *packages*) (jstring jmodfile)))))
-          result)))))
-
-(defmethod open-resource :around ((cpe jmod-classpath-entry) resource-name)
-  "Handle closed stream errors by reopening the zipfile."
-  (restart-case
-      (handler-case
-          (call-next-method)
-        (sb-int:closed-saved-stream-error ()
-          (invoke-restart 'reopen-zipfile)))
-    (reopen-zipfile ()
-      :report "Reopen the zipfile and retry."
-      (with-slots (zipfile zipfile-entries jmodfile lock) cpe
-        (bt:with-lock-held (lock)
-          (setf zipfile (open-jmod-zipfile jmodfile))
-          (setf zipfile-entries (zip:zipfile-entries zipfile)))
-        (open-resource cpe resource-name)))))
+      (%ensure-entry-open cpe)
+      (%zipfile-classfile-stream cpe classname "classes/" jmodfile))))
 
 (defmethod open-resource ((cpe jmod-classpath-entry) resource-name)
   "Return an input stream for a resource RESOURCE-NAME in this JMOD, or NIL if not found."
-  (with-slots (jmodfile zipfile zipfile-entries lock) cpe
+  (with-slots (zipfile-entries lock) cpe
     (bt:with-lock-held (lock)
-      (unless zipfile
-        (setf zipfile (open-jmod-zipfile jmodfile))
-        (setf zipfile-entries (zip:zipfile-entries zipfile)))
+      (%ensure-entry-open cpe)
       (when-let (ze (gethash (format nil "classes/~A" resource-name) zipfile-entries))
         (flexi-streams:make-in-memory-input-stream (zip:zipfile-entry-contents ze))))))
 
 (defmethod get-resource-url ((cpe jmod-classpath-entry) resource-name)
   "Return a jmod: URL string for a resource if it exists in this JMOD, or NIL."
-  (with-slots (jmodfile zipfile zipfile-entries lock) cpe
+  (with-slots (jmodfile zipfile-entries lock) cpe
     (bt:with-lock-held (lock)
-      (unless zipfile
-        (setf zipfile (open-jmod-zipfile jmodfile))
-        (setf zipfile-entries (zip:zipfile-entries zipfile)))
+      (%ensure-entry-open cpe)
       (when (gethash (format nil "classes/~A" resource-name) zipfile-entries)
         (format nil "jmod:file:~A!/classes/~A" jmodfile resource-name)))))
 
@@ -337,51 +335,32 @@ saved image was dumped)."
       (read-sequence bytes (slot-value cpe 'stream))
       bytes)))
 
-(defmethod open-java-classfile :around ((cpe jimage-classpath-entry) classname)
-  (restart-case
-      (handler-case
-          (call-next-method)
-        (sb-int:closed-saved-stream-error ()
-          (invoke-restart 'reopen-jimage)))
-    (reopen-jimage ()
-      :report "Reopen the jimage stream and retry."
-      (with-slots (stream lock) cpe
-        (bt:with-lock-held (lock)
-          (setf stream (%jimage-open-stream (slot-value cpe 'imagefile))))
-        (open-java-classfile cpe classname)))))
+(defmethod %ensure-entry-open ((cpe jimage-classpath-entry))
+  (ensure-jimage-loaded cpe))
+
+(defmethod %reopen-entry ((cpe jimage-classpath-entry))
+  (with-slots (stream imagefile) cpe
+    (setf stream (%jimage-open-stream imagefile))))
+
+(%define-reopen-retry open-java-classfile jimage-classpath-entry classname)
+(%define-reopen-retry open-resource jimage-classpath-entry resource-name)
 
 (defmethod open-java-classfile ((cpe jimage-classpath-entry) classname)
   "Return an input stream for a java class, CLASSNAME, from a jimage file."
-  (with-slots (index lock) cpe
+  (with-slots (index imagefile lock) cpe
     (bt:with-lock-held (lock)
-      (ensure-jimage-loaded cpe)
+      (%ensure-entry-open cpe)
       (when-let (location (gethash (format nil "~A.class" classname) index))
         (let ((result (flexi-streams:make-in-memory-input-stream
                        (%jimage-read-resource cpe location))))
-          (when-let (last-slash-position (position #\/ classname :from-end t))
-            (let ((package-name (take (1+ last-slash-position) classname)))
-              (unless (gethash package-name *packages*)
-                (setf (gethash package-name *packages*) (jstring (slot-value cpe 'imagefile))))))
+          (%register-classfile-package classname imagefile)
           result)))))
-
-(defmethod open-resource :around ((cpe jimage-classpath-entry) resource-name)
-  (restart-case
-      (handler-case
-          (call-next-method)
-        (sb-int:closed-saved-stream-error ()
-          (invoke-restart 'reopen-jimage)))
-    (reopen-jimage ()
-      :report "Reopen the jimage stream and retry."
-      (with-slots (stream lock) cpe
-        (bt:with-lock-held (lock)
-          (setf stream (%jimage-open-stream (slot-value cpe 'imagefile))))
-        (open-resource cpe resource-name)))))
 
 (defmethod open-resource ((cpe jimage-classpath-entry) resource-name)
   "Return an input stream for a resource RESOURCE-NAME in this jimage, or NIL."
   (with-slots (index lock) cpe
     (bt:with-lock-held (lock)
-      (ensure-jimage-loaded cpe)
+      (%ensure-entry-open cpe)
       (when-let (location (gethash resource-name index))
         (flexi-streams:make-in-memory-input-stream
          (%jimage-read-resource cpe location))))))
@@ -390,7 +369,7 @@ saved image was dumped)."
   "Return a jrt: URL string for a resource if it exists in this jimage, or NIL."
   (with-slots (index lock) cpe
     (bt:with-lock-held (lock)
-      (ensure-jimage-loaded cpe)
+      (%ensure-entry-open cpe)
       (when-let (location (gethash resource-name index))
         (format nil "jrt:/~A/~A" (first location) resource-name)))))
 
@@ -422,41 +401,18 @@ jimage container at $JAVA_HOME/lib/modules directly."
         ;; Read into memory and return an in-memory input stream
         (let* ((bytes (read-file-into-byte-vector fqn))
                (result (flexi-streams:make-in-memory-input-stream bytes)))
-          ;; Add this package to the *PACKAGE* hashtable.
-          (when-let (last-slash-position (position #\/ classname :from-end t))
-            (let ((package-name (take (1+ last-slash-position) classname)))
-              (unless (gethash package-name *packages*)
-                (setf (gethash package-name *packages*) (jstring fqn)))))
+          (%register-classfile-package classname fqn)
           result)))))
 
 ;;; Resource loading (for finding arbitrary files in classpath, not just .class files)
 ;;; See url.lisp for documentation on why this is needed and how it integrates
 ;;; with Java's ClassLoader.getResource() mechanism.
 
-(defmethod open-resource :around ((cpe jar-classpath-entry) resource-name)
-  "Handle closed stream errors by reopening the zipfile."
-  (restart-case
-      (handler-case
-          (call-next-method)
-        (sb-int:closed-saved-stream-error ()
-          (invoke-restart 'reopen-zipfile)))
-    (reopen-zipfile ()
-      :report "Reopen the zipfile and retry."
-      (with-slots (zipfile zipfile-entries jarfile lock) cpe
-        (bt:with-lock-held (lock)
-          (setf zipfile (zip:open-zipfile jarfile))
-          (setf zipfile-entries (zip:zipfile-entries zipfile)))
-        (open-resource cpe resource-name)))))
-
 (defmethod open-resource ((cpe jar-classpath-entry) resource-name)
   "Return an input stream for a resource RESOURCE-NAME in this JAR, or NIL if not found."
-  (with-slots (jarfile zipfile zipfile-entries lock) cpe
+  (with-slots (zipfile-entries lock) cpe
     (bt:with-lock-held (lock)
-      ;; Ensure the zipfile is open
-      (unless zipfile
-        (setf zipfile (zip:open-zipfile jarfile))
-        (setf zipfile-entries (zip:zipfile-entries zipfile)))
-      ;; Look up the resource in the zipfile entries
+      (%ensure-entry-open cpe)
       (when-let (ze (gethash resource-name zipfile-entries))
         (flexi-streams:make-in-memory-input-stream (zip:zipfile-entry-contents ze))))))
 
@@ -469,13 +425,9 @@ jimage container at $JAVA_HOME/lib/modules directly."
 
 (defmethod get-resource-url ((cpe jar-classpath-entry) resource-name)
   "Return a jar: URL string for a resource if it exists in this JAR, or NIL."
-  (with-slots (jarfile zipfile zipfile-entries lock) cpe
+  (with-slots (jarfile zipfile-entries lock) cpe
     (bt:with-lock-held (lock)
-      ;; Ensure the zipfile is open
-      (unless zipfile
-        (setf zipfile (zip:open-zipfile jarfile))
-        (setf zipfile-entries (zip:zipfile-entries zipfile)))
-      ;; Check if the resource exists
+      (%ensure-entry-open cpe)
       (when (gethash resource-name zipfile-entries)
         (format nil "jar:file:~A!/~A" jarfile resource-name)))))
 
@@ -485,6 +437,19 @@ jimage container at $JAVA_HOME/lib/modules directly."
     (let ((fqn (format nil "~A~A~A" dir (uiop:directory-separator-for-host) resource-name)))
       (when (uiop:file-exists-p fqn)
         (format nil "file:~A" fqn)))))
+
+(defun %reset-classpath-entry-runtime-state (cpe)
+  "Give CPE a fresh lock and drop its cached container handle.  Called
+before dumping an image: saved streams are dead on restart (the reopen
+machinery handles that), but a lock saved mid-acquisition — e.g. from a
+warmup thread that died holding it — would deadlock the restarted image
+on its first classload."
+  (when (slot-exists-p cpe 'lock)
+    (setf (slot-value cpe 'lock) (bt:make-lock "classpath-lock")))
+  (when (slot-exists-p cpe 'zipfile)
+    (setf (slot-value cpe 'zipfile) nil))
+  (when (slot-exists-p cpe 'stream)
+    (setf (slot-value cpe 'stream) nil)))
 
 (defun open-resource-on-classpath (resource-name)
   "Find and open a resource RESOURCE-NAME on the classpath. Returns an input stream or NIL."
@@ -500,12 +465,9 @@ jimage container at $JAVA_HOME/lib/modules directly."
 
 (defun list-jar-classes (jar-entry)
   "Return a list of all class file names in a JAR file."
-  (with-slots (jarfile zipfile zipfile-entries lock) jar-entry
+  (with-slots (zipfile-entries lock) jar-entry
     (bt:with-lock-held (lock)
-      ;; Ensure the zipfile is open
-      (unless zipfile
-        (setf zipfile (zip:open-zipfile jarfile))
-        (setf zipfile-entries (zip:zipfile-entries zipfile)))
+      (%ensure-entry-open jar-entry)
       ;; Collect all .class files
       (let ((classes nil))
         (maphash (lambda (name entry)

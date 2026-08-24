@@ -39,7 +39,16 @@
 
 (in-package :openldk)
 
+;;; Transpile JVM bytecode into the IR defined in ir.lisp.  Each opcode
+;;; has a DEFINE-BYTECODE-TRANSPILER form (dispatched by opcode keyword)
+;;; that consumes bytes from the method's code array, simulates the JVM
+;;; operand stack held in the <CONTEXT>, and returns a list of IR nodes.
+;;; The IR is later lowered to Lisp by codegen.lisp.
+
 (defmacro define-bytecode-transpiler (name args &body body)
+  "Define transpiler function NAME for one JVM opcode.  BODY reads the
+instruction at (PC CONTEXT) and returns IR nodes; the macro records the
+instruction's byte length in the context's INSN-SIZE array."
   (let ((start-pc (gensym))
         (has-declare (eq (car (car body)) 'declare)))
     `(defun ,name ,args
@@ -54,10 +63,12 @@
   (declare (ignore x)))
 
 (defun pop-args (num-args context)
+  "Pop NUM-ARGS values off the simulated operand stack, TOS first."
   (loop for i below num-args
         collect (pop (stack context))))
 
 (defun %transpile-xastore (context ir-class)
+  "Transpile a *astore opcode into an IR-CLASS array-store node."
   (with-slots (pc) context
     (let ((pc-start pc))
       (incf pc)
@@ -124,6 +135,7 @@
                                                   :address pc-start))))))
 
 (defun %transpile-aload-x (context index)
+  "Transpile aload_INDEX: push a reference from local variable INDEX."
   (with-slots (pc) context
     (let* ((pc-start pc)
            (var (make-stack-variable context pc-start :REFERENCE)))
@@ -195,6 +207,7 @@
                            :rvalue (pop (stack context)))))))
 
 (defun %transpile-astore-x (context index)
+  "Transpile astore_INDEX: store the popped reference in local INDEX."
   (with-slots (pc) context
     (let* ((pc-start pc))
       (incf pc)
@@ -255,6 +268,7 @@
                              :const const))))))
 
 (defun %transpile-xstore (context code jtype)
+  "Transpile a JTYPE-typed *store opcode with an explicit local index."
   (with-slots (pc) context
     (let ((pc-start pc)
           (index (if (next-is-wide-p context)
@@ -286,6 +300,7 @@
   (%transpile-xstore context code :DOUBLE))
 
 (defun %transpile-lstore-x (context index)
+  "Transpile lstore_INDEX: store the popped long in local INDEX."
   (with-slots (pc) context
     (let* ((pc-start pc)
            (var (pop (stack context))))
@@ -316,6 +331,7 @@
   (%transpile-lstore-x context 3))
 
 (defun %transpile-istore-x (context index)
+  "Transpile istore_INDEX: store the popped int in local INDEX."
   (with-slots (pc) context
     (let* ((pc-start pc)
            (var (pop (stack context))))
@@ -346,6 +362,7 @@
   (%transpile-istore-x context 3))
 
 (defun %transpile-dstore-x (context index)
+  "Transpile dstore_INDEX: store the popped double in local INDEX."
   (with-slots (pc) context
     (let* ((pc-start pc)
            (var (pop (stack context))))
@@ -376,6 +393,7 @@
   (%transpile-dstore-x context 3))
 
 (defun %transpile-fstore-x (context index)
+  "Transpile fstore_INDEX: store the popped float in local INDEX."
   (with-slots (pc) context
     (let* ((pc-start pc)
            (var (pop (stack context))))
@@ -579,6 +597,7 @@
                                :objref (car (stack context)))))))))
 
 (defun %transpile-unop (context ir-class op-type)
+  "Transpile a one-operand opcode into an OP-TYPE-typed IR-CLASS node."
   (with-slots (pc) context
     (let* ((pc-start pc)
            (var (make-stack-variable context pc-start op-type))
@@ -970,6 +989,7 @@
         code))))
 
 (defun %transpile-fconst-x (context value)
+  "Transpile fconst_VALUE: push the float constant VALUE."
   (with-slots (pc stack) context
     (let* ((pc-start pc)
            (var (make-stack-variable context pc-start :FLOAT)))
@@ -996,6 +1016,7 @@
   (%transpile-fconst-x context 2.0))
 
 (defun %transpile-dconst-x (context value)
+  "Transpile dconst_VALUE: push the double constant VALUE."
   (with-slots (pc stack) context
     (let* ((pc-start pc)
            (var (make-stack-variable context pc-start :DOUBLE)))
@@ -1510,38 +1531,37 @@
                (call-site-specifier (aref constant-pool index)))
           ;; Skip two reserved bytes
           (incf pc 3)
+          ;; Record the fall-through successor so a block ending in this
+          ;; invokedynamic gets its fall-through edge (and terminating GO).
+          ;; Without this, the last case of a type/enum switch — whose merge
+          ;; block was already emitted via an earlier goto — falls off the
+          ;; tagbody and the method returns NIL.
+          (push pc (aref (next-insn-list context) pc-start))
 
           ;; Lookup the BootstrapMethod
           (let* ((bootstrap-method
                    (nth (bootstrap-method-attr-index call-site-specifier)
                         (gethash "BootstrapMethods" (attributes class))))
-;                 (j1 (format t "DI1: ~A~%" bootstrap-method))
                  (bsm-method-handle
                    (aref constant-pool (method-ref bootstrap-method)))
-;                 (j2 (format t "DI2: ~A~%" bsm-method-handle))
                  (name-and-type
                    (aref constant-pool
                          (slot-value call-site-specifier 'name-and-type-index)))
-;                 (j3 (format t "DI3: ~A~%" (emit name-and-type constant-pool)))
                  (method-name
                    (slot-value (aref constant-pool
                                      (slot-value name-and-type 'name-index))
                                'value))
-;                 (j4 (format t "DI4: method-name=~A~%" method-name))
                  (method-type
                    (let ((mt (|java/lang/invoke/MethodType.fromMethodDescriptorString(Ljava/lang/String;Ljava/lang/ClassLoader;)|
                               (jstring (emit (aref constant-pool (slot-value name-and-type 'type-descriptor-index)) constant-pool))
                               nil)))
                      (make-instance 'ir-object-literal
                                     :value mt)))
-;                 (j6 (format t "DI6: method-type=~A~%" method-type))
                  (descriptor
                    (slot-value (aref constant-pool
                                      (slot-value name-and-type 'type-descriptor-index))
                                'value))
-;                 (j5 (format t "DI5: descriptor=~A~%" descriptor))
                  (parameter-count (count-parameters descriptor))
-;                 (j7 (format t "DI7: parameter-count=~A~%" parameter-count))
                  (return-type (get-return-type descriptor))
                  ;; Extract interface class name from return type (e.g. "Lcom/foo/Bar;" → "com/foo/Bar")
                  (interface-type-name
@@ -1550,8 +1570,6 @@
                        (subseq ret-str 1 (1- (length ret-str))))))
                  (bootstrap-method-name (emit-static-method-reference (aref constant-pool (reference-index bsm-method-handle)) constant-pool))
                  (dynamic-args (reverse (loop repeat parameter-count collect (pop (stack context))))))
-;                 (j6 (format t "DI6: ~A~%" bootstrap-method-name))
-
 
             ;; Emit the dynamic call
             (list
@@ -1568,7 +1586,6 @@
                                                 (mapcar (lambda (arg)
                                                           (emit (aref constant-pool arg) constant-pool))
                                                         (method-args bootstrap-method))))))
-;               (format t "INVOKEDYNAMIC args = ~A~%" (mapcar (lambda (a) (value a)) (args call)))
                (if (eq return-type :VOID)
                    call
                    (let ((var (make-stack-variable context pc-start return-type)))
@@ -1750,7 +1767,7 @@
                       (9 (%get-java-class-by-bin-name "short"))
                       (10 (%get-java-class-by-bin-name "int"))
                       (11 (%get-java-class-by-bin-name "long"))
-                      (t (error "internal error")))))
+                      (t (internal-error "unknown newarray atype ~A" atype)))))
         (incf pc)
         (push pc (aref (next-insn-list context) pc-start))
         (push var (stack context))
@@ -1794,7 +1811,8 @@
                                              :rvalue (make-instance 'ir-member
                                                                     :address pc-start
                                                                     :objref (pop (stack context))
-                                                                    :member-name fieldname)))))
+                                                                    :member-name fieldname
+                                                                    :ref-class fieldclass)))))
               (push var (stack context))
               code)))))))
 
@@ -1804,7 +1822,7 @@
       (with-slots (constant-pool) class
         (let* ((index (+ (* (aref code (incf pc)) 256)
                          (aref code (incf pc)))))
-          (multiple-value-bind (fieldname)
+          (multiple-value-bind (fieldname fieldclass)
               (emit (aref constant-pool index) constant-pool)
             (incf pc)
             (push pc (aref (next-insn-list context) pc-start))
@@ -1814,7 +1832,8 @@
                                  :lvalue (make-instance 'ir-member
                                                         :address pc-start
                                                         :objref (pop (stack context))
-                                                        :member-name fieldname)))))))))
+                                                        :member-name fieldname
+                                                        :ref-class fieldclass)))))))))
 
 (define-bytecode-transpiler :PUTSTATIC (context code)
   (with-slots (pc class is-clinit-p) context
@@ -1908,7 +1927,6 @@
               (push (+ pc-start default-offset) (aref (next-insn-list context) pc-start))
               ;; FIXME: why is this required??????????
               (incf pc)
-              ; (format t "~&TABLESWITCH TARGETS = ~A~%" (aref (next-insn-list context) pc-start))
 
               ;; Record stack state for each jump destination
               (dolist (offset (cons (+ pc-start default-offset) jump-offsets))

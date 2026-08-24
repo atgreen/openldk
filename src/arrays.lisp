@@ -61,6 +61,28 @@
        :component-class component-class
        :data (make-array size :initial-element initial-element))))
 
+(defun %array-component-class (array)
+  "Return ARRAY's component class as a |java/lang/Class| object, healing
+legacy values in place: bootstrap byte-array placeholders (created before
+the byte class was registered), internal <CLASS> metaobjects, and
+descriptor strings."
+  (let ((cc (java-array-component-class array)))
+    (if (typep cc '|java/lang/Class|)
+        cc
+        (let ((healed (cond
+                        ((member cc '(:early-placeholder :early-byte-placeholder))
+                         (%get-java-class-by-bin-name "byte" t))
+                        ((typep cc '<class>)
+                         (java-class cc))
+                        ((stringp cc)
+                         (%bin-type-name-to-class cc))
+                        (t nil))))
+          (cond
+            (healed
+             (setf (java-array-component-class array) healed)
+             healed)
+            (t cc))))))
+
 (defun jaref (array index)
   "Java-style array access for ARRAY at INDEX."
   (when (null array)

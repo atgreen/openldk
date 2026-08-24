@@ -39,10 +39,8 @@
 
 (in-package :openldk)
 
-;; Methods registered here will not have their native Lisp implementations
-;; overwritten by bytecode compilation.  Key is the method key string
-;; (e.g. "java/lang/System.console()Ljava/io/Console;").
-(defvar *native-overrides* (make-hash-table :test #'equal))
+;; *native-overrides* is defined in global-state.lisp so earlier-loaded
+;; files (e.g. jrt.lisp) can register overrides too.
 
 ;; OpenLDK supplies JDK native entry points as Lisp methods.  Loading the
 ;; corresponding HotSpot JNI libraries (awt, javajpeg, zip, and friends) into
@@ -97,7 +95,7 @@ defmethod before the JIT would upgrade them), which is why the name check matter
     ((null (car args))
      (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|))))
     (t
-     (error "internal error: no applicable method for invocation of ~A with arguments ~S" gf args))))
+     (internal-error "no applicable method for invocation of ~A with arguments ~S" gf args))))
 
 (defun |java/lang/Object.registerNatives()| ()
   ())
@@ -206,24 +204,32 @@ Accepts native CL integers and Java numeric wrapper instances."
   (slot-value |+static-java/lang/Boolean+|
               (if truthy '|TRUE| '|FALSE|)))
 
-(defun %caller-class-name-from-stack-frame (caller-list)
-  (let ((caller-string (format nil "~A" caller-list)))
-    (let ((dot-position (position #\. caller-string)))
-      (cond
-        ((starts-with? "(%clinit-" caller-string)
-         (subseq caller-string 9 (1- (length caller-string))))
-        ((starts-with? "((METHOD" caller-string)
-         (format nil "~A" (type-of (cadr caller-list))))
-        ((starts-with? "((LAMBDA " caller-string)
-         (substitute #\/ #\. (format nil "~A" (type-of (cadr caller-list)))))
-        ((starts-with? "((LABELS CLINIT IN %CLINIT" caller-string)
-         (name (cadr caller-list)))
-        ((starts-with? "(%CLINIT " caller-string)
-         (name (cadr caller-list)))
-        (dot-position
-         (subseq caller-string 1 dot-position))
-        ;; FIXME: maybe use an OpenLDK internal class to indicate internal frame
-        (t "java/lang/System")))))
+(defun %caller-class-name-from-stack-frame (frame)
+  "Java class name for a backtrace FRAME, examining only the frame head
+and, for CLOS method frames, the receiver's type -- never printing frame
+arguments (that pretty-prints arbitrarily large Java object graphs)."
+  (let* ((head (%frame-head frame))
+         (kind (%frame-head-kind head)))
+    (case kind
+      (:method (format nil "~A" (type-of (cadr frame))))
+      (:lambda (substitute #\/ #\. (format nil "~A" (type-of (cadr frame)))))
+      (:labels-clinit
+       (if (typep (cadr frame) '<class>)
+           (name (cadr frame))
+           "java/lang/System"))
+      (:symbol
+       (let ((n (symbol-name head)))
+         (cond
+           ((and (> (length n) 8) (string-equal n "%clinit-" :end1 8))
+            (subseq n 8))
+           ((and (string-equal n "%clinit")
+                 (typep (cadr frame) '<class>))
+            (name (cadr frame)))
+           ((find #\. n)
+            (subseq n 0 (position #\. n)))
+           ;; FIXME: maybe use an OpenLDK internal class to indicate internal frame
+           (t "java/lang/System"))))
+      (t "java/lang/System"))))
 
 (defmethod |getStackTraceElement(I)| ((this |java/lang/Throwable|) index)
   (let ((ste (%make-java-instance "java/lang/StackTraceElement"))
@@ -271,58 +277,89 @@ Accepts native CL integers and Java numeric wrapper instances."
           do (setf last item))
     (nreverse result)))
 
-(defun %remove-elements-with-substrings (element-list substring-list)
-  "Remove elements from ELEMENT-LIST whose string representation contains
-any substring in SUBSTRING-LIST."
-  (remove-if
-   (lambda (elem)
-     (let ((str-representation (format nil "~A" elem)))
-       (some (lambda (substr)
-               (search substr str-representation))
-             substring-list)))
-   element-list))
+;;; Backtrace frames are examined constantly (every Throwable construction,
+;;; every Reflection.getCallerClass) -- javac alone makes thousands of such
+;;; calls per compilation.  All predicates below therefore work structurally
+;;; on the frame HEAD (a symbol or a small name list) and never print frame
+;;; ARGUMENTS: (format nil "~A" frame) pretty-prints arbitrarily large Java
+;;; object graphs and once dominated the entire javac runtime profile.
 
-(defun %remove-invoke-frames (frames)
-  "Remove any frames associated with java.lang.reflect.Method.invoke()
-and its implementation."
-  (%remove-elements-with-substrings
-   frames
-   '("sun/reflect/NativeMethodAccessorImpl.invoke0"
-     "jdk/internal/reflect/DirectMethodHandleAccessor$NativeAccessor.invoke0"
-     "%RESOLVE-INVOKEDYNAMIC"
-     "METHOD invoke"
-     "#<java/lang/reflect/Method "
-     "#<sun/reflect/NativeMethodAccessorImpl "
-     "INVOKE-SPECIAL")))
+(defun %frame-head (frame)
+  (if (consp frame) (car frame) frame))
 
+(defun %frame-head-kind (head)
+  "Classify a backtrace frame head: :METHOD, :LAMBDA, :LABELS-CLINIT,
+:SYMBOL, or NIL."
+  (cond
+    ((symbolp head) :symbol)
+    ((and (consp head) (symbolp (car head)))
+     (let ((n (symbol-name (car head))))
+       (cond ((string= n "METHOD") :method)
+             ((string= n "FAST-METHOD") :method)
+             ((string= n "LAMBDA") :lambda)
+             ((string= n "LABELS")
+              (let ((l (cadr head)))
+                (if (and (symbolp l) (string-equal (symbol-name l) "CLINIT"))
+                    :labels-clinit
+                    :lambda)))
+             (t nil))))
+    (t nil)))
 
-(defun %is-internal-frame-p (caller-string)
-  "Return T if the frame is an internal OpenLDK frame that should be skipped."
-  (let ((lower-string (string-downcase caller-string)))
-    (or (search "%clinit-" lower-string)
-        (search "(labels clinit in %clinit" lower-string)
-        (search "(%clinit " lower-string)
-        (search "sun/reflect/reflection.getcallerclass" lower-string))))
+(defun %invoke-frame-p (frame)
+  "True for frames belonging to reflective-invoke plumbing that Java stack
+traces should not show."
+  (let* ((head (%frame-head frame))
+         (kind (%frame-head-kind head)))
+    (case kind
+      (:symbol
+       (let ((n (symbol-name head)))
+         (or (search "invoke0" n)
+             (search "%RESOLVE-INVOKEDYNAMIC" n)
+             (string= n "INVOKE-SPECIAL"))))
+      (:method
+       (let ((m (cadr head)))
+         (and (symbolp m)
+              (let ((n (symbol-name m)))
+                (and (>= (length n) 6) (string= n "invoke" :end1 6))))))
+      (t
+       ;; Frames whose arguments carry reflective machinery objects.
+       (and (consp frame)
+            (some (lambda (a)
+                    (or (typep a '|java/lang/reflect/Method|)
+                        (and (find-class '|sun/reflect/NativeMethodAccessorImpl| nil)
+                             (typep a '|sun/reflect/NativeMethodAccessorImpl|))))
+                  (rest frame)))))))
+
+(defun %internal-frame-p (frame)
+  "True for internal OpenLDK frames that should be skipped when looking
+for the Java caller."
+  (let* ((head (%frame-head frame))
+         (kind (%frame-head-kind head)))
+    (case kind
+      (:symbol
+       (let ((n (symbol-name head)))
+         (or (and (>= (length n) 8) (string-equal n "%clinit-" :end1 8))
+             (search "Reflection.getCallerClass" n))))
+      (:labels-clinit t)
+      (t nil))))
+
+(defun %filtered-backtrace ()
+  (remove-if #'%invoke-frame-p
+             (%remove-adjacent-repeats (sb-debug:list-backtrace))))
 
 (defun |sun/reflect/Reflection.getCallerClass(I)| (index)
-  ;; FIXME: we don't need the whole backtrace
-  (let* ((backtrace (%remove-invoke-frames (%remove-adjacent-repeats (sb-debug:list-backtrace)))))
-    (assert (stringp (%caller-class-name-from-stack-frame (nth index backtrace))))
-    (%get-java-class-by-bin-name (%caller-class-name-from-stack-frame (nth index backtrace)))))
+  (let ((backtrace (%filtered-backtrace)))
+    (%get-java-class-by-bin-name
+     (%caller-class-name-from-stack-frame (nth index backtrace)))))
 
 (defun |sun/reflect/Reflection.getCallerClass()| ()
   ;; Skip internal frames to find the actual caller
   ;; The caller is the first non-internal Java method frame after:
   ;; - getCallerClass() itself (frame 0)
   ;; - The method that called getCallerClass (e.g., registerAsParallelCapable) (frame 1)
-  ;; So we start at frame 2
-  (let* ((backtrace (%remove-invoke-frames (%remove-adjacent-repeats (sb-debug:list-backtrace))))
-         (skip-count 2)) ; Skip getCallerClass() and its immediate caller
-    ;; Find the first non-internal frame after the skip count
-    (loop for i from skip-count below (length backtrace)
-          for frame = (nth i backtrace)
-          for caller-string = (format nil "~A" frame)
-          unless (%is-internal-frame-p caller-string)
+  (let ((backtrace (nthcdr 2 (%filtered-backtrace))))
+    (loop for frame in backtrace
+          unless (%internal-frame-p frame)
             do (let ((class-name (%caller-class-name-from-stack-frame frame)))
                  (when (and (stringp class-name)
                             (not (find #\. class-name))
@@ -396,7 +433,7 @@ and its implementation."
                     ((characterp object)
                      (%get-java-class-by-bin-name "java/lang/Character"))
                     ((typep object 'java-array)
-                     (let* ((comp-class (java-array-component-class object))
+                     (let* ((comp-class (%array-component-class object))
                             (comp-name (lstring (slot-value comp-class '|name|)))
                             (array-name
                               (cond
@@ -424,6 +461,22 @@ and its implementation."
            c))
     (when *debug-trace*
       (incf *call-nesting-level* -1))))
+
+;; Class.forName(Module, String) is Java code delegating into the built-in
+;; class-loader/module machinery (BootLoader.loadClass etc.), which OpenLDK
+;; fakes -- it silently returns null there, breaking ResourceBundle's
+;; bundle-class lookup (javac's messages, among others).  Resolve through
+;; OpenLDK's own class loading instead.  Per spec: returns null when not
+;; found and does NOT initialize the class.
+(setf (gethash "java/lang/Class.forName(Ljava/lang/Module;Ljava/lang/String;)Ljava/lang/Class;"
+               *native-overrides*)
+      (lambda (module name)
+        (declare (ignore module))
+        (handler-case
+            (let ((lclass (classload (substitute #\/ #\. (lstring name)))))
+              (when lclass
+                (java-class lclass)))
+          (condition () nil))))
 
 (defmethod |java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (name initialize loader caller)
   (unwind-protect
@@ -562,6 +615,66 @@ and its implementation."
 (defmethod |java/lang/Float.intBitsToFloat(I)| (int-bits)
   (float-features:bits-single-float (ldb (byte 32 0) int-bits)))
 
+;;; jdk.internal.util.ByteArray / ByteArrayLittleEndian read and write
+;;; primitives out of byte arrays through VarHandle byte-array views, whose
+;;; polymorphic get/set invocations OpenLDK does not implement.  Override
+;;; the (bytecode) accessors themselves instead -- they are the JDK's
+;;; standard byte-order plumbing (DataInputStream, ObjectStreams, UUID...).
+
+(defun %byte-array-load (array index nbytes big-endian-p)
+  "Read NBYTES from Java byte ARRAY at INDEX as an unsigned integer."
+  (let ((data (java-array-data array))
+        (result 0))
+    (dotimes (i nbytes result)
+      (let ((b (logand (aref data (+ index (if big-endian-p i (- nbytes 1 i)))) #xff)))
+        (setf result (logior (ash result 8) b))))))
+
+(defun %byte-array-store (array index nbytes big-endian-p value)
+  "Write the low NBYTES of VALUE into Java byte ARRAY at INDEX."
+  (let ((data (java-array-data array))
+        (v (ldb (byte (* 8 nbytes) 0) value)))
+    (dotimes (i nbytes)
+      (let* ((shift (* 8 (if big-endian-p (- nbytes 1 i) i)))
+             (b (ldb (byte 8 shift) v)))
+        (setf (aref data (+ index i)) (if (> b 127) (- b 256) b))))))
+
+(defun %signed-of-width (v bits)
+  (if (logbitp (1- bits) v) (- v (ash 1 bits)) v))
+
+(dolist (spec '(("jdk/internal/util/ByteArray" . t)
+                ("jdk/internal/util/ByteArrayLittleEndian" . nil)))
+  (destructuring-bind (class . be) spec
+    (flet ((reg (sig fn)
+             (setf (gethash (format nil "~A.~A" class sig) *native-overrides*) fn)))
+      (reg "getBoolean([BI)Z" (lambda (a i) (if (zerop (%byte-array-load a i 1 be)) 0 1)))
+      (reg "getChar([BI)C" (lambda (a i) (code-char (%byte-array-load a i 2 be))))
+      (reg "getShort([BI)S" (lambda (a i) (%signed-of-width (%byte-array-load a i 2 be) 16)))
+      (reg "getUnsignedShort([BI)I" (lambda (a i) (%byte-array-load a i 2 be)))
+      (reg "getInt([BI)I" (lambda (a i) (%signed-of-width (%byte-array-load a i 4 be) 32)))
+      (reg "getLong([BI)J" (lambda (a i) (%signed-of-width (%byte-array-load a i 8 be) 64)))
+      (reg "getFloat([BI)F" (lambda (a i) (float-features:bits-single-float (%byte-array-load a i 4 be))))
+      (reg "getFloatRaw([BI)F" (lambda (a i) (float-features:bits-single-float (%byte-array-load a i 4 be))))
+      (reg "getDouble([BI)D" (lambda (a i) (float-features:bits-double-float (%byte-array-load a i 8 be))))
+      (reg "getDoubleRaw([BI)D" (lambda (a i) (float-features:bits-double-float (%byte-array-load a i 8 be))))
+      (reg "setBoolean([BIZ)V" (lambda (a i v) (%byte-array-store a i 1 be (if (or (eql v 0) (null v)) 0 1)) nil))
+      (reg "setChar([BIC)V" (lambda (a i v) (%byte-array-store a i 2 be (if (characterp v) (char-code v) v)) nil))
+      (reg "setShort([BIS)V" (lambda (a i v) (%byte-array-store a i 2 be v) nil))
+      (reg "setUnsignedShort([BII)V" (lambda (a i v) (%byte-array-store a i 2 be v) nil))
+      (reg "setInt([BII)V" (lambda (a i v) (%byte-array-store a i 4 be v) nil))
+      (reg "setLong([BIJ)V" (lambda (a i v) (%byte-array-store a i 8 be v) nil))
+      (reg "setFloat([BIF)V" (lambda (a i v)
+                               (%byte-array-store a i 4 be (float-features:single-float-bits (coerce v 'single-float)))
+                               nil))
+      (reg "setFloatRaw([BIF)V" (lambda (a i v)
+                                  (%byte-array-store a i 4 be (float-features:single-float-bits (coerce v 'single-float)))
+                                  nil))
+      (reg "setDouble([BID)V" (lambda (a i v)
+                                (%byte-array-store a i 8 be (float-features:double-float-bits (coerce v 'double-float)))
+                                nil))
+      (reg "setDoubleRaw([BID)V" (lambda (a i v)
+                                   (%byte-array-store a i 8 be (float-features:double-float-bits (coerce v 'double-float)))
+                                   nil)))))
+
 (defmethod |java/util/TimeZone.getSystemTimeZoneID(Ljava/lang/String;)| (arg)
   (jstring (local-time:format-timestring nil (local-time:now) :format '(:timezone))))
 
@@ -593,8 +706,7 @@ and its implementation."
 (defun |java/lang/Class$Atomic.objectFieldOffset([Ljava/lang/reflect/Field;Ljava/lang/String;)| (field name)
   (declare (ignore field)
            (ignore name))
-  ;; FIXME
-  (error "ofo"))
+  (unimplemented "java/lang/Class$Atomic.objectFieldOffset"))
 
 (defmethod |staticFieldBase(Ljava/lang/reflect/Field;)| ((unsafe |sun/misc/Unsafe|) field)
   (declare (ignore unsafe)
@@ -637,7 +749,7 @@ and its implementation."
     (format out "~A" (slot-value class '|name|))))
 
 (defmethod |java/lang/Thread.registerNatives()| ()
-  ;; FIXME: What does this do??
+  ;; JNI binding registration -- a no-op here, like the other registerNatives.
   nil)
 
 ;;; The current |java/lang/Thread| object.
@@ -646,7 +758,7 @@ and its implementation."
 (defmethod |add(Ljava/lang/Thread;)| (thread-group thread)
   (declare (ignore thread-group))
   (declare (ignore thread))
-  (error "internal error"))
+  (unimplemented "ThreadGroup.add(Thread)"))
 
 (defmethod |java/lang/Thread.currentThread()| ()
   "Return the Java Thread object for the current Lisp thread (or fiber)."
@@ -696,20 +808,16 @@ and its implementation."
           thread))))
 
 (defmethod |setPriority0(I)| ((thread |java/lang/Thread|) priority)
-  ;; FIXME
   (declare (ignore thread priority))
   nil)
 
 (defmethod |isAlive()| ((thread |java/lang/Thread|))
-  ;; FIXME
   0)
 
 (defmethod |isInterrupted(Z)| ((thread |java/lang/Thread|) x)
-  ;; FIXME
   0)
 
 (defmethod |start0()| ((thread |java/lang/Thread|))
-  ;; FIXME
   (declare (ignore thread))
   nil)
 
@@ -943,7 +1051,6 @@ and its implementation."
     (submit-virtual-thread-fiber fiber)))
 
 (defun |sun/misc/Unsafe.registerNatives()| ()
-  ;; FIXME
   nil)
 
 (defun |jdk/internal/misc/Unsafe.registerNatives()| ()
@@ -1010,7 +1117,7 @@ and its implementation."
               (let ((bais (%make-java-instance "java/io/ByteArrayInputStream")))
                 (|<init>([B)| bais
                  (make-java-array
-                  :component-class (%get-ldk-class-by-fq-name "byte")
+                  :component-class (%get-java-class-by-bin-name "byte")
                   :initial-contents (coerce bytes 'vector)))
                 bais))))))
 
@@ -1049,7 +1156,7 @@ and its implementation."
 
 (defun %unsafe-array-component-name (array)
   "Return ARRAY's component class name as a Lisp string."
-  (lstring (slot-value (java-array-component-class array) '|name|)))
+  (lstring (slot-value (%array-component-class array) '|name|)))
 
 (defun %unsafe-array-value-bits (array index)
   "Return ARRAY element INDEX as its unsigned in-memory bit pattern."
@@ -1107,6 +1214,38 @@ and its implementation."
       (error "Unaligned Unsafe array offset ~D" byte-offset))
     index))
 
+;;; Unsafe.getXUnaligned(Object, long) reads multi-byte values out of byte
+;;; arrays at arbitrary byte offsets (CodePointTrie, ICU, vectorized string
+;;; ops).  The Java implementations decompose into VarHandle/getByte tricks
+;;; our Unsafe emulation can't serve, so override them wholesale.  Results
+;;; are native (little-endian) order, as the JDK's 3-arg big-endian variants
+;;; expect; char results are returned as integers (bit-manipulation code
+;;; consumes them arithmetically).
+
+(defun %unsafe-get-unaligned (obj offset nbytes signedp)
+  (if (typep obj 'java-array)
+      (let ((data (java-array-data obj))
+            (v 0))
+        (dotimes (i nbytes)
+          (setf v (logior v (ash (logand (aref data (+ offset i)) #xff) (* 8 i)))))
+        (if signedp
+            (%signed-of-width v (* 8 nbytes))
+            v))
+      (let ((v (%unsafe-read-native-bits offset nbytes)))
+        (if signedp
+            (%signed-of-width v (* 8 nbytes))
+            v))))
+
+(dolist (spec '(("getCharUnaligned(Ljava/lang/Object;J)C" 2 nil)
+                ("getShortUnaligned(Ljava/lang/Object;J)S" 2 t)
+                ("getIntUnaligned(Ljava/lang/Object;J)I" 4 t)
+                ("getLongUnaligned(Ljava/lang/Object;J)J" 8 t)))
+  (destructuring-bind (sig nbytes signedp) spec
+    (setf (gethash (format nil "jdk/internal/misc/Unsafe.~A" sig) *native-overrides*)
+          (lambda (unsafe obj offset)
+            (declare (ignore unsafe))
+            (%unsafe-get-unaligned obj offset nbytes signedp)))))
+
 ;;; Common storage model for jdk.internal.misc.Unsafe.  Older native support
 ;;; below grew around sun.misc.Unsafe, but Java 9+ NIO and atomics call the
 ;;; internal Unsafe class directly.  Keep one implementation for fields,
@@ -1114,21 +1253,34 @@ and its implementation."
 
 (defvar *unsafe-reference-memory-table* (make-hash-table))
 
+(defun %unsafe-slot-key (offset)
+  "Return the CLOS slot symbol for the field registered at Unsafe OFFSET,
+or NIL if no field is registered there."
+  (let ((field (gethash offset *field-offset-table*)))
+    (when field
+      (intern (mangle-field-name (lstring (slot-value field '|name|)))
+              :openldk))))
+
+(defun %unsafe-static-storage (field &key (errorp t))
+  "Return the static storage object (+static-CLASSNAME+) for FIELD's
+declaring class.  With ERRORP NIL, return NIL instead of signalling when
+the storage object does not (yet) exist."
+  (let* ((clazz (slot-value field '|clazz|))
+         (bin-name (substitute #\/ #\. (lstring (slot-value clazz '|name|))))
+         (pkg (class-package bin-name))
+         (name (format nil "+static-~A+" bin-name)))
+    (if errorp
+        (symbol-value (intern name pkg))
+        (let ((sym (find-symbol name pkg)))
+          (when (and sym (boundp sym))
+            (symbol-value sym))))))
+
 (defun %unsafe-field-owner-and-key (object offset)
   (let ((field (gethash offset *field-offset-table*)))
     (when field
-      (let* ((key (intern (mangle-field-name
-                           (lstring (slot-value field '|name|)))
-                          :openldk))
-             (owner
-               (or object
-                   (let* ((clazz (slot-value field '|clazz|))
-                          (name (lstring (slot-value clazz '|name|)))
-                          (bin-name (substitute #\/ #\. name))
-                          (pkg (class-package bin-name)))
-                     (eval (intern (format nil "+static-~A+" bin-name)
-                                   pkg))))))
-        (values owner key t)))))
+      (values (or object (%unsafe-static-storage field))
+              (%unsafe-slot-key offset)
+              t))))
 
 (defun %unsafe-read-native-bits (address byte-count)
   (let ((sap (sb-sys:int-sap address)))
@@ -1608,8 +1760,7 @@ and its implementation."
 ;;; the latter directly).
 (defun %cas-byte-field (obj offset expected new-val)
   "CAS a byte/boolean field using CLOS slots instead of raw memory."
-  (let* ((field (gethash offset *field-offset-table*))
-         (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk))
+  (let* ((key (%unsafe-slot-key offset))
          (current (slot-value obj key)))
     (if (eql current expected)
         (progn (setf (slot-value obj key) new-val) 1)
@@ -1617,8 +1768,7 @@ and its implementation."
 
 (defun %cae-byte-field (obj offset expected new-val)
   "Compare-and-exchange a byte/boolean field using CLOS slots."
-  (let* ((field (gethash offset *field-offset-table*))
-         (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk))
+  (let* ((key (%unsafe-slot-key offset))
          (current (slot-value obj key)))
     (when (eql current expected)
       (setf (slot-value obj key) new-val))
@@ -1734,15 +1884,12 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
   (%unsafe-array-index-scale array))
 
 (defmethod |addressSize()| ((unsafe |sun/misc/Unsafe|))
-  ;; FIXME
   997)
 
 (defmethod |availableProcessors()| ((runtime |java/lang/Runtime|))
-  ;; FIXME
   1)
 
 (defmethod |isArray()| ((class |java/lang/Class|))
-  ;; FIXME
   (let ((name-string (lstring (slot-value class '|name|))))
     (if (eq #\[ (char name-string 0))
         1
@@ -2221,7 +2368,6 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
       (incf *call-nesting-level* -1))))
 
 (defun |sun/misc/VM.initialize()| ()
-  ;; FIXME
   nil)
 
 (defun |jdk/internal/misc/VM.initialize()| ()
@@ -2259,6 +2405,29 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
 (defun |java/lang/ref/Reference.getAndClearReferencePendingList()| () nil)
 (defun |java/lang/ref/Reference.hasReferencePendingList()| () 0)
 
+;;; OpenLDK runs no reference-processing threads (SBCL's GC handles memory),
+;;; so Reference's clinit never registers a JavaLangRefAccess.  initPhase1
+;;; calls SharedSecrets.getJavaLangRefAccess().startThreads() and Bits
+;;; calls .waitForReferenceProcessing(), so hand out a no-op stub instead
+;;; of the null that made initPhase1 NPE and abort mid-way.
+
+(defclass %java-lang-ref-access-stub (|java/lang/Object|) ())
+
+(defvar *java-lang-ref-access-stub* (make-instance '%java-lang-ref-access-stub))
+
+(defmethod |startThreads()| ((this %java-lang-ref-access-stub))
+  nil)
+
+(defmethod |runFinalization()| ((this %java-lang-ref-access-stub))
+  nil)
+
+(defmethod |waitForReferenceProcessing()| ((this %java-lang-ref-access-stub))
+  0)
+
+(setf (gethash "jdk/internal/access/SharedSecrets.getJavaLangRefAccess()Ljdk/internal/access/JavaLangRefAccess;"
+               *native-overrides*)
+      (lambda () *java-lang-ref-access-stub*))
+
 (defmethod |clear0()| ((this |java/lang/ref/Reference|))
   "Native clear0: set the referent to null."
   (when (slot-exists-p this '|referent|)
@@ -2273,7 +2442,6 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
   (declare (ignore obj)) nil)
 
 (defmethod |compareAndSwapObject(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)| ((unsafe |sun/misc/Unsafe|) obj field-id expected-value new-value)
-  ;; FIXME
   (cond
     ((typep obj 'java-array)
      (let ((index (%unsafe-array-index obj field-id)))
@@ -2294,8 +2462,7 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
            1)
          0))
     (t
-    (let* ((field (gethash field-id *field-offset-table*))
-            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
+     (let ((key (%unsafe-slot-key field-id)))
        (if (equal (slot-value obj key) expected-value)
            (progn
              (setf (slot-value obj key) new-value)
@@ -2318,10 +2485,7 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
             (|putInt(Ljava/lang/Object;JI)| unsafe obj field-id new-value)
             1)
           0)
-      (let* ((field (gethash field-id *field-offset-table*))
-             (key (intern (mangle-field-name
-                           (lstring (slot-value field '|name|)))
-                          :openldk)))
+      (let ((key (%unsafe-slot-key field-id)))
         (if (equal (slot-value obj key) expected-value)
             (progn
               (setf (slot-value obj key) new-value)
@@ -2347,44 +2511,29 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
            unsafe obj field-id expected-value new-value))))
 
 (defmethod |getObjectVolatile(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) obj l)
-  ;; FIXME
   (cond
     ((typep obj 'java-array)
      (jaref obj (%unsafe-array-index obj l)))
     ((typep obj '|java/lang/Object|)
-    (let* ((field (gethash l *field-offset-table*))
-            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
-       (slot-value obj key)))
+     (slot-value obj (%unsafe-slot-key l)))
     ((null obj)
      ;; FIXME: check that the field is STATIC
-    (let* ((field (gethash l *field-offset-table*))
-            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
-       (let* ((clazz (slot-value field '|clazz|))
-              (lname (lstring (slot-value clazz '|name|)))
-              (bin-name (substitute #\/ #\. lname))
-              (pkg (class-package bin-name)))
-         (let ((v (slot-value (eval (intern (format nil "+static-~A+" bin-name) pkg)) key)))
-           v))))
-    (t (error "internal error: unrecognized object type in getObjectVolatile: ~A" obj))))
+     (slot-value (%unsafe-static-storage (gethash l *field-offset-table*))
+                 (%unsafe-slot-key l)))
+    (t (internal-error "unrecognized object type in getObjectVolatile: ~A" obj))))
 
 (defmethod |putObjectVolatile(Ljava/lang/Object;JLjava/lang/Object;)| ((unsafe |sun/misc/Unsafe|) obj l value)
   (cond
     ((typep obj 'java-array)
      (setf (jaref obj (%unsafe-array-index obj l)) value))
     ((typep obj '|java/lang/Object|)
-     (let* ((field (gethash l *field-offset-table*))
-            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
-       (setf (slot-value obj key) value)))
+     (setf (slot-value obj (%unsafe-slot-key l)) value))
     ((null obj)
      ;; Static field access
-     (let* ((field (gethash l *field-offset-table*))
-            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk))
-            (clazz (slot-value field '|clazz|))
-            (lname (lstring (slot-value clazz '|name|)))
-            (bin-name (substitute #\/ #\. lname))
-            (pkg (class-package bin-name)))
-       (setf (slot-value (eval (intern (format nil "+static-~A+" bin-name) pkg)) key) value)))
-    (t (error "internal error: unrecognized object type in putObjectVolatile: ~A" obj))))
+     (setf (slot-value (%unsafe-static-storage (gethash l *field-offset-table*))
+                       (%unsafe-slot-key l))
+           value))
+    (t (internal-error "unrecognized object type in putObjectVolatile: ~A" obj))))
 
 ;; getObject - same as getObjectVolatile for OpenLDK (no volatile semantics needed in Lisp)
 (defmethod |getObject(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) obj l)
@@ -2392,59 +2541,39 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
     ((typep obj 'java-array)
      (jaref obj (%unsafe-array-index obj l)))
     ((typep obj '|java/lang/Object|)
-    (let* ((field (gethash l *field-offset-table*))
-            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
-       (slot-value obj key)))
+     (slot-value obj (%unsafe-slot-key l)))
     ((null obj)
      ;; FIXME: check that the field is STATIC
-    (let* ((field (gethash l *field-offset-table*)))
-       (if (null field)
-           nil
-           (let* ((key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk))
-                  (clazz (slot-value field '|clazz|))
-                  (lname (lstring (slot-value clazz '|name|)))
-                  (bin-name (substitute #\/ #\. lname))
-                  (pkg (class-package bin-name))
-                  (static-sym (find-symbol (format nil "+static-~A+" bin-name) pkg)))
-             (if (and static-sym (boundp static-sym))
-                 (let ((static-obj (symbol-value static-sym)))
-                   (if (slot-boundp static-obj key)
-                       (slot-value static-obj key)
-                       nil))
-                 nil)))))
-    (t (error "internal error: unrecognized object type in getObject: ~A" obj))))
+     (let ((field (gethash l *field-offset-table*)))
+       (when field
+         (let ((static-obj (%unsafe-static-storage field :errorp nil))
+               (key (%unsafe-slot-key l)))
+           (when (and static-obj (slot-boundp static-obj key))
+             (slot-value static-obj key))))))
+    (t (internal-error "unrecognized object type in getObject: ~A" obj))))
 
 (defmethod |getLongVolatile(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) obj l)
   (cond
     ((typep obj 'java-array)
      (jaref obj (%unsafe-array-index obj l)))
     ((typep obj '|java/lang/Object|)
-    (let* ((field (gethash l *field-offset-table*))
-            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
-       (slot-value obj key)))
-    (t (error "internal error: unrecognized object type in getLongVolatile: ~A" obj))))
+     (slot-value obj (%unsafe-slot-key l)))
+    (t (internal-error "unrecognized object type in getLongVolatile: ~A" obj))))
 
 (defmethod |putObject(Ljava/lang/Object;JLjava/lang/Object;)| ((unsafe |sun/misc/Unsafe|) obj l value)
   (cond
     ((typep obj 'java-array)
      (setf (jaref obj (%unsafe-array-index obj l)) value))
     ((typep obj '|java/lang/Object|)
-     (let* ((field (gethash l *field-offset-table*))
-            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
-       (setf (slot-value obj key) value)))
+     (setf (slot-value obj (%unsafe-slot-key l)) value))
     ((null obj)
      ;; Static field access
-     (let* ((field (gethash l *field-offset-table*))
-            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk))
-            (clazz (slot-value field '|clazz|))
-            (lname (lstring (slot-value clazz '|name|)))
-            (bin-name (substitute #\/ #\. lname))
-            (pkg (class-package bin-name)))
-       (setf (slot-value (eval (intern (format nil "+static-~A+" bin-name) pkg)) key) value)))
-    (t (error "internal error: unrecognized object type in putObject: ~A" obj))))
+     (setf (slot-value (%unsafe-static-storage (gethash l *field-offset-table*))
+                       (%unsafe-slot-key l))
+           value))
+    (t (internal-error "unrecognized object type in putObject: ~A" obj))))
 
 (defmethod |putOrderedObject(Ljava/lang/Object;JLjava/lang/Object;)| ((unsafe |sun/misc/Unsafe|) obj l value)
-  ;; FIXME
   (|putObject(Ljava/lang/Object;JLjava/lang/Object;)| unsafe obj l value))
 
 ;;; JDK 9+ renamed native methods -- contain actual implementations to avoid
@@ -2454,22 +2583,14 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
   (cond
     ((typep obj 'java-array) (jaref obj (%unsafe-array-index obj l)))
     ((typep obj '|java/lang/Object|)
-     (let* ((field (gethash l *field-offset-table*))
-            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
-       (slot-value obj key)))
+     (slot-value obj (%unsafe-slot-key l)))
     ((null obj)
-     (let* ((field (gethash l *field-offset-table*)))
+     (let ((field (gethash l *field-offset-table*)))
        (when field
-         (let* ((key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk))
-                (clazz (slot-value field '|clazz|))
-                (lname (lstring (slot-value clazz '|name|)))
-                (bin-name (substitute #\/ #\. lname))
-                (pkg (class-package bin-name))
-                (static-sym (find-symbol (format nil "+static-~A+" bin-name) pkg)))
-           (when (and static-sym (boundp static-sym))
-             (let ((static-obj (symbol-value static-sym)))
-               (when (slot-boundp static-obj key)
-                 (slot-value static-obj key))))))))
+         (let ((static-obj (%unsafe-static-storage field :errorp nil))
+               (key (%unsafe-slot-key l)))
+           (when (and static-obj (slot-boundp static-obj key))
+             (slot-value static-obj key))))))
     (t nil)))
 
 (defmethod |putReference(Ljava/lang/Object;JLjava/lang/Object;)| ((unsafe |sun/misc/Unsafe|) obj l value)
@@ -2477,17 +2598,11 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
     ((typep obj 'java-array)
      (setf (jaref obj (%unsafe-array-index obj l)) value))
     ((typep obj '|java/lang/Object|)
-     (let* ((field (gethash l *field-offset-table*))
-            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
-       (setf (slot-value obj key) value)))
+     (setf (slot-value obj (%unsafe-slot-key l)) value))
     ((null obj)
-     (let* ((field (gethash l *field-offset-table*))
-            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk))
-            (clazz (slot-value field '|clazz|))
-            (lname (lstring (slot-value clazz '|name|)))
-            (bin-name (substitute #\/ #\. lname))
-            (pkg (class-package bin-name)))
-       (setf (slot-value (eval (intern (format nil "+static-~A+" bin-name) pkg)) key) value)))
+     (setf (slot-value (%unsafe-static-storage (gethash l *field-offset-table*))
+                       (%unsafe-slot-key l))
+           value))
     (t nil)))
 
 (defmethod |getReferenceVolatile(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) obj l)
@@ -2503,7 +2618,7 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
   (|getReference(Ljava/lang/Object;J)| unsafe obj l))
 
 (defun |java/security/AccessController.getStackAccessControlContext()| ()
-  ;; FIXME -- implement
+  ;; NIL means "privileged context"; fine with the SecurityManager gone.
   nil)
 
 (defun |java/security/AccessController.ensureMaterializedForStackWalk(Ljava/lang/Object;)| (obj)
@@ -2518,6 +2633,84 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
 ;; changed relative to JDK 17/21 (file.encoding was replaced by native.encoding,
 ;; and stdin/stdout/stderr encodings were added), so FIXED_LENGTH is now 40.
 ;; vmProperties() returns String[] of key-value pairs (like -D properties).
+
+;;; Single source of truth for VM/system property values, consumed by
+;;; SystemProps$Raw.platformProperties/vmProperties (JDK 9+) and the
+;;; legacy System.initProperties.
+
+(defparameter +java-identity-properties+
+  '(("java.specification.version" . "25")
+    ("java.specification.name" . "Java Platform API Specification")
+    ("java.specification.vendor" . "Oracle Corporation")
+    ("java.vm.specification.version" . "25")
+    ("java.vm.specification.name" . "Java Virtual Machine Specification")
+    ("java.vm.specification.vendor" . "Oracle Corporation")
+    ("java.vm.name" . "OpenLDK")
+    ("java.vm.version" . "1.0")
+    ("java.vm.vendor" . "OpenLDK")
+    ("java.vm.info" . "interpreted mode")
+    ("java.version" . "25")
+    ("java.version.date" . "2025-09-16")
+    ("java.runtime.version" . "25+36")
+    ("java.runtime.name" . "OpenLDK Runtime Environment")
+    ("java.vendor" . "OpenLDK")
+    ("java.vendor.url" . "https://github.com/atgreen/openldk")
+    ("java.vendor.url.bug" . "https://github.com/atgreen/openldk/issues")
+    ("java.class.version" . "69.0")
+    ("sun.cds.enableSharedLookupCache" . "1")
+    ("java.security.debug" . "0")
+    ("log4j2.disable.jmx" . "true"))
+  "Static java.* identity strings shared by all property providers.")
+
+(defparameter +encoding-properties+
+  '(("file.encoding" . "UTF-8")
+    ("file.encoding.pkg" . "sun.io")
+    ("native.encoding" . "UTF-8")
+    ("stdout.encoding" . "UTF-8")
+    ("stderr.encoding" . "UTF-8")
+    ("sun.stdout.encoding" . "UTF-8")
+    ("sun.stderr.encoding" . "UTF-8")
+    ("sun.jnu.encoding" . "UTF-8"))
+  "Encoding-related properties; OpenLDK always runs UTF-8.")
+
+(defun %os-name ()
+  (cond ((find :LINUX *features*) "Linux")
+        ((find :DARWIN *features*) "Mac OS X")
+        (t "Unknown")))
+
+(defun %os-version ()
+  (cond ((find :LINUX *features*)
+         (handler-case
+             (with-open-file (stream "/proc/version" :direction :input)
+               (let* ((line (read-line stream))
+                      (version-start (+ (search "Linux version " line)
+                                        (length "Linux version ")))
+                      (space-pos (position #\Space line :start version-start)))
+                 (subseq line version-start space-pos)))
+           (condition () "0.0")))
+        ((find :DARWIN *features*)
+         (string-trim '(#\Newline) (uiop:run-program "sw_vers --productVersion" :output :string)))
+        (t "0.0")))
+
+(defun %os-arch ()
+  (cond ((find :X86-64 *features*) "amd64")
+        ((find :ARM64 *features*) "aarch64")
+        (t "unknown")))
+
+(defun %cpu-endian ()
+  (if (find :LITTLE-ENDIAN *features*) "little" "big"))
+
+(defun %user-name ()
+  (slot-value (sb-posix:getpwuid (sb-posix:getuid)) 'sb-posix::name))
+
+(defun %vm-dynamic-properties ()
+  "Environment-derived properties, computed at call time."
+  `(("java.home" . ,(uiop:getenv "JAVA_HOME"))
+    ("java.class.path" . ,(or (uiop:getenv "LDK_CLASSPATH")
+                              (uiop:getenv "CLASSPATH")
+                              "."))
+    ("java.library.path" . ,(concatenate 'string (uiop:getenv "JAVA_HOME") "/lib/"))
+    ("java.io.tmpdir" . ,(namestring (uiop:temporary-directory)))))
 
 (defun |jdk/internal/util/SystemProps$Raw.platformProperties()| ()
   "Return a String[40] of indexed platform properties for JDK 25."
@@ -2549,29 +2742,11 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
     ;; 19: _native_encoding_NDX
     (setf (aref arr 19) (jstring "UTF-8"))
     ;; 20: _os_arch_NDX
-    (setf (aref arr 20) (jstring (cond
-                                   ((find :X86-64 *features*) "amd64")
-                                   ((find :ARM64 *features*) "aarch64")
-                                   (t "unknown"))))
+    (setf (aref arr 20) (jstring (%os-arch)))
     ;; 21: _os_name_NDX
-    (setf (aref arr 21) (jstring (cond
-                                   ((find :LINUX *features*) "Linux")
-                                   ((find :DARWIN *features*) "Mac OS X")
-                                   (t "Unknown"))))
+    (setf (aref arr 21) (jstring (%os-name)))
     ;; 22: _os_version_NDX
-    (setf (aref arr 22) (jstring (cond
-                                   ((find :LINUX *features*)
-                                    (handler-case
-                                        (with-open-file (stream "/proc/version" :direction :input)
-                                          (let* ((line (read-line stream))
-                                                 (version-start (+ (search "Linux version " line)
-                                                                   (length "Linux version ")))
-                                                 (space-pos (position #\Space line :start version-start)))
-                                            (subseq line version-start space-pos)))
-                                      (condition () "0.0")))
-                                   ((find :DARWIN *features*)
-                                    (string-trim '(#\Newline) (uiop:run-program "sw_vers --productVersion" :output :string)))
-                                   (t "0.0"))))
+    (setf (aref arr 22) (jstring (%os-version)))
     ;; 23: _path_separator_NDX
     (setf (aref arr 23) (jstring ":"))
     ;; 24-26: SOCKS proxy (nil)
@@ -2586,7 +2761,7 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
     ;; 31: _sun_arch_data_model_NDX
     (setf (aref arr 31) (jstring "64"))
     ;; 32: _sun_cpu_endian_NDX
-    (setf (aref arr 32) (jstring (if (find :LITTLE-ENDIAN *features*) "little" "big")))
+    (setf (aref arr 32) (jstring (%cpu-endian)))
     ;; 33: _sun_cpu_isalist_NDX (empty)
     (setf (aref arr 33) (jstring ""))
     ;; 34: _sun_io_unicode_encoding_NDX
@@ -2600,49 +2775,18 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
     ;; 38: _user_home_NDX
     (setf (aref arr 38) (jstring (uiop:getenv "HOME")))
     ;; 39: _user_name_NDX
-    (setf (aref arr 39) (jstring (slot-value (sb-posix:getpwuid (sb-posix:getuid)) 'sb-posix::name)))
+    (setf (aref arr 39) (jstring (%user-name)))
     ;; Wrap as a java-array
     (make-java-array :component-class (gethash "java/lang/String" *java-classes-by-bin-name*)
                      :initial-contents arr)))
 
 (defun |jdk/internal/util/SystemProps$Raw.vmProperties()| ()
   "Return String[] of key-value pairs for JDK 25 VM properties."
-  (let* ((pairs `(("java.home" ,(uiop:getenv "JAVA_HOME"))
-                  ("java.specification.version" "25")
-                  ("java.specification.name" "Java Platform API Specification")
-                  ("java.specification.vendor" "Oracle Corporation")
-                  ("java.vm.specification.version" "25")
-                  ("java.vm.specification.name" "Java Virtual Machine Specification")
-                  ("java.vm.specification.vendor" "Oracle Corporation")
-                  ("java.vm.name" "OpenLDK")
-                  ("java.vm.version" "1.0")
-                  ("java.vm.vendor" "OpenLDK")
-                  ("java.vm.info" "interpreted mode")
-                  ("java.version" "25")
-                  ("java.version.date" "2025-09-16")
-                  ("java.runtime.version" "25+36")
-                  ("java.runtime.name" "OpenLDK Runtime Environment")
-                  ("java.vendor" "OpenLDK")
-                  ("java.vendor.url" "https://github.com/atgreen/openldk")
-                  ("java.vendor.url.bug" "https://github.com/atgreen/openldk/issues")
-                  ("java.class.version" "69.0")
-                  ("java.class.path" ,(or (uiop:getenv "LDK_CLASSPATH")
-                                          (uiop:getenv "CLASSPATH")
-                                          "."))
-                  ("java.library.path" ,(concatenate 'string
-                                                     (uiop:getenv "JAVA_HOME")
-                                                     "/lib/"))
-                  ("java.io.tmpdir" ,(namestring (uiop:temporary-directory)))
-                  ("file.encoding" "UTF-8")
-                  ("file.encoding.pkg" "sun.io")
-                  ("native.encoding" "UTF-8")
-                  ("stdout.encoding" "UTF-8")
-                  ("stderr.encoding" "UTF-8")
-                  ("sun.cds.enableSharedLookupCache" "1")
-                  ("java.security.debug" "0")
-                  ("log4j2.disable.jmx" "true")))
+  (let* ((pairs (append +java-identity-properties+
+                        +encoding-properties+
+                        (%vm-dynamic-properties)))
          ;; Flatten to alternating key-value string array
-         (flat (loop for (k v) in pairs
+         (flat (loop for (k . v) in pairs
                      when v
                      collect (jstring k)
                      and collect (jstring v)))
@@ -2651,81 +2795,22 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
                      :initial-contents arr)))
 
 (defun |java/lang/System.initProperties(Ljava/util/Properties;)| (props)
-  (dolist (prop `(("log4j2.disable.jmx" . "true")
-                  ("java.specification.version" . "25")
-                  ("java.specification.name" . "Java Platform API Specification")
-                  ("java.specification.vendor" . "Oracle Corporation")
-                  ("java.vm.specification.version" . "25")
-                  ("java.vm.specification.name" . "Java Virtual Machine Specification")
-                  ("java.vm.specification.vendor" . "Oracle Corporation")
-                  ("java.vm.name" . "OpenLDK")
-                  ("java.vm.version" . "1.0")
-                  ("java.vm.vendor" . "OpenLDK")
-                  ("java.version" . "25")
-                  ("java.vendor" . "OpenLDK")
-                  ("java.vendor.url" . "https://github.com/atgreen/openldk")
-                  ("java.vendor.url.bug" . "https://github.com/atgreen/openldk/issues")
-                  ("java.class.version" . "69.0")
-                  ("sun.cds.enableSharedLookupCache" . "1")
-                  ("java.class.path" . ,(or (uiop:getenv "LDK_CLASSPATH")
-                                            (uiop:getenv "CLASSPATH")
-                                            "."))
-                  ("java.home" . ,(uiop:getenv "JAVA_HOME"))
-                  ("user.home" . ,(uiop:getenv "HOME"))
-                  ("user.dir" . ,(namestring (uiop:getcwd)))
-                  ("user.name" . ,(let ((uid (sb-posix:getuid)))
-                                    (slot-value (sb-posix:getpwuid uid) 'sb-posix::name)))
-                  ("os.name" . ,(cond
-                                  ((find :LINUX *features*)
-                                   "Linux")
-                                  ((find :DARWIN *features*)
-                                   "Mac OS X")
-                                  (t (error "internal error"))))
-                  ("os.version" . ,(cond
-                                    ((find :LINUX *features*)
-                                     (with-open-file (stream "/proc/version" :direction :input)
-                                                     (let ((line (read-line stream)))
-                                                       (let* ((version-start (+ (search "Linux version " line)
-                                                                                (length "Linux version ")))
-                                                              (space-pos (position #\Space line :start version-start))
-                                                              (version (subseq line version-start space-pos)))
-                                                         version))))
-                                    ((find :DARWIN *features*)
-                                     (string-trim '(#\Newline) (uiop:run-program "sw_vers --productVersion" :output :string)))
-                                    (error "internal error")))
-                  ("os.arch" . ,(cond
-                                  ((find :X86-64 *features*)
-                                   "amd64")
-                                  ((find :ARM64 *features*)
-                                   "aarch64")
-                                  (t (error "internal error"))))
-                  ("sun.jnu.encoding" . "UTF-8")
-                  ("sun.cpu.endian" . ,(cond
-                                         ((find :LITTLE-ENDIAN *features*)
-                                          "little")
-                                         ((find :BIG-ENDIAN *features*)
-                                          "big")
-                                         (t (error "internal error"))))
-                  ("file.separator" . ,(cond
-                                         ((find :UNIX *features*) "/")
-                                         (t (error "internal error"))))
-                  ("file.encoding.pkg" . "sun.io")
-                  ("java.io.tmpdir" . ,(namestring (uiop:temporary-directory)))
-                  ("file.encoding" . "UTF-8")
-                  ("path.separator" . ":")
-                  ("java.library.path" . ,(concatenate 'string
-                                                       (uiop:getenv "JAVA_HOME")
-                                                       "/lib/"))
-                  ("java.security.debug" . "0")
-                  ("line.separator" . ,(format nil "~%"))
-                  ("native.encoding" . "UTF-8")
-                  ("stdout.encoding" . "UTF-8")
-                  ("stderr.encoding" . "UTF-8")
-                  ("sun.stdout.encoding" . "UTF-8")
-                  ("sun.stderr.encoding" . "UTF-8")
-                  ("java.version.date" . "2025-09-16")
-                  ("java.runtime.version" . "25+36")))
-    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring (car prop)) (ijstring (cdr prop))))
+  (dolist (prop (append +java-identity-properties+
+                        +encoding-properties+
+                        (%vm-dynamic-properties)
+                        `(("user.home" . ,(uiop:getenv "HOME"))
+                          ("user.dir" . ,(namestring (uiop:getcwd)))
+                          ("user.name" . ,(%user-name))
+                          ("os.name" . ,(%os-name))
+                          ("os.version" . ,(%os-version))
+                          ("os.arch" . ,(%os-arch))
+                          ("sun.cpu.endian" . ,(%cpu-endian))
+                          ("file.separator" . "/")
+                          ("path.separator" . ":")
+                          ("line.separator" . ,(format nil "~%")))))
+    (when (cdr prop)
+      (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)|
+       (ijstring (car prop)) (ijstring (cdr prop)))))
   props)
 
 #|
@@ -2841,7 +2926,6 @@ user.variant
 
 (defun |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedExceptionAction;Ljava/security/AccessControlContext;)| (action context)
   (declare (ignore context))
-  ;; FIXME
   (let ((result (|run()| action)))
     result))
 
@@ -2900,17 +2984,10 @@ user.variant
      (jaref param-object (%unsafe-array-index param-object param-long)))
     ((null param-object)
      ;; Static field access: look up the static singleton
-     (let* ((field (gethash param-long *field-offset-table*))
-            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk))
-            (clazz (slot-value field '|clazz|))
-            (lname (lstring (slot-value clazz '|name|)))
-            (bin-name (substitute #\/ #\. lname))
-            (pkg (class-package bin-name)))
-       (slot-value (eval (intern (format nil "+static-~A+" bin-name) pkg)) key)))
+     (slot-value (%unsafe-static-storage (gethash param-long *field-offset-table*))
+                 (%unsafe-slot-key param-long)))
     (t
-     (let* ((field (gethash param-long *field-offset-table*))
-            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
-       (slot-value param-object key)))))
+     (slot-value param-object (%unsafe-slot-key param-long)))))
 
 (defmethod |putIntVolatile(Ljava/lang/Object;JI)| ((unsafe |sun/misc/Unsafe|) obj offset value)
   "Same as putInt for OpenLDK (no volatile semantics needed in Lisp)."
@@ -2919,17 +2996,11 @@ user.variant
     ((typep obj 'java-array)
      (setf (jaref obj (%unsafe-array-index obj offset)) value))
     ((null obj)
-     (let* ((field (gethash offset *field-offset-table*))
-            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk))
-            (clazz (slot-value field '|clazz|))
-            (lname (lstring (slot-value clazz '|name|)))
-            (bin-name (substitute #\/ #\. lname))
-            (pkg (class-package bin-name)))
-       (setf (slot-value (eval (intern (format nil "+static-~A+" bin-name) pkg)) key) value)))
+     (setf (slot-value (%unsafe-static-storage (gethash offset *field-offset-table*))
+                       (%unsafe-slot-key offset))
+           value))
     (t
-     (let* ((field (gethash offset *field-offset-table*))
-            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
-       (setf (slot-value obj key) value)))))
+     (setf (slot-value obj (%unsafe-slot-key offset)) value))))
 
 (defmethod |getCharVolatile(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) param-object param-long)
   (cond
@@ -2937,17 +3008,10 @@ user.variant
      (jaref param-object (%unsafe-array-index param-object param-long)))
     ((null param-object)
      ;; Static field access: look up the static singleton
-     (let* ((field (gethash param-long *field-offset-table*))
-            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk))
-            (clazz (slot-value field '|clazz|))
-            (lname (lstring (slot-value clazz '|name|)))
-            (bin-name (substitute #\/ #\. lname))
-            (pkg (class-package bin-name)))
-       (slot-value (eval (intern (format nil "+static-~A+" bin-name) pkg)) key)))
+     (slot-value (%unsafe-static-storage (gethash param-long *field-offset-table*))
+                 (%unsafe-slot-key param-long)))
     (t
-     (let* ((field (gethash param-long *field-offset-table*))
-            (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
-       (slot-value param-object key)))))
+     (slot-value param-object (%unsafe-slot-key param-long)))))
 
 (defmethod |clone()| ((array java-array))
   (make-java-array :component-class (java-array-component-class array) :initial-contents (copy-seq (java-array-data array))))
@@ -3103,10 +3167,9 @@ does not reconstruct, so we compute it from the name directly."
 (defun |java/lang/System.mapLibraryName(Ljava/lang/String;)| (library-name)
   (or #+LINUX (jstring (format nil "lib~A.so" (lstring library-name)))
       #+DARWIN (jstring (format nil "lib~A.dylib" (lstring library-name)))
-      (error "unimplemented")))
+      (unimplemented "System.mapLibraryName on this platform")))
 
 (defun |java/lang/ClassLoader.findBuiltinLib(Ljava/lang/String;)| (library-name)
-  ;; FIXME
   library-name)
 
 (defun |java/lang/ClassLoader.findLoadedClass0(Ljava/lang/String;)| (loader name)
@@ -3225,7 +3288,7 @@ does not reconstruct, so we compute it from the name directly."
 
 (defmethod |load(Ljava/lang/String;Z)| ((loader t) library-name is-builtin)
   (when *debug-trace*
-    (format t "FIXME: ~A loading ~A~%" loader library-name))
+    (format t "~&; ~A loading native library ~A (no-op)~%" loader library-name))
   (setf (slot-value loader '|loaded|) 1)
   nil)
 
@@ -3236,12 +3299,11 @@ does not reconstruct, so we compute it from the name directly."
       ((string= sname "INT") 2)
       ((string= sname "KILL") 9)
       ((string= sname "TERM") 15)
-      (t (error "unimplemented")))))
+      (t (unimplemented "Signal.findSignal(~S)" sname)))))
 
 (defun |sun/misc/Signal.handle0(IJ)| (sig native-h)
   (declare (ignore sig)
            (ignore native-h))
-  ;; FIXME
   1)
 
 (defmethod |notifyAll()| ((objref |java/lang/Object|))
@@ -3258,7 +3320,6 @@ does not reconstruct, so we compute it from the name directly."
 
 (defun |sun/misc/URLClassPath.getLookupCacheURLs(Ljava/lang/ClassLoader;)| (class-loader)
   (declare (ignore class-loader))
-  ;; FIXME
   nil)
 
 (defmethod |open0(Ljava/lang/String;I)| ((fis |java/io/RandomAccessFile|) filename mode)
@@ -3293,7 +3354,7 @@ does not reconstruct, so we compute it from the name directly."
     (loop for i from offset below (+ offset length)
           for byte = (read-byte in-stream nil nil) ; Read a byte, return NIL on EOF
           while byte
-          do (setf (jaref byte-array i) byte)
+          do (setf (jaref byte-array i) (if (> byte 127) (- byte 256) byte))
              (incf bytes-read))  ; Count bytes read
     bytes-read))
 
@@ -3338,7 +3399,7 @@ does not reconstruct, so we compute it from the name directly."
                            (force-output *standard-output*)
                            *standard-input*)
                           ((streamp fd) fd)
-                          (t (error "unimplemented fd ~A in FileInputStream.readBytes" fd))))
+                          (t (unimplemented "fd ~A in FileInputStream.readBytes" fd))))
          (bytes-read 0))
     ;; First byte: block waiting for input.
     ;; Subsequent bytes: only read if immediately available (listen).
@@ -3347,13 +3408,13 @@ does not reconstruct, so we compute it from the name directly."
     (when (plusp length)
       (let ((byte (read-byte in-stream nil nil)))
         (when byte
-          (setf (jaref byte-array offset) byte)
+          (setf (jaref byte-array offset) (if (> byte 127) (- byte 256) byte))
           (incf bytes-read)
           (loop for i from (1+ offset) below (+ offset length)
                 while (listen in-stream)
                 for b = (read-byte in-stream nil nil)
                 while b
-                do (setf (jaref byte-array i) b)
+                do (setf (jaref byte-array i) (if (> b 127) (- b 256) b))
                    (incf bytes-read)))))
     (if (and (zerop bytes-read) (plusp length)) -1 bytes-read)))
 
@@ -3416,7 +3477,7 @@ does not reconstruct, so we compute it from the name directly."
       ((streamp fd)
        (write-sequence (%convert-to-unsigned-8-bit (java-array-data byte-array)) fd :start offset :end (+ offset length)))
       (t
-       (error "unimplemented file descriptor ~A in FileOutputStream.writeBytes" fd)))))
+       (unimplemented "fd ~A in FileOutputStream.writeBytes" fd)))))
 
 ;; Flush the underlying Lisp stream for stdout/stderr.
 ;; In standard Java, FileOutputStream.write() calls the OS write() directly
@@ -3463,11 +3524,9 @@ does not reconstruct, so we compute it from the name directly."
   nil)
 
 (defmethod |getEnclosingMethod0()| ((this |java/lang/Class|))
-  ;; FIXME
   nil)
 
 (defmethod |getDeclaringClass0()| ((this |java/lang/Class|))
-  ;; FIXME
   nil)
 
 (defmethod |getBooleanAttributes0(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
@@ -3500,16 +3559,13 @@ does not reconstruct, so we compute it from the name directly."
 
 (defun |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedAction;Ljava/security/AccessControlContext;)| (action context)
   (declare (ignore context))
-  ;; FIXME
   (let ((result (|run()| action)))
     result))
 
 (defun |java/net/InetAddress.init()| ()
-  ;; FIXME
   nil)
 
 (defun |java/io/ObjectStreamClass.initNative()| ()
-  ;; FIXME
   nil)
 
 (defmethod |java/lang/System.gc()| ()
@@ -3717,11 +3773,9 @@ does not reconstruct, so we compute it from the name directly."
                    :initial-element nil))
 
 (defmethod |findLoadedClass0(Ljava/lang/String;)| ((loader |java/lang/ClassLoader|) name)
-  ;; FIXME
   (gethash (lstring name) *java-classes-by-fq-name*))
 
 (defmethod |findBootstrapClass(Ljava/lang/String;)| ((loader |java/lang/ClassLoader|) name)
-  ;; FIXME
   (handler-case
       (let ((ldk-class (classload (substitute #\/ #\. (lstring name)))))
         (java-class ldk-class))
@@ -3779,14 +3833,15 @@ does not reconstruct, so we compute it from the name directly."
     (if byte byte -1)))
 
 (defmethod |read([BII)| ((this <resource-input-stream>) byte-array offset length)
-  "Read up to LENGTH bytes into BYTE-ARRAY starting at OFFSET."
+  "Read up to LENGTH bytes into BYTE-ARRAY starting at OFFSET.
+Java byte arrays hold SIGNED bytes; read-byte yields 0..255."
   (let ((stream (slot-value this 'lisp-stream))
         (bytes-read 0))
     (loop for i from offset below (+ offset length)
           for byte = (read-byte stream nil nil)
           while byte
           do (progn
-               (setf (jaref byte-array i) byte)
+               (setf (jaref byte-array i) (if (> byte 127) (- byte 256) byte))
                (incf bytes-read)))
     (if (zerop bytes-read) -1 bytes-read)))
 
@@ -3828,7 +3883,6 @@ does not reconstruct, so we compute it from the name directly."
 ;; Note: |openStream()| for java/net/URL is defined in url.lisp after the class is loaded
 
 (defun |java/io/UnixFileSystem.initIDs()| ()
-  ;; FIXME
   nil)
 
 (defun |java/util/LinkedHashMap.hash(Ljava/lang/Object;)| (obj)
@@ -3878,7 +3932,6 @@ does not reconstruct, so we compute it from the name directly."
      1000))
 
 (defun |sun/misc/Perf.registerNatives()| ()
-  ;; FIXME
   nil)
 
 (defmethod |createLong(Ljava/lang/String;IIJ)| (perf name variability units value)
@@ -3894,23 +3947,16 @@ does not reconstruct, so we compute it from the name directly."
 (defmethod |getBoolean(Ljava/lang/Object;J)|((unsafe |sun/misc/Unsafe|) objref ptr)
   (declare (ignore unsafe))
   (let* ((field (gethash ptr *field-offset-table*))
-         (key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk)))
-    (if objref
-        (let ((v (slot-value objref key)))
-          (if v (if (eql v 0) 0 1) 0))
-        ;; Static field access: look up the static singleton
-        (let* ((clazz (slot-value field '|clazz|))
-               (lname (lstring (slot-value clazz '|name|)))
-               (bin-name (substitute #\/ #\. lname))
-               (pkg (class-package bin-name))
-               (v (slot-value (eval (intern (format nil "+static-~A+" bin-name) pkg)) key)))
-          (if v (if (eql v 0) 0 1) 0)))))
+         (key (%unsafe-slot-key ptr))
+         (owner (or objref (%unsafe-static-storage field)))
+         (v (slot-value owner key)))
+    (if v (if (eql v 0) 0 1) 0)))
 
 (defun %unsafe-byte-array-p (object)
   "Return true when OBJECT is a Java byte array."
   (and (typep object 'java-array)
-       (let ((component (java-array-component-class object)))
-         (and component
+       (let ((component (%array-component-class object)))
+         (and (typep component '|java/lang/Class|)
               (string= (lstring (slot-value component '|name|)) "byte")))))
 
 (defun %unsafe-read-byte-array (array offset byte-count)
@@ -3958,59 +4004,35 @@ does not reconstruct, so we compute it from the name directly."
   (declare (ignore unsafe))
   (if (%unsafe-byte-array-p objref)
       (unsigned-to-signed-integer (%unsafe-read-byte-array objref ptr 4))
-      (let* ((field (gethash ptr *field-offset-table*))
-             (key (when field
-                    (intern (mangle-field-name
-                             (lstring (slot-value field '|name|)))
-                            :openldk))))
+      (let ((field (gethash ptr *field-offset-table*))
+            (key (%unsafe-slot-key ptr)))
         (if objref
             (slot-value objref key)
             (if field
                 ;; Static field access: look up the static singleton.
-                (let* ((clazz (slot-value field '|clazz|))
-                       (lname (lstring (slot-value clazz '|name|)))
-                       (bin-name (substitute #\/ #\. lname))
-                       (pkg (class-package bin-name)))
-                  (slot-value
-                   (eval (intern (format nil "+static-~A+" bin-name) pkg)) key))
+                (slot-value (%unsafe-static-storage field) key)
                 (sb-sys:signed-sap-ref-32 (sb-sys:int-sap ptr) 0))))))
 
 (defmethod |putLong(Ljava/lang/Object;JJ)|((unsafe |sun/misc/Unsafe|) objref ptr value)
   (declare (ignore unsafe))
-  (let* ((field (gethash ptr *field-offset-table*))
-         (key (when field
-                (intern (mangle-field-name (lstring (slot-value field '|name|)))
-                        :openldk))))
+  (let ((field (gethash ptr *field-offset-table*))
+        (key (%unsafe-slot-key ptr)))
     (if objref
         (setf (slot-value objref key) value)
         (if field
             ;; Static field access: look up the static singleton.
-            (let* ((clazz (slot-value field '|clazz|))
-                   (lname (lstring (slot-value clazz '|name|)))
-                   (bin-name (substitute #\/ #\. lname))
-                   (pkg (class-package bin-name)))
-              (setf (slot-value
-                     (eval (intern (format nil "+static-~A+" bin-name) pkg)) key)
-                    value))
+            (setf (slot-value (%unsafe-static-storage field) key) value)
             (setf (sb-sys:signed-sap-ref-64 (sb-sys:int-sap ptr) 0) value)))))
 
 (defmethod |putInt(Ljava/lang/Object;JI)|((unsafe |sun/misc/Unsafe|) objref ptr value)
   (declare (ignore unsafe))
-  (let* ((field (gethash ptr *field-offset-table*))
-         (key (when field
-                (intern (mangle-field-name (lstring (slot-value field '|name|)))
-                        :openldk))))
+  (let ((field (gethash ptr *field-offset-table*))
+        (key (%unsafe-slot-key ptr)))
     (if objref
         (setf (slot-value objref key) value)
         (if field
             ;; Static field access: look up the static singleton.
-            (let* ((clazz (slot-value field '|clazz|))
-                   (lname (lstring (slot-value clazz '|name|)))
-                   (bin-name (substitute #\/ #\. lname))
-                   (pkg (class-package bin-name)))
-              (setf (slot-value
-                     (eval (intern (format nil "+static-~A+" bin-name) pkg)) key)
-                    value))
+            (setf (slot-value (%unsafe-static-storage field) key) value)
             (setf (sb-sys:signed-sap-ref-32 (sb-sys:int-sap ptr) 0) value)))))
 
 (defmethod |getLong(Ljava/lang/Object;J)|((unsafe |sun/misc/Unsafe|) objref ptr)
@@ -4108,7 +4130,6 @@ does not reconstruct, so we compute it from the name directly."
         (setf (sb-sys:sap-ref-8 offset-sap 0) byte)))))
 
 (defun |java/lang/Shutdown.beforeHalt()| ()
-  ;; FIXME
   nil)
 
 ;;; Shutdown.logRuntimeExit — JDK 21 tries to log via System.Logger which
@@ -4133,7 +4154,6 @@ does not reconstruct, so we compute it from the name directly."
       (gethash "RuntimeVisibleAnnotations" (attributes lclass)))))
 
 (defun |java/awt/image/ColorModel.initIDs()| ()
-  ;; FIXME
   nil)
 
 (defun |java/awt/Toolkit.initIDs()| ()
@@ -4144,15 +4164,12 @@ does not reconstruct, so we compute it from the name directly."
   0)
 
 (defun |java/awt/image/IndexColorModel.initIDs()| ()
-  ;; FIXME
   nil)
 
 (defun |java/awt/image/Raster.initIDs()| ()
-  ;; FIXME
   nil)
 
 (defun |java/awt/image/SampleModel.initIDs()| ()
-  ;; FIXME
   nil)
 
 (defun |sun/awt/image/ByteComponentRaster.initIDs()| ()
@@ -4165,11 +4182,9 @@ does not reconstruct, so we compute it from the name directly."
   nil)
 
 (defun |java/util/zip/Deflater.initIDs()| ()
-  ;; FIXME
   nil)
 
 (defun |java/util/zip/Inflater.initIDs()| ()
-  ;; FIXME
   nil)
 
 (defun |java/security/SystemConfigurator.getSystemFIPSEnabled()| ()
@@ -4187,6 +4202,11 @@ does not reconstruct, so we compute it from the name directly."
 (defun |sun/nio/ch/IOUtil.iovMax()| ()
   0)
 
+(defun |sun/nio/ch/IOUtil.writevMax()| ()
+  "Maximum number of bytes writev(2) can transfer in one call.  We gather
+in Lisp, so any generous cap works; Linux IOV_MAX * page-ish value."
+  (* 1024 4096))
+
 (defun |sun/nio/ch/FileChannelImpl.initIDs()| ()
   nil)
 
@@ -4196,10 +4216,26 @@ does not reconstruct, so we compute it from the name directly."
 (defun |sun/nio/ch/NativeThread.current()| ()
   -1)
 
+(defun |sun/nio/ch/NativeThread.current0()| ()
+  "JDK 21+ native behind NativeThread.current().  Self-contained: the Java
+current() wrapper calls current0(), so delegating back would recurse once
+the wrapper is JIT-compiled over the Lisp current() stub."
+  -1)
+
 (defun |sun/nio/ch/NativeThread.signal(J)| (thread-id)
   "Signal a native thread blocked in an I/O operation. No-op in single-threaded OpenLDK."
   (declare (ignore thread-id))
   nil)
+
+(defun |sun/nio/ch/NativeThread.signal0(J)| (thread-id)
+  "JDK 21+ native behind NativeThread.signal(J).  Self-contained no-op (see
+current0 for why it must not delegate to the wrapper name)."
+  (declare (ignore thread-id))
+  nil)
+
+(defun |sun/nio/ch/NativeThread.supportPendingSignals0()| ()
+  "Whether pending-signal delivery to blocked I/O threads is supported: no."
+  0)
 
 (defun |java/nio/Bits.pageSize()| ()
   4096)
@@ -4223,7 +4259,6 @@ does not reconstruct, so we compute it from the name directly."
   (sb-thread:barrier (:memory)))
 
 (defun |sun/nio/ch/FileDispatcherImpl.init()| ()
-  ;; FIXME
   nil)
 
 (defun |sun/nio/ch/FileDispatcherImpl.size0(Ljava/io/FileDescriptor;)| (fd)
@@ -4314,6 +4349,131 @@ does not reconstruct, so we compute it from the name directly."
         (sap (sb-sys:int-sap ptr)))
     (sb-unix:unix-read real-fd sap length)))
 
+;;; JDK 25 moved the per-fd dispatcher natives from FileDispatcherImpl to
+;;; UnixFileDispatcherImpl (FileDispatcherImpl keeps only init0/transfer*).
+;;; Delegate to the existing implementations and add the iovec/positioned
+;;; variants the old family lacked.
+
+(defun |sun/nio/ch/FileDispatcherImpl.init0()| ()
+  nil)
+
+(defun %raw-fd (fd)
+  "Unwrap a java/io/FileDescriptor object (or pass through a raw int fd)."
+  (if (and (slot-exists-p fd '|fd|) (slot-boundp fd '|fd|))
+      (slot-value fd '|fd|)
+      fd))
+
+(defun |sun/nio/ch/UnixFileDispatcherImpl.read0(Ljava/io/FileDescriptor;JI)| (fd ptr length)
+  (|sun/nio/ch/FileDispatcherImpl.read0(Ljava/io/FileDescriptor;JI)| fd ptr length))
+
+(defun |sun/nio/ch/UnixFileDispatcherImpl.write0(Ljava/io/FileDescriptor;JI)| (fd ptr length)
+  (|sun/nio/ch/FileDispatcherImpl.write0(Ljava/io/FileDescriptor;JI)| fd ptr length))
+
+(defun |sun/nio/ch/UnixFileDispatcherImpl.seek0(Ljava/io/FileDescriptor;J)| (fd offset)
+  (|sun/nio/ch/FileDispatcherImpl.seek0(Ljava/io/FileDescriptor;J)| fd offset))
+
+(defun |sun/nio/ch/UnixFileDispatcherImpl.size0(Ljava/io/FileDescriptor;)| (fd)
+  (|sun/nio/ch/FileDispatcherImpl.size0(Ljava/io/FileDescriptor;)| fd))
+
+(defun |sun/nio/ch/UnixFileDispatcherImpl.force0(Ljava/io/FileDescriptor;Z)| (fd metadata)
+  (|sun/nio/ch/FileDispatcherImpl.force0(Ljava/io/FileDescriptor;Z)| fd metadata))
+
+(defun |sun/nio/ch/UnixFileDispatcherImpl.truncate0(Ljava/io/FileDescriptor;J)| (fd size)
+  (|sun/nio/ch/FileDispatcherImpl.truncate0(Ljava/io/FileDescriptor;J)| fd size))
+
+(defun |sun/nio/ch/UnixFileDispatcherImpl.close0(Ljava/io/FileDescriptor;)| (fd)
+  (|sun/nio/ch/FileDispatcherImpl.close0(Ljava/io/FileDescriptor;)| fd))
+
+(defun |sun/nio/ch/UnixFileDispatcherImpl.preClose0(Ljava/io/FileDescriptor;)| (fd)
+  (|sun/nio/ch/FileDispatcherImpl.preClose0(Ljava/io/FileDescriptor;)| fd))
+
+(defun |sun/nio/ch/UnixFileDispatcherImpl.closeIntFD(I)| (fd)
+  (|sun/nio/ch/FileDispatcherImpl.closeIntFD(I)| fd))
+
+(defun |sun/nio/ch/UnixFileDispatcherImpl.pread0(Ljava/io/FileDescriptor;JIJ)| (fd ptr length offset)
+  "pread(2) — positioned read into native buffer at PTR."
+  (let ((real-fd (%raw-fd fd))
+        (sap (sb-sys:int-sap ptr)))
+    (sb-posix:lseek real-fd offset sb-posix:seek-set)
+    (sb-unix:unix-read real-fd sap length)))
+
+(defun |sun/nio/ch/UnixFileDispatcherImpl.pwrite0(Ljava/io/FileDescriptor;JIJ)| (fd ptr length offset)
+  "pwrite(2) — positioned write from native buffer at PTR."
+  (let ((real-fd (%raw-fd fd))
+        (sap (sb-sys:int-sap ptr)))
+    (sb-posix:lseek real-fd offset sb-posix:seek-set)
+    (sb-unix:unix-write real-fd sap 0 length)))
+
+(defun %iovec-base-and-len (iovec-address index)
+  "Read struct iovec[INDEX] {iov_base, iov_len} at IOVEC-ADDRESS (LP64)."
+  (let ((sap (sb-sys:int-sap (+ iovec-address (* index 16)))))
+    (values (sb-sys:sap-ref-64 sap 0)
+            (sb-sys:sap-ref-64 sap 8))))
+
+(defun |sun/nio/ch/UnixFileDispatcherImpl.readv0(Ljava/io/FileDescriptor;JI)| (fd iovec-address count)
+  "readv(2) — scatter read into COUNT iovec buffers."
+  (let ((real-fd (%raw-fd fd))
+        (total 0))
+    (dotimes (i count total)
+      (multiple-value-bind (base len) (%iovec-base-and-len iovec-address i)
+        (let ((n (sb-unix:unix-read real-fd (sb-sys:int-sap base) len)))
+          (when (or (null n) (minusp n))
+            (return (if (zerop total)
+                        (or n -1)
+                        total)))
+          (incf total n)
+          (when (< n len)
+            (return total)))))))
+
+(defun |sun/nio/ch/UnixFileDispatcherImpl.writev0(Ljava/io/FileDescriptor;JI)| (fd iovec-address count)
+  "writev(2) — gather write from COUNT iovec buffers."
+  (let ((real-fd (%raw-fd fd))
+        (total 0))
+    (dotimes (i count total)
+      (multiple-value-bind (base len) (%iovec-base-and-len iovec-address i)
+        (let ((n (sb-unix:unix-write real-fd (sb-sys:int-sap base) 0 len)))
+          (when (or (null n) (minusp n))
+            (return (if (zerop total)
+                        (or n -1)
+                        total)))
+          (incf total n)
+          (when (< n len)
+            (return total)))))))
+
+(defun |sun/nio/ch/UnixFileDispatcherImpl.available0(Ljava/io/FileDescriptor;)| (fd)
+  "Bytes available to read: size minus current position, or 0."
+  (let ((real-fd (%raw-fd fd)))
+    (handler-case
+        (let ((size (sb-posix:stat-size (sb-posix:fstat real-fd)))
+              (pos (sb-posix:lseek real-fd 0 sb-posix:seek-cur)))
+          (max 0 (- size pos)))
+      (sb-posix:syscall-error () 0))))
+
+(defun |sun/nio/ch/UnixFileDispatcherImpl.isOther0(Ljava/io/FileDescriptor;)| (fd)
+  "Whether FD refers to something other than a regular file/dir/link."
+  (let ((real-fd (%raw-fd fd)))
+    (handler-case
+        (let ((mode (sb-posix:stat-mode (sb-posix:fstat real-fd))))
+          (if (or (sb-posix:s-isreg mode)
+                  (sb-posix:s-isdir mode)
+                  (sb-posix:s-islnk mode))
+              0
+              1))
+      (sb-posix:syscall-error () 0))))
+
+(defun |sun/nio/ch/UnixFileDispatcherImpl.lock0(Ljava/io/FileDescriptor;ZJJZ)| (fd blocking pos size shared)
+  "File locking — single-process runtime, report success."
+  (declare (ignore fd blocking pos size shared))
+  0)
+
+(defun |sun/nio/ch/UnixFileDispatcherImpl.release0(Ljava/io/FileDescriptor;JJ)| (fd pos size)
+  "Release a file lock — no-op."
+  (declare (ignore fd pos size))
+  nil)
+
+(defun |sun/nio/ch/UnixFileDispatcherImpl.allocationGranularity0()| ()
+  4096)
+
 ;;; ChannelInputStream.read([BII) native override — bypass heavy NIO path
 ;;; The Java NIO read path (FileChannelImpl → IOUtil → DirectByteBuffer
 ;;; allocation → Bits.tryReserveMemory CAS loops) triggers dozens of
@@ -4372,7 +4532,6 @@ does not reconstruct, so we compute it from the name directly."
   (declare (ignore off)
            (ignore len)
            (ignore size))
-  ;; FIXME
   nil)
 
 
@@ -4433,14 +4592,10 @@ does not reconstruct, so we compute it from the name directly."
       (sb-posix:syscall-errno e))))
 
 (defun |sun/nio/fs/UnixNativeDispatcher.stat0(JLsun/nio/fs/UnixFileAttributes;)| (address attrs)
-  "stat(2) — populate UnixFileAttributes. Throws UnixException on failure (JDK 17: void return)."
-  (let ((path (%read-c-string-from-sap address)))
-    (let ((result (%populate-unix-file-attributes path attrs t)))
-      (unless (zerop result)
-        (let ((ux (%make-java-instance "sun/nio/fs/UnixException")))
-          (when (slot-exists-p ux '|errno|)
-            (setf (slot-value ux '|errno|) result))
-          (error (%lisp-condition ux)))))))
+  "stat(2) — populate UnixFileAttributes.  JDK 25 contract: return 0 on
+success or the errno value on failure; the Java caller throws the
+UnixException itself."
+  (%populate-unix-file-attributes (%read-c-string-from-sap address) attrs t))
 
 (defun |sun/nio/fs/UnixNativeDispatcher.stat1(J)| (address)
   "stat(2) — returns st_mode on success, 0 on failure."
@@ -4462,15 +4617,14 @@ does not reconstruct, so we compute it from the name directly."
           (error (%lisp-condition ux)))))))
 
 (defun |sun/nio/fs/UnixNativeDispatcher.access0(JI)| (address mode)
-  "access(2) — check file access. Throws UnixException on failure (JDK 17: void return)."
-  (let ((path (%read-c-string-from-sap address)))
-    (handler-case
-        (sb-posix:access path mode)
-      (sb-posix:syscall-error (e)
-        (let ((ux (%make-java-instance "sun/nio/fs/UnixException")))
-          (when (slot-exists-p ux '|errno|)
-            (setf (slot-value ux '|errno|) (sb-posix:syscall-errno e)))
-          (error (%lisp-condition ux)))))))
+  "access(2) — check file access.  JDK 25 contract: return 0 on success or
+the errno value on failure; the Java caller throws the UnixException."
+  (handler-case
+      (progn
+        (sb-posix:access (%read-c-string-from-sap address) mode)
+        0)
+    (sb-posix:syscall-error (e)
+      (sb-posix:syscall-errno e))))
 
 (defun |sun/nio/fs/UnixNativeDispatcher.open0(JII)| (address flags mode)
   "open(2) — open file. Returns file descriptor."
@@ -4547,12 +4701,12 @@ does not reconstruct, so we compute it from the name directly."
          (real (namestring (truename (pathname path))))
          (bytes (flexi-streams:string-to-octets real :external-format :utf-8)))
     (make-java-array
-     :component-class (%get-ldk-class-by-fq-name "byte")
+     :component-class (%get-java-class-by-bin-name "byte")
      :initial-contents bytes)))
 
 (defun |sun/nio/fs/UnixNativeDispatcher.getcwd()| ()
   (make-java-array
-   :component-class (%get-ldk-class-by-fq-name "byte")
+   :component-class (%get-java-class-by-bin-name "byte")
    :initial-contents (flexi-streams:string-to-octets (namestring (uiop:getcwd)) :external-format :utf-8)))
 
 (defun |sun/nio/fs/UnixNativeDispatcher.dup(I)| (fd)
@@ -4608,10 +4762,12 @@ does not reconstruct, so we compute it from the name directly."
       (remhash dirp-addr *dir-pointer-table*)
       (sb-posix:closedir dirp))))
 
-(defun |sun/nio/fs/UnixNativeDispatcher.readdir(J)| (dirp-addr)
-  "readdir(3) — read directory entry. Returns filename as byte[] or nil."
+(defun |sun/nio/fs/UnixNativeDispatcher.readdir0(J)| (dirp-addr)
+  "readdir(3) — read directory entry. Returns filename as byte[] or nil.
+This is the JDK 25 native name; the implementation lives here because a
+compiled Java readdir wrapper may overwrite the old readdir(J) symbol."
   (let ((dirp (gethash dirp-addr *dir-pointer-table*)))
-    (unless dirp (return-from |sun/nio/fs/UnixNativeDispatcher.readdir(J)| nil))
+    (unless dirp (return-from |sun/nio/fs/UnixNativeDispatcher.readdir0(J)| nil))
     ;; Use the raw readdir(3) FFI to avoid SBCL's sb-posix:readdir trying to
     ;; naturalize d_name from a null dirent pointer at end-of-directory,
     ;; which causes a CORRUPTION WARNING (memory fault at 0x13 = d_name offset).
@@ -4620,13 +4776,17 @@ does not reconstruct, so we compute it from the name directly."
                                          (function (* t) (* t)))
                   dirp)))
       (when (sb-alien:null-alien entry)
-        (return-from |sun/nio/fs/UnixNativeDispatcher.readdir(J)| nil))
+        (return-from |sun/nio/fs/UnixNativeDispatcher.readdir0(J)| nil))
       ;; d_name is at offset 19 in struct dirent on Linux x86-64
       (let* ((name (%read-c-string-from-sap (+ (sb-sys:sap-int (sb-alien:alien-sap entry)) 19)))
              (bytes (flexi-streams:string-to-octets name :external-format :utf-8)))
         (make-java-array
-         :component-class (%get-ldk-class-by-fq-name "byte")
+         :component-class (%get-java-class-by-bin-name "byte")
          :initial-contents bytes)))))
+
+(defun |sun/nio/fs/UnixNativeDispatcher.readdir(J)| (dirp-addr)
+  "Pre-JDK-25 name for readdir0."
+  (|sun/nio/fs/UnixNativeDispatcher.readdir0(J)| dirp-addr))
 
 (defun |sun/nio/fs/UnixNativeDispatcher.write(IJI)| (fd address len)
   "write(2) — write to file descriptor from native buffer."
@@ -4644,7 +4804,7 @@ does not reconstruct, so we compute it from the name directly."
   (let* ((msg (sb-int:strerror errno))
          (bytes (flexi-streams:string-to-octets msg :external-format :utf-8)))
     (make-java-array
-     :component-class (%get-ldk-class-by-fq-name "byte")
+     :component-class (%get-java-class-by-bin-name "byte")
      :initial-contents bytes)))
 
 (defun |sun/nio/fs/UnixNativeDispatcher.getpwuid(I)| (uid)
@@ -4654,7 +4814,7 @@ does not reconstruct, so we compute it from the name directly."
              (name (sb-posix:passwd-name pw))
              (bytes (flexi-streams:string-to-octets name :external-format :utf-8)))
         (make-java-array
-         :component-class (%get-ldk-class-by-fq-name "byte")
+         :component-class (%get-java-class-by-bin-name "byte")
          :initial-contents bytes))
     (sb-posix:syscall-error (e)
       (let ((ux (%make-java-instance "sun/nio/fs/UnixException")))
@@ -4669,7 +4829,7 @@ does not reconstruct, so we compute it from the name directly."
              (name (sb-posix:group-name gr))
              (bytes (flexi-streams:string-to-octets name :external-format :utf-8)))
         (make-java-array
-         :component-class (%get-ldk-class-by-fq-name "byte")
+         :component-class (%get-java-class-by-bin-name "byte")
          :initial-contents bytes))
     (sb-posix:syscall-error (e)
       (let ((ux (%make-java-instance "sun/nio/fs/UnixException")))
@@ -4853,13 +5013,11 @@ does not reconstruct, so we compute it from the name directly."
 |#
 
 (defun |java/net/Inet4Address.init()| ()
-  ;; FIXME
   nil)
 
 (defmethod |getOption(I)| ((this |java/net/SocketOptions|) option-id)
   (declare (ignore this)
            (ignore option-id))
-  ;; FIXME
   (slot-value |+static-java/lang/Boolean+| '|TRUE|))
 
 ;; FIXME -- am I picking up the wrong static method?  Found with log4j.
@@ -4895,7 +5053,6 @@ does not reconstruct, so we compute it from the name directly."
   0)
 
 (defmethod |getStartupTime()| ((this |sun/management/VMManagementImpl|))
-  ;; FIXME
   555)
 
 (defmethod |read0()| ((this |java/io/FileInputStream|))
@@ -4909,7 +5066,7 @@ does not reconstruct, so we compute it from the name directly."
                     (or b -1)))
       ((streamp fd) (let ((b (read-byte fd nil nil)))
                       (or b -1)))
-      (t (error "unimplemented fd ~A in FileInputStream.read0" fd)))))
+      (t (unimplemented "fd ~A in FileInputStream.read0" fd)))))
 
 (defun %class->descriptor-string (class)
   "Return a JVM type descriptor fragment for the given java.lang.Class."
@@ -5008,7 +5165,6 @@ does not reconstruct, so we compute it from the name directly."
     count))
 
 (defun |java/lang/invoke/MethodHandleNatives.registerNatives()| ()
-  ;; FIXME
   nil)
 
 (defun |java/lang/invoke/MethodHandleNatives.getConstant(I)| (i)
@@ -5016,7 +5172,6 @@ does not reconstruct, so we compute it from the name directly."
   0)
 
 (defun |java/lang/invoke/MethodHandleNatives.getNamedCon(I[Ljava/lang/Object;)| (which objarray)
-  ;; FIXME
   (declare (ignore objarray))
   (assert (zerop which))
   0)
@@ -5595,85 +5750,39 @@ interfaces (which pass boxed Object args) reach primitive-parameter methods."
                           (%unbox-args-for-descriptor b (rest args)))
                     args))))))
 
-(defun |java/lang/invoke/MethodHandle.linkToStatic(Ljava/lang/invoke/MemberName;)| (&rest args)
-  "MethodHandle intrinsic: invoke a static method via MemberName (no-arg variant).
-   The last argument is the MemberName, the rest are method arguments."
-  (let* ((member-name (car (last args)))
-         (method-args (butlast args)))
-    (apply #'%invoke-from-member-name member-name method-args)))
+;;; The linkTo* MethodHandle intrinsics all delegate to
+;;; %invoke-from-member-name: the last argument is the MemberName, the
+;;; rest are method arguments (including the receiver for the non-static
+;;; kinds).  Each kind gets a varargs variant named
+;;; |java/lang/invoke/MethodHandle.linkToKIND(Ljava/lang/invoke/MemberName;)|
+;;; plus fixed-arity variants
+;;; |...linkToKIND(Ljava/lang/Object;...Ljava/lang/invoke/MemberName;)|.
 
-(defun |java/lang/invoke/MethodHandle.linkToStatic(Ljava/lang/Object;Ljava/lang/invoke/MemberName;)| (arg member-name)
-  "MethodHandle intrinsic: invoke a static method via MemberName (1-arg variant)."
-  (%invoke-from-member-name member-name arg))
+(defmacro %define-linkto-wrappers (kind max-arity)
+  "Define the linkTo<KIND> intrinsic family: a varargs variant plus
+fixed variants taking 1..MAX-ARITY leading Object arguments."
+  (let ((base (format nil "java/lang/invoke/MethodHandle.linkTo~A" kind)))
+    `(progn
+       (defun ,(intern (format nil "~A(Ljava/lang/invoke/MemberName;)" base) :openldk)
+           (&rest args)
+         ,(format nil "MethodHandle intrinsic: linkTo~A, varargs variant." kind)
+         (apply #'%invoke-from-member-name (car (last args)) (butlast args)))
+       ,@(loop for n from 1 upto max-arity
+               collect
+               (let ((name (intern (format nil "~A(~{~A~}Ljava/lang/invoke/MemberName;)"
+                                           base
+                                           (loop repeat n collect "Ljava/lang/Object;"))
+                                   :openldk))
+                     (params (loop for i from 1 upto n
+                                   collect (intern (format nil "arg~A" i) :openldk))))
+                 `(defun ,name (,@params member-name)
+                    ,(format nil "MethodHandle intrinsic: linkTo~A, ~A-argument variant." kind n)
+                    (%invoke-from-member-name member-name ,@params)))))))
 
-(defun |java/lang/invoke/MethodHandle.linkToStatic(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/invoke/MemberName;)| (arg1 arg2 member-name)
-  "MethodHandle intrinsic: invoke a static method via MemberName (2-arg variant)."
-  (%invoke-from-member-name member-name arg1 arg2))
-
-(defun |java/lang/invoke/MethodHandle.linkToStatic(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/invoke/MemberName;)| (arg1 arg2 arg3 member-name)
-  "MethodHandle intrinsic: invoke a static method via MemberName (3-arg variant)."
-  (%invoke-from-member-name member-name arg1 arg2 arg3))
-
-(defun |java/lang/invoke/MethodHandle.linkToStatic(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/invoke/MemberName;)| (arg1 arg2 arg3 arg4 member-name)
-  "MethodHandle intrinsic: invoke a static method via MemberName (4-arg variant)."
-  (%invoke-from-member-name member-name arg1 arg2 arg3 arg4))
-
-(defun |java/lang/invoke/MethodHandle.linkToVirtual(Ljava/lang/invoke/MemberName;)| (&rest args)
-  "MethodHandle intrinsic: invoke a virtual method via MemberName (varargs variant).
-   The last argument is the MemberName, the rest are method arguments (including receiver)."
-  (let* ((member-name (car (last args)))
-         (method-args (butlast args)))
-    (apply #'%invoke-from-member-name member-name method-args)))
-
-(defun |java/lang/invoke/MethodHandle.linkToVirtual(Ljava/lang/Object;Ljava/lang/invoke/MemberName;)| (receiver member-name)
-  "MethodHandle intrinsic: invoke a virtual method via MemberName (receiver-only variant)."
-  (%invoke-from-member-name member-name receiver))
-
-(defun |java/lang/invoke/MethodHandle.linkToVirtual(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/invoke/MemberName;)| (receiver arg1 member-name)
-  "MethodHandle intrinsic: invoke a virtual method via MemberName (1-arg variant)."
-  (%invoke-from-member-name member-name receiver arg1))
-
-(defun |java/lang/invoke/MethodHandle.linkToVirtual(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/invoke/MemberName;)| (receiver arg1 arg2 member-name)
-  "MethodHandle intrinsic: invoke a virtual method via MemberName (2-arg variant)."
-  (%invoke-from-member-name member-name receiver arg1 arg2))
-
-(defun |java/lang/invoke/MethodHandle.linkToSpecial(Ljava/lang/invoke/MemberName;)| (&rest args)
-  "MethodHandle intrinsic: invoke a special (non-virtual) method via MemberName (varargs variant).
-   The last argument is the MemberName, the rest are method arguments (including receiver)."
-  (let* ((member-name (car (last args)))
-         (method-args (butlast args)))
-    (apply #'%invoke-from-member-name member-name method-args)))
-
-(defun |java/lang/invoke/MethodHandle.linkToSpecial(Ljava/lang/Object;Ljava/lang/invoke/MemberName;)| (receiver member-name)
-  "MethodHandle intrinsic: invoke a special method via MemberName (receiver-only variant)."
-  (%invoke-from-member-name member-name receiver))
-
-(defun |java/lang/invoke/MethodHandle.linkToSpecial(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/invoke/MemberName;)| (receiver arg1 member-name)
-  "MethodHandle intrinsic: invoke a special method via MemberName (1-arg variant)."
-  (%invoke-from-member-name member-name receiver arg1))
-
-(defun |java/lang/invoke/MethodHandle.linkToSpecial(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/invoke/MemberName;)| (receiver arg1 arg2 member-name)
-  "MethodHandle intrinsic: invoke a special method via MemberName (2-arg variant)."
-  (%invoke-from-member-name member-name receiver arg1 arg2))
-
-(defun |java/lang/invoke/MethodHandle.linkToInterface(Ljava/lang/invoke/MemberName;)| (&rest args)
-  "MethodHandle intrinsic: invoke an interface method via MemberName (varargs variant).
-   The last argument is the MemberName, the rest are method arguments (including receiver)."
-  (let* ((member-name (car (last args)))
-         (method-args (butlast args)))
-    (apply #'%invoke-from-member-name member-name method-args)))
-
-(defun |java/lang/invoke/MethodHandle.linkToInterface(Ljava/lang/Object;Ljava/lang/invoke/MemberName;)| (receiver member-name)
-  "MethodHandle intrinsic: invoke an interface method via MemberName (receiver-only variant)."
-  (%invoke-from-member-name member-name receiver))
-
-(defun |java/lang/invoke/MethodHandle.linkToInterface(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/invoke/MemberName;)| (receiver arg1 member-name)
-  "MethodHandle intrinsic: invoke an interface method via MemberName (1-arg variant)."
-  (%invoke-from-member-name member-name receiver arg1))
-
-(defun |java/lang/invoke/MethodHandle.linkToInterface(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/invoke/MemberName;)| (receiver arg1 arg2 member-name)
-  "MethodHandle intrinsic: invoke an interface method via MemberName (2-arg variant)."
-  (%invoke-from-member-name member-name receiver arg1 arg2))
+(%define-linkto-wrappers "Static" 4)
+(%define-linkto-wrappers "Virtual" 3)
+(%define-linkto-wrappers "Special" 3)
+(%define-linkto-wrappers "Interface" 3)
 
 ;;; -----------------------------------------------------------------------
 ;;; DirectMethodHandle$Holder trampolines
@@ -5971,6 +6080,38 @@ Returns the class symbol."
                              (slot-value |this| 'captures)
                              (list ,@params))))))
 
+(defun %prebuilt-lambda-class (method-str sam-param-count interface-type-name)
+  "Return the prebuilt openldk/Lambda* class for METHOD-STR when it
+implements the requested INTERFACE-TYPE-NAME (or when the interface is
+unknown, preserving legacy behavior), else NIL."
+  (flet ((covers (&rest ifaces)
+           (or (null interface-type-name)
+               (member interface-type-name ifaces :test #'string=))))
+    (cond
+      ((and (string= method-str "get")
+            (covers "java/util/function/Supplier"))
+       '|openldk/LambdaSupplier|)
+      ((and (string= method-str "test") sam-param-count (<= sam-param-count 1)
+            (covers "java/util/function/Predicate"))
+       '|openldk/LambdaPredicate|)
+      ((and (string= method-str "test")
+            (covers "java/util/function/BiPredicate"))
+       '|openldk/LambdaBiPredicate|)
+      ((and (string= method-str "apply") sam-param-count (<= sam-param-count 1)
+            (covers "java/util/function/Function"))
+       '|openldk/LambdaFunction|)
+      ((and (string= method-str "apply")
+            ;; BinaryOperator extends BiFunction, so the prebuilt class
+            ;; passes checkcast for both.
+            (covers "java/util/function/BinaryOperator" "java/util/function/BiFunction"))
+       '|openldk/LambdaBinaryOperator|)
+      ((and (string= method-str "accept") sam-param-count (<= sam-param-count 1)
+            (covers "java/util/function/Consumer"))
+       '|openldk/LambdaConsumer|)
+      ((and (string= method-str "accept")
+            (covers "java/util/function/BiConsumer"))
+       '|openldk/LambdaBiConsumer|))))
+
 (defun %lambda-metafactory (impl-handle captures &optional (method-name "get") sam-method-type interface-type-name)
   "Construct a functional interface implementation for Java lambdas.
 METHOD-NAME is the interface method name (get, test, apply, accept, etc.).
@@ -5991,28 +6132,19 @@ INTERFACE-TYPE-NAME is the binary name of the target functional interface."
                  (some #'identity
                        (%descriptor-param-prim-flags
                         (lstring (|toMethodDescriptorString()| sam-method-type)))))))
-         (lambda-class (cond
-                         ;; A SAM with primitive parameters (e.g. a custom
-                         ;; interface `int apply(int,int)`) cannot use the generic
-                         ;; Object-based Lambda* helpers, whose method is
-                         ;; apply(Object,Object); generate a class carrying the
-                         ;; exact SAM descriptor method instead.
-                         ((and interface-type-name sam-has-primitive-param)
-                          (%ensure-dynamic-lambda-class method-str sam-method-type interface-type-name))
-                         ((string= method-str "get") '|openldk/LambdaSupplier|)
-                         ((and (string= method-str "test") sam-param-count (<= sam-param-count 1))
-                          '|openldk/LambdaPredicate|)
-                         ((string= method-str "test")
-                          '|openldk/LambdaBiPredicate|)
-                         ((and (string= method-str "apply") sam-param-count (<= sam-param-count 1))
-                          '|openldk/LambdaFunction|)
-                         ((string= method-str "apply")
-                          '|openldk/LambdaBinaryOperator|)
-                         ((and (string= method-str "accept") sam-param-count (<= sam-param-count 1))
-                          '|openldk/LambdaConsumer|)
-                         ((string= method-str "accept") '|openldk/LambdaBiConsumer|)
-                         ;; Dynamic: create class + method for unknown SAM names
-                         (t (%ensure-dynamic-lambda-class method-str sam-method-type interface-type-name))))
+         (lambda-class (or
+                        ;; A SAM with primitive parameters (e.g. a custom
+                        ;; interface `int apply(int,int)`) cannot use the generic
+                        ;; Object-based Lambda* helpers, whose method is
+                        ;; apply(Object,Object).  Likewise a prebuilt Lambda*
+                        ;; class only passes CHECKCAST for the exact
+                        ;; java.util.function interface it implements -- a
+                        ;; custom SAM like java.util.stream.Sink (accept, but
+                        ;; NOT a Consumer as far as checkcast is concerned)
+                        ;; must get a generated class implementing it.
+                        (unless (and interface-type-name sam-has-primitive-param)
+                          (%prebuilt-lambda-class method-str sam-param-count interface-type-name))
+                        (%ensure-dynamic-lambda-class method-str sam-method-type interface-type-name)))
          (instance (make-instance lambda-class)))
     (setf (slot-value instance 'target) impl-handle)
     (setf (slot-value instance 'captures) captures)
@@ -6063,7 +6195,6 @@ INTERFACE-TYPE-NAME is the binary name of the target functional interface."
 
 (defun |java/lang/invoke/MethodHandleNatives.getMembers(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Class;I[Ljava/lang/invoke/MemberName;)|
     (defc match-name match-sig match-flags caller skip results)
-  ;; FIXME
   (assert (null match-name))
   (assert (null match-sig))
   (assert (eq match-flags 65536)) ;; methods only
@@ -6088,7 +6219,6 @@ INTERFACE-TYPE-NAME is the binary name of the target functional interface."
     (- (length (methods ldk-class)) (or skip 0))))
 
 (defmethod |getProtectionDomain0()| ((clazz |java/lang/Class|))
-  ;; FIXME
   nil)
 
 ;;; Remaining native entry points on JDK 21's internal Unsafe.  These are

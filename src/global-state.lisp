@@ -328,6 +328,18 @@
 (defvar *identity-hash-counter-lock* (bordeaux-threads:make-lock "identity-hash-lock"))
 (defvar *identity-hash-table* (make-hash-table :test #'eq :weakness :key :synchronized t))
 
+;; Methods registered here will not have their native Lisp implementations
+;; overwritten by bytecode compilation.  Key is the method key string
+;; (e.g. "java/lang/System.console()Ljava/io/Console;").
+(defvar *native-overrides* (make-hash-table :test #'equal))
+
+;; JVM field shadowing: a class may declare an instance field with the same
+;; name as one in a superclass (javac's synthetic this$0 outer references do
+;; this routinely); they are distinct fields resolved by declaring class.
+;; Shadowing fields get a class-qualified CLOS slot; this table maps
+;; "class-bin-name.field-name" -> that slot symbol.
+(defvar *field-shadow-slots* (make-hash-table :test #'equal :synchronized t))
+
 ;; Per-class-name locks for thread-safe class loading.
 ;; Maps class binary name (string) -> recursive lock.
 (defvar *class-load-locks* (make-hash-table :test #'equal :synchronized t))

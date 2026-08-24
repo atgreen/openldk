@@ -122,7 +122,11 @@
         ;; Fall back to Java implementation
         (call-next-method))))
 
-(defmethod |openStream()| ((url |java/net/URL|))
+;; :around so the override survives JIT compilation of java.net.URL — a
+;; compiled Java openStream() installs a primary method on this same GF and
+;; would otherwise clobber a primary Lisp override (it then NPEs in
+;; openConnection() on our handler-less synthetic jar:/jrt: URLs).
+(defmethod |openStream()| :around ((url |java/net/URL|))
   "Open an InputStream for the URL."
   (let ((url-string (or (gethash url *native-url-strings*)
                         (lstring (|toString()| url)))))
@@ -147,7 +151,7 @@
            (when-let (stream (open-resource-on-classpath (subseq rest (1+ slash))))
              (make-instance '<resource-input-stream> :lisp-stream stream)))))
       ;; Fall through to Java implementation for other protocols
-      (t nil))))
+      (t (call-next-method)))))
 
 (defmethod |toString()| :around ((url |java/net/URL|))
   "Return the original spelling of an OpenLDK-constructed resource URL."

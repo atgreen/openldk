@@ -7,6 +7,37 @@
   "Entry point for the pre-dumped javac image. Runs com.sun.tools.javac.Main."
   ;; Match Java FP semantics
   (sb-int:set-floating-point-modes :traps nil)
+  ;; Refresh process-dependent system properties baked in at image-build
+  ;; time; relative paths would otherwise resolve against the BUILD
+  ;; directory's cwd.  Must happen before any NIO use (the default
+  ;; filesystem captures user.dir in its clinit, which make-javac-image
+  ;; arranged to re-run at first access).
+  (handler-case
+      (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)|
+       (openldk::ijstring "user.dir")
+       (openldk::jstring (namestring (uiop:getcwd))))
+    (condition () nil))
+  ;; The default NIO filesystem object baked into the image captured the
+  ;; BUILD directory as its defaultDirectory; patch it so relative paths
+  ;; resolve against the actual current directory.
+  (handler-case
+      (let ((get-default (static-method-symbol "java/nio/file/FileSystems.getDefault()"
+                                               (loader-package *boot-ldk-class-loader*))))
+        (when (fboundp get-default)
+          (let ((fs (funcall get-default))
+                (cwd (let ((d (string-right-trim "/" (namestring (uiop:getcwd)))))
+                       (if (string= d "") "/" d))))
+            (when (and fs (slot-exists-p fs '|defaultDirectory|))
+              (setf (slot-value fs '|defaultDirectory|)
+                    (make-java-array
+                     :component-class (%get-java-class-by-bin-name "byte")
+                     :initial-contents (map 'vector
+                                            (lambda (c)
+                                              (let ((b (char-code c)))
+                                                (if (> b 127) (- b 256) b)))
+                                            cwd)))))))
+    (condition (c)
+      (format *error-output* "~&; Warning: could not refresh default filesystem cwd: ~A~%" c)))
   (let* ((args (uiop:command-line-arguments))
          (cp (default-javac-classpath)))
     (handler-bind
@@ -257,7 +288,7 @@
   (unwind-protect
        (let ((cp (default-javac-classpath)))
 	 (let ((openldk::*ignore-quit* t))
-	   (flet ((safe-warmup (args desc &key (timeout 120))
+	   (flet ((safe-warmup (args desc &key (timeout 420))
 		    (handler-case
 			(sb-ext:with-timeout timeout
 			  (openldk::main "com.sun.tools.javac.Main" args :classpath cp))
@@ -278,11 +309,82 @@
       ;; the actual runtime environment, not stale warmup state.
       (let ((pe (openldk::%get-ldk-class-by-bin-name "java/lang/ProcessEnvironment" t)))
         (when pe (setf (openldk::initialized-p pe) nil)))
-      ;; Kill helper threads before dumping the image.
+      ;; Likewise the NIO default filesystem: its clinit captures user.dir
+      ;; (the BUILD directory) into UnixFileSystem.defaultDirectory, sending
+      ;; relative-path I/O to the wrong place after restart.
+      (dolist (cname '("sun/nio/fs/DefaultFileSystemProvider"
+                       "java/nio/file/FileSystems$DefaultFileSystemHolder"))
+        (let ((c (openldk::%get-ldk-class-by-bin-name cname t)))
+          (when c (setf (openldk::initialized-p c) nil))))
+      ;; Kill ALL helper threads before dumping the image — warmup can spawn
+      ;; NIO/cleaner threads with arbitrary names, and save-lisp-and-die
+      ;; refuses to run with any other thread alive.
       (loop for thread in (bt:all-threads)
-            when (and (not (eq thread (bt:current-thread)))
-                      (search "Java-Thread" (bt:thread-name thread)))
-            do (bt:destroy-thread thread))
+            unless (eq thread (bt:current-thread))
+              do (ignore-errors (bt:destroy-thread thread)))
+      (loop repeat 50
+            while (rest (bt:all-threads))
+            do (sleep 0.1))
+      ;; Reset ALL lock state.  A lock or monitor saved mid-acquisition (a
+      ;; warmup thread killed while holding it, or a warmup that died from
+      ;; stack exhaustion inside a synchronized region) blocks the restarted
+      ;; image forever on its first acquisition.
+      (clrhash openldk::*class-load-locks*)
+      (setf openldk::*class-load-locks-lock* (bt:make-lock "class-load-locks"))
+      (clrhash openldk::*monitors*)
+      (setf openldk::*method-compilation-lock* (bt:make-lock "method-compilation-lock"))
+      (setf openldk::*method-compilation-cv* (bt:make-condition-variable :name "method-compilation-cv"))
+      (setf openldk::*identity-hash-counter-lock* (bt:make-lock "identity-hash-lock"))
+      ;; Drop stale in-progress compilation claims from dead warmup threads.
+      (maphash (lambda (k v)
+                 (when (eq v t)
+                   (remhash k openldk::*methods-being-compiled*)))
+               openldk::*methods-being-compiled*)
+      ;; Classpath entries carry their own locks and open container handles.
+      (mapc #'openldk::%reset-classpath-entry-runtime-state openldk::*classpath*)
+      ;; jrt: filesystem state (providers, mmapped jimage buffers) is
+      ;; process-local; drop it so the restarted image rebuilds it.
+      (setf openldk::*installed-file-system-providers* nil)
+      (clrhash openldk::*jimage-native-maps*)
+      ;; Java-side static caches also hold the build-time ImageReader whose
+      ;; mmapped buffer dies with this process; using them after restart
+      ;; segfaults.  Clear them so the runtime rebuilds the jrt filesystem.
+      (flet ((static-storage (bin-name)
+               (handler-case
+                   (let* ((pkg (openldk::class-package bin-name))
+                          (sym (and pkg (find-symbol (format nil "+static-~A+" bin-name) pkg))))
+                     (when (and sym (boundp sym))
+                       (symbol-value sym)))
+                 (condition () nil))))
+        (let ((sir (static-storage "jdk/internal/jimage/ImageReader$SharedImageReader")))
+          (when (and sir (slot-exists-p sir '|OPEN_FILES|))
+            (let ((map (slot-value sir '|OPEN_FILES|)))
+              (when map (ignore-errors (openldk::|clear()| map))))))
+        (let ((jrti (static-storage "com/sun/tools/javac/file/JRTIndex")))
+          (when (and jrti (slot-exists-p jrti '|sharedInstance|))
+            (setf (slot-value jrti '|sharedInstance|) nil)))
+        ;; ResourceBundle negative-caches failed lookups; a NONEXISTENT
+        ;; marker cached during warmup would be baked into the image and
+        ;; poison the same lookup forever at runtime.
+        (let ((rb (static-storage "java/util/ResourceBundle")))
+          (when (and rb (slot-exists-p rb '|cacheList|))
+            (let ((m (slot-value rb '|cacheList|)))
+              (when m (ignore-errors (openldk::|clear()| m)))))))
+      ;; Synchronized hash tables carry an internal mutex; one saved in the
+      ;; locked state (a warmup thread killed mid-access) deadlocks the
+      ;; restarted image on its first table access.  Sweep the heap and give
+      ;; every synchronized table a fresh lock.
+      (let ((tables '()))
+        (sb-vm:map-allocated-objects
+         (lambda (obj type size)
+           (declare (ignore type size))
+           (when (and (hash-table-p obj)
+                      (sb-ext:hash-table-synchronized-p obj))
+             (push obj tables)))
+         :all)
+        (dolist (ht tables)
+          (setf (sb-impl::hash-table-%lock ht)
+                (sb-thread:make-mutex :name "hash-table lock"))))
       (sb-ext:save-lisp-and-die output-path
 				:executable t
 				:save-runtime-options t
