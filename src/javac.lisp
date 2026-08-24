@@ -291,11 +291,23 @@
 	   (flet ((safe-warmup (args desc &key (timeout 420))
 		    (handler-case
 			(sb-ext:with-timeout timeout
-			  (openldk::main "com.sun.tools.javac.Main" args :classpath cp))
+			  ;; handler-bind so a Lisp-level arithmetic error is
+			  ;; backtraced at signal time, before unwinding.
+			  (handler-bind
+			      ((arithmetic-error
+				 (lambda (c)
+				   (format *error-output* "~&;; WARMUP (~A) arithmetic error at signal time: ~A~%" desc c)
+				   (sb-debug:print-backtrace :stream *error-output* :count 40)
+				   (force-output *error-output*))))
+			    (openldk::main "com.sun.tools.javac.Main" args :classpath cp)))
 		      (sb-ext:timeout ()
 			(format *error-output* "~&;; WARMUP (~A) timed out after ~Ds~%" desc timeout))
 		      (condition (c)
-			(format *error-output* "~&;; WARMUP (~A) caught: ~A~%" desc c)))))
+			(format *error-output* "~&;; WARMUP (~A) caught: ~A~%" desc c)
+			;; Java exceptions print their own traces; for Lisp-level
+			;; conditions a backtrace is the only clue to the origin.
+			(unless (typep c 'openldk::|condition-java/lang/Throwable|)
+			  (sb-debug:print-backtrace :stream *error-output* :count 40))))))
 	     (safe-warmup '() "no-args")
 	     (safe-warmup '("-version") "-version")
 	     (safe-warmup '("-verbose" "Hello.java") "Hello.java")

@@ -1423,6 +1423,12 @@ shadows a superclass field and needs its own storage."
    DUMP-DIR: The directory into which internal debug info is dumped.
    AOT: Ahead-of-time compilation directory (generate Lisp source files)."
 
+  ;; Java floating-point semantics: float division by zero must yield
+  ;; infinity/NaN, not trap (javac itself relies on 1.0/0.0 in isPosZero).
+  ;; The image-entry wrappers also set this, but MAIN can be called
+  ;; directly (build-time warmups, the REPL).
+  (sb-int:set-floating-point-modes :traps nil)
+
   (ensure-JAVA_HOME)
 
   ;; Install SIGQUIT handler for debugging hangs (send kill -3 to dump all stacks)

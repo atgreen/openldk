@@ -583,9 +583,9 @@ result always stays in range (bitwise ops, floats, doubles)."
 
                             ;; If the dividend is an infinity or the divisor is a zero or both, the result is NaN
                             ((or (float-features:float-infinity-p value1)
-                                 (eq 0.0 value2)
+                                 (zerop value2)
                                  (and (float-features:float-infinity-p value1)
-                                      (eq 0.0 value2)))
+                                      (zerop value2)))
                              float-features:single-float-nan)
 
                             ;; If the dividend is finite and the divisor is an infinity, the result equals the dividend
@@ -594,7 +594,7 @@ result always stays in range (bitwise ops, floats, doubles)."
                              value1)
 
                             ;; If the dividend is a zero and the divisor is finite, the result equals the dividend
-                            ((and (eq 0.0 value1)
+                            ((and (zerop value1)
                                   (not (float-features:float-infinity-p value2)))
                              value1)
 
@@ -616,9 +616,9 @@ result always stays in range (bitwise ops, floats, doubles)."
 
                             ;; If the dividend is an infinity or the divisor is a zero or both, the result is NaN
                             ((or (float-features:float-infinity-p value1)
-                                 (eq 0.0d0 value2)
+                                 (zerop value2)
                                  (and (float-features:float-infinity-p value1)
-                                      (eq 0.0d0 value2)))
+                                      (zerop value2)))
                              float-features:double-float-nan)
 
                             ;; If the dividend is finite and the divisor is an infinity, the result equals the dividend
@@ -627,7 +627,7 @@ result always stays in range (bitwise ops, floats, doubles)."
                              value1)
 
                             ;; If the dividend is a zero and the divisor is finite, the result equals the dividend
-                            ((and (eq 0.0d0 value1)
+                            ((and (zerop value1)
                                   (not (float-features:float-infinity-p value2)))
                              value1)
 
