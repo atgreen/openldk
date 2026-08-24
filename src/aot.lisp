@@ -68,6 +68,8 @@
 (defun %write-aot-class (class-name class-definition-code)
   "Store AOT class definitions in memory for later topological sorting and writing."
   (when *aot-dir*
+    (unless *aot-class-definitions*
+      (setf *aot-class-definitions* (make-hash-table :test #'equal)))
     ;; Store the class definition along with its parent class name for sorting
     (let* ((class (gethash class-name *ldk-classes-by-bin-name*))
            (parent-name (when class (slot-value class 'super))))
@@ -272,6 +274,23 @@ class definitions and an ASDF system."
 
       ;; Otherwise treat as class name
       (t
+       (when aot
+         (setf *aot-class-definitions* (make-hash-table :test #'equal)))
+       (setf *aot-dir* aot)
        (let ((class (classload (substitute #\/ #\. mainclass))))
          (assert (or class (error "Can't load ~A" mainclass)))
-         (return-from %run-aot-main)))))
+         (let ((bin-name (substitute #\/ #\. mainclass)))
+           (format t "; AOT compiling ~A~%" bin-name)
+           (handler-case
+               (loop for method-index from 1 to (length (slot-value class 'methods))
+                     do (handler-case
+                            (%compile-method bin-name method-index)
+                          (error (e)
+                            (format t ";   Warning: Failed to compile method ~A in ~A: ~A~%" method-index bin-name e))))
+             (sb-kernel::control-stack-exhausted ()
+               (format t ";   ERROR: Stack exhausted compiling ~A, skipping remaining methods~%" bin-name)))))
+       (setf *aot-dir* nil)
+       (when aot
+         (%write-all-aot-classes aot)
+         (%generate-aot-asdf-file aot "aot-compiled"))
+       (return-from %run-aot-main))))
