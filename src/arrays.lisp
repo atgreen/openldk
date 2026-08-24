@@ -112,6 +112,21 @@ descriptor strings."
         (error (%lisp-condition exc))))
     (setf (aref data index) new-value)))
 
+(defun %array-type-name-for-component (component-name)
+  "Class.getName()-style name of an array type whose component Class is
+named COMPONENT-NAME (dotted form, e.g. \"java.lang.String\", \"int\",
+or \"[I\")."
+  (cond
+    ((char= (char component-name 0) #\[)
+     (concatenate 'string "[" component-name))
+    ((let ((code (cdr (assoc component-name
+                             '(("byte" . "B") ("char" . "C") ("int" . "I")
+                               ("short" . "S") ("long" . "J") ("double" . "D")
+                               ("float" . "F") ("boolean" . "Z"))
+                             :test #'string=))))
+       (when code (concatenate 'string "[" code))))
+    (t (concatenate 'string "[L" component-name ";"))))
+
 (defun %array-store-compatible-p (component value)
   "Can VALUE legally be stored into a reference array whose component
 Class is COMPONENT?  Permissive when the component's CLOS class is not
@@ -120,10 +135,16 @@ ArrayStoreException during bootstrap."
   (let ((component-name (lstring (slot-value component '|name|))))
     (cond
       ((string= component-name "java.lang.Object") t)
-      ;; Array-of-arrays component: require an array value; finer
-      ;; component covariance is enforced when the nested array is used.
+      ;; Array-of-arrays component: the value must be an array whose
+      ;; type is assignable to the component array type.
       ((char= (char component-name 0) #\[)
-       (typep value 'java-array))
+       (and (typep value 'java-array)
+            (let ((value-component (%array-component-class value)))
+              (or (not (typep value-component '|java/lang/Class|))
+                  (%array-type-name-assignable-p
+                   component-name
+                   (%array-type-name-for-component
+                    (lstring (slot-value value-component '|name|))))))))
       (t
        (let* ((bin-name (substitute #\/ #\. component-name))
               (clos-class (find-class (intern bin-name (class-package bin-name)) nil)))
