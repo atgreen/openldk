@@ -1038,6 +1038,12 @@ attribute; nil for top-level, local, and anonymous classes."
   (trivial-garbage:gc))
 
 (defun |java/lang/Thread.sleep(J)| (milliseconds)
+  "Legacy public native sleep(J) — newer JDKs compile this as bytecode
+delegating to sleep0/sleepNanos0, clobbering this defun; the real
+implementation therefore lives in %java-thread-sleep."
+  (%java-thread-sleep milliseconds))
+
+(defun %java-thread-sleep (milliseconds)
   "Sleep for the specified milliseconds, checking for interruption."
   ;; Get current thread
   (let* ((current-java-thread (or #+sb-fiber

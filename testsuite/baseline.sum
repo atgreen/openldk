@@ -1,4 +1,4 @@
-Test run by green on Mon Aug 24 14:16:18 2026
+Test run by green on Mon Aug 24 16:35:54 2026
 Native configuration is x86_64-pc-linux-gnu
 
 		=== openldk tests ===
@@ -28,7 +28,6 @@ PASS: jikestst/derek/ok/exec/TestVirtualCall.e
 XFAIL: jikestst/hpj/ok/exec/AbsClassMain.e
 PASS: jikestst/hpj/ok/exec/BigComp.e
 PASS: jikestst/hpj/ok/exec/Const.e
-WARNING: program timed out
 XFAIL: jikestst/hpj/ok/exec/DTest.e
 XFAIL: jikestst/hpj/ok/exec/FISTest.e
 XFAIL: jikestst/hpj/ok/exec/FOSTest.e
@@ -164,11 +163,10 @@ PASS: aaa/switchindy.java output pattern test
 
 		=== openldk Summary ===
 
-# of expected passes		103
+# of expected passes		105
 # of unexpected failures	2
-# of unexpected successes	1
 # of expected failures		43
-Test run by green on Mon Aug 24 14:19:51 2026
+Test run by green on Mon Aug 24 16:38:54 2026
 Native configuration is x86_64-pc-linux-gnu
 
 		=== openldk tests ===
@@ -255,7 +253,7 @@ XFAIL: gcj/PR162.java execution test
 PASS: gcj/PR16867.java (test for excess errors)
 PASS: gcj/PR16867.java execution test
 PASS: gcj/PR18699.java (test for excess errors)
-FAIL: gcj/PR18699.java execution test
+PASS: gcj/PR18699.java execution test
 PASS: gcj/PR19870.java (test for excess errors)
 PASS: gcj/PR19870.java execution test
 PASS: gcj/PR19870_2.java (test for excess errors)
@@ -276,7 +274,7 @@ PASS: gcj/PR26858.java (test for excess errors)
 WARNING: program timed out
 XFAIL: gcj/PR26858.java execution test
 PASS: gcj/PR27908.java (test for excess errors)
-XFAIL: gcj/PR27908.java execution test
+PASS: gcj/PR27908.java execution test
 PASS: gcj/PR29013.java (test for excess errors)
 PASS: gcj/PR29013.java execution test
 PASS: gcj/PR29495.java (test for excess errors)
@@ -316,6 +314,7 @@ XFAIL: gcj/Process_1.java execution test
 PASS: gcj/Process_2.java (test for excess errors)
 XFAIL: gcj/Process_2.java execution test
 PASS: gcj/Process_3.java (test for excess errors)
+WARNING: program timed out
 XFAIL: gcj/Process_3.java execution test
 PASS: gcj/Process_4.java (test for excess errors)
 XFAIL: gcj/Process_4.java execution test
@@ -348,7 +347,7 @@ XFAIL: gcj/String_overflow.java execution test
 PASS: gcj/SyncGlobal.java (test for excess errors)
 PASS: gcj/SyncGlobal.java execution test
 PASS: gcj/SyncTest.java (test for excess errors)
-FAIL: gcj/SyncTest.java execution test
+XFAIL: gcj/SyncTest.java execution test
 PASS: gcj/Synch.java (test for excess errors)
 PASS: gcj/Synch.java execution test
 PASS: gcj/TLtest.java (test for excess errors)
@@ -356,27 +355,27 @@ XFAIL: gcj/TLtest.java execution test
 PASS: gcj/TestProxy.java (test for excess errors)
 FAIL: gcj/TestProxy.java execution test
 PASS: gcj/TestWait0.java (test for excess errors)
-FAIL: gcj/TestWait0.java execution test
+PASS: gcj/TestWait0.java execution test
 PASS: gcj/TestWaitSimple.java (test for excess errors)
-FAIL: gcj/TestWaitSimple.java execution test
+PASS: gcj/TestWaitSimple.java execution test
 PASS: gcj/TestWaitThis.java (test for excess errors)
-FAIL: gcj/TestWaitThis.java execution test
+PASS: gcj/TestWaitThis.java execution test
 PASS: gcj/Thread_Alive.java (test for excess errors)
-FAIL: gcj/Thread_Alive.java execution test
+XFAIL: gcj/Thread_Alive.java execution test
 PASS: gcj/Thread_HoldsLock.java (test for excess errors)
 PASS: gcj/Thread_HoldsLock.java execution test
 PASS: gcj/Thread_Interrupt.java (test for excess errors)
 XFAIL: gcj/Thread_Interrupt.java execution test
 PASS: gcj/Thread_Join.java (test for excess errors)
-FAIL: gcj/Thread_Join.java execution test
+XFAIL: gcj/Thread_Join.java execution test
 PASS: gcj/Thread_Monitor.java (test for excess errors)
 XFAIL: gcj/Thread_Monitor.java execution test
 PASS: gcj/Thread_Sleep.java (test for excess errors)
-FAIL: gcj/Thread_Sleep.java execution test
+PASS: gcj/Thread_Sleep.java execution test
 PASS: gcj/Thread_Sleep_2.java (test for excess errors)
-FAIL: gcj/Thread_Sleep_2.java execution test
+PASS: gcj/Thread_Sleep_2.java execution test
 PASS: gcj/Thread_Wait.java (test for excess errors)
-FAIL: gcj/Thread_Wait.java execution test
+PASS: gcj/Thread_Wait.java execution test
 PASS: gcj/Thread_Wait_2.java (test for excess errors)
 XFAIL: gcj/Thread_Wait_2.java execution test
 PASS: gcj/Thread_Wait_Interrupt.java (test for excess errors)
@@ -525,7 +524,7 @@ XFAIL: gcj/pr21785.java execution test
 PASS: gcj/pr21844.java (test for excess errors)
 PASS: gcj/pr21844.java execution test
 PASS: gcj/pr22211.java (test for excess errors)
-FAIL: gcj/pr22211.java execution test
+PASS: gcj/pr22211.java execution test
 PASS: gcj/pr24321.java (test for excess errors)
 PASS: gcj/pr24321.java execution test
 PASS: gcj/pr25676.java (test for excess errors)
@@ -585,7 +584,7 @@ PASS: gcj/verify.java execution test
 
 		=== openldk Summary ===
 
-# of expected passes		344
-# of unexpected failures	17
-# of expected failures		38
+# of expected passes		353
+# of unexpected failures	6
+# of expected failures		40
 # of unresolved testcases	3

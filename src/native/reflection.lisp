@@ -168,7 +168,7 @@
        (progn
          (when *debug-trace*
            (format t "~&~V@A trace: entering java/lang/Class.getDeclaredFields0(Z)~%" (incf *call-nesting-level* 1) "*"))
-         (unless (gethash "java/lang/reflect/Field" *ldk-classes-by-bin-name* t)
+         (unless (gethash "java/lang/reflect/Field" *ldk-classes-by-bin-name*)
            (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/reflect/Field") nil nil nil))
 
          ;; Get the lclass for THIS (use correct loader)

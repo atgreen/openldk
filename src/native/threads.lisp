@@ -139,7 +139,13 @@
 
 (defun |java/lang/Thread.sleep0(J)| (milliseconds)
   "JDK 21 private native sleep0 — replaces public native sleep(J)."
-  (|java/lang/Thread.sleep(J)| milliseconds))
+  (%java-thread-sleep milliseconds))
+
+(defun |java/lang/Thread.sleepNanos0(J)| (nanos)
+  "JDK 25 private native sleepNanos0 — Thread.sleep now passes
+nanoseconds and its bytecode wrapper clobbers any sleep(J) defun, so
+this must hold the real implementation path."
+  (%java-thread-sleep (ceiling nanos 1000000)))
 
 (defun |java/lang/Thread.yield0()| ()
   "JDK 21 private native yield0 — replaces public native yield()."
