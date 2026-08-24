@@ -676,7 +676,20 @@ for the Java caller."
                                    nil)))))
 
 (defmethod |java/util/TimeZone.getSystemTimeZoneID(Ljava/lang/String;)| (arg)
-  (jstring (local-time:format-timestring nil (local-time:now) :format '(:timezone))))
+  "Return the zoneinfo ID of the system default timezone (e.g.
+\"America/Toronto\"): $TZ if set, else the /etc/localtime symlink target.
+The previous implementation returned an abbreviation like \"EDT\", which
+TimeZone.getTimeZone does not recognize, silently defaulting to GMT."
+  (declare (ignore arg))
+  (jstring
+   (or (let ((tz (uiop:getenv "TZ")))
+         (and tz (plusp (length tz)) (string-left-trim ":" tz)))
+       (ignore-errors
+         (let* ((link (sb-posix:readlink "/etc/localtime"))
+                (pos (search "zoneinfo/" link)))
+           (when pos
+             (subseq link (+ pos (length "zoneinfo/"))))))
+       "GMT")))
 
 (defmethod |length()| ((str string))
   (length (lstring str)))
