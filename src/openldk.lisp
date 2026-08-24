@@ -1422,32 +1422,38 @@ shadows a superclass field and needs its own storage."
      (not (zerop (or (slot-value thread '|daemon|) 0))))
     (t nil)))
 
-(defun main (mainclass &optional (args (list)) &key dump-dir classpath aot)
-  "Run a Java class with the given arguments.
-   MAINCLASS: The class with the static main method to execute.
-   ARGS: Java program command line arguments (list of strings).
-   CLASSPATH: The classpath from which classes are loaded.
-   DUMP-DIR: The directory into which internal debug info is dumped.
-   AOT: Ahead-of-time compilation directory (generate Lisp source files)."
+(defun %parse-ldk-debug-flags ()
+  "Set the *debug-...* flags from the LDK_DEBUG environment variable."
+  (let ((LDK_DEBUG (uiop:getenv "LDK_DEBUG")))
+    (when LDK_DEBUG
+      (when (find #\c LDK_DEBUG) (setf *debug-codegen* t))
+      (when (find #\l LDK_DEBUG) (setf *debug-load* t))
+      (when (find #\L LDK_DEBUG) (setf *debug-load* t) (setf *debug-compile* t))
+      (when (find #\s LDK_DEBUG) (setf *debug-slynk* t))
+      (when (find #\t LDK_DEBUG) (setf *debug-trace* t))
+      (when (find #\T LDK_DEBUG) (setf *debug-trace-args* t))
+      (when (find #\b LDK_DEBUG) (setf *debug-bytecode* t))
+      (when (find #\e LDK_DEBUG) (setf *debug-exceptions* t))
+      (when (find #\x LDK_DEBUG) (setf *debug-x* t))
+      (when (find #\u LDK_DEBUG) (setf *debug-unmuffle* t))
+      (when (find #\p LDK_DEBUG) (setf *debug-propagation* t)))))
 
+(defun %main-runtime-setup (classpath dump-dir aot)
+  "Per-run setup shared by every MAIN invocation: Java FP semantics, the
+VM start-time stamp, SIGQUIT handler, class loaders, debug flags, system
+properties, and *CLASSPATH* construction."
   ;; Java floating-point semantics: float division by zero must yield
   ;; infinity/NaN, not trap (javac itself relies on 1.0/0.0 in isPosZero).
   ;; The image-entry wrappers also set this, but MAIN can be called
   ;; directly (build-time warmups, the REPL).
   (sb-int:set-floating-point-modes :traps nil)
-
   ;; Stamp the VM start time (RuntimeMXBean.getStartTime) on first entry.
   (unless *vm-start-time-millis*
     (setf *vm-start-time-millis* (|java/lang/System.currentTimeMillis()|)))
-
   (ensure-JAVA_HOME)
-
   ;; Install SIGQUIT handler for debugging hangs (send kill -3 to dump all stacks)
   (install-sigquit-handler)
-
-  ;; Initialize the boot class loader if not already done
-  ;; It uses OPENLDK.SYSTEM package for class symbols (which :use's :openldk)
-  ;; Boot loader is for JDK classes only (java/*, javax/*, sun/*, etc.)
+  ;; Boot class loader: OPENLDK.SYSTEM package, JDK classes only.
   (unless *boot-ldk-class-loader*
     (let ((system-pkg (or (find-package "OPENLDK.SYSTEM")
                           (make-package "OPENLDK.SYSTEM" :use '(:openldk)))))
@@ -1461,256 +1467,124 @@ shadows a superclass field and needs its own storage."
                            :ldk-classes-by-fq-name *ldk-classes-by-fq-name*
                            :java-classes-by-bin-name *java-classes-by-bin-name*
                            :java-classes-by-fq-name *java-classes-by-fq-name*))))
-
-  ;; Initialize the application class loader if not already done
-  ;; It uses OPENLDK.APP package for user classes loaded from CLASSPATH
-  ;; App loader is child of boot loader (delegates JDK classes to parent)
+  ;; Application class loader: OPENLDK.APP package, child of boot.
   (unless *app-ldk-class-loader*
     (setf *app-ldk-class-loader*
           (make-ldk-class-loader :parent-loader *boot-ldk-class-loader*
                                  :java-loader nil
                                  :package-name "OPENLDK.APP")))
-
-  ;; If classpath isn't set on the command line, then get it
-  ;; from the LDK_CLASSPATH environment variable.
-  (unless classpath
-    (setf classpath (or (uiop:getenv "CLASSPATH") (uiop:getenv "LDK_CLASSPATH") ".")))
-
-  (let ((LDK_DEBUG (uiop:getenv "LDK_DEBUG")))
-    (when LDK_DEBUG
-      (progn
-
-        (when (find #\c LDK_DEBUG)
-          (setf *debug-codegen* t))
-        (when (find #\l LDK_DEBUG)
-          (setf *debug-load* t))
-        (when (find #\L LDK_DEBUG)
-          (setf *debug-load* t)
-          (setf *debug-compile* t))
-        (when (find #\s LDK_DEBUG)
-          (setf *debug-slynk* t))
-        (when (find #\t LDK_DEBUG)
-          (setf *debug-trace* t))
-        (when (find #\T LDK_DEBUG)
-          (setf *debug-trace-args* t))
-        (when (find #\b LDK_DEBUG)
-          (setf *debug-bytecode* t))
-        (when (find #\e LDK_DEBUG)
-          (setf *debug-exceptions* t))
-        (when (find #\x LDK_DEBUG)
-          (setf *debug-x* t))
-        (when (find #\u LDK_DEBUG)
-          (setf *debug-unmuffle* t))
-        (when (find #\p LDK_DEBUG)
-          (setf *debug-propagation* t)))))
-
+  (%parse-ldk-debug-flags)
   ;; Enable DCE via environment variable LDK_DCE=1 (or any non-empty value)
   (let ((LDK_DCE (uiop:getenv "LDK_DCE")))
     (when (and LDK_DCE (plusp (length LDK_DCE)))
       (setf *enable-dce* t)))
-
   ;; Reset system properties to fix things that change between
   ;; build-time and run-time.
   (|java/lang/System.initProperties(Ljava/util/Properties;)|
    (slot-value |+static-java/lang/System+| '|props|))
-
   ;; Apply -D system properties from command line
   (dolist (prop *cli-jvm-properties*)
     (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)|
      (ijstring (car prop)) (ijstring (cdr prop))))
-
   (when *debug-slynk*
     (slynk:create-server :port 2025)
     (sleep 10))
-
   (setf *dump-dir* dump-dir)
   (setf *aot-dir* aot)
+  (let ((classpath (or classpath
+                       (uiop:getenv "CLASSPATH")
+                       (uiop:getenv "LDK_CLASSPATH")
+                       ".")))
+    (setf *classpath*
+          (append
+           (loop for cpe in (split-sequence:split-sequence (uiop:inter-directory-separator) classpath)
+                 collect (if (ends-with? ".jar" cpe)
+                             (make-instance 'jar-classpath-entry :jarfile cpe)
+                             (make-instance 'dir-classpath-entry :dir cpe)))
+           (discover-jmod-classpath-entries)))))
 
-  (setf *classpath*
-        (append
-         (loop for cpe in (split-sequence:split-sequence (uiop:inter-directory-separator) classpath)
-               collect (if (ends-with? ".jar" cpe)
-                           (make-instance 'jar-classpath-entry :jarfile cpe)
-                           (make-instance 'dir-classpath-entry :dir cpe)))
-         (discover-jmod-classpath-entries)))
+(defun %find-java-main-symbol (class)
+  "Find the static main([Ljava/lang/String;) symbol for CLASS, searching
+the superclass chain.  Static methods live in the defining class's
+loader package (OPENLDK.SYSTEM for classes loaded during warm-up)."
+  (when class
+    (let* ((pkg (if (and (slot-boundp class 'ldk-loader)
+                         (slot-value class 'ldk-loader))
+                    (loader-package (slot-value class 'ldk-loader))
+                    (or (find-package "OPENLDK.SYSTEM")
+                        (make-package "OPENLDK.SYSTEM" :use '(:openldk)))))
+           (main-symbol (intern (format nil "~A.main([Ljava/lang/String;)" (name class)) pkg)))
+      (if (fboundp main-symbol)
+          main-symbol
+          (%find-java-main-symbol (gethash (super class) *ldk-classes-by-bin-name*))))))
 
-  ;; In AOT mode, handle JAR files, directories, or class names
-  (when *aot-dir*
-    (cond
-      ;; Check if it's a JAR file
-      ((and (stringp mainclass) (str:ends-with? ".jar" mainclass))
-       (let* ((jar-path (uiop:parse-native-namestring mainclass))
-              (jar-entry (make-instance 'jar-classpath-entry :jarfile (namestring jar-path)))
-              (class-names nil))
-         (unless (uiop:file-exists-p jar-path)
-           (error "JAR file not found: ~A" mainclass))
-         ;; Initialize AOT class definitions hash table
-         (when aot
-           (setf *aot-class-definitions* (make-hash-table :test #'equal)))
-         ;; Collect class names from JAR
-         (dolist (class-name (list-jar-classes jar-entry))
-           (when (str:ends-with? ".class" class-name)
-             (let ((bin-name (substitute #\/ #\. (subseq class-name 0 (- (length class-name) 6)))))
-               (push bin-name class-names))))
-         ;; Load and compile each class immediately (streaming output)
-         (let ((compiled-classes (make-hash-table :test #'equal)))
-           (dolist (bin-name (reverse class-names))
-             (handler-case
-                 (progn
-                   ;; Load with AOT enabled to write class definitions
-                   (setf *aot-dir* aot)
-                   (classload bin-name)
-                   (setf *aot-dir* nil)
-                   ;; Now compile methods with AOT enabled
-                   (let ((class (gethash bin-name *ldk-classes-by-bin-name*)))
-                     (when (and class (not (gethash bin-name compiled-classes)))
-                       (setf (gethash bin-name compiled-classes) t)
-                       (format t "; Transpiling ~A~%" bin-name)
-                       (force-output)
-                       (setf *aot-dir* aot)
-                       (handler-case
-                           (loop for method-index from 1 to (length (slot-value class 'methods))
-                                 do (handler-case
-                                        (%compile-method bin-name method-index)
-                                      (error (e)
-                                        (format t ";   Warning: Failed to compile method ~A in ~A: ~A~%" method-index bin-name e))))
-                         (sb-kernel::control-stack-exhausted ()
-                           (format t ";   ERROR: Stack exhausted compiling ~A, skipping remaining methods~%" bin-name)))
-                       (setf *aot-dir* nil))))
-               (error (e)
-                 (format t ";   Warning: Failed to process ~A: ~A~%" bin-name e)))))
-         ;; Write all class definitions to classes.lisp and generate ASDF file
-         (when aot
-           (%write-all-aot-classes aot)
-           (%generate-aot-asdf-file aot "aot-compiled")))
-       (return-from main))
+(defun %await-nondaemon-java-threads ()
+  "Wait for all non-daemon Java threads (other than the current one) to
+complete.  Interactive applications can disable the default safety
+timeout with LDK_THREAD_WAIT_SECONDS=0."
+  (let ((current-lisp-thread (bordeaux-threads:current-thread))
+        (deadline
+          (let* ((setting (uiop:getenv "LDK_THREAD_WAIT_SECONDS"))
+                 (seconds (if setting
+                              (parse-integer setting :junk-allowed t)
+                              30)))
+            (when (and seconds (plusp seconds))
+              (+ (get-internal-real-time)
+                 (* seconds internal-time-units-per-second))))))
+    (loop
+      (let ((platform-threads
+              ;; start0 records this mapping in the parent after
+              ;; MAKE-THREAD returns.  The reverse mapping is
+              ;; installed by the child and can therefore still be
+              ;; empty when a short Java main method returns.
+              (loop for java-thread being the hash-keys of *java-threads*
+                      using (hash-value lisp-thread)
+                    when (and (not (eq lisp-thread current-lisp-thread))
+                              (not (%thread-daemon-p java-thread))
+                              (bordeaux-threads:thread-alive-p lisp-thread))
+                      collect java-thread))
+            #+sb-fiber
+            (fiber-threads
+              (loop for java-thread being the hash-values of *fiber-to-java-threads*
+                    when (and (not (%thread-daemon-p java-thread))
+                              (let ((fiber (gethash java-thread *java-to-fibers*)))
+                                (and fiber (sb-thread:fiber-alive-p fiber))))
+                      collect java-thread))
+            #-sb-fiber
+            (fiber-threads nil))
+        (let ((java-threads (append platform-threads fiber-threads)))
+          (cond
+            ((null java-threads)
+             (sleep 0.1)
+             (finish-output)
+             (return))
+            ((and deadline (> (get-internal-real-time) deadline))
+             (finish-output)
+             (return))
+            (t
+             (sleep 0.1))))))))
 
-      ;; Check if it's a directory
-      ((uiop:directory-exists-p mainclass)
-       ;; Temporarily add directory to classpath and load all .class files recursively
-       (let* ((base-dir (truename (uiop:ensure-directory-pathname mainclass)))
-              (dir-entry (make-instance 'dir-classpath-entry :dir (namestring base-dir)))
-              (class-names nil))
-         (push dir-entry *classpath*)
-         ;; Initialize AOT class definitions hash table
-         (when aot
-           (setf *aot-class-definitions* (make-hash-table :test #'equal)))
-         ;; First pass: collect all class names
-         (dolist (class-file (directory (merge-pathnames "**/*.class" base-dir)))
-           (let* ((relative-path (enough-namestring class-file base-dir))
-                  ;; Convert to binary name: remove .class and use / as separator
-                  (bin-name (substitute #\/ (uiop:directory-separator-for-host)
-                                       (subseq (namestring relative-path) 0 (- (length (namestring relative-path)) 6)))))
-             (push bin-name class-names)))
-         ;; Second pass: load with AOT enabled to write class definitions
-         (setf *aot-dir* aot)
-         (dolist (bin-name (reverse class-names))
-           (format t "; Loading ~A~%" bin-name)
-           (handler-case
-               (classload bin-name)
-             (error (e)
-               (format t ";   Warning: Failed to load ~A: ~A~%" bin-name e))))
-         (setf *aot-dir* nil)
-         ;; Third pass: now eagerly compile methods with AOT enabled
-         (setf *aot-dir* aot)
-         (let ((compiled-classes (make-hash-table :test #'equal)))
-           (dolist (bin-name (reverse class-names))
-             (let ((class (gethash bin-name *ldk-classes-by-bin-name*)))
-               (when (and class (not (gethash bin-name compiled-classes)))
-                 (setf (gethash bin-name compiled-classes) t)
-                 (format t "; AOT compiling ~A~%" bin-name)
-                 (handler-case
-                     (loop for method-index from 1 to (length (slot-value class 'methods))
-                           do (handler-case
-                                  (%compile-method bin-name method-index)
-                                (error (e)
-                                  (format t ";   Warning: Failed to compile method ~A in ~A: ~A~%" method-index bin-name e))))
-                   (sb-kernel::control-stack-exhausted ()
-                     (format t ";   ERROR: Stack exhausted compiling ~A, skipping remaining methods~%" bin-name)))))))
-         ;; Write all class definitions to classes.lisp and generate ASDF file
-         (when aot
-           (%write-all-aot-classes aot)
-           (%generate-aot-asdf-file aot "aot-compiled")))
-       (return-from main))
-
-      ;; Otherwise treat as class name
-      (t
-       (let ((class (classload (substitute #\/ #\. mainclass))))
-         (assert (or class (error "Can't load ~A" mainclass)))
-         (return-from main)))))
-
-  (let* ((class (classload (substitute #\/ #\. mainclass)))
-         (argv (make-java-array
-                :component-class (%get-java-class-by-bin-name "java/lang/String")
-                :initial-contents (mapcar #'jstring args))))
-
-    (assert (or class (error "Can't load ~A" mainclass)))
-
-    (%clinit class)
-
-    ;; The `main` method may be in a superclass of CLASS.  Search for it.
-    ;; Look up in the class's loader's package (static methods are defined there)
-    ;; Classes loaded during warm-up may not have ldk-loader set, use OPENLDK.SYSTEM for those
-    (labels ((find-main (class)
-               (when class
-                 (let* ((pkg (if (and (slot-boundp class 'ldk-loader)
-                                      (slot-value class 'ldk-loader))
-                                 (loader-package (slot-value class 'ldk-loader))
-                                 (or (find-package "OPENLDK.SYSTEM")
-                                     (make-package "OPENLDK.SYSTEM" :use '(:openldk)))))
-                        (main-symbol (intern (format nil "~A.main([Ljava/lang/String;)" (name class)) pkg)))
-                   (if (fboundp main-symbol)
-                       main-symbol
-                       (find-main (gethash (super class) *ldk-classes-by-bin-name*)))))))
-      (let ((main-symbol (find-main class)))
-        (if main-symbol
-            (progn
-              (%eval (list main-symbol argv))
-              ;; Wait for all non-daemon Java threads (other than the current
-              ;; one) to complete.  Interactive applications can disable the
-              ;; default safety timeout with LDK_THREAD_WAIT_SECONDS=0.
-              (let ((current-lisp-thread (bordeaux-threads:current-thread))
-                    (deadline
-                      (let* ((setting (uiop:getenv "LDK_THREAD_WAIT_SECONDS"))
-                             (seconds (if setting
-                                          (parse-integer setting :junk-allowed t)
-                                          30)))
-                        (when (and seconds (plusp seconds))
-                          (+ (get-internal-real-time)
-                             (* seconds internal-time-units-per-second))))))
-                (loop
-                  (let ((platform-threads
-                          ;; start0 records this mapping in the parent after
-                          ;; MAKE-THREAD returns.  The reverse mapping is
-                          ;; installed by the child and can therefore still be
-                          ;; empty when a short Java main method returns.
-                          (loop for java-thread being the hash-keys of *java-threads*
-                                  using (hash-value lisp-thread)
-                                when (and (not (eq lisp-thread current-lisp-thread))
-                                          (not (%thread-daemon-p java-thread))
-                                          (bordeaux-threads:thread-alive-p lisp-thread))
-                                  collect java-thread))
-                        #+sb-fiber
-                        (fiber-threads
-                          (loop for java-thread being the hash-values of *fiber-to-java-threads*
-                                when (and (not (%thread-daemon-p java-thread))
-                                          (let ((fiber (gethash java-thread *java-to-fibers*)))
-                                            (and fiber (sb-thread:fiber-alive-p fiber))))
-                                  collect java-thread))
-                        #-sb-fiber
-                        (fiber-threads nil))
-                    (let ((java-threads (append platform-threads fiber-threads)))
-                      (cond
-                        ((null java-threads)
-                         (sleep 0.1)
-                         (finish-output)
-                         (return))
-                        ((and deadline (> (get-internal-real-time) deadline))
-                         (finish-output)
-                         (return))
-                        (t
-                         (sleep 0.1))))))))
-            (error "Main method not found in class ~A." (name class)))))))
+(defun main (mainclass &optional (args (list)) &key dump-dir classpath aot)
+  "Run a Java class with the given arguments.
+   MAINCLASS: The class with the static main method to execute.
+   ARGS: Java program command line arguments (list of strings).
+   CLASSPATH: The classpath from which classes are loaded.
+   DUMP-DIR: The directory into which internal debug info is dumped.
+   AOT: Ahead-of-time compilation directory (generate Lisp source files)."
+  (%main-runtime-setup classpath dump-dir aot)
+  (if *aot-dir*
+      (%run-aot-main mainclass aot)
+      (let* ((class (classload (substitute #\/ #\. mainclass)))
+             (argv (make-java-array
+                    :component-class (%get-java-class-by-bin-name "java/lang/String")
+                    :initial-contents (mapcar #'jstring args))))
+        (assert (or class (error "Can't load ~A" mainclass)))
+        (%clinit class)
+        (let ((main-symbol (%find-java-main-symbol class)))
+          (unless main-symbol
+            (error "Main method not found in class ~A." (name class)))
+          (%eval (list main-symbol argv))
+          (%await-nondaemon-java-threads)))))
 
 
 (defun %java-string (value)
@@ -1752,17 +1626,9 @@ shadows a superclass field and needs its own storage."
                                    :prefix "Caused by: "
                                    :visited visited))))))
 
-(defun initialize (&optional (property-alist (list)))
-
-  (assert (typep property-alist 'list))
-
-  (ensure-JAVA_HOME)
-
-  ;; Allow build-time control of DCE via environment (since main isn't invoked during image build)
-  (let ((LDK_DCE (uiop:getenv "LDK_DCE")))
-    (when (and LDK_DCE (plusp (length LDK_DCE)))
-      (setf *enable-dce* t)))
-
+(defun %initialize-classpath ()
+  "Build *CLASSPATH* from the LDK_CLASSPATH environment variable plus
+the discovered jmod entries."
   (let ((classpath (or (uiop:getenv "LDK_CLASSPATH") "")))
 
     (setf *classpath*
@@ -1772,8 +1638,12 @@ shadows a superclass field and needs its own storage."
                  collect (if (ends-with? ".jar" cpe)
                              (make-instance 'jar-classpath-entry :jarfile cpe)
                              (make-instance 'dir-classpath-entry :dir cpe)))
-           (discover-jmod-classpath-entries))))
+           (discover-jmod-classpath-entries)))))
 
+(defun %initialize-bootstrap-classes ()
+  "Hand-load the classes Class.forName0 itself depends on, then patch
+jdk.internal.misc.UnsafeConstants with the real platform values (its
+<clinit> deliberately zeroes them, expecting the JVM to fill them in)."
   ;; We need to hand load these before Class.forName0 will work.
   (%clinit (classload "java/lang/Object"))
   (%clinit (classload "java/lang/String"))
@@ -1794,205 +1664,145 @@ shadows a superclass field and needs its own storage."
           (setf (slot-value s '|PAGE_SIZE|) (sb-posix:getpagesize))
           (setf (slot-value s '|BIG_ENDIAN|) 0)
           (setf (slot-value s '|UNALIGNED_ACCESS|) 1)
-          (setf (slot-value s '|DATA_CACHE_LINE_FLUSH_SIZE|) 0)))))
+          (setf (slot-value s '|DATA_CACHE_LINE_FLUSH_SIZE|) 0))))))
 
+(defun %initialize-primitive-classes ()
+  "Synthesize java.lang.Class objects for the primitive types."
+  (dolist (p '(("byte" . "B") ("char" . "C") ("int" . "I")
+               ("short" . "S") ("long" . "J") ("double" . "D")
+               ("float" . "F") ("boolean" . "Z") ("void" . "V")))
+    (let ((jclass (%make-java-instance "java/lang/Class"))
+          (lclass (make-instance '<class>)))
+      (setf (slot-value jclass '|name|) (ijstring (car p)))
+      ;; JDK 25: java.lang.Class.isPrimitive() reads the boolean `primitive`
+      ;; field directly (it is no longer a native method), so synthetic
+      ;; primitive Class objects must have it set.
+      (when (slot-exists-p jclass '|primitive|)
+        (setf (slot-value jclass '|primitive|) 1))
+      (setf (name lclass) (car p))
+      (setf (java-class lclass) jclass)
+      (setf (gethash (car p) *ldk-classes-by-fq-name*) lclass)
+      (setf (gethash (car p) *ldk-classes-by-bin-name*) lclass)
+      (setf (gethash (car p) *java-classes-by-fq-name*) jclass)
+      (setf (gethash (car p) *java-classes-by-bin-name*) jclass))))
+
+(defun %preload-early-classes (boot-class-loader)
+  "Preload classes needed before System.initPhase1 can run."
+  ;; Preload some important classes.
+  (dolist (c '("java/lang/Boolean"
+               "java/lang/Character"
+               "java/lang/Byte"
+               "java/lang/Short"
+               "java/lang/Integer"
+               "java/lang/Long"
+               "java/lang/Float"
+               "java/lang/Double"
+               "java/nio/LongBuffer"
+               "java/lang/Void"
+               "java/lang/ClassLoader"
+               "java/security/PrivilegedAction"
+               "java/lang/StackTraceElement"
+               "java/lang/System"
+               "java/lang/ThreadGroup"
+               "java/lang/Thread"
+               "java/lang/ref/SoftReference"
+               "java/util/Properties"
+               "java/lang/SecurityManager"))
+    (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil)))
+
+(defun %seed-system-properties (property-alist)
+  "Create the System props table and seed essential properties needed
+during early JDK init (many JDK components assume non-NIL encodings),
+plus user.* properties and the caller-supplied PROPERTY-ALIST."
+  (let ((props (%make-java-instance "java/util/Properties")))
+    (|<init>()| props)
+    (setf (slot-value |+static-java/lang/System+| '|props|) props))
+
+  ;; Seed essential system properties needed during early JDK init.
+  ;; Many JDK components assume non-NIL encodings.
+  (dolist (kv `(("file.encoding" . "UTF-8")
+                ("sun.jnu.encoding" . "UTF-8")
+                ("sun.stdout.encoding" . "UTF-8")
+                ("sun.stderr.encoding" . "UTF-8")
+                ("line.separator" . "\n")
+                ("file.separator" . "/")
+                ("path.separator" . ":")
+                ("os.name" . "Linux")
+                ("os.arch" . "amd64")
+                ("os.version" . "")
+                ("java.io.tmpdir" . "/tmp")))
+    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring (car kv)) (ijstring (cdr kv))))
+
+  ;; Also set java.home for code that queries it early.
+  (when-let ((jh (uiop:getenv "JAVA_HOME")))
+    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring "java.home") (ijstring jh)))
+
+  ;; Populate common user properties
+  (when-let ((cwd (uiop:getcwd)))
+    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring "user.dir") (ijstring (namestring cwd))))
+  (when-let ((uh (or (uiop:getenv "HOME") "/")))
+    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring "user.home") (ijstring uh)))
+  (when-let ((un (or (uiop:getenv "USER") (uiop:getenv "LOGNAME") "openldk")))
+    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring "user.name") (ijstring un)))
+
+  ;; Add user-provided properties...
+  (dolist (prop property-alist)
+    (assert (typep prop 'list))
+    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring (car prop)) (ijstring (cdr prop)))))
+
+(defun %initialize-system-phase1 (boot-class-loader)
+  "Run System.initPhase1 and the module/class-loader setup around it."
+  ;; Ensure AccessibleObject <clinit> runs before initPhase1,
+  ;; because ReflectionFactory reads langReflectAccess from SharedSecrets
+  ;; in its constructor, and AccessibleObject <clinit> is what sets it.
+  (%clinit (classload "java/lang/reflect/AccessibleObject"))
+
+  ;; Call System.initPhase1() which sets up JavaLangAccess (JLA),
+  ;; system properties (via SystemProps$Raw native methods), I/O streams
+  ;; (System.in/out/err), and VM.initLevel(1).
+  (|java/lang/System.initPhase1()|)
+
+  ;; Create an unnamed Module for bootstrap classes.
+  ;; Class.getModule() returns the module field; if null, calls like
+  ;; getResourceAsStream() NPE.  An unnamed module (name=null) causes
+  ;; isNamed() to return false, which skips module access checks.
+  (classload "java/lang/Module")
+  (let ((mod (%make-java-instance "java/lang/Module")))
+    ;; Module(ClassLoader) constructor sets name=null, loader=classLoader
+    (when (slot-exists-p mod '|name|)
+      (setf (slot-value mod '|name|) nil))
+    (when (slot-exists-p mod '|loader|)
+      (setf (slot-value mod '|loader|) nil))
+    (setf *unnamed-module* mod)
+    ;; Set module on all existing Class objects
+    (maphash (lambda (name klass)
+               (declare (ignore name))
+               (when (slot-exists-p klass '|module|)
+                 (setf (slot-value klass '|module|) mod)))
+             *java-classes-by-bin-name*))
+
+  ;; ClassLoader.<init> may trigger ClassLoaders.<clinit> which calls
+  ;; registerAsParallelCapable(). In JDK 17 this can throw InternalError
+  ;; "Unable to register as parallel capable" — non-fatal for our purposes.
   (handler-case
+      (|<init>()| boot-class-loader)
+    (condition (c)
+      (format t "~&; Warning during ClassLoader init (non-fatal): ~A~%" c)))
+  ;; JDK 17's ClassLoader() calls getSystemClassLoader() which returns
+  ;; *boot-class-loader* — the same object! Clear parent to prevent
+  ;; infinite recursion in getResources() delegation.
+  (when (slot-exists-p boot-class-loader '|parent|)
+    (setf (slot-value boot-class-loader '|parent|) nil)))
 
-      (let ((boot-class-loader (%make-java-instance "java/lang/ClassLoader")))
-
-        (setf *boot-class-loader* boot-class-loader)
-
-        (dolist (p '(("byte" . "B") ("char" . "C") ("int" . "I")
-                     ("short" . "S") ("long" . "J") ("double" . "D")
-                     ("float" . "F") ("boolean" . "Z") ("void" . "V")))
-          (let ((jclass (%make-java-instance "java/lang/Class"))
-                (lclass (make-instance '<class>)))
-            (setf (slot-value jclass '|name|) (ijstring (car p)))
-            ;; JDK 25: java.lang.Class.isPrimitive() reads the boolean `primitive`
-            ;; field directly (it is no longer a native method), so synthetic
-            ;; primitive Class objects must have it set.
-            (when (slot-exists-p jclass '|primitive|)
-              (setf (slot-value jclass '|primitive|) 1))
-            (setf (name lclass) (car p))
-            (setf (java-class lclass) jclass)
-            (setf (gethash (car p) *ldk-classes-by-fq-name*) lclass)
-            (setf (gethash (car p) *ldk-classes-by-bin-name*) lclass)
-            (setf (gethash (car p) *java-classes-by-fq-name*) jclass)
-            (setf (gethash (car p) *java-classes-by-bin-name*) jclass)))
-
-        ;; Preload some important classes.
-        (dolist (c '("java/lang/Boolean"
-                     "java/lang/Character"
-                     "java/lang/Byte"
-                     "java/lang/Short"
-                     "java/lang/Integer"
-                     "java/lang/Long"
-                     "java/lang/Float"
-                     "java/lang/Double"
-                     "java/nio/LongBuffer"
-                     "java/lang/Void"
-                     "java/lang/ClassLoader"
-                     "java/security/PrivilegedAction"
-                     "java/lang/StackTraceElement"
-                     "java/lang/System"
-                     "java/lang/ThreadGroup"
-                     "java/lang/Thread"
-                     "java/lang/ref/SoftReference"
-                     "java/util/Properties"
-                     "java/lang/SecurityManager"))
-          (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil))
-
-        (let ((props (%make-java-instance "java/util/Properties")))
-          (|<init>()| props)
-          (setf (slot-value |+static-java/lang/System+| '|props|) props))
-
-        ;; Seed essential system properties needed during early JDK init.
-        ;; Many JDK components assume non-NIL encodings.
-        (dolist (kv `(("file.encoding" . "UTF-8")
-                      ("sun.jnu.encoding" . "UTF-8")
-                      ("sun.stdout.encoding" . "UTF-8")
-                      ("sun.stderr.encoding" . "UTF-8")
-                      ("line.separator" . "\n")
-                      ("file.separator" . "/")
-                      ("path.separator" . ":")
-                      ("os.name" . "Linux")
-                      ("os.arch" . "amd64")
-                      ("os.version" . "")
-                      ("java.io.tmpdir" . "/tmp")))
-          (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring (car kv)) (ijstring (cdr kv))))
-
-        ;; Also set java.home for code that queries it early.
-        (when-let ((jh (uiop:getenv "JAVA_HOME")))
-          (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring "java.home") (ijstring jh)))
-
-        ;; Populate common user properties
-        (when-let ((cwd (uiop:getcwd)))
-          (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring "user.dir") (ijstring (namestring cwd))))
-        (when-let ((uh (or (uiop:getenv "HOME") "/")))
-          (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring "user.home") (ijstring uh)))
-        (when-let ((un (or (uiop:getenv "USER") (uiop:getenv "LOGNAME") "openldk")))
-          (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring "user.name") (ijstring un)))
-
-        ;; Add user-provided properties...
-        (dolist (prop property-alist)
-          (assert (typep prop 'list))
-          (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring (car prop)) (ijstring (cdr prop))))
-
-        ;; Ensure AccessibleObject <clinit> runs before initPhase1,
-        ;; because ReflectionFactory reads langReflectAccess from SharedSecrets
-        ;; in its constructor, and AccessibleObject <clinit> is what sets it.
-        (%clinit (classload "java/lang/reflect/AccessibleObject"))
-
-        ;; Call System.initPhase1() which sets up JavaLangAccess (JLA),
-        ;; system properties (via SystemProps$Raw native methods), I/O streams
-        ;; (System.in/out/err), and VM.initLevel(1).
-        (|java/lang/System.initPhase1()|)
-
-        ;; Create an unnamed Module for bootstrap classes.
-        ;; Class.getModule() returns the module field; if null, calls like
-        ;; getResourceAsStream() NPE.  An unnamed module (name=null) causes
-        ;; isNamed() to return false, which skips module access checks.
-        (classload "java/lang/Module")
-        (let ((mod (%make-java-instance "java/lang/Module")))
-          ;; Module(ClassLoader) constructor sets name=null, loader=classLoader
-          (when (slot-exists-p mod '|name|)
-            (setf (slot-value mod '|name|) nil))
-          (when (slot-exists-p mod '|loader|)
-            (setf (slot-value mod '|loader|) nil))
-          (setf *unnamed-module* mod)
-          ;; Set module on all existing Class objects
-          (maphash (lambda (name klass)
-                     (declare (ignore name))
-                     (when (slot-exists-p klass '|module|)
-                       (setf (slot-value klass '|module|) mod)))
-                   *java-classes-by-bin-name*))
-
-        ;; ClassLoader.<init> may trigger ClassLoaders.<clinit> which calls
-        ;; registerAsParallelCapable(). In JDK 17 this can throw InternalError
-        ;; "Unable to register as parallel capable" — non-fatal for our purposes.
-        (handler-case
-            (|<init>()| boot-class-loader)
-          (condition (c)
-            (format t "~&; Warning during ClassLoader init (non-fatal): ~A~%" c)))
-        ;; JDK 17's ClassLoader() calls getSystemClassLoader() which returns
-        ;; *boot-class-loader* — the same object! Clear parent to prevent
-        ;; infinite recursion in getResources() delegation.
-        (when (slot-exists-p boot-class-loader '|parent|)
-          (setf (slot-value boot-class-loader '|parent|) nil))
-
-        ;; Functional interfaces used by lambda implementation classes in native.lisp.
-        ;; These must be loaded before anything triggers finalize-inheritance on
-        ;; LambdaSupplier/LambdaPredicate/etc., which are defined via defclass/std
-        ;; with these interfaces as superclasses.
-        ;; Use classload (not forName0) here: the defclass/std forms in
-        ;; native.lisp create forward-referenced-class placeholders for these
-        ;; interfaces, which makes forName0 believe they are already loaded and
-        ;; skip generating the real CLOS class. classload always emits it, so
-        ;; the Lambda* subclasses can finalize their inheritance.
-        (dolist (c '("java/util/function/Supplier"
-                     "java/util/function/Predicate"
-                     "java/util/function/BiPredicate"
-                     "java/util/function/Function"
-                     "java/util/function/Consumer"
-                     "java/util/function/BiConsumer"
-                     "java/util/function/BiFunction"
-                     "java/util/function/BinaryOperator"))
-          (handler-case (classload c)
-            (condition (e)
-              (format t "~&; Warning preloading ~A (non-fatal): ~A~%" c e))))
-
-        ;; Minimal pre-load: only ASM bytecode generation classes
-        ;; MethodHandle/LambdaForm classes have complex lazy initialization via ClassSpecializer
-        ;; that doesn't work with pre-loading - they need runtime initialization in correct order
-        (dolist (c '(;; ASM bytecode generation classes used by LambdaMetafactory
-                     "jdk/internal/org/objectweb/asm/ClassWriter"
-                     "jdk/internal/org/objectweb/asm/ClassVisitor"
-                     "jdk/internal/org/objectweb/asm/MethodVisitor"
-                     "jdk/internal/org/objectweb/asm/MethodWriter"
-                     "jdk/internal/org/objectweb/asm/FieldVisitor"
-                     "jdk/internal/org/objectweb/asm/FieldWriter"
-                     "jdk/internal/org/objectweb/asm/Type"
-                     "jdk/internal/org/objectweb/asm/Label"
-                     "jdk/internal/org/objectweb/asm/ByteVector"
-                     "jdk/internal/org/objectweb/asm/Item"
-                     "jdk/internal/org/objectweb/asm/Frame"
-                     "jdk/internal/org/objectweb/asm/Handler"
-                     "jdk/internal/org/objectweb/asm/Edge"
-                     "jdk/internal/org/objectweb/asm/AnnotationWriter"
-                     "jdk/internal/org/objectweb/asm/AnnotationVisitor"
-                     "jdk/internal/org/objectweb/asm/ClassReader"
-                     "jdk/internal/org/objectweb/asm/Handle"
-                     ;; Frequently loaded NIO/charset classes for testsuite performance
-                     "java/io/InterruptedIOException"
-                     "java/nio/BufferOverflowException"
-                     "java/nio/BufferUnderflowException"
-                     "java/nio/charset/CoderMalfunctionError"
-                     "java/nio/charset/CoderResult"
-                     "java/nio/charset/CoderResult$1"
-                     "java/nio/charset/CoderResult$2"
-                     "java/nio/charset/CoderResult$Cache"
-                     "java/nio/HeapCharBuffer"
-                     "java/nio/ReadOnlyBufferException"
-                     "java/lang/Readable"
-                     "java/nio/CharBuffer"
-                     "sun/nio/cs/Surrogate$Parser"))
-          (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil)))
-
-    (|condition-java/lang/Throwable| (c)
-      (let ((throwable (when (slot-boundp c '|objref|)
-                         (slot-value c '|objref|))))
-        (cond
-          ((typep throwable '|java/lang/Throwable|)
-           (format *error-output* "~&Unhandled Java exception:~%")
-           (%print-java-stack-trace throwable :stream *error-output*)
-           (finish-output *error-output*))
-          (t
-           (format *error-output* "~&Unhandled Java condition: ~A~%" c))))))
-  ;; Ensure the functional interfaces backing native.lisp's Lambda* classes are
-  ;; fully defined (not forward-referenced). This must run after the main init
-  ;; body above has finished setting up the class loaders; done here (rather than
-  ;; inside the handler-case) it reliably emits the CLOS classes so that the
-  ;; Lambda* subclasses can finalize their inheritance at runtime.
+(defun %preload-lambda-interfaces (verb)
+  "Load the functional interfaces backing native.lisp's Lambda* classes.
+These must be fully defined (not forward-referenced) before anything
+triggers finalize-inheritance on LambdaSupplier/LambdaPredicate/etc.
+Use classload (not forName0): the defclass/std forms in native.lisp
+create forward-referenced-class placeholders for these interfaces,
+which makes forName0 believe they are already loaded and skip
+generating the real CLOS class.  classload always emits it.  VERB
+labels the non-fatal warning messages."
   (dolist (c '("java/util/function/Supplier"
                "java/util/function/Predicate"
                "java/util/function/BiPredicate"
@@ -2003,6 +1813,85 @@ shadows a superclass field and needs its own storage."
                "java/util/function/BinaryOperator"))
     (handler-case (classload c)
       (condition (e)
-        (format t "~&; Warning finalizing ~A (non-fatal): ~A~%" c e))))
+        (format t "~&; Warning ~A ~A (non-fatal): ~A~%" verb c e)))))
+
+(defun %preload-runtime-classes (boot-class-loader)
+  "Preload the ASM bytecode-generation classes used by LambdaMetafactory
+and frequently loaded NIO/charset classes (testsuite performance).
+MethodHandle/LambdaForm classes are deliberately NOT preloaded: their
+lazy initialization via ClassSpecializer needs runtime ordering."
+  ;; Minimal pre-load: only ASM bytecode generation classes
+  ;; MethodHandle/LambdaForm classes have complex lazy initialization via ClassSpecializer
+  ;; that doesn't work with pre-loading - they need runtime initialization in correct order
+  (dolist (c '(;; ASM bytecode generation classes used by LambdaMetafactory
+               "jdk/internal/org/objectweb/asm/ClassWriter"
+               "jdk/internal/org/objectweb/asm/ClassVisitor"
+               "jdk/internal/org/objectweb/asm/MethodVisitor"
+               "jdk/internal/org/objectweb/asm/MethodWriter"
+               "jdk/internal/org/objectweb/asm/FieldVisitor"
+               "jdk/internal/org/objectweb/asm/FieldWriter"
+               "jdk/internal/org/objectweb/asm/Type"
+               "jdk/internal/org/objectweb/asm/Label"
+               "jdk/internal/org/objectweb/asm/ByteVector"
+               "jdk/internal/org/objectweb/asm/Item"
+               "jdk/internal/org/objectweb/asm/Frame"
+               "jdk/internal/org/objectweb/asm/Handler"
+               "jdk/internal/org/objectweb/asm/Edge"
+               "jdk/internal/org/objectweb/asm/AnnotationWriter"
+               "jdk/internal/org/objectweb/asm/AnnotationVisitor"
+               "jdk/internal/org/objectweb/asm/ClassReader"
+               "jdk/internal/org/objectweb/asm/Handle"
+               ;; Frequently loaded NIO/charset classes for testsuite performance
+               "java/io/InterruptedIOException"
+               "java/nio/BufferOverflowException"
+               "java/nio/BufferUnderflowException"
+               "java/nio/charset/CoderMalfunctionError"
+               "java/nio/charset/CoderResult"
+               "java/nio/charset/CoderResult$1"
+               "java/nio/charset/CoderResult$2"
+               "java/nio/charset/CoderResult$Cache"
+               "java/nio/HeapCharBuffer"
+               "java/nio/ReadOnlyBufferException"
+               "java/lang/Readable"
+               "java/nio/CharBuffer"
+               "sun/nio/cs/Surrogate$Parser"))
+    (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil)))
+
+(defun initialize (&optional (property-alist (list)))
+  "Bootstrap the Java runtime: classpath, core classes, system
+properties, System.initPhase1, and class preloading.  PROPERTY-ALIST
+supplies additional system properties as (name . value) pairs."
+  (assert (typep property-alist 'list))
+  (ensure-JAVA_HOME)
+  ;; Allow build-time control of DCE via environment (since main isn't invoked during image build)
+  (let ((LDK_DCE (uiop:getenv "LDK_DCE")))
+    (when (and LDK_DCE (plusp (length LDK_DCE)))
+      (setf *enable-dce* t)))
+  (%initialize-classpath)
+  (%initialize-bootstrap-classes)
+  (handler-case
+      (let ((boot-class-loader (%make-java-instance "java/lang/ClassLoader")))
+        (setf *boot-class-loader* boot-class-loader)
+        (%initialize-primitive-classes)
+        (%preload-early-classes boot-class-loader)
+        (%seed-system-properties property-alist)
+        (%initialize-system-phase1 boot-class-loader)
+        (%preload-lambda-interfaces "preloading")
+        (%preload-runtime-classes boot-class-loader))
+    (|condition-java/lang/Throwable| (c)
+      (let ((throwable (when (slot-boundp c '|objref|)
+                         (slot-value c '|objref|))))
+        (cond
+          ((typep throwable '|java/lang/Throwable|)
+           (format *error-output* "~&Unhandled Java exception:~%")
+           (%print-java-stack-trace throwable :stream *error-output*)
+           (finish-output *error-output*))
+          (t
+           (format *error-output* "~&Unhandled Java condition: ~A~%" c))))))
+  ;; Re-ensure the functional interfaces are fully defined.  Done here
+  ;; (outside the handler-case, after loader setup has finished) it
+  ;; reliably emits the CLOS classes so the Lambda* subclasses can
+  ;; finalize their inheritance at runtime.
+  (%preload-lambda-interfaces "finalizing")
   (setf *debug-load* nil)
   (setf *debug-compile* nil))
