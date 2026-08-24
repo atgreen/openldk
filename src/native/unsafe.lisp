@@ -978,6 +978,14 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
   (declare (ignore this))
   module)
 
+(defun |jdk/internal/loader/BootLoader.getSystemPackageLocation(Ljava/lang/String;)| (name)
+  "Location of a boot-loader (system) package: everything OpenLDK loads
+from the jimage lives in the runtime image, so report jrt:.  A non-null
+result is what lets Class.getPackage() define Package objects for
+java.* classes."
+  (declare (ignore name))
+  (jstring "jrt:/java.base"))
+
 ;; JDK 9+: BootLoader native — associate unnamed module with boot loader (no-op)
 (defun |jdk/internal/loader/BootLoader.setBootLoaderUnnamedModule0(Ljava/lang/Module;)| (module)
   (declare (ignore module))

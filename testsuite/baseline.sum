@@ -1,4 +1,4 @@
-Test run by green on Mon Aug 24 16:35:54 2026
+Test run by green on Mon Aug 24 16:55:35 2026
 Native configuration is x86_64-pc-linux-gnu
 
 		=== openldk tests ===
@@ -81,8 +81,8 @@ PASS: jikestst/hpj/ok/exec/for1.e
 PASS: jikestst/hpj/ok/exec/for2.e
 XFAIL: jikestst/hpj/ok/exec/implement.e
 XFAIL: jikestst/hpj/ok/exec/instance1.e
-XFAIL: jikestst/hpj/ok/exec/lptry1.e
-XFAIL: jikestst/hpj/ok/exec/lptry2.e
+PASS: jikestst/hpj/ok/exec/lptry1.e
+PASS: jikestst/hpj/ok/exec/lptry2.e
 PASS: jikestst/hpj/ok/exec/multarg.e
 XFAIL: jikestst/hpj/ok/exec/multmain.e
 XFAIL: jikestst/hpj/ok/exec/recur.e
@@ -128,7 +128,7 @@ PASS: aaa/MethodHandleTest.java execution test
 PASS: aaa/MethodHandleTest.java output pattern test
 PASS: aaa/TestSuper.java (test for excess errors)
 PASS: aaa/TestSuper.java execution test
-FAIL: aaa/TestSuper.java output pattern test
+PASS: aaa/TestSuper.java output pattern test
 PASS: aaa/h001.java (test for excess errors)
 PASS: aaa/h001.java execution test
 PASS: aaa/h001.java output pattern test
@@ -163,10 +163,10 @@ PASS: aaa/switchindy.java output pattern test
 
 		=== openldk Summary ===
 
-# of expected passes		105
-# of unexpected failures	2
-# of expected failures		43
-Test run by green on Mon Aug 24 16:38:54 2026
+# of expected passes		108
+# of unexpected failures	1
+# of expected failures		41
+Test run by green on Mon Aug 24 16:58:41 2026
 Native configuration is x86_64-pc-linux-gnu
 
 		=== openldk tests ===
@@ -365,6 +365,7 @@ XFAIL: gcj/Thread_Alive.java execution test
 PASS: gcj/Thread_HoldsLock.java (test for excess errors)
 PASS: gcj/Thread_HoldsLock.java execution test
 PASS: gcj/Thread_Interrupt.java (test for excess errors)
+WARNING: program timed out
 XFAIL: gcj/Thread_Interrupt.java execution test
 PASS: gcj/Thread_Join.java (test for excess errors)
 XFAIL: gcj/Thread_Join.java execution test
@@ -489,7 +490,7 @@ XFAIL: gcj/invokethrow.java execution test
 PASS: gcj/klass.java (test for excess errors)
 PASS: gcj/klass.java execution test
 PASS: gcj/md5test.java (test for excess errors)
-FAIL: gcj/md5test.java execution test
+PASS: gcj/md5test.java execution test
 PASS: gcj/multiple_finit.java (test for excess errors)
 PASS: gcj/multiple_finit.java execution test
 PASS: gcj/negzero.java (test for excess errors)
@@ -532,7 +533,7 @@ PASS: gcj/pr25676.java execution test
 PASS: gcj/pr26390.java (test for excess errors)
 PASS: gcj/pr26390.java execution test
 PASS: gcj/pr26990.java (test for excess errors)
-FAIL: gcj/pr26990.java execution test
+XFAIL: gcj/pr26990.java execution test
 PASS: gcj/pr27171.java (test for excess errors)
 XFAIL: gcj/pr27171.java execution test
 PASS: gcj/pr6388.java (test for excess errors)
@@ -558,7 +559,7 @@ PASS: gcj/private_indirect_write.java execution test
 PASS: gcj/search_outer.java (test for excess errors)
 PASS: gcj/search_outer.java execution test
 PASS: gcj/shatest.java (test for excess errors)
-XFAIL: gcj/shatest.java execution test
+PASS: gcj/shatest.java execution test
 PASS: gcj/stacktrace.java (test for excess errors)
 XFAIL: gcj/stacktrace.java execution test
 PASS: gcj/stringconst.java (test for excess errors)
@@ -584,7 +585,7 @@ PASS: gcj/verify.java execution test
 
 		=== openldk Summary ===
 
-# of expected passes		353
-# of unexpected failures	6
+# of expected passes		355
+# of unexpected failures	4
 # of expected failures		40
 # of unresolved testcases	3

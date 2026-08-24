@@ -1,4 +1,4 @@
-/* { dg-output "^CHILD TEST\nBASE TEST\n" } */
+/* { dg-output "CHILD TEST(\n|\r\n|\r)BASE TEST" } */
 
 package aaa;
 

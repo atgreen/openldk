@@ -1393,13 +1393,20 @@ Java byte arrays hold SIGNED bytes; read-byte yields 0..255."
                     path-str (lstring result)))
           result)))))
 
-(defmethod |checkAccess(Ljava/io/File;I)| ((ufs |java/io/UnixFileSystem|) file access-mode)
+(defmethod |checkAccess0(Ljava/io/File;I)| ((ufs |java/io/UnixFileSystem|) file access-mode)
+  "JDK 25 private native checkAccess0 — must hold the implementation;
+the bytecode checkAccess wrapper delegates here and clobbers any
+same-named defmethod."
   ;; TODO: check actual POSIX permissions (R_OK/W_OK/X_OK) instead of just file existence
   (declare (ignore ufs access-mode))
   (let ((path (lstring (slot-value file '|path|))))
     (handler-case
         (if (probe-file path) 1 0)
       (error () 0))))
+
+(defmethod |checkAccess(Ljava/io/File;I)| ((ufs |java/io/UnixFileSystem|) file access-mode)
+  "Legacy public native checkAccess — older JDKs call this directly."
+  (|checkAccess0(Ljava/io/File;I)| ufs file access-mode))
 
 (defmethod |getLastModifiedTime(Ljava/io/File;)| ((ufs |java/io/UnixFileSystem|) file)
   (declare (ignore ufs))

@@ -1696,3 +1696,4 @@ XFAIL: mauve/gnu/testlet/java/util/zip/ZipInputStream/close.java execution test
 2025-03-04T02:24:14.7109189Z Running: grep -qi -- "gcj/RH194522.java execution test$" expected-failures.txt
 2025-03-04T02:24:14.7109777Z Test RH194522.java NOT found in expected-failures.txt
 2025-03-04T02:24:14.7110086Z FAIL: gcj/RH194522.java execution test
+FAIL: gcj/pr26990.java execution test

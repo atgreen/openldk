@@ -231,6 +231,16 @@
   ;; Fall back to the loader's package for user-defined classes
   (let* ((pkg (class-package class-name))
          (sym (intern class-name pkg)))
+    (unless (find-class sym nil)
+      ;; Not loaded yet (e.g. ArrayIndexOutOfBoundsException thrown before
+      ;; anything referenced it) — load it now.  CLASSLOAD may emit the
+      ;; class into the system package rather than PKG.
+      (ignore-errors (classload class-name))
+      (unless (find-class sym nil)
+        (let ((sys-sym (find-symbol class-name
+                                    (or (find-package "OPENLDK.SYSTEM") pkg))))
+          (when (and sys-sym (find-class sys-sym nil))
+            (setf sym sys-sym)))))
     (if (find-class sym nil)
         (make-instance sym)
         (internal-error "Class not found: ~A" class-name))))
