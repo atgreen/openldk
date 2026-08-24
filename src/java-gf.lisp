@@ -55,7 +55,9 @@
 
 (defun %compute-java-effective-method (gf class)
   "Compute an effective method function for GF dispatching on CLASS.
-Returns a function of one argument (the argument list)."
+Returns (values FUNCTION APPLICABLE-P); when APPLICABLE-P is NIL the
+function signals no-applicable-method and must not be cached (the class
+may still be a bare stub that a later classload fleshes out)."
   (let* ((lambda-list (closer-mop:generic-function-lambda-list gf))
          (nargs (length lambda-list))
          (class-list (cons class
@@ -67,8 +69,9 @@ Returns a function of one argument (the argument list)."
       (if (null methods)
           ;; No applicable methods — signal no-applicable-method
           ;; (preserves null → NullPointerException via native.lisp)
-          (lambda (args)
-            (apply #'no-applicable-method gf args))
+          (values (lambda (args)
+                    (apply #'no-applicable-method gf args))
+                  nil)
           ;; Partition into :around and primary methods
           (let* ((around (remove-if-not
                           (lambda (m) (equal (method-qualifiers m) '(:around)))
@@ -78,31 +81,58 @@ Returns a function of one argument (the argument list)."
                            methods))
                  (chain (append around primary)))
             (if (null chain)
-                (lambda (args)
-                  (apply #'no-applicable-method gf args))
+                (values (lambda (args)
+                          (apply #'no-applicable-method gf args))
+                        nil)
                 (let ((first-mf (closer-mop:method-function (first chain)))
                       (rest-chain (rest chain)))
-                  (lambda (args)
-                    (funcall first-mf args rest-chain)))))))))
+                  (values (lambda (args)
+                            (funcall first-mf args rest-chain))
+                          t))))))))
+
+(defun %invalidate-java-gf-cache (gf specializer)
+  "Invalidate GF's dispatch cache entries affected by a method change on
+SPECIALIZER: only receivers that are subtypes of it can see a different
+applicable-method set.  Non-class specializers flush everything."
+  (let ((cache (java-gf-dispatch-cache gf))
+        (special-cache (java-gf-invoke-special-cache gf)))
+    (bordeaux-threads:with-lock-held ((java-gf-cache-lock gf))
+      (if (typep specializer 'class)
+          (let (stale)
+            (maphash (lambda (k v)
+                       (declare (ignore v))
+                       (when (subtypep k specializer)
+                         (push k stale)))
+                     cache)
+            (dolist (k stale) (remhash k cache)))
+          (clrhash cache))
+      (clrhash special-cache))))
+
+(defmethod sb-mop:add-method :after ((gf java-generic-function) method)
+  (%invalidate-java-gf-cache gf (first (sb-mop:method-specializers method))))
+
+(defmethod sb-mop:remove-method :after ((gf java-generic-function) method)
+  (%invalidate-java-gf-cache gf (first (sb-mop:method-specializers method))))
 
 (defmethod closer-mop:compute-discriminating-function ((gf java-generic-function))
   "Return a discriminating function that dispatches via a hash-table cache
-keyed on the receiver's class.  Also clears stale caches, since SBCL's
-update-dfun calls this whenever the method set changes."
+keyed on the receiver's class.  SBCL's update-dfun calls this whenever the
+method set changes; invalidation is handled surgically by the
+add-method/remove-method :after hooks above, so the caches persist —
+flushing them wholesale here made every lazy class load recompute hot
+dispatch (equals/hashCode/toString) from scratch."
   (let ((cache (java-gf-dispatch-cache gf))
-        (special-cache (java-gf-invoke-special-cache gf))
         (lock (java-gf-cache-lock gf)))
-    (bordeaux-threads:with-lock-held (lock)
-      (clrhash cache)
-      (clrhash special-cache))
     (lambda (&rest args)
       (let* ((receiver (first args))
              (class (class-of receiver))
              (emfun (gethash class cache)))
         (if emfun
             (funcall emfun args)
-            (let ((new-emfun (%compute-java-effective-method gf class)))
-              (bordeaux-threads:with-lock-held (lock)
-                (setf (gethash class cache) new-emfun))
+            (multiple-value-bind (new-emfun applicable-p)
+                (%compute-java-effective-method gf class)
+              (when applicable-p
+                (bordeaux-threads:with-lock-held (lock)
+                  (setf (gethash class cache) new-emfun)))
               (funcall new-emfun args)))))))
 

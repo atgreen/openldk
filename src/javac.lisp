@@ -398,17 +398,26 @@
       ;; locked state (a warmup thread killed mid-access) deadlocks the
       ;; restarted image on its first table access.  Sweep the heap and give
       ;; every synchronized table a fresh lock.
-      (let ((tables '()))
+      (let ((tables '())
+            (gfs '()))
         (sb-vm:map-allocated-objects
          (lambda (obj type size)
            (declare (ignore type size))
-           (when (and (hash-table-p obj)
-                      (sb-ext:hash-table-synchronized-p obj))
-             (push obj tables)))
+           (cond
+             ((and (hash-table-p obj)
+                   (sb-ext:hash-table-synchronized-p obj))
+              (push obj tables))
+             ((typep obj 'openldk::java-generic-function)
+              (push obj gfs))))
          :all)
         (dolist (ht tables)
           (setf (sb-impl::hash-table-%lock ht)
-                (sb-thread:make-mutex :name "hash-table lock"))))
+                (sb-thread:make-mutex :name "hash-table lock")))
+        ;; java-generic-function dispatch-cache locks are ordinary mutex
+        ;; slots with the same saved-locked hazard.
+        (dolist (gf gfs)
+          (setf (slot-value gf 'openldk::cache-lock)
+                (bt:make-lock "java-gf-cache"))))
       (sb-ext:save-lisp-and-die output-path
 				:executable t
 				:save-runtime-options t
