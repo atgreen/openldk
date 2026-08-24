@@ -4,11 +4,11 @@
 ;;;
 ;;; This file is part of OpenLDK.
 
-(declaim (optimize (speed 0) (space 0) (debug 3)))
-
-#+sbcl
-(sb-ext:restrict-compiler-policy 'debug 3)
-
+;; No local optimize policy: inherit openldk's (speed 3) (safety 1)
+;; (debug 1).  A (debug 3) declaim here — and especially
+;; sb-ext:restrict-compiler-policy — would leak into every system
+;; compiled in the same session, including the openldk runtime whose
+;; JIT policy gets baked into the dumped image.
 (asdf:defsystem "javacl"
   :description "Preloaded javac executable built on OpenLDK"
   :author "Anthony Green <green@moxielogic.com>"
