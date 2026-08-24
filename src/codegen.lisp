@@ -157,14 +157,13 @@ implements IR node INSN, generating operand code recursively."))
     throwable))
 
 (defmethod codegen ((insn ir-aastore) context)
-  ;;; FIXME: throw nullpointerexception if needed
   (with-slots (arrayref index value) insn
     (make-instance '<expression>
                    :insn insn
                    :code `(let ((value ,(code (codegen value context)))
                                 (index ,(code (codegen index context)))
                                 (arrayref ,(code (codegen arrayref context))))
-                            (setf (jaref arrayref index) value)))))
+                            (%aastore arrayref index value)))))
 
 (defmethod codegen ((insn ir-iastore) context)
   (with-slots (arrayref index value) insn

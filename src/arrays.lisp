@@ -110,10 +110,37 @@ descriptor strings."
         (|<init>(Ljava/lang/String;)| exc
          (jstring (format nil "~A" index)))
         (error (%lisp-condition exc))))
-    ;; TODO: Add type compatibility check (ArrayStoreException)
-    ;; Requires validating component-class vs new-value type
-    ;; Deferred due to bootstrap complexity with exception classes
     (setf (aref data index) new-value)))
+
+(defun %array-store-compatible-p (component value)
+  "Can VALUE legally be stored into a reference array whose component
+Class is COMPONENT?  Permissive when the component's CLOS class is not
+yet emitted — a missed check is preferable to a spurious
+ArrayStoreException during bootstrap."
+  (let ((component-name (lstring (slot-value component '|name|))))
+    (cond
+      ((string= component-name "java.lang.Object") t)
+      ;; Array-of-arrays component: require an array value; finer
+      ;; component covariance is enforced when the nested array is used.
+      ((char= (char component-name 0) #\[)
+       (typep value 'java-array))
+      (t
+       (let* ((bin-name (substitute #\/ #\. component-name))
+              (clos-class (find-class (intern bin-name (class-package bin-name)) nil)))
+         (or (null clos-class)
+             (typep value clos-class)
+             (%native-type-castable-p value bin-name)))))))
+
+(defun %aastore (array index value)
+  "Reference-array store implementing the aastore bytecode: performs
+the JVM's covariance check, throwing ArrayStoreException when VALUE is
+not assignable to ARRAY's component type."
+  (when (and array value)
+    (let ((component (%array-component-class array)))
+      (when (and (typep component '|java/lang/Class|)
+                 (not (%array-store-compatible-p component value)))
+        (error (%lisp-condition (%make-throwable '|java/lang/ArrayStoreException|))))))
+  (setf (jaref array index) value))
 
 (defun java-array-length (array)
   "Return the logical length of the Java-style ARRAY."

@@ -3085,6 +3085,37 @@ user.variant
   (let ((result (|run()| action)))
     result))
 
+(defun %array-type-name-assignable-p (this-name other-name)
+  "JLS assignability between two array-type names in Class.getName()
+form (dotted, e.g. \"[Ljava.lang.String;\").  An array type is
+assignable from another when their component types are: recursively
+assignable arrays, identical primitives, or reference types where the
+target component is assignable from the source component."
+  (let ((tc (subseq this-name 1))
+        (oc (subseq other-name 1)))
+    (cond
+      ;; Nested arrays on both sides: recurse on the component types.
+      ((and (char= (char tc 0) #\[) (char= (char oc 0) #\[))
+       (%array-type-name-assignable-p tc oc))
+      ;; Reference component on the target side.
+      ((char= (char tc 0) #\L)
+       (let ((t-comp (subseq tc 1 (1- (length tc)))))
+         (cond
+           ;; Object[], Cloneable[], Serializable[] accept any reference
+           ;; or array component (all arrays implement both interfaces),
+           ;; but never primitive components ([I is not an Object[]).
+           ((member t-comp '("java.lang.Object" "java.lang.Cloneable" "java.io.Serializable")
+                    :test #'string=)
+            (or (char= (char oc 0) #\L) (char= (char oc 0) #\[)))
+           ((char= (char oc 0) #\L)
+            (let ((t-class (%bin-type-name-to-class (substitute #\/ #\. tc)))
+                  (o-class (%bin-type-name-to-class (substitute #\/ #\. oc))))
+              (and t-class o-class
+                   (eql 1 (|isAssignableFrom(Ljava/lang/Class;)| t-class o-class)))))
+           (t nil))))
+      ;; Primitive components must match exactly.
+      (t (string= tc oc)))))
+
 (defmethod |isAssignableFrom(Ljava/lang/Class;)| ((this |java/lang/Class|) other)
   (if (equal this other)
       1
@@ -3094,16 +3125,10 @@ user.variant
                 (other-name (lstring (slot-value other '|name|))))
             ;; Handle array types specially - they don't have CLOS classes
             (cond
-              ;; Both are arrays
+              ;; Both are arrays: JLS covariance on component types
               ((and (char= (char this-name 0) #\[)
                     (char= (char other-name 0) #\[))
-               ;; For arrays, check component type assignability
-               ;; All arrays are assignable to Object, Cloneable, Serializable
-               (if (or (string= this-name other-name)
-                       (string= this-name "[Ljava.lang.Object;"))
-                   1
-                   ;; TODO: More complex array covariance checking
-                   0))
+               (if (%array-type-name-assignable-p this-name other-name) 1 0))
               ;; Other is array, this is not - array assignable to Object/Cloneable/Serializable
               ((char= (char other-name 0) #\[)
                (if (member this-name '("java.lang.Object" "java.lang.Cloneable" "java.io.Serializable")
