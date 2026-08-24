@@ -323,6 +323,10 @@
 ;; atomic with respect to each other.
 (defvar *cas-lock* (bordeaux-threads:make-recursive-lock "unsafe-cas"))
 
+;; Epoch milliseconds when this VM run started; set on the first entry to
+;; MAIN, reset before image dump so restarted images re-stamp themselves.
+(defvar *vm-start-time-millis* nil)
+
 ;; Track interrupted status for each Thread (not a field in Java 8)
 (defvar *thread-interrupted* (make-hash-table :test #'eq :synchronized t)
   "Hash table tracking interrupted status for each Java Thread object.")

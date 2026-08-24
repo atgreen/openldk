@@ -3916,7 +3916,9 @@ does not reconstruct, so we compute it from the name directly."
                    :initial-element nil))
 
 (defmethod |findLoadedClass0(Ljava/lang/String;)| ((loader |java/lang/ClassLoader|) name)
-  (gethash (lstring name) *java-classes-by-fq-name*))
+  "Return the class NAME if LOADER already loaded it (its own map only --
+parent delegation is the Java caller's job)."
+  (|java/lang/ClassLoader.findLoadedClass0(Ljava/lang/String;)| loader name))
 
 (defmethod |findBootstrapClass(Ljava/lang/String;)| ((loader |java/lang/ClassLoader|) name)
   (handler-case
@@ -5218,8 +5220,10 @@ compiled Java readdir wrapper may overwrite the old readdir(J) symbol."
     (|<init>(Ljava/lang/String;ZJJ)|
      mp-mxbean (jstring "SBCL Heap")
      t                               ;; isHeap = true
-     100000000                       ;; usageThreshold -- FIXME
-     100000000)                      ;; gcThreshold -- FIXME
+     ;; Negative thresholds mean "not supported" -- SBCL's GC has no
+     ;; usage/collection threshold notification mechanism to back them.
+     -1                              ;; usageThreshold
+     -1)                             ;; gcThreshold
 
     ;; Return it as a Java array of the interface type
     (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/management/MemoryPoolMXBean")
@@ -5229,7 +5233,9 @@ compiled Java readdir wrapper may overwrite the old readdir(J) symbol."
   0)
 
 (defmethod |getStartupTime()| ((this |sun/management/VMManagementImpl|))
-  555)
+  "VM start time in epoch milliseconds (RuntimeMXBean.getStartTime)."
+  (or *vm-start-time-millis*
+      (|java/lang/System.currentTimeMillis()|)))
 
 (defmethod |read0()| ((this |java/io/FileInputStream|))
   (let* ((file-descriptor (slot-value this '|fd|))

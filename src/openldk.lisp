@@ -1429,6 +1429,10 @@ shadows a superclass field and needs its own storage."
   ;; directly (build-time warmups, the REPL).
   (sb-int:set-floating-point-modes :traps nil)
 
+  ;; Stamp the VM start time (RuntimeMXBean.getStartTime) on first entry.
+  (unless *vm-start-time-millis*
+    (setf *vm-start-time-millis* (|java/lang/System.currentTimeMillis()|)))
+
   (ensure-JAVA_HOME)
 
   ;; Install SIGQUIT handler for debugging hangs (send kill -3 to dump all stacks)
