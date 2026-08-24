@@ -108,7 +108,7 @@
      source source-offset destination destination-offset bytes element-size)
   (declare (ignore unsafe))
   (unless (and (plusp element-size) (zerop (mod bytes element-size)))
-    (error "Invalid copySwapMemory size ~D for ~D-byte elements"
+    (internal-error "Invalid copySwapMemory size ~D for ~D-byte elements"
            bytes element-size))
   (let ((snapshot (make-array bytes :element-type '(unsigned-byte 8))))
     (dotimes (index bytes)

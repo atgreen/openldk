@@ -238,7 +238,7 @@
                         (slot-value class '|name|)))
          (name (and raw-name (lstring raw-name))))
     (cond
-      ((null name) (error "Missing class name for descriptor ~A" class))
+      ((null name) (internal-error "Missing class name for descriptor ~A" class))
       ((string= name "void") "V")
       ((string= name "boolean") "Z")
       ((string= name "byte") "B")
@@ -455,7 +455,7 @@
                              (slot-boundp form '|vmentry|))
                     (slot-value form '|vmentry|))))
     (unless vmentry
-      (error "MethodHandle.invokeExact: no vmentry found in ~A" method-handle))
+      (internal-error "MethodHandle.invokeExact: no vmentry found in ~A" method-handle))
 
     ;; Extract method information from the MemberName
     (let* ((clazz (when (and (slot-exists-p vmentry '|clazz|)
@@ -472,7 +472,7 @@
                    (slot-value vmentry '|flags|))))
 
       (unless (and clazz name type)
-        (error "MethodHandle.invokeExact: incomplete MemberName ~A" vmentry))
+        (internal-error "MethodHandle.invokeExact: incomplete MemberName ~A" vmentry))
 
       ;; Get the class name and method name as strings
       (let* ((class-name-raw (lstring (slot-value clazz '|name|)))
@@ -856,7 +856,7 @@ The plan depends only on the (stable) MemberName, so it is memoized."
                                      (slot-boundp member-name '|flags|))
                             (slot-value member-name '|flags|))))
               (unless (and clazz name)
-                (error "linkTo*: incomplete MemberName ~A" member-name))
+                (internal-error "linkTo*: incomplete MemberName ~A" member-name))
               (let* ((class-name (substitute #\/ #\. (lstring (slot-value clazz '|name|))))
                      (method-name (lstring name))
                      ;; type is a String descriptor or a MethodType

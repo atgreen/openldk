@@ -126,7 +126,7 @@
   (multiple-value-bind (index remainder)
       (truncate byte-offset (%unsafe-array-element-scale array))
     (unless (zerop remainder)
-      (error "Unaligned Unsafe array offset ~D" byte-offset))
+      (internal-error "Unaligned Unsafe array offset ~D" byte-offset))
     index))
 
 ;;; Unsafe.getXUnaligned(Object, long) reads multi-byte values out of byte
@@ -389,7 +389,7 @@ the storage object does not (yet) exist."
             (%unsafe-bits-to-scalar
              (%unsafe-read-native-bits offset byte-count) kind))
            (t
-            (error "Unsafe ~A read has no field at offset ~D on ~A"
+            (internal-error "Unsafe ~A read has no field at offset ~D on ~A"
                    kind offset object))))))))
 
 (defun %unsafe-put-scalar (object offset value kind)
@@ -408,7 +408,7 @@ the storage object does not (yet) exist."
             (%unsafe-write-native-bits
              offset byte-count (%unsafe-scalar-to-bits normalized kind)))
            (t
-            (error "Unsafe ~A write has no field at offset ~D on ~A"
+            (internal-error "Unsafe ~A write has no field at offset ~D on ~A"
                    kind offset object)))))))
   nil)
 
@@ -422,7 +422,7 @@ the storage object does not (yet) exist."
        (cond
          (field-p (slot-value owner key))
          ((null object) (gethash offset *unsafe-reference-memory-table*))
-         (t (error "Unsafe reference read has no field at offset ~D on ~A"
+         (t (internal-error "Unsafe reference read has no field at offset ~D on ~A"
                    offset object)))))))
 
 (defun %unsafe-put-reference (object offset value)
@@ -436,7 +436,7 @@ the storage object does not (yet) exist."
          (field-p (setf (slot-value owner key) value))
          ((null object)
           (setf (gethash offset *unsafe-reference-memory-table*) value))
-         (t (error "Unsafe reference write has no field at offset ~D on ~A"
+         (t (internal-error "Unsafe reference write has no field at offset ~D on ~A"
                    offset object))))))
   nil)
 

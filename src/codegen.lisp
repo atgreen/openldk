@@ -1495,7 +1495,7 @@ boolean prints true/false and char prints the character rather than an int."
                                                     ,(code (codegen (second dynamic-args) context))
                                                     ,class-code ,names-code)
                              :expression-type :INTEGER))
-             (t (error "Unsupported ObjectMethods bootstrap method: ~A" mname)))))
+             (t (unimplemented "ObjectMethods bootstrap method ~A" mname)))))
         ;; Fast path for SwitchBootstraps.typeSwitch / enumSwitch (pattern-matching
         ;; switch). The real JDK generates a hidden class via the ClassFile API;
         ;; instead we compute the case index directly. args[0] is the call-site

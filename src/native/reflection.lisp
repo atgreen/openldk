@@ -63,7 +63,7 @@
                     (find-package :openldk)))
            (sym (find-symbol fn-name pkg)))
       (unless (and sym (fboundp sym))
-        (error "Reflective invoke0: method ~A not found (class=~A, static=~A)"
+        (internal-error "Reflective invoke0: method ~A not found (class=~A, static=~A)"
                fn-name class-name is-static))
       (let ((lisp-args (when args
                          (coerce (java-array-data args) 'list))))
@@ -96,7 +96,7 @@
                        (coerce (java-array-data args) 'list))))
       (if (and sym (fboundp sym))
           (apply (symbol-function sym) instance lisp-args)
-          (error "Reflective newInstance0: constructor ~A not found for class ~A"
+          (internal-error "Reflective newInstance0: constructor ~A not found for class ~A"
                  lispized class-name))
       instance)))
 

@@ -329,7 +329,7 @@ saved image was dumped)."
   (destructuring-bind (module offset comp unc) location
     (declare (ignore module))
     (when (plusp comp)
-      (error "Compressed jimage resources are not supported: ~A" (slot-value cpe 'imagefile)))
+      (unimplemented "compressed jimage resources: ~A" (slot-value cpe 'imagefile)))
     (let ((bytes (make-array unc :element-type '(unsigned-byte 8))))
       (file-position (slot-value cpe 'stream) offset)
       (read-sequence bytes (slot-value cpe 'stream))

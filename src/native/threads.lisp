@@ -325,7 +325,7 @@
          ;; supports :timeout/:default (bt1 threads are sb-thread:thread objects).
          (handler-case
              (sb-thread:join-thread lisp-thread :timeout timeout-sec :default nil)
-           (error () nil)))))))
+           (sb-thread:join-thread-error () nil)))))))
 
 ;;; Fiber-based start0 for virtual threads (when SBCL has fiber support).
 ;;; Creates a fiber instead of an OS thread for BaseVirtualThread instances.

@@ -145,7 +145,7 @@
                 (if obj-end
                     (progn (push t param-hints)
                            (setf index (1+ obj-end)))
-                    (error "Malformed descriptor: Missing ';' in object type."))))
+                    (internal-error "Malformed descriptor: Missing ';' in object type."))))
 
              ;; Array types
              ((char= ch #\[)
@@ -157,7 +157,7 @@
                      (if obj-end
                          (progn (push t param-hints)
                                 (setf index (1+ obj-end)))
-                         (error "Malformed descriptor: Missing ';' in object type."))))
+                         (internal-error "Malformed descriptor: Missing ';' in object type."))))
                   (t
                    (push t param-hints)
                    (incf index)))))

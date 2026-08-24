@@ -233,7 +233,7 @@
          (sym (intern class-name pkg)))
     (if (find-class sym nil)
         (make-instance sym)
-        (error "Class not found: ~A" class-name))))
+        (internal-error "Class not found: ~A" class-name))))
 
 ;; BIN-NAME is the binary name of a class.  eg: java/lang/String
 ;; FQ-NAME is the fully qualified name of a class. eg: java.lang.String
@@ -375,7 +375,7 @@
                     ((null bin-name)
                      (if fail-ok
                          (return-from %get-java-class-by-bin-name nil)
-                         (error "bin-name is NIL in %get-java-class-by-bin-name")))
+                         (internal-error "bin-name is NIL in %get-java-class-by-bin-name")))
                     (t (coerce (java-array-data bin-name) 'string)))))
     (assert (stringp bin-name))
     (assert (not (find #\. bin-name)))
@@ -385,7 +385,7 @@
                       ;; Fall back to global tables for backward compatibility
                       (gethash bin-name *java-classes-by-bin-name*))))
       (unless (or fail-ok result)
-        (error "Class ~A not found in %get-java-class-by-bin-name" bin-name))
+        (internal-error "Class ~A not found in %get-java-class-by-bin-name" bin-name))
       result)))
 
 (defun %get-java-class-by-fq-name (fq-name &optional fail-ok loader)
@@ -397,7 +397,7 @@
                    ((null fq-name)
                     (if fail-ok
                         (return-from %get-java-class-by-fq-name nil)
-                        (error "fq-name is NIL in %get-java-class-by-fq-name")))
+                        (internal-error "fq-name is NIL in %get-java-class-by-fq-name")))
                    (t (coerce (java-array-data fq-name) 'string)))))
     (assert (stringp fq-name))
     (assert (not (find #\/ fq-name)))
@@ -405,7 +405,7 @@
                       (%lookup-class-with-delegation loader fq-name 'java-classes-by-fq-name)
                       (gethash fq-name *java-classes-by-fq-name*))))
       (unless (or fail-ok result)
-        (error "Class ~A not found in %get-java-class-by-fq-name" fq-name))
+        (internal-error "Class ~A not found in %get-java-class-by-fq-name" fq-name))
       result)))
 
 (defun %get-ldk-class-by-bin-name (bin-name &optional fail-ok loader)
@@ -417,7 +417,7 @@
                     ((null bin-name)
                      (if fail-ok
                          (return-from %get-ldk-class-by-bin-name nil)
-                         (error "bin-name is NIL in %get-ldk-class-by-bin-name")))
+                         (internal-error "bin-name is NIL in %get-ldk-class-by-bin-name")))
                     (t (coerce (java-array-data bin-name) 'string)))))
     (assert (stringp bin-name))
     (assert (not (find #\. bin-name)))
@@ -425,7 +425,7 @@
                       (%lookup-class-with-delegation loader bin-name 'ldk-classes-by-bin-name)
                       (gethash bin-name *ldk-classes-by-bin-name*))))
       (unless (or fail-ok result)
-        (error "Class ~A not found in %get-ldk-class-by-bin-name" bin-name))
+        (internal-error "Class ~A not found in %get-ldk-class-by-bin-name" bin-name))
       result)))
 
 (defun %get-ldk-class-by-fq-name (fq-name &optional fail-ok loader)
@@ -437,14 +437,14 @@
                    ((null fq-name)
                     (if fail-ok
                         (return-from %get-ldk-class-by-fq-name nil)
-                        (error "fq-name is NIL in %get-ldk-class-by-fq-name")))
+                        (internal-error "fq-name is NIL in %get-ldk-class-by-fq-name")))
                    (t (coerce (java-array-data fq-name) 'string)))))
     (assert (stringp fq-name))
     (let ((result (if loader
                       (%lookup-class-with-delegation loader fq-name 'ldk-classes-by-fq-name)
                       (gethash fq-name *ldk-classes-by-fq-name*))))
       (unless (or fail-ok result)
-        (error "Class ~A not found in %get-ldk-class-by-fq-name" fq-name))
+        (internal-error "Class ~A not found in %get-ldk-class-by-fq-name" fq-name))
       result)))
 
 (defun %lookup-class-with-delegation (loader name slot-name)

@@ -87,7 +87,8 @@ when running in a fiber, so no separate fiber code path is needed."
            (current-thread (current-thread-identity)))
       (bordeaux-threads:with-lock-held (mutex)
         (unless (eq (owner monitor) current-thread)
-          (error "Current thread does not own the monitor"))
+          ;; JVM spec: monitorexit by a non-owner throws IllegalMonitorStateException.
+          (error (%lisp-condition (%make-throwable '|java/lang/IllegalMonitorStateException|))))
         (decf (recursion-count monitor))
         (when (zerop (recursion-count monitor))
           (setf (owner monitor) nil)

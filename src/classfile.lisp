@@ -111,7 +111,7 @@
                           (8 '|java/lang/invoke/MethodHandles$Lookup.findConstructor(Ljava/lang/Class;Ljava/lang/invoke/MethodType;)|)
                           ;; interface methods use findVirtual
                           (9 '|java/lang/invoke/MethodHandles$Lookup.findVirtual(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)|)
-                          (t (error "Unknown MethodHandle reference kind: ~A" ref-kind)))))
+                          (t (internal-error "Unknown MethodHandle reference kind: ~A" ref-kind)))))
     (make-instance 'ir-method-handle
                    :reference-index (reference-index cmh)
                    :value (case ref-kind
@@ -132,7 +132,7 @@
                             ;; Standard method lookups (invokeVirtual, invokeStatic, invokeInterface)
                             ((5 6 9) `(let ((lookup (|java/lang/invoke/MethodHandles.lookup()|)))
                                         (,lookup-method lookup ,refc ,name ,type)))
-                            (t (error "Unhandled MethodHandle reference kind: ~A" ref-kind))))))
+                            (t (internal-error "Unhandled MethodHandle reference kind: ~A" ref-kind))))))
 
 (defclass/std constant-method-type ()
   ((descriptor-index)))
@@ -568,8 +568,12 @@ stream."
             (let ((minor-version (read-u2))
                   (major-version (read-u2)))
               (when (> major-version 69)
-                (error "Unsupported class file version ~A.~A (max supported: 69.0)"
-                       major-version minor-version))
+                ;; Java-visible: the JVM throws UnsupportedClassVersionError.
+                (let ((exc (%make-java-instance "java/lang/UnsupportedClassVersionError")))
+                  (|<init>(Ljava/lang/String;)| exc
+                   (jstring (format nil "Unsupported class file version ~A.~A (max supported: 69.0)"
+                                    major-version minor-version)))
+                  (error (%lisp-condition exc))))
               (setf (slot-value class 'major-version) major-version)
               (setf (slot-value class 'minor-version) minor-version)
               (let ((constant-pool-count (read-u2)))

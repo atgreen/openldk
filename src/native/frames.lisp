@@ -315,6 +315,13 @@ for the Java caller."
           1000000000)
        nanoseconds)))
 
+(defun %throw-arraycopy-index-error (format-control &rest format-arguments)
+  "System.arraycopy bounds violations throw ArrayIndexOutOfBoundsException."
+  (let ((exc (%make-java-instance "java/lang/ArrayIndexOutOfBoundsException")))
+    (|<init>(Ljava/lang/String;)| exc
+     (jstring (apply #'format nil format-control format-arguments)))
+    (error (%lisp-condition exc))))
+
 (defmethod |java/lang/System.arraycopy(Ljava/lang/Object;ILjava/lang/Object;II)| (src-array src-pos dest-array dest-pos length)
   "Copies LENGTH elements from SRC-ARRAY starting at SRC-POS
    to DEST-ARRAY starting at DEST-POS.
@@ -327,21 +334,21 @@ for the Java caller."
 
     ;; Validate arguments
     (when (< length 0)
-      (error "Length cannot be negative: ~A" length))
+      (%throw-arraycopy-index-error "length ~A" length))
 
     (when (< src-pos 0)
-      (error "Source position cannot be negative: ~A" src-pos))
+      (%throw-arraycopy-index-error "source position ~A" src-pos))
 
     (when (< dest-pos 0)
-      (error "Destination position cannot be negative: ~A" dest-pos))
+      (%throw-arraycopy-index-error "destination position ~A" dest-pos))
 
     (when (> (+ src-pos length) (array-total-size src-array))
-      (error "Source array index out of bounds: size=~A, access=~A"
-             (array-total-size src-array) (+ src-pos length -1)))
+      (%throw-arraycopy-index-error "source size=~A, access=~A"
+                                    (array-total-size src-array) (+ src-pos length -1)))
 
     (when (> (+ dest-pos length) (array-total-size dest-array))
-      (error "Destination array index out of bounds: size=~A, access=~A"
-             (array-total-size dest-array) (+ dest-pos length -1)))
+      (%throw-arraycopy-index-error "destination size=~A, access=~A"
+                                    (array-total-size dest-array) (+ dest-pos length -1)))
 
     ;; Handle the case when src-array and dest-array are the same and regions overlap
     (if (and (eq src-array dest-array)

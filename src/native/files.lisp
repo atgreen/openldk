@@ -396,7 +396,7 @@ current0 for why it must not delegate to the wrapper name)."
                              (slot-value ch '|fd|)))
                    (fd (when fd-obj (slot-value fd-obj '|fd|))))
               (unless fd
-                (error "ChannelInputStream.read: unsupported channel type ~A"
+                (unimplemented "ChannelInputStream.read: unsupported channel type ~A"
                        (type-of ch)))
               (let* ((mem (sb-alien:make-alien sb-alien:char len))
                      (sap (sb-alien:alien-sap mem))
@@ -425,7 +425,7 @@ current0 for why it must not delegate to the wrapper name)."
                            (slot-value ch '|fd|)))
                  (fd (when fd-obj (slot-value fd-obj '|fd|))))
             (unless fd
-              (error "Channels$1.write: unsupported channel type ~A"
+              (unimplemented "Channels$1.write: unsupported channel type ~A"
                      (type-of ch)))
             (let* ((data (java-array-data b))
                    (mem (sb-alien:make-alien sb-alien:char len))

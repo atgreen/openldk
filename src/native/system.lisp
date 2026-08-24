@@ -645,7 +645,7 @@ does not reconstruct, so we compute it from the name directly."
         ;; Verify name matches hint if provided
         (when (and class-name-hint
                    (not (string= classname (substitute #\/ #\. class-name-hint))))
-          (error "Class name ~A does not match expected ~A" classname class-name-hint))
+          (internal-error "Class name ~A does not match expected ~A" classname class-name-hint))
 
         ;; Check if class already defined - return existing java.lang.Class
         ;; This mirrors JVM behavior where defineClass on existing class is an error,
@@ -1434,7 +1434,7 @@ Java byte arrays hold SIGNED bytes; read-byte yields 0..255."
   ;; OpenLDK is currently supported on little-endian SBCL/Linux systems.
   (unless (and (<= 0 offset)
                (<= (+ offset byte-count) (length (java-array-data array))))
-    (error "Unsafe byte-array read of ~D bytes at ~D exceeds length ~D"
+    (internal-error "Unsafe byte-array read of ~D bytes at ~D exceeds length ~D"
            byte-count offset (length (java-array-data array))))
   (loop for index below byte-count
         sum (ash (logand (jaref array (+ offset index)) #xff)

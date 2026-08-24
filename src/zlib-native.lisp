@@ -61,7 +61,7 @@
                       (sb-alien:unsigned-long checksum)
                       ((* sb-alien:unsigned-char) pointer)
                       (sb-alien:unsigned-int length)))
-        (t (error "Unknown zlib checksum function ~A" function)))
+        (t (internal-error "Unknown zlib checksum function ~A" function)))
       #xffffffff))))
 
 (defun %zlib-checksum-byte (function checksum value)
@@ -108,7 +108,7 @@
 
 (defun %zlib-stream (address)
   (or (gethash address *zlib-streams*)
-      (error "Unknown or closed zlib stream at address ~X" address)))
+      (internal-error "Unknown or closed zlib stream at address ~X" address)))
 
 (defun %zero-zlib-stream (stream)
   (%zlib-call "memset" (* t)
@@ -166,6 +166,13 @@
   (error (%lisp-condition
           (%make-throwable '|java/util/zip/DataFormatException|))))
 
+(defun %throw-zlib-illegal-argument (operation status)
+  "The JDK throws IllegalArgumentException when zlib rejects a
+dictionary (wrong adler32 or bad stream state)."
+  (declare (ignore operation status))
+  (error (%lisp-condition
+          (%make-throwable '|java/lang/IllegalArgumentException|))))
+
 (defun |java/util/zip/Inflater.init(Z)| (nowrap)
   (%load-zlib)
   (let ((stream (sb-alien:make-alien openldk-z-stream)))
@@ -179,7 +186,7 @@
                           (sb-alien:alien-size openldk-z-stream :bytes)))))
       (unless (zerop status)
         (sb-alien:free-alien stream)
-        (error "inflateInit2 failed with zlib status ~D" status))
+        (internal-error "inflateInit2 failed with zlib status ~D" status))
       (%register-zlib-stream stream))))
 
 (defun %inflate-saps (inflater address input-sap input-length output-sap output-length)
@@ -193,7 +200,7 @@
         (case status
           ((0 1 2 -5) packed)       ; OK, STREAM_END, NEED_DICT, BUF_ERROR
           (-3 (%throw-data-format-exception inflater input-used output-used))
-          (otherwise (error "inflate failed with zlib status ~D" status)))))))
+          (otherwise (internal-error "inflate failed with zlib status ~D" status)))))))
 
 (defmethod |inflateBytesBytes(J[BII[BII)|
     ((inflater t) address input input-offset input-length
@@ -250,7 +257,7 @@
                               ((* sb-alien:unsigned-char) memory)
                               (sb-alien:unsigned-int length))))
            (unless (zerop status)
-             (error "inflateSetDictionary failed with zlib status ~D" status)))
+             (%throw-zlib-illegal-argument "inflateSetDictionary" status)))
       (sb-alien:free-alien memory)))
   nil)
 
@@ -263,7 +270,7 @@
                                             (* sb-alien:unsigned-char)))
                        (sb-alien:unsigned-int length))))
     (unless (zerop status)
-      (error "inflateSetDictionary failed with zlib status ~D" status)))
+      (%throw-zlib-illegal-argument "inflateSetDictionary" status)))
   nil)
 
 (defun |java/util/zip/Inflater.getAdler(J)| (address)
@@ -273,14 +280,14 @@
 (defun |java/util/zip/Inflater.reset(J)| (address)
   (unless (zerop (%zlib-call "inflateReset" sb-alien:int
                              ((* openldk-z-stream) (%zlib-stream address))))
-    (error "inflateReset failed"))
+    (internal-error "inflateReset failed"))
   nil)
 
 (defun |java/util/zip/Inflater.end(J)| (address)
   (let ((stream (%zlib-stream address)))
     (unless (zerop (%zlib-call "inflateEnd" sb-alien:int
                                ((* openldk-z-stream) stream)))
-      (error "inflateEnd failed"))
+      (internal-error "inflateEnd failed"))
     (%free-zlib-stream address))
   nil)
 
@@ -301,7 +308,7 @@
                           (sb-alien:alien-size openldk-z-stream :bytes)))))
       (unless (zerop status)
         (sb-alien:free-alien stream)
-        (error "deflateInit2 failed with zlib status ~D" status))
+        (internal-error "deflateInit2 failed with zlib status ~D" status))
       (%register-zlib-stream stream))))
 
 (defun %deflate-saps (address input-sap input-length output-sap output-length
@@ -319,7 +326,7 @@
                              ((* openldk-z-stream) stream)
                              (sb-alien:int flush)))))
       (unless (member status '(0 1 -5))
-        (error "deflate failed with zlib status ~D" status))
+        (internal-error "deflate failed with zlib status ~D" status))
       (%zlib-result stream input-length output-length (= status 1)
                     (and setting-parameters (/= status 0))))))
 
@@ -387,7 +394,7 @@
                               ((* sb-alien:unsigned-char) memory)
                               (sb-alien:unsigned-int length))))
            (unless (zerop status)
-             (error "deflateSetDictionary failed with zlib status ~D" status)))
+             (%throw-zlib-illegal-argument "deflateSetDictionary" status)))
       (sb-alien:free-alien memory)))
   nil)
 
@@ -400,7 +407,7 @@
                                             (* sb-alien:unsigned-char)))
                        (sb-alien:unsigned-int length))))
     (unless (zerop status)
-      (error "deflateSetDictionary failed with zlib status ~D" status)))
+      (%throw-zlib-illegal-argument "deflateSetDictionary" status)))
   nil)
 
 (defun |java/util/zip/Deflater.getAdler(J)| (address)
@@ -410,13 +417,13 @@
 (defun |java/util/zip/Deflater.reset(J)| (address)
   (unless (zerop (%zlib-call "deflateReset" sb-alien:int
                              ((* openldk-z-stream) (%zlib-stream address))))
-    (error "deflateReset failed"))
+    (internal-error "deflateReset failed"))
   nil)
 
 (defun |java/util/zip/Deflater.end(J)| (address)
   (let ((stream (%zlib-stream address)))
     (unless (zerop (%zlib-call "deflateEnd" sb-alien:int
                                ((* openldk-z-stream) stream)))
-      (error "deflateEnd failed"))
+      (internal-error "deflateEnd failed"))
     (%free-zlib-stream address))
   nil)

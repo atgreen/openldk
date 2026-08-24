@@ -296,7 +296,7 @@ the normal call-next-method chain for the owner's superclasses."
                                    collect (find-class 't))))
            (methods (closer-mop:compute-applicable-methods-using-classes gf class-list)))
       (unless methods
-        (error "No applicable methods found for ~A on declaring class ~A with ~D args"
+        (internal-error "No applicable methods found for ~A on declaring class ~A with ~D args"
                method-symbol owner-symbol (length args)))
       (let ((method (or (find owner-class methods
                               :key (lambda (m)
@@ -711,7 +711,7 @@ during error handling."
           (setf (symbol-function fn-symbol)
                 (lambda (&rest args)
                   (declare (ignore args))
-                  (error "JIT compilation failed for ~A" method-key))))
+                  (internal-error "JIT compilation failed for ~A" method-key))))
         ;; Instance method: install a defmethod that throws an error.
         ;; Use CL:EVAL (not %eval) to avoid re-entering the JIT.
         (let* ((class-sym (intern (slot-value class 'name)
@@ -723,7 +723,7 @@ during error handling."
           (when (find-class class-sym nil)
             (eval `(defmethod ,fn-symbol ((,this-sym ,class-sym) ,@param-names)
                      (declare (ignore ,this-sym ,@param-names))
-                     (error "JIT compilation failed for ~A" ,method-key))))))))
+                     (internal-error "JIT compilation failed for ~A" ,method-key))))))))
 
 (defun %compile-method (class-name method-index)
   "JIT-compile method METHOD-INDEX of CLASS-NAME: transpile its bytecode to
@@ -807,7 +807,7 @@ or skip in-progress compilations."
 (defun %clinit (class)
   (let ((class (gethash (name class) *ldk-classes-by-bin-name*)))
     (assert
-     (or class (error "Can't find ~A" class)))
+     (or class (internal-error "Can't find ~A" class)))
     (labels ((clinit (class)
                (let ((super-class (gethash (slot-value class 'super) *ldk-classes-by-bin-name*)))
                  (when (and super-class (not (initialized-p super-class)))
