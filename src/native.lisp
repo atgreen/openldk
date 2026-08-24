@@ -1277,6 +1277,114 @@ for the Java caller."
             (declare (ignore unsafe))
             (%unsafe-get-unaligned obj offset nbytes signedp)))))
 
+;;; VarHandle byte-array views (MethodHandles.byteArrayViewVarHandle):
+;;; polymorphic get/set invocations on VarHandleByteArrayAs*$ArrayHandle
+;;; instances are intrinsified in HotSpot, so there is no bytecode to
+;;; compile -- implement them as CLOS methods.  Stub defclasses let the
+;;; methods be defined at load time; the real classload later redefines
+;;; the classes in place (same identity), preserving the methods.
+
+(defun %byte-view-be-p (handle)
+  (and (slot-exists-p handle '|be|)
+       (ignore-errors (slot-boundp handle '|be|))
+       (let ((v (slot-value handle '|be|)))
+         (and v (not (eql v 0))))))
+
+(defun %byte-view-get (handle array index nbytes kind)
+  (let ((v (%byte-array-load array index nbytes (%byte-view-be-p handle))))
+    (ecase kind
+      (:char (code-char v))
+      (:signed (%signed-of-width v (* 8 nbytes)))
+      (:float (float-features:bits-single-float v))
+      (:double (float-features:bits-double-float v)))))
+
+(defun %byte-view-set (handle array index nbytes kind value)
+  (%byte-array-store array index nbytes (%byte-view-be-p handle)
+                     (ecase kind
+                       (:char (if (characterp value) (char-code value) value))
+                       (:signed value)
+                       (:float (float-features:single-float-bits
+                                (coerce value 'single-float)))
+                       (:double (float-features:double-float-bits
+                                 (coerce value 'double-float)))))
+  nil)
+
+(dolist (spec '(("Shorts" 2 :signed "S")
+                ("Chars" 2 :char "C")
+                ("Ints" 4 :signed "I")
+                ("Longs" 8 :signed "J")
+                ("Floats" 4 :float "F")
+                ("Doubles" 8 :double "D")))
+  (destructuring-bind (view nbytes kind jtype) spec
+    (let ((class-sym (intern (format nil "java/lang/invoke/VarHandleByteArrayAs~A$ArrayHandle" view)
+                             :openldk)))
+      (eval `(defclass ,class-sym () ()))
+      (dolist (getter '("get" "getVolatile" "getAcquire" "getOpaque"))
+        (eval `(defmethod ,(intern (format nil "~A([BI)" getter) :openldk)
+                   ((this ,class-sym) array index)
+                 (%byte-view-get this array index ,nbytes ,kind))))
+      (dolist (setter '("set" "setVolatile" "setRelease" "setOpaque"))
+        (eval `(defmethod ,(intern (format nil "~A([BI~A)" setter jtype) :openldk)
+                   ((this ,class-sym) array index value)
+                 (%byte-view-set this array index ,nbytes ,kind value)))))))
+
+;;; VarHandle array-element views (MethodHandles.arrayElementVarHandle),
+;;; same stub-class technique.  All read-modify-write operations serialize
+;;; on *cas-lock*, like the Unsafe CAS emulation.
+
+(dolist (spec '(("References" "[Ljava/lang/Object;" "Ljava/lang/Object;" eq nil)
+                ("Ints" "[I" "I" eql 32)
+                ("Longs" "[J" "J" eql 64)))
+  (destructuring-bind (family arr-sig val-sig test bits) spec
+    (let ((class-sym (intern (format nil "java/lang/invoke/VarHandle~A$Array" family)
+                             :openldk)))
+      (eval `(defclass ,class-sym () ()))
+      (dolist (getter '("get" "getVolatile" "getAcquire" "getOpaque"))
+        (eval `(defmethod ,(intern (format nil "~A(~AI)" getter arr-sig) :openldk)
+                   ((this ,class-sym) array index)
+                 (declare (ignore this))
+                 (jaref array index))))
+      (dolist (setter '("set" "setVolatile" "setRelease" "setOpaque"))
+        (eval `(defmethod ,(intern (format nil "~A(~AI~A)" setter arr-sig val-sig) :openldk)
+                   ((this ,class-sym) array index value)
+                 (declare (ignore this))
+                 (setf (jaref array index) value)
+                 nil)))
+      (dolist (cas '("compareAndSet" "weakCompareAndSet" "weakCompareAndSetPlain"
+                     "weakCompareAndSetAcquire" "weakCompareAndSetRelease"))
+        (eval `(defmethod ,(intern (format nil "~A(~AI~A~A)" cas arr-sig val-sig val-sig) :openldk)
+                   ((this ,class-sym) array index expected new-value)
+                 (declare (ignore this))
+                 (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
+                   (if (,test (jaref array index) expected)
+                       (progn (setf (jaref array index) new-value) 1)
+                       0)))))
+      (dolist (cae '("compareAndExchange" "compareAndExchangeAcquire" "compareAndExchangeRelease"))
+        (eval `(defmethod ,(intern (format nil "~A(~AI~A~A)" cae arr-sig val-sig val-sig) :openldk)
+                   ((this ,class-sym) array index expected new-value)
+                 (declare (ignore this))
+                 (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
+                   (let ((old (jaref array index)))
+                     (when (,test old expected)
+                       (setf (jaref array index) new-value))
+                     old)))))
+      (eval `(defmethod ,(intern (format nil "getAndSet(~AI~A)" arr-sig val-sig) :openldk)
+                 ((this ,class-sym) array index value)
+               (declare (ignore this))
+               (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
+                 (let ((old (jaref array index)))
+                   (setf (jaref array index) value)
+                   old))))
+      (when bits
+        (eval `(defmethod ,(intern (format nil "getAndAdd(~AI~A)" arr-sig val-sig) :openldk)
+                   ((this ,class-sym) array index delta)
+                 (declare (ignore this))
+                 (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
+                   (let ((old (jaref array index)))
+                     (setf (jaref array index)
+                           (%signed-of-width (ldb (byte ,bits 0) (+ old delta)) ,bits))
+                     old))))))))
+
 ;;; Common storage model for jdk.internal.misc.Unsafe.  Older native support
 ;;; below grew around sun.misc.Unsafe, but Java 9+ NIO and atomics call the
 ;;; internal Unsafe class directly.  Keep one implementation for fields,
@@ -5091,10 +5199,6 @@ compiled Java readdir wrapper may overwrite the old readdir(J) symbol."
   (declare (ignore this)
            (ignore option-id))
   (slot-value |+static-java/lang/Boolean+| '|TRUE|))
-
-;; FIXME -- am I picking up the wrong static method?  Found with log4j.
-(defun |sun/util/calendar/BaseCalendar.getDayOfWeekDateOnOrBefore(JI)| (l i)
-  (|sun/util/calendar/AbstractCalendar.getDayOfWeekDateOnOrBefore(JI)| l i))
 
 (defun |sun/management/MemoryImpl.getMemoryManagers0()| ()
   (let* ((mm-mxbean-class (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
