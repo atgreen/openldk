@@ -317,6 +317,12 @@
 (defvar *lisp-to-java-threads* (make-hash-table :test #'eq :synchronized t)
   "Hash table mapping bordeaux-threads to Java Thread objects.")
 
+;; Serializes all Unsafe compare-and-swap/exchange emulation.  A single
+;; recursive lock (compareAndSwapLong delegates to compareAndSwapInt on one
+;; path) is the simplest way to make the read-compare-write sequences
+;; atomic with respect to each other.
+(defvar *cas-lock* (bordeaux-threads:make-recursive-lock "unsafe-cas"))
+
 ;; Track interrupted status for each Thread (not a field in Java 8)
 (defvar *thread-interrupted* (make-hash-table :test #'eq :synchronized t)
   "Hash table tracking interrupted status for each Java Thread object.")

@@ -808,18 +808,35 @@ for the Java caller."
           thread))))
 
 (defmethod |setPriority0(I)| ((thread |java/lang/Thread|) priority)
+  "Thread priorities are advisory; SBCL threads have none."
   (declare (ignore thread priority))
   nil)
 
 (defmethod |isAlive()| ((thread |java/lang/Thread|))
-  0)
+  (let ((lisp-thread (gethash thread *java-threads*)))
+    (cond
+      ;; A started platform thread: alive iff its Lisp thread is.
+      (lisp-thread
+       (if (bordeaux-threads:thread-alive-p lisp-thread) 1 0))
+      #+sb-fiber
+      ((gethash thread *java-to-fibers*)
+       (if (sb-thread:fiber-alive-p (gethash thread *java-to-fibers*)) 1 0))
+      ;; The calling thread's own Java object (e.g. the main thread) is
+      ;; only registered in the lisp->java direction.
+      ((eq thread (gethash (bordeaux-threads:current-thread)
+                           *lisp-to-java-threads*))
+       1)
+      ;; Never started, or its thread is gone.
+      (t 0))))
 
-(defmethod |isInterrupted(Z)| ((thread |java/lang/Thread|) x)
-  0)
-
-(defmethod |start0()| ((thread |java/lang/Thread|))
-  (declare (ignore thread))
-  nil)
+(defmethod |isInterrupted(Z)| ((thread |java/lang/Thread|) clear-interrupted)
+  "Interrupted status lives in *THREAD-INTERRUPTED* (see interrupt0)."
+  (let ((interrupted (gethash thread *thread-interrupted*)))
+    (when (and interrupted
+               clear-interrupted
+               (not (eql clear-interrupted 0)))
+      (setf (gethash thread *thread-interrupted*) nil))
+    (if interrupted 1 0)))
 
 ;;; JDK 21 Thread native methods for virtual thread support.
 ;;; OpenLDK treats all threads as platform (carrier) threads.
@@ -1060,10 +1077,24 @@ for the Java caller."
   nil)
 
 ;; Runtime native methods
+(defun %available-processor-count ()
+  "Number of online CPUs, via sysconf(_SC_NPROCESSORS_ONLN) with a
+/proc/cpuinfo fallback."
+  (or (ignore-errors
+        (let ((n (sb-alien:alien-funcall
+                  (sb-alien:extern-alien "sysconf" (function sb-alien:long sb-alien:int))
+                  84)))                 ; _SC_NPROCESSORS_ONLN on Linux
+          (when (plusp n) n)))
+      (ignore-errors
+        (with-open-file (in "/proc/cpuinfo")
+          (loop for line = (read-line in nil)
+                while line
+                count (and (>= (length line) 9)
+                           (string= "processor" line :end2 9)))))
+      1))
+
 (defmethod |availableProcessors()| ((rt |java/lang/Runtime|))
-  (max 1 (sb-alien:alien-funcall
-          (sb-alien:extern-alien "sysconf" (function sb-alien:long sb-alien:int))
-          sb-posix::_sc-nprocessors-onln)))
+  (%available-processor-count))
 
 (defmethod |freeMemory()| ((rt |java/lang/Runtime|))
   ;; Return SBCL's available dynamic space
@@ -1478,17 +1509,19 @@ the storage object does not (yet) exist."
 
 (defun %unsafe-compare-and-exchange-scalar
     (object offset expected replacement kind)
-  (let ((old (%unsafe-get-scalar object offset kind)))
-    (when (eql old (%unsafe-normalize-scalar expected kind))
-      (%unsafe-put-scalar object offset replacement kind))
-    old))
+  (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
+    (let ((old (%unsafe-get-scalar object offset kind)))
+      (when (eql old (%unsafe-normalize-scalar expected kind))
+        (%unsafe-put-scalar object offset replacement kind))
+      old)))
 
 (defun %unsafe-compare-and-exchange-reference
     (object offset expected replacement)
-  (let ((old (%unsafe-get-reference object offset)))
-    (when (eq old expected)
-      (%unsafe-put-reference object offset replacement))
-    old))
+  (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
+    (let ((old (%unsafe-get-reference object offset)))
+      (when (eq old expected)
+        (%unsafe-put-reference object offset replacement))
+      old)))
 
 (defmethod |compareAndSetInt(Ljava/lang/Object;JII)|
     ((unsafe |jdk/internal/misc/Unsafe|) object offset expected replacement)
@@ -1760,19 +1793,21 @@ the storage object does not (yet) exist."
 ;;; the latter directly).
 (defun %cas-byte-field (obj offset expected new-val)
   "CAS a byte/boolean field using CLOS slots instead of raw memory."
-  (let* ((key (%unsafe-slot-key offset))
-         (current (slot-value obj key)))
-    (if (eql current expected)
-        (progn (setf (slot-value obj key) new-val) 1)
-        0)))
+  (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
+    (let* ((key (%unsafe-slot-key offset))
+           (current (slot-value obj key)))
+      (if (eql current expected)
+          (progn (setf (slot-value obj key) new-val) 1)
+          0))))
 
 (defun %cae-byte-field (obj offset expected new-val)
   "Compare-and-exchange a byte/boolean field using CLOS slots."
-  (let* ((key (%unsafe-slot-key offset))
-         (current (slot-value obj key)))
-    (when (eql current expected)
-      (setf (slot-value obj key) new-val))
-    current))
+  (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
+    (let* ((key (%unsafe-slot-key offset))
+           (current (slot-value obj key)))
+      (when (eql current expected)
+        (setf (slot-value obj key) new-val))
+      current)))
 
 (defmethod |compareAndSetByte(Ljava/lang/Object;JBB)| ((unsafe |sun/misc/Unsafe|) obj offset expected new-val)
   (declare (ignore unsafe))
@@ -1884,10 +1919,7 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
   (%unsafe-array-index-scale array))
 
 (defmethod |addressSize()| ((unsafe |sun/misc/Unsafe|))
-  997)
-
-(defmethod |availableProcessors()| ((runtime |java/lang/Runtime|))
-  1)
+  8)
 
 (defmethod |isArray()| ((class |java/lang/Class|))
   (let ((name-string (lstring (slot-value class '|name|))))
@@ -2442,6 +2474,7 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
   (declare (ignore obj)) nil)
 
 (defmethod |compareAndSwapObject(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)| ((unsafe |sun/misc/Unsafe|) obj field-id expected-value new-value)
+  (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
   (cond
     ((typep obj 'java-array)
      (let ((index (%unsafe-array-index obj field-id)))
@@ -2467,9 +2500,10 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
            (progn
              (setf (slot-value obj key) new-value)
              1)
-           0)))))
+           0))))))
 
 (defmethod |compareAndSwapInt(Ljava/lang/Object;JII)| ((unsafe |sun/misc/Unsafe|) obj field-id expected-value new-value)
+  (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
   ;; FIXME: use atomics package
   (if (typep obj 'java-array)
       (let ((index (%unsafe-array-index obj field-id)))
@@ -2490,9 +2524,10 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
             (progn
               (setf (slot-value obj key) new-value)
               1)
-            0)))))
+            0))))))
 
 (defmethod |compareAndSwapLong(Ljava/lang/Object;JJJ)| ((unsafe |sun/misc/Unsafe|) obj field-id expected-value new-value)
+  (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
   (if (typep obj 'java-array)
       (let ((index (%unsafe-array-index obj field-id)))
         (if (equal (jaref obj index) expected-value)
@@ -2508,7 +2543,7 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
             1)
           0)
           (|compareAndSwapInt(Ljava/lang/Object;JII)|
-           unsafe obj field-id expected-value new-value))))
+           unsafe obj field-id expected-value new-value)))))
 
 (defmethod |getObjectVolatile(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) obj l)
   (cond

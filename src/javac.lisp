@@ -347,6 +347,7 @@
       (setf openldk::*method-compilation-lock* (bt:make-lock "method-compilation-lock"))
       (setf openldk::*method-compilation-cv* (bt:make-condition-variable :name "method-compilation-cv"))
       (setf openldk::*identity-hash-counter-lock* (bt:make-lock "identity-hash-lock"))
+      (setf openldk::*cas-lock* (bt:make-recursive-lock "unsafe-cas"))
       ;; Drop stale in-progress compilation claims from dead warmup threads.
       (maphash (lambda (k v)
                  (when (eq v t)

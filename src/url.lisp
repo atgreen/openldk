@@ -122,12 +122,10 @@
         ;; Fall back to Java implementation
         (call-next-method))))
 
-;; :around so the override survives JIT compilation of java.net.URL — a
-;; compiled Java openStream() installs a primary method on this same GF and
-;; would otherwise clobber a primary Lisp override (it then NPEs in
-;; openConnection() on our handler-less synthetic jar:/jrt: URLs).
-(defmethod |openStream()| :around ((url |java/net/URL|))
-  "Open an InputStream for the URL."
+(defun %open-url-stream-1 (url)
+  "Open an InputStream for URL when its protocol is one we serve natively
+(jar:, file:, jrt:).  Returns the stream, NIL for a servable protocol whose
+target does not exist, or :FALLTHROUGH for other protocols."
   (let ((url-string (or (gethash url *native-url-strings*)
                         (lstring (|toString()| url)))))
     (cond
@@ -150,8 +148,30 @@
          (when slash
            (when-let (stream (open-resource-on-classpath (subseq rest (1+ slash))))
              (make-instance '<resource-input-stream> :lisp-stream stream)))))
-      ;; Fall through to Java implementation for other protocols
-      (t (call-next-method)))))
+      (t :fallthrough))))
+
+;; The :around survives JIT compilation of java.net.URL — a compiled Java
+;; openStream() installs a primary method on this same GF and would clobber
+;; a primary-only Lisp override (it then NPEs in openConnection() on our
+;; handler-less synthetic jar:/jrt: URLs).  The fallback PRIMARY below is
+;; still required: standard method combination signals NO-PRIMARY-METHOD if
+;; only an :around is applicable, which is exactly the situation before
+;; java.net.URL has been JIT-compiled.
+(defmethod |openStream()| :around ((url |java/net/URL|))
+  "Open an InputStream for the URL."
+  (let ((stream (%open-url-stream-1 url)))
+    (if (eq stream :fallthrough)
+        (call-next-method)
+        stream)))
+
+(defmethod |openStream()| ((url |java/net/URL|))
+  "Fallback primary for URLs of protocols we don't serve, dispatched before
+java.net.URL's bytecode is compiled.  The compiled Java method replaces
+this; the :around above still intercepts our native protocols."
+  (let ((stream (%open-url-stream-1 url)))
+    (if (eq stream :fallthrough)
+        nil
+        stream)))
 
 (defmethod |toString()| :around ((url |java/net/URL|))
   "Return the original spelling of an OpenLDK-constructed resource URL."
