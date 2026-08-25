@@ -126,6 +126,37 @@ supplementary characters) with coder 1."
     (setf (slot-value s '|hash|) 0)
     (|intern()| s)))
 
+(defun %java-string-hash (s)
+  "Java String.hashCode() over Lisp string S: s[0]*31^(n-1)+...+s[n-1] in 32-bit
+signed arithmetic. Supplementary code points expand to their UTF-16 surrogate
+pair to match the JVM (which hashes UTF-16 code units)."
+  (let ((h 0))
+    (flet ((mix (unit) (setf h (logand (+ (* 31 h) unit) #xFFFFFFFF))))
+      (loop for ch across s
+            for cp = (char-code ch)
+            do (if (> cp #xFFFF)
+                   (let ((v (- cp #x10000)))
+                     (mix (logior #xD800 (ash v -10)))
+                     (mix (logior #xDC00 (logand v #x3FF))))
+                   (mix cp))))
+    (if (> h #x7FFFFFFF) (- h #x100000000) h)))
+
+;; JDK 25's String.hashCode() dispatches to StringLatin1/StringUTF16.hashCode,
+;; which read the value byte[] via ArraysSupport.vectorizedHashCode (Unsafe raw
+;; memory) and NPE on OpenLDK's CLOS byte arrays -- surfacing when Clojure's ASM
+;; SymbolTable hashes a constant while compiling clojure/java/process.clj. Compute
+;; the hash directly. An :around survives the JIT-compiled bytecode body.
+(defmethod |hashCode()| :around ((this |java/lang/String|))
+  (let ((cached (and (slot-exists-p this '|hash|)
+                     (slot-boundp this '|hash|)
+                     (slot-value this '|hash|))))
+    (if (and (integerp cached) (not (zerop cached)))
+        cached
+        (let ((h (%java-string-hash (lstring this))))
+          (when (slot-exists-p this '|hash|)
+            (setf (slot-value this '|hash|) h))
+          h))))
+
 (defmethod |intern()| ((str |java/lang/String|))
   (let ((lisp-string (lstring str)))
     (let ((istr (gethash lisp-string *interned-string-table*)))
