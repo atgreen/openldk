@@ -12,10 +12,10 @@ want: -1
  got: -1
 
 want: A
- got: ?
+ got: 罁
 
 want: A
- got: ?
+ got: ａ
 
 want: 32767
  got: 32767
@@ -114,4 +114,3 @@ ary[0][2]=null
 ary[1][0]=null
 ary[1][1]=null
 ary[1][2]=null
-

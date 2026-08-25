@@ -375,10 +375,14 @@ for the Java caller."
     (%get-java-class-by-fq-name name)))
 
 (defmethod |java/lang/Float.floatToRawIntBits(F)| (float)
-  (float-features:single-float-bits (coerce float 'single-float)))
+  ;; single-float-bits yields the unsigned 32-bit pattern; Java returns a
+  ;; signed int, so a negative float (sign bit set) must come back negative --
+  ;; otherwise Float.toString reads the sign as positive and drops the '-'.
+  (%int-to-signed (float-features:single-float-bits (coerce float 'single-float))))
 
 (defmethod |java/lang/Double.doubleToRawLongBits(D)| (double)
-  (float-features:double-float-bits (coerce double 'double-float)))
+  ;; Likewise: Java returns a signed 64-bit long.
+  (%long-to-signed (float-features:double-float-bits (coerce double 'double-float))))
 
 (defmethod |java/lang/Double.longBitsToDouble(J)| (long-bits)
   (float-features:bits-double-float (ldb (byte 64 0) long-bits)))
