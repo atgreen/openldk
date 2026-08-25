@@ -1704,10 +1704,7 @@ FAIL: gcj/pr26990.java execution test
 # tracked as ldk-e5u.1..9; StringBuffer_overflow behaves per JVM-25 (empty)
 # and Divide_2 is timeout-flaky.
 FAIL: gcj/PR162.java execution test
-FAIL: gcj/SyncTest.java execution test
 FAIL: gcj/TLtest.java execution test
-FAIL: gcj/Thread_Alive.java execution test
-FAIL: gcj/Thread_Join.java execution test
 FAIL: gcj/StringBuffer_overflow.java execution test
 FAIL: gcj/Divide_2.java execution test
 FAIL: gcj/Throw_1.java execution test

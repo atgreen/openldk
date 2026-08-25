@@ -1127,27 +1127,59 @@ Java byte[] data stores signed bytes, so octets are converted."
     (return-from |java/lang/Thread.yield()|))
   nil)
 
+(defun %set-thread-status (thread status)
+  "Set THREAD's holder.threadStatus (JVMTI state bits) when the field is
+present.  Consumed by Thread.getState()/start()/getThreadGroup()."
+  (when (slot-exists-p thread '|holder|)
+    (let ((holder (slot-value thread '|holder|)))
+      (when (and holder (slot-exists-p holder '|threadStatus|))
+        (setf (slot-value holder '|threadStatus|) status)))))
+
 (defmethod |start0()| ((thread |java/lang/Thread|))
   "Start a new Lisp thread that executes the Thread's run() method."
+  ;; JDK 25's Thread.isAlive() is a bytecode method delegating to alive(),
+  ;; which returns (eetop != 0).  The JIT compiles those over any Lisp override,
+  ;; so we keep eetop itself truthful: non-zero while the thread runs, zero once
+  ;; it terminates.  Set it in the parent before the child can be observed.
+  (when (slot-exists-p thread '|eetop|)
+    (setf (slot-value thread '|eetop|) 1))
+  ;; Thread.holder.threadStatus drives getState()/restart: Thread.start()
+  ;; throws IllegalThreadStateException unless threadStatus == 0 (NEW), and
+  ;; VM.toThreadState maps bit 0x4 -> RUNNABLE, 0x2 -> TERMINATED.  Mark
+  ;; RUNNABLE now; the cleanup below marks TERMINATED so a dead thread can't
+  ;; be restarted and getThreadGroup() returns null after termination.
+  (%set-thread-status thread 4)
   (let* ((debug-codegen *debug-codegen*)
          (lisp-thread
           (bordeaux-threads:make-thread
            (lambda ()
              ;; Register this Lisp thread with the Java Thread
              (setf (gethash (bordeaux-threads:current-thread) *lisp-to-java-threads*) thread)
-             ;; Call the Thread's run() method
-             (handler-case
-                 (handler-bind
-                     ((error
-                        (lambda (e)
-                          (when debug-codegen
-                            (format *error-output*
-                                    "~&Error signalled in ~A: ~A~%" thread e)
-                            (sb-debug:print-backtrace
-                             :stream *error-output* :count 60)))))
-                   (|run()| thread))
-               (error (e)
-                 (format *error-output* "~&Thread ~A terminated with error: ~A~%" thread e))))
+             (unwind-protect
+                  ;; Call the Thread's run() method
+                  (handler-case
+                      (handler-bind
+                          ((error
+                             (lambda (e)
+                               (when debug-codegen
+                                 (format *error-output*
+                                         "~&Error signalled in ~A: ~A~%" thread e)
+                                 (sb-debug:print-backtrace
+                                  :stream *error-output* :count 60)))))
+                        (|run()| thread))
+                    (error (e)
+                      (format *error-output* "~&Thread ~A terminated with error: ~A~%" thread e)))
+               ;; On termination: mark not-alive (eetop=0) and wake any thread
+               ;; blocked in Thread.join(), which does `while (isAlive()) wait(0)`
+               ;; on this Thread object -- the JVM notifies join waiters here.
+               (when (slot-exists-p thread '|eetop|)
+                 (setf (slot-value thread '|eetop|) 0))
+               (%set-thread-status thread 2) ; TERMINATED
+               (ignore-errors
+                (monitor-enter thread)
+                (unwind-protect
+                     (|notifyAll()| thread)
+                  (monitor-exit thread)))))
            :name (format nil "Java-Thread-~A" (slot-value thread '|name|)))))
     ;; Store the Lisp thread in our mapping
     (setf (gethash thread *java-threads*) lisp-thread)))
