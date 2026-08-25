@@ -554,6 +554,48 @@ the storage object does not (yet) exist."
   (%unsafe-compare-and-exchange-reference
    object offset expected replacement))
 
+;;; java.util.concurrent.atomic.AtomicReference implements its atomics through a
+;;; VarHandle on its `value` field (VALUE.compareAndSet(this, ...)).  OpenLDK
+;;; doesn't lower field VarHandles, so those polymorphic calls have no
+;;; implementation -- clojure.lang.RT.<clinit> hits this and fails to
+;;; initialize (ldk-uyv).  Override the AtomicReference methods (bytecode, so
+;;; installed via *native-overrides* before the JIT compiles their VarHandle
+;;; bodies) to operate on the `value` slot directly, serialized by one lock
+;;; (identity compare = JVM ==).
+(defvar *atomic-field-lock* (bordeaux-threads:make-lock "atomic-field"))
+
+(let ((cas (lambda (this expected update)
+             (bordeaux-threads:with-lock-held (*atomic-field-lock*)
+               (if (eq (slot-value this '|value|) expected)
+                   (progn (setf (slot-value this '|value|) update) 1)
+                   0)))))
+  (dolist (sig '("compareAndSet(Ljava/lang/Object;Ljava/lang/Object;)Z"
+                 "weakCompareAndSet(Ljava/lang/Object;Ljava/lang/Object;)Z"
+                 "weakCompareAndSetPlain(Ljava/lang/Object;Ljava/lang/Object;)Z"
+                 "weakCompareAndSetAcquire(Ljava/lang/Object;Ljava/lang/Object;)Z"
+                 "weakCompareAndSetRelease(Ljava/lang/Object;Ljava/lang/Object;)Z"
+                 "weakCompareAndSetVolatile(Ljava/lang/Object;Ljava/lang/Object;)Z"))
+    (setf (gethash (concatenate 'string
+                                "java/util/concurrent/atomic/AtomicReference." sig)
+                   *native-overrides*)
+          cas)))
+
+(setf (gethash "java/util/concurrent/atomic/AtomicReference.getAndSet(Ljava/lang/Object;)Ljava/lang/Object;"
+               *native-overrides*)
+      (lambda (this update)
+        (bordeaux-threads:with-lock-held (*atomic-field-lock*)
+          (prog1 (slot-value this '|value|)
+            (setf (slot-value this '|value|) update)))))
+
+(setf (gethash "java/util/concurrent/atomic/AtomicReference.compareAndExchange(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
+               *native-overrides*)
+      (lambda (this expected update)
+        (bordeaux-threads:with-lock-held (*atomic-field-lock*)
+          (let ((current (slot-value this '|value|)))
+            (when (eq current expected)
+              (setf (slot-value this '|value|) update))
+            current))))
+
 (defmethod |fullFence()| ((unsafe |jdk/internal/misc/Unsafe|))
   (declare (ignore unsafe))
   nil)
