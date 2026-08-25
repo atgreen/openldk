@@ -442,7 +442,12 @@ stream."
            (setf (gethash "EnclosingMethod" attributes)
                  (cons (read-u2) (read-u2))))
           ("Exceptions"
-           (read-buffer attributes-length))
+           ;; number_of_exceptions u2, then that many CONSTANT_Class indices.
+           ;; Stored so Method/Constructor reflection can report declared
+           ;; checked exceptions (Method.toString()'s "throws" clause etc.).
+           (let ((count (read-u2)))
+             (setf (gethash "Exceptions" attributes)
+                   (loop repeat count collect (read-u2)))))
           ("InnerClasses"
            (let ((count (read-u2)))
              (setf (gethash "InnerClasses" attributes)

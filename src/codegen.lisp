@@ -1646,37 +1646,56 @@ boolean prints true/false and char prints the character rather than an int."
                                              :initial-element ,init-element))
                    :expression-type :ARRAY)))
 
-(defun %make-multi-array (dimensions)
+(defun %multi-array-leaf-default (component-name)
+  "Default element for a leaf array whose component descriptor is
+COMPONENT-NAME: the primitive zero/false/NUL, or nil for references."
+  (case (char component-name 0)
+    (#\D 0.0d0)
+    (#\F 0.0)
+    ((#\I #\J #\S #\B #\Z) 0)
+    (#\C #\Null)
+    (t nil)))
+
+(defun %make-multi-array (type-name dimensions)
+  "Build a multidimensional array for the JVM array descriptor TYPE-NAME
+(slash-separated, e.g. \"[[Ljava/lang/Long;\") allocating the leading
+DIMENSIONS.  Each level's component class is TYPE-NAME with one leading
+'[' removed, so the true element type is preserved -- without it aastore
+covariance checks (ArrayStoreException) can't see the real component
+type."
   (if (null dimensions)
       nil
-      (let ((size (car dimensions)))
+      (let* ((size (car dimensions))
+             (component-name (subseq type-name 1))
+             (rest-dims (cdr dimensions)))
         ;; Check for negative array size
         (when (< size 0)
           (let ((exc (%make-java-instance "java/lang/NegativeArraySizeException")))
             (|<init>()| exc)
             (error (%lisp-condition exc))))
-        (make-java-array :size size
-                         :component-class :multi-array-placeholder
-                         :initial-contents
-                         (loop repeat size
-                               collect (%make-multi-array (cdr dimensions)))))))
+        (let ((component-class (%bin-type-name-to-class component-name)))
+          (if rest-dims
+              (make-java-array :size size
+                               :component-class component-class
+                               :initial-contents
+                               (loop repeat size
+                                     collect (%make-multi-array component-name rest-dims)))
+              (make-java-array :size size
+                               :component-class component-class
+                               :initial-element (%multi-array-leaf-default component-name)))))))
 
 (defmethod codegen ((insn ir-multi-new-array) context)
-  (let ((init-element
-          (case (atype insn)
-            ;; Determine the initial element based on the array type
-            (4 0)        ; Integer
-            (5 #\Null)      ; Character
-            (6 0.0)      ; Single-precision float
-            (7 0.0d0)    ; Double-precision float
-            ((8 9 10 11) 0) ; Other integer types (assuming default to 0)
-            (t nil))))   ; Default to nil for unknown types
+  ;; The MULTIANEWARRAY operand is the full array type (e.g. "[[Ljava/lang/Long;");
+  ;; pass it so %make-multi-array can set the real component class at each level.
+  (let ((type-name (substitute #\/ #\.
+                               (lstring (slot-value (java-class (ir-class-class (slot-value insn 'class)))
+                                                    '|name|)))))
     (make-instance '<expression>
                    :insn insn
-                   :code `(progn
-                            ;; Create the multi-dimensional array with the determined initial element
-                            ;; Reverse sizes because bytecode pops dimensions in reverse order
-                            (%make-multi-array (list ,@(mapcar (lambda (c) (code (codegen c context))) (reverse (sizes insn))))))
+                   :code `(%make-multi-array
+                           ,type-name
+                           ;; Reverse sizes because bytecode pops dimensions in reverse order
+                           (list ,@(mapcar (lambda (c) (code (codegen c context))) (reverse (sizes insn)))))
                    :expression-type :ARRAY)))
 
 (defmethod codegen ((insn ir-nop) context)

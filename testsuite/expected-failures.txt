@@ -1705,12 +1705,10 @@ FAIL: gcj/pr26990.java execution test
 # and Divide_2 is timeout-flaky.
 FAIL: gcj/InterfaceDispatch.java execution test
 FAIL: gcj/PR162.java execution test
-FAIL: gcj/assign2.java execution test
-FAIL: gcj/Throw_1.java execution test
-FAIL: gcj/pr8415.java execution test
 FAIL: gcj/SyncTest.java execution test
 FAIL: gcj/TLtest.java execution test
 FAIL: gcj/Thread_Alive.java execution test
 FAIL: gcj/Thread_Join.java execution test
 FAIL: gcj/StringBuffer_overflow.java execution test
 FAIL: gcj/Divide_2.java execution test
+FAIL: gcj/Throw_1.java execution test

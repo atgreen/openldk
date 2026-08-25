@@ -1170,9 +1170,7 @@ java.* classes."
                                                c this
                                                (make-java-array :component-class (%get-java-class-by-fq-name "java.lang.Class")
                                                                 :initial-contents pt)
-                                               (make-java-array
-                                                :component-class (%get-java-class-by-fq-name "java.lang.Class")
-                                                :size 0)
+                                               (%checked-exception-classes method lclass)
                                                (access-flags method) 0
                                                nil  ; generic signature (not yet supported)
                                                (gethash "RuntimeVisibleAnnotations" (attributes method))
@@ -1197,6 +1195,20 @@ java.* classes."
       (make-java-array
        :component-class (%get-java-class-by-fq-name "java.lang.Class")
        :initial-contents (coerce java-classes 'vector)))))
+
+(defun %checked-exception-classes (method lclass)
+  "Class[] of METHOD's declared checked exceptions, from its Exceptions
+attribute (empty when absent).  Feeds the checkedExceptions argument of
+Method/Constructor so reflection reports them (e.g. Method.toString()'s
+\"throws\" clause)."
+  (let ((cp (constant-pool lclass)))
+    (make-java-array
+     :component-class (%get-java-class-by-fq-name "java.lang.Class")
+     :initial-contents
+     (loop for idx in (gethash "Exceptions" (attributes method))
+           for class-ref = (aref cp idx)
+           for cname = (slot-value (aref cp (index class-ref)) 'value)
+           collect (%get-java-class-by-bin-name cname)))))
 
 (defmethod |getDeclaredMethods0(Z)| ((this |java/lang/Class|) public-only)
   (unwind-protect
@@ -1244,10 +1256,7 @@ java.* classes."
                                                                     (%get-java-class-by-fq-name "java.lang.Class")
                                                                     :initial-contents pt)
                                                                    (%get-return-type (descriptor method))
-                                                                   (make-java-array
-                                                                    :component-class
-                                                                    (%get-java-class-by-fq-name "java.lang.Class")
-                                                                    :size 0)
+                                                                   (%checked-exception-classes method lclass)
                                                                    (access-flags method) 0
                                                                    nil  ; generic signature (not yet supported)
                                                                    (gethash "RuntimeVisibleAnnotations"
