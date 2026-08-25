@@ -273,22 +273,40 @@ Combined with global substitutions during codegen for this block only.")
         ;; Reverse all of the code back into normal order.
         (setf (code block) (nreverse (code block))))
 
-      ;; Let's create try blocks
-      ;; NOTE: try-catch ends up in REVERSE exception-table order here (PUSH
-      ;; prepends).  That is wrong for catch precedence in general (see
-      ;; ldk-e5u.4: `catch (Throwable)` before `catch (NPE)`), but OpenLDK
-      ;; currently flattens all handlers for a start-block into one
-      ;; HANDLER-CASE, so nested try-finally re-throw only works with this
-      ;; order.  Correcting both needs nested HANDLER-CASEs -- tracked in
-      ;; ldk-e5u.4.
+      ;; Let's create try blocks.
+      ;;
+      ;; OpenLDK flattens all exception-table handlers for a start-block into a
+      ;; single HANDLER-CASE, whose clauses are tried top-to-bottom.  Order them
+      ;; by covered-range END descending, then by exception-table index
+      ;; ascending.  Range-end descending keeps an enclosing try's handler ahead
+      ;; of an inner one, which preserves nested try-finally behavior (an outer
+      ;; catch still fires when an inner finally re-throws -- the flat model
+      ;; can't chain finallies, but this order matches what worked before).
+      ;; Index-ascending within the same range restores JVM catch precedence for
+      ;; ordinary multi-catch (e.g. catch(NullPointerException) before
+      ;; catch(Throwable), catch(RuntimeException) before catch(Exception)).
+      ;; See ldk-e5u.4.
       (when-let ((exception-table (exception-table *context*)))
-        (loop for i from 0 below (length exception-table)
-              for ete = (aref exception-table i)
-              for start-block = (gethash (start-pc ete) block-by-address)
-              for end-block = (gethash (end-pc ete) block-by-address)
-              for handler = (gethash (handler-pc ete) block-by-address)
-              do (push end-block (exception-end-blocks start-block))
-              do (push (cons (catch-type ete) handler) (try-catch start-block))))
+        (let ((tuples-by-block (make-hash-table :test #'eq)))
+          (loop for i from 0 below (length exception-table)
+                for ete = (aref exception-table i)
+                for start-block = (gethash (start-pc ete) block-by-address)
+                for end-block = (gethash (end-pc ete) block-by-address)
+                for handler = (gethash (handler-pc ete) block-by-address)
+                do (push end-block (exception-end-blocks start-block))
+                do (push (list (end-pc ete) i (catch-type ete) handler)
+                         (gethash start-block tuples-by-block)))
+          (maphash
+           (lambda (start-block tuples)
+             (setf (try-catch start-block)
+                   (mapcar (lambda (tp) (cons (third tp) (fourth tp)))
+                           (stable-sort
+                            tuples
+                            (lambda (a b)
+                              (or (> (first a) (first b))
+                                  (and (= (first a) (first b))
+                                       (< (second a) (second b)))))))))
+           tuples-by-block)))
 
       ;; Compute dominance sets for all blocks.
       (compute-dominance blocks (gethash 0 block-by-address))

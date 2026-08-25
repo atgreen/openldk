@@ -1707,4 +1707,3 @@ FAIL: gcj/PR162.java execution test
 FAIL: gcj/TLtest.java execution test
 FAIL: gcj/StringBuffer_overflow.java execution test
 FAIL: gcj/Divide_2.java execution test
-FAIL: gcj/Throw_1.java execution test
