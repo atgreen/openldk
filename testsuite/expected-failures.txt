@@ -1697,3 +1697,20 @@ XFAIL: mauve/gnu/testlet/java/util/zip/ZipInputStream/close.java execution test
 2025-03-04T02:24:14.7109777Z Test RH194522.java NOT found in expected-failures.txt
 2025-03-04T02:24:14.7110086Z FAIL: gcj/RH194522.java execution test
 FAIL: gcj/pr26990.java execution test
+
+# --- ldk-e5u: genuine gcj failures formerly masked by the gcj.exp:87 XFAIL
+# typo (output-mismatch was mislabeled xfail regardless of this list).  Listed
+# here so they remain honest XFAILs now that the typo is fixed.  Root causes
+# tracked as ldk-e5u.1..9; StringBuffer_overflow behaves per JVM-25 (empty)
+# and Divide_2 is timeout-flaky.
+FAIL: gcj/InterfaceDispatch.java execution test
+FAIL: gcj/PR162.java execution test
+FAIL: gcj/assign2.java execution test
+FAIL: gcj/Throw_1.java execution test
+FAIL: gcj/pr8415.java execution test
+FAIL: gcj/SyncTest.java execution test
+FAIL: gcj/TLtest.java execution test
+FAIL: gcj/Thread_Alive.java execution test
+FAIL: gcj/Thread_Join.java execution test
+FAIL: gcj/StringBuffer_overflow.java execution test
+FAIL: gcj/Divide_2.java execution test

@@ -14,8 +14,17 @@ proc openldk_load { classfile } {
     global testargs
     set timeout 40
     verbose "load $classfile"
-    set ldkcp [getenv "LDK_CLASSPATH"]
-    setenv "LDK_CLASSPATH" "$ldkcp:./gcj"
+    # Isolate the classpath to this suite's own directory.  gcj tests use
+    # unqualified class names whose .class files are compiled into ./gcj, so the
+    # path must be ONLY ./gcj -- with no '.' (testsuite/) and no inherited
+    # LDK_CLASSPATH.  Both would let a colliding simple-named class shadow the
+    # gcj test's own: runtest runs all suites in one process, so a cumulative
+    # path puts ./aaa and ./df ahead of ./gcj, and jikestst compiles a Test.java
+    # (which declares a top-level 'class A') straight into testsuite/, leaving a
+    # testsuite/A.class.  Either would shadow, e.g., err1's A (field 'counter')
+    # -> "slot |counter| is missing".  ./gcj alone makes each gcj test see only
+    # its own freshly compiled classes.
+    setenv "LDK_CLASSPATH" "./gcj"
     set classname [string map {".class" ""} $classfile]
     set classname [string trimleft $classname "gcj/"]
     set result [local_exec "../openldk $classname $testargs" "" "" $timeout]
@@ -61,21 +70,23 @@ proc openldk_load { classfile } {
         # Remove trailing newlines from the cleaned expected output
         regsub {\n+$} $expected_cleaned "" expected_cleaned
 
-        if {[catch {exec grep -q -- "$test_name" $expected_failures_file} result options]} {
-            set expected_failure 0
-        } else {
-            set expected_failure 1
-        }
-
-        # Compare the cleaned output with the cleaned expected output
+        # Output-comparison policy:
+        #   match           -> pass  (a matching run is always a pass, even if
+        #                             the test is still listed in
+        #                             expected-failures.txt -- a stale entry for
+        #                             a now-fixed test must not demote it to
+        #                             xpass / a "lost pass")
+        #   mismatch, listed -> xfail (known failure)
+        #   mismatch, unlisted -> fail (honest regression)
+        #
+        # Historically this branch had two bugs that together hid all of the
+        # above: it grepped $test_name (never set here) so expected_failure was
+        # always 0, and the mismatch arm tested the literal '{expected_failure}'
+        # (missing $) so every mismatch became xfail regardless.  See ldk-e5u.
         if { $run_output_cleaned == $expected_cleaned } {
-            if { $expected_failure == 0 } {
-                return [list "pass" "Output matches expected"]
-            } else {
-                return [list "xpass" "Output matches expected"]
-            }
+            return [list "pass" "Output matches expected"]
         } else {
-            if { {expected_failure} == 0 } {
+            if { [is_expected_failure $classname] == 0 } {
                 return [list "fail" "Output does not match expected"]
             } else {
                 return [list "xfail" "Output does not match expected"]

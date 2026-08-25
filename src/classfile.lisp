@@ -557,6 +557,62 @@ stream."
                   (incf i)))))
     result))
 
+(defun modified-utf8-to-string (data)
+  "Decode Java Modified UTF-8 bytes DATA directly to a Lisp string.
+
+Unlike routing the bytes through flexi-streams' UTF-8 decoder, this
+tolerates unpaired surrogates: a class file's CONSTANT_Utf8 may hold a
+lone surrogate (e.g. sun/nio/cs/StandardCharsets tables contain
+#xDE9A), which is a legal Java char but not a legal UTF-8 code point --
+flexi-streams signals 'Illegal code point' on it.  SBCL's CODE-CHAR
+accepts surrogate code points, so we build the string directly.
+
+Matches OpenLDK's code-point string convention (see STRINGS.LISP):
+surrogate PAIRS combine into one supplementary character (> #xFFFF);
+lone surrogates and other BMP characters map to one character each."
+  (let ((out (make-array (length data) :element-type 'character
+                                       :adjustable t :fill-pointer 0))
+        (n (length data))
+        (i 0))
+    (flet ((emit (code) (vector-push-extend (code-char code) out)))
+      (loop while (< i n)
+            do (let ((b (aref data i)))
+                 (cond
+                   ;; Modified UTF-8 NUL: 0xC0 0x80 -> U+0000
+                   ((and (= b #xC0) (< (1+ i) n) (= (aref data (1+ i)) #x80))
+                    (emit 0) (incf i 2))
+                   ;; 1-byte ASCII (0x01..0x7F)
+                   ((< b #x80) (emit b) (incf i))
+                   ;; 6-byte surrogate pair: ED Ax .. ED Bx -> supplementary
+                   ((and (= b #xED) (< (+ i 5) n)
+                         (= (logand (aref data (1+ i)) #xF0) #xA0)
+                         (= (aref data (+ i 3)) #xED)
+                         (= (logand (aref data (+ i 4)) #xF0) #xB0))
+                    (let ((hi (logior #xD800
+                                      (ash (logand (aref data (1+ i)) #x0F) 6)
+                                      (logand (aref data (+ i 2)) #x3F)))
+                          (lo (logior #xDC00
+                                      (ash (logand (aref data (+ i 4)) #x0F) 6)
+                                      (logand (aref data (+ i 5)) #x3F))))
+                      (emit (+ #x10000
+                               (ash (logand hi #x3FF) 10)
+                               (logand lo #x3FF)))
+                      (incf i 6)))
+                   ;; 3-byte (1110xxxx) -- includes lone surrogates
+                   ((and (= (logand b #xF0) #xE0) (< (+ i 2) n))
+                    (emit (logior (ash (logand b #x0F) 12)
+                                  (ash (logand (aref data (+ i 1)) #x3F) 6)
+                                  (logand (aref data (+ i 2)) #x3F)))
+                    (incf i 3))
+                   ;; 2-byte (110xxxxx)
+                   ((and (= (logand b #xE0) #xC0) (< (1+ i) n))
+                    (emit (logior (ash (logand b #x1F) 6)
+                                  (logand (aref data (1+ i)) #x3F)))
+                    (incf i 2))
+                   ;; Malformed/truncated -- pass the raw byte through.
+                   (t (emit b) (incf i))))))
+    (coerce out 'string)))
+
 (defun read-classfile (fin)
   "Parse a classfile from binary input stream FIN and return a <class>."
   (let ((class (make-instance '<class>)))
@@ -591,8 +647,7 @@ stream."
                                    (let* ((size (read-u2))
                                           (octets (read-buffer size)))
                                      (make-instance 'ir-string-literal
-                                                    :value (flexi-streams:octets-to-string (modified-utf8-to-utf8 octets)
-                                                                                           :external-format :utf-8))))
+                                                    :value (modified-utf8-to-string octets))))
                                   (3
                                    (make-instance 'constant-int
                                                   :value (unsigned-to-signed-integer (read-u4))))

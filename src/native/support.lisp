@@ -185,9 +185,67 @@ defmethod before the JIT would upgrade them), which is why the name check matter
   "Return true (1) if this class and OTHER share the same nest host."
   (if (eq (|getNestHost()| this) (|getNestHost()| other)) 1 0))
 
+(defun %java-frame-p (frame)
+  "True when FRAME is a Java method frame (a name carrying a method
+descriptor, e.g. |Class.method(...)| or |%jimpl:Class.method(...)|), as
+opposed to the SBCL launcher/eval frames below main() or Lisp plumbing.
+JVM stack traces contain only Java frames."
+  (let* ((head (%frame-head frame))
+         (kind (%frame-head-kind head)))
+    (flet ((java-name-p (name)
+             (let* ((n (if (and (> (length name) 7) (string= name "%jimpl:" :end1 7))
+                           (subseq name 7)
+                           name))
+                    (paren (position #\( n)))
+               ;; A Java frame name is Class.method(descriptor): a '.'
+               ;; separating class from method, before the descriptor's '('.
+               (and paren (position #\. n :end paren) t))))
+      (case kind
+        (:method (let ((m (cadr head)))
+                   (and (symbolp m) (java-name-p (symbol-name m)))))
+        (:symbol (java-name-p (symbol-name head)))
+        (t nil)))))
+
+(defun %throwable-construction-frame-p (frame throwable)
+  "True for leading backtrace frames the JVM omits from stack traces:
+the throwable's own construction (fillInStackTrace, its <init> chain)
+and Lisp-level plumbing (frames with no Java-method name)."
+  (let* ((head (%frame-head frame))
+         (kind (%frame-head-kind head)))
+    (flet ((construction-method-p (method-name)
+             (or (eql 0 (search "fillInStackTrace" method-name))
+                 (and (eql 0 (search "<init>" method-name))
+                      (eq (cadr frame) throwable)))))
+      (case kind
+        (:method
+         (let ((m (cadr head)))
+           (and (symbolp m) (construction-method-p (symbol-name m)))))
+        (:symbol
+         (let* ((n (symbol-name head))
+                (jn (if (and (> (length n) 7) (string= n "%jimpl:" :end1 7))
+                        (subseq n 7)
+                        n))
+                (dot (position #\. jn)))
+           (if dot
+               (construction-method-p (subseq jn (1+ dot)))
+               ;; Pure Lisp frame at the leading edge — plumbing.
+               t)))
+        (:lambda nil)
+        (t t)))))
+
 (defmethod |fillInStackTrace(I)| ((this |java/lang/Throwable|) dummy)
   (declare (ignore dummy))
-  (setf (slot-value this '|backtrace|) (sb-debug:list-backtrace)))
+  (let ((backtrace (remove-if-not
+                    #'%java-frame-p
+                    (loop for rest on (sb-debug:list-backtrace)
+                          unless (%throwable-construction-frame-p (car rest) this)
+                            return rest))))
+    (setf (slot-value this '|backtrace|) backtrace)
+    ;; getOurStackTrace sizes its StackTraceElement[] from the depth
+    ;; field; leaving it 0 makes getStackTrace() return an empty array.
+    (when (slot-exists-p this '|depth|)
+      (setf (slot-value this '|depth|) (length backtrace)))
+    this))
 
 (defmethod |getStackTraceDepth()| ((this |java/lang/Throwable|))
   (length (slot-value this '|backtrace|)))
@@ -238,14 +296,45 @@ arguments (that pretty-prints arbitrarily large Java object graphs)."
            (t "java/lang/System"))))
       (t "java/lang/System"))))
 
-(defmethod |getStackTraceElement(I)| ((this |java/lang/Throwable|) index)
-  (let ((ste (%make-java-instance "java/lang/StackTraceElement"))
-        (stack-frame (nth index (slot-value this '|backtrace|))))
+(defun %method-name-from-stack-frame (frame)
+  "Java method name for a backtrace FRAME, from the frame head only --
+never the arguments (printing them pretty-prints arbitrary object
+graphs)."
+  (let* ((head (%frame-head frame))
+         (kind (%frame-head-kind head)))
+    (flet ((strip-descriptor (name)
+             (subseq name 0 (position #\( name))))
+      (case kind
+        (:method (let ((m (cadr head)))
+                   (if (symbolp m) (strip-descriptor (symbol-name m)) "unknown")))
+        (:symbol
+         (let* ((n (symbol-name head))
+                (n (if (and (> (length n) 7) (string= n "%jimpl:" :end1 7))
+                       (subseq n 7)
+                       n))
+                (dot (position #\. n)))
+           (strip-descriptor (if dot (subseq n (1+ dot)) n))))
+        (t "unknown")))))
+
+(defun %fill-stack-trace-element (ste frame)
+  "Initialize STE from a backtrace FRAME.  StackTraceElement.of() runs
+computeFormat() on every element, which dereferences
+declaringClassObject (normally set by the JVM's native initializer), so
+it must point at a real Class object."
+  (let ((class-name (%caller-class-name-from-stack-frame frame)))
     (|<init>(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;I)|
      ste
-     (jstring (%caller-class-name-from-stack-frame stack-frame))
-     (ijstring "unknown") (jstring (format nil "~A" stack-frame)) -1)
+     (jstring class-name)
+     (ijstring (%method-name-from-stack-frame frame)) nil -1)
+    (when (slot-exists-p ste '|declaringClassObject|)
+      (setf (slot-value ste '|declaringClassObject|)
+            (or (%get-java-class-by-bin-name class-name t)
+                (%get-java-class-by-bin-name "java/lang/Object"))))
     ste))
+
+(defmethod |getStackTraceElement(I)| ((this |java/lang/Throwable|) index)
+  (%fill-stack-trace-element (%make-java-instance "java/lang/StackTraceElement")
+                             (nth index (slot-value this '|backtrace|))))
 
 ;; JDK 17: static native initStackTraceElements — fill array from Throwable's backtrace
 (defun |java/lang/StackTraceElement.initStackTraceElements([Ljava/lang/StackTraceElement;Ljava/lang/Throwable;)|
@@ -266,12 +355,11 @@ arguments (that pretty-prints arbitrarily large Java object graphs)."
          (frames (if (listp backtrace) backtrace nil))
          (count (min (length data) depth (length frames))))
     (dotimes (index count)
-      (let ((ste (%make-java-instance "java/lang/StackTraceElement"))
-            (frame (nth index frames)))
-        (|<init>(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;I)|
-         ste
-         (jstring (%caller-class-name-from-stack-frame frame))
-         (ijstring "unknown") (jstring (format nil "~A" frame)) -1)
+      ;; StackTraceElement.of pre-fills the array with empty STEs for us
+      ;; to initialize in place; fall back to fresh instances otherwise.
+      (let ((ste (or (aref data index)
+                     (%make-java-instance "java/lang/StackTraceElement"))))
+        (%fill-stack-trace-element ste (nth index frames))
         (setf (aref data index) ste)))))
 
 (defun %remove-adjacent-repeats (list)

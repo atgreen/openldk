@@ -995,6 +995,15 @@ attribute; nil for top-level, local, and anonymous classes."
                                                     'value)))
                        (%get-java-class-by-bin-name outer-name t))))))
 
+(defmethod |getPermittedSubclasses0()| ((this |java/lang/Class|))
+  "JDK 17+ native for sealed classes: return the PermittedSubclasses array,
+or null when the class is not sealed.  OpenLDK does not track the
+PermittedSubclasses attribute, so report every class as non-sealed (null)
+-- which is what Proxy$ProxyBuilder and Class.getPermittedSubclasses()
+expect for ordinary interfaces/classes."
+  (declare (ignore this))
+  nil)
+
 (defmethod |getBooleanAttributes0(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
   (handler-case
       (let ((attr (org.shirakumo.file-attributes:decode-attributes

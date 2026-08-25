@@ -216,6 +216,26 @@
   ;; JDK 9+ version
   nil)
 
+;; VM.isModuleSystemInited returns (initLevel >= 2).  OpenLDK only runs
+;; System.initPhase1 (VM.initLevel 1), so this is false and blocks features
+;; that gate on it -- notably java.lang.reflect.Proxy$ProxyBuilder, which
+;; throws InternalError "Proxy is not supported until module system is fully
+;; initialized".  OpenLDK's runtime behaves as a fully-initialized single
+;; unnamed module, so report the module system as inited.
+(setf (gethash "jdk/internal/misc/VM.isModuleSystemInited()Z" *native-overrides*)
+      (lambda () 1))
+
+;; Reporting the module system as inited (above) has one side effect worth
+;; neutralizing: StackTraceElement.isHashedInJavaBase() short-circuits to false
+;; when the module system is NOT inited, but otherwise consults
+;; StackTraceElement$HashedModules -- which walks the boot module layer and NPEs
+;; under OpenLDK (no real module graph).  computeFormat() runs on every
+;; StackTraceElement, so this would break all getStackTrace() formatting.  Force
+;; it back to false: OpenLDK does not hash modules, so no frame is "in java.base"
+;; for STE-formatting purposes.
+(setf (gethash "java/lang/StackTraceElement.isHashedInJavaBase(Ljava/lang/Module;)Z" *native-overrides*)
+      (lambda (module) (declare (ignore module)) 0))
+
 ;; JDK 17: SharedSecrets.getJavaLangAccess().getEnumConstantsShared(Class)
 ;; getJavaLangAccess() returns nil in our VM, so this is dispatched as a plain
 ;; function call with nil as 'this' and the enum Class as the argument.

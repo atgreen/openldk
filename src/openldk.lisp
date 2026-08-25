@@ -800,9 +800,6 @@ or skip in-progress compilations."
                             (blocks-after-dce (%optimize-method-blocks ir-code))
                             (definition-code (%build-method-definition class method blocks-after-dce
                                                                        parameter-hints max-locals)))
-                       (when (search "require" method-key)
-                         (format *error-output* "~&;; COMPILING METHOD: ~A~%" method-key)
-                         (force-output *error-output*))
                        (if *aot-dir*
                            (%write-aot-method class-name
                                               (lispize-method-name (format nil "~A~A" (name method) (descriptor method)))

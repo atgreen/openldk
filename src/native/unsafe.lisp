@@ -991,6 +991,44 @@ java.* classes."
   (declare (ignore module))
   nil)
 
+;; JDK 9+: Module.defineModule0 registers a module (name, packages, openness)
+;; with the VM's module graph.  OpenLDK runs everything as one unnamed module
+;; and enforces no module boundaries, so registration is a no-op.  Reached via
+;; java.lang.reflect.Proxy, which defines a dynamic module for each proxy class.
+(defun |java/lang/Module.defineModule0(Ljava/lang/Module;ZLjava/lang/String;Ljava/lang/String;[Ljava/lang/Object;)|
+    (module is-open version location packages)
+  (declare (ignore module is-open version location packages))
+  nil)
+
+;; The remaining Module graph natives (reads/exports edges) are likewise no-ops:
+;; OpenLDK enforces no module boundaries, so all reads/exports already succeed.
+(defun |java/lang/Module.addReads0(Ljava/lang/Module;Ljava/lang/Module;)| (from to)
+  (declare (ignore from to))
+  nil)
+
+(defun |java/lang/Module.addExports0(Ljava/lang/Module;Ljava/lang/String;Ljava/lang/Module;)| (from pkg to)
+  (declare (ignore from pkg to))
+  nil)
+
+(defun |java/lang/Module.addExportsToAll0(Ljava/lang/Module;Ljava/lang/String;)| (from pkg)
+  (declare (ignore from pkg))
+  nil)
+
+(defun |java/lang/Module.addExportsToAllUnnamed0(Ljava/lang/Module;Ljava/lang/String;)| (from pkg)
+  (declare (ignore from pkg))
+  nil)
+
+;; BootLoader$PackageHelper.findModule resolves a package location back to its
+;; java.base Module via ModuleLayer.boot().findModule(name).  OpenLDK only runs
+;; System.initPhase1 (VM.initLevel 1), so the boot module layer is never built
+;; and ModuleLayer.boot() is null -- Modules.findLoadedModule then NPEs.  Return
+;; null (module not found), which routes definePackage() down its manifest/URL
+;; fallback (BuiltinClassLoader.defineOrCheckPackage) to produce a module-less
+;; Package -- enough for Class.getPackage() to work on java.* classes.
+(setf (gethash "jdk/internal/loader/BootLoader$PackageHelper.findModule(Ljava/lang/String;)Ljava/lang/Module;"
+               *native-overrides*)
+      (lambda (location) (declare (ignore location)) nil))
+
 ;; Return our boot-class-loader for getSystemClassLoader() so it's never nil
 (defun |java/lang/ClassLoader.getSystemClassLoader()| ()
   *boot-class-loader*)
