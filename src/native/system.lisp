@@ -452,11 +452,26 @@ target component is assignable from the source component."
   (let ((lclass (get-ldk-class-for-java-class class)))
     (if lclass (access-flags lclass) 0)))
 
-(defmethod |getModifiers()| ((class |java/lang/Class|))
+(defun %class-modifiers (class)
+  "Source-level modifiers for CLASS, computed from the ldk-class access flags
+with ACC_SUPER (0x20) masked out (it is not a source-level modifier)."
   (if (eq (|isArray()| class) 1)
       0
       (let ((lclass (get-ldk-class-for-java-class class)))
-        (if lclass (access-flags lclass) 0))))
+        (if lclass (logandc2 (access-flags lclass) #x20) 0))))
+
+(defmethod |getModifiers()| ((class |java/lang/Class|))
+  (%class-modifiers class))
+
+;; JDK 25's Class.getModifiers() reads the `modifiers` field directly rather
+;; than calling a native, and OpenLDK populates that field at class load. The
+;; primordial bootstrap classes (java.lang.Object/String) are pre-baked and
+;; never pass through that path, so their field stays 0 and they read back as
+;; non-public -- which breaks clojure.lang.Reflector ("Can't call public method
+;; of non-public class: String.concat"). An :around survives the JIT-compiled
+;; field-reading body and always returns the value computed from access flags.
+(defmethod |getModifiers()| :around ((class |java/lang/Class|))
+  (%class-modifiers class))
 
 (defun %java-simple-name (class)
   "Compute Class.getSimpleName() for CLASS: strip the package and any enclosing

@@ -54,6 +54,19 @@
          (is-static (not (zerop (logand modifiers #x0008))))
          (descriptor (%build-method-descriptor return-type param-types))
          (lispized (lispize-method-name (format nil "~A~A" method-name descriptor))))
+    ;; Unbox wrapper arguments where the target parameter is a primitive: the
+    ;; Lisp method expects a raw value, not a java.lang.{Integer,Long,...}.
+    ;; (The sun.reflect invoke0 does the same.) Without this, reflective calls to
+    ;; primitive-signature methods -- e.g. clojure Numbers.shiftLeft(long,long) --
+    ;; receive boxed wrappers and NPE inside the callee.
+    (when (and args param-types)
+      (dotimes (i (length (java-array-data args)))
+        (let ((arg (jaref args i))
+              (param-type (jaref param-types i)))
+          (when (and arg param-type
+                     (eq 1 (|isPrimitive()| param-type))
+                     (slot-exists-p arg '|value|))
+            (setf (jaref args i) (slot-value arg '|value|))))))
     (let* ((class-name (substitute #\/ #\. (lstring (slot-value declaring-class '|name|))))
            (fn-name (if is-static
                         (format nil "~A.~A" class-name lispized)
@@ -276,6 +289,15 @@ storage for a static field, otherwise OBJ."
       (lambda (constructor args)
         (|jdk/internal/reflect/NativeConstructorAccessorImpl.newInstance0(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)|
          constructor args)))
+
+;; Method.invoke has the same JDK 25 problem: acquireMethodAccessor builds a
+;; MethodHandle-based accessor that NPEs in MethodHandle.asType. OpenLDK already
+;; has a native reflective method path (NativeMethodAccessorImpl.invoke0); route
+;; Method.invoke straight to it so the MethodHandle accessor is never built.
+(setf (gethash "java/lang/reflect/Method.invoke(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;" *native-overrides*)
+      (lambda (method obj args)
+        (|jdk/internal/reflect/NativeMethodAccessorImpl.invoke0(Ljava/lang/reflect/Method;Ljava/lang/Object;[Ljava/lang/Object;)|
+         method obj args)))
 
 (defun |sun/misc/VM.initialize()| ()
   nil)
