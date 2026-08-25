@@ -547,14 +547,39 @@ default method -- not every superinterface."
                                     (error (%lisp-condition (%make-throwable '|java/lang/ClassCastException|))))))))
                    :expression-type nil)))
 
+(defun %self-referential-hidden-class-p (compiled-name classname)
+  "True when COMPILED-NAME is the uniquified registration name of a hidden or
+anonymous class whose own constant pool still refers to itself by CLASSNAME.
+%classload-from-stream registers such classes as <orig>/hidden-N or
+<orig>/anonymous-class-N, so a class constant naming <orig> from inside the
+class is a self-reference to the class currently being compiled."
+  (and compiled-name classname
+       (let ((prefix (concatenate 'string classname "/")))
+         (and (> (length compiled-name) (length prefix))
+              (string= prefix compiled-name :end2 (length prefix))
+              (let ((suffix (subseq compiled-name (length prefix))))
+                (or (%string-prefix-p "hidden-" suffix)
+                    (%string-prefix-p "anonymous-class-" suffix)))))))
+
+(defun %string-prefix-p (prefix string)
+  (and (>= (length string) (length prefix))
+       (string= prefix string :end2 (length prefix))))
+
 (defmethod codegen ((insn ir-class) context)
   (let* ((classname (slot-value (slot-value insn 'class) 'name))
-         (loader (slot-value context 'ldk-loader)))
-    (let ((expr (make-instance '<expression>
-                               :insn insn
-                               :code (java-class (%get-ldk-class-by-bin-name classname t loader))
-                               :expression-type :REFERENCE)))
-      expr)))
+         (loader (slot-value context 'ldk-loader))
+         (ldk-class (or (%get-ldk-class-by-bin-name classname t loader)
+                        ;; A hidden/anonymous class references itself by its
+                        ;; original name, but it is registered under a
+                        ;; uniquified name; resolve that to the class being
+                        ;; compiled rather than failing with (java-class NIL).
+                        (let ((cc (slot-value context 'class)))
+                          (when (and cc (%self-referential-hidden-class-p (name cc) classname))
+                            cc)))))
+    (make-instance '<expression>
+                   :insn insn
+                   :code (java-class ldk-class)
+                   :expression-type :REFERENCE)))
 
 (defmethod codegen ((insn ir-branch-target) context)
   (declare (ignore context))

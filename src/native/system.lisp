@@ -631,6 +631,39 @@ does not reconstruct, so we compute it from the name directly."
         (error (%lisp-condition exc))))
     (java-class result)))
 
+(defvar *hidden-class-data* (make-hash-table :test #'eq)
+  "Maps a hidden class's java.lang.Class object to the classData passed to
+MethodHandles.Lookup.defineHiddenClassWithClassData; read back by
+MethodHandles.classData().")
+
+(defun |java/lang/ClassLoader.defineClass0(Ljava/lang/ClassLoader;Ljava/lang/Class;Ljava/lang/String;[BIILjava/security/ProtectionDomain;ZILjava/lang/Object;)|
+    (loader lookup-class name bytes offset len pd initialize flags class-data)
+  "JDK 25 native backing MethodHandles.Lookup.defineClass / defineHiddenClass.
+   Loads a class from BYTES via %classload-from-stream under its own declared
+   name. OpenLDK cracks MethodHandle vmentries directly rather than running the
+   spun LambdaForm bytecode, so the hidden class only needs to load and run its
+   <clinit>; distinct spins that share a name resolve to one CLOS class, which
+   is harmless because the bytecode body is never executed. CLASS-DATA is stashed
+   for MethodHandles.classData(). When INITIALIZE is true, runs <clinit>."
+  (declare (ignore lookup-class pd flags))
+  (let* ((ldk-loader (get-ldk-loader-for-java-loader loader))
+         (class-name (if name
+                         (substitute #\/ #\. (lstring name))
+                         (format nil "hidden/~A" (gensym "class-"))))
+         (stream (make-instance 'byte-array-input-stream
+                                :array bytes :start offset :end (+ offset len)))
+         (result (%classload-from-stream class-name stream loader ldk-loader)))
+    (unless result
+      (let ((exc (%make-java-instance "java/lang/NoClassDefFoundError")))
+        (|<init>(Ljava/lang/String;)| exc (or name (jstring class-name)))
+        (error (%lisp-condition exc))))
+    (let ((jc (java-class result)))
+      (when class-data
+        (setf (gethash jc *hidden-class-data*) class-data))
+      (when (and initialize (not (eql initialize 0)))
+        (%clinit result))
+      jc)))
+
 (defun %define-class-from-bytes (loader class-name-hint class-bytes)
   "Internal function to define a class from raw bytes.
    LOADER is the java.lang.ClassLoader.

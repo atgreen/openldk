@@ -1408,7 +1408,8 @@ instruction's byte length in the context's INSN-SIZE array."
                  (args (reverse (pop-args parameter-count context)))
                  (call (if (and (string= class-name "java/lang/invoke/MethodHandle")
                                 (or (string= method-simple-name "invokeExact")
-                                    (string= method-simple-name "invoke")))
+                                    (string= method-simple-name "invoke")
+                                    (string= method-simple-name "invokeBasic")))
                            (make-instance 'ir-call-virtual-method
                                           :address pc-start
                                           :return-type return-type

@@ -340,15 +340,24 @@
   0)
 
 (defun find-method-in-class (class name &key static)
-  "Find a method by name in a class. When STATIC is :yes, only match static methods.
+  "Find a method by name in a class, walking the superclass chain so inherited
+   methods (e.g. AccessibleObject.canAccess seen through Method) resolve too.
+   When STATIC is :yes, only match static methods.
    When STATIC is :no, only match non-static methods. When STATIC is nil, match any."
-  (find-if (lambda (m)
-             (and (string= (slot-value m 'name) name)
-                  (case static
-                    (:yes (not (zerop (logand #x0008 (access-flags m)))))
-                    (:no  (zerop (logand #x0008 (access-flags m))))
-                    (t t))))
-           (coerce (slot-value class 'methods) 'list)))
+  (or (find-if (lambda (m)
+                 (and (string= (slot-value m 'name) name)
+                      (case static
+                        (:yes (not (zerop (logand #x0008 (access-flags m)))))
+                        (:no  (zerop (logand #x0008 (access-flags m))))
+                        (t t))))
+               (coerce (slot-value class 'methods) 'list))
+      ;; Not declared here — climb to the superclass. SUPER holds the parent's
+      ;; binary name (NIL for java/lang/Object), so this terminates.
+      (let ((super-name (slot-value class 'super)))
+        (when super-name
+          (let ((super-class (%get-ldk-class-by-bin-name super-name t)))
+            (when super-class
+              (find-method-in-class super-class name :static static)))))))
 
 (defun |java/lang/invoke/MethodHandleNatives.resolve(Ljava/lang/invoke/MemberName;Ljava/lang/Class;IZ)| (member-name klass speculative-resolve native-access)
   "JDK 17: resolve(MemberName self, Class<?> caller, int speculativeResolve, boolean nativeAccess)"
@@ -386,11 +395,50 @@
     (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Object")
                      :initial-contents (list o vm-target))))
 
+(defun |java/lang/invoke/MethodHandleNatives.staticFieldOffset(Ljava/lang/invoke/MemberName;)| (member-name)
+  "Return a synthetic Unsafe offset for the static field named by MEMBER-NAME.
+   Mirrors Unsafe.staticFieldOffset(Field) but sources the class/name from a
+   resolved MemberName (used when lowering static-field VarHandles/MethodHandles)."
+  (let ((f (make-instance '%synthetic-field
+                          :name (slot-value member-name '|name|)
+                          :clazz (slot-value member-name '|clazz|))))
+    (%register-field-offset f)))
+
+(defun |java/lang/invoke/MethodHandleNatives.staticFieldBase(Ljava/lang/invoke/MemberName;)| (member-name)
+  "OpenLDK models statics as class-allocated CLOS slots, so the base object is
+   unused; the field resolves from its offset alone (see %unsafe-static-storage)."
+  (declare (ignore member-name))
+  nil)
+
+(defun |java/lang/invoke/MethodHandleNatives.objectFieldOffset(Ljava/lang/invoke/MemberName;)| (member-name)
+  "Return a synthetic Unsafe offset for the instance field named by MEMBER-NAME."
+  (let ((f (make-instance '%synthetic-field
+                          :name (slot-value member-name '|name|)
+                          :clazz (slot-value member-name '|clazz|))))
+    (%register-field-offset f)))
+
 (defun |java/lang/invoke/MethodHandleNatives.init(Ljava/lang/invoke/MemberName;Ljava/lang/Object;)| (member-name objref)
   (setf (slot-value member-name '|clazz|) (slot-value objref '|clazz|))
   (setf (slot-value member-name '|name|) (slot-value objref '|name|))
 
-  ;; This must be a method
+  ;; A MemberName can be initialized from either a reflected Method or a
+  ;; reflected Field (e.g. Lookup.unreflectGetter / findGetter, and field
+  ;; VarHandles as used by Clojure's RT/Reflector). Handle the Field case
+  ;; first, then fall through to the method handling below.
+  (when (typep objref '|java/lang/reflect/Field|)
+    ;; MN_IS_FIELD (0x40000) | refKind<<24 | modifiers. Default to a getter
+    ;; reference kind (REF_getStatic=2 for static, REF_getField=1 otherwise);
+    ;; the setter view is derived later by MemberName when needed.
+    (when (slot-exists-p member-name '|type|)
+      (setf (slot-value member-name '|type|) (slot-value objref '|type|)))
+    (let* ((mods (slot-value objref '|modifiers|))
+           (ref-kind (if (zerop (logand #x8 mods)) 1 2)))
+      (setf (slot-value member-name '|flags|)
+            (logior #x40000 (ash ref-kind 24) mods)))
+    (return-from |java/lang/invoke/MethodHandleNatives.init(Ljava/lang/invoke/MemberName;Ljava/lang/Object;)|
+      member-name))
+
+  ;; Otherwise it must be a method
   (assert (typep objref '|java/lang/reflect/Method|))
 
   #|

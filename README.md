@@ -186,8 +186,11 @@ OpenLDK can run non-trivial Java applications:
   bootstraps on OpenLDK (~3700 classes, ~42s startup), printing its
   banner and completing both low-level and high-level initialization.
   REPL interaction is not yet working.  See [docs/ABCL.md](docs/ABCL.md).
-- **Clojure** - [Clojure](https://clojure.org/) 1.12.0 fully
-  bootstraps and runs its REPL on OpenLDK.
+- **Clojure** - [Clojure](https://clojure.org/) 1.12.0's runtime
+  (`clojure.lang.RT`) initializes on OpenLDK and reaches Clojure's own
+  compiler loading `clojure/core.clj`.  Full bootstrap is not yet
+  complete: it is currently blocked in the JDK's MethodHandle-based
+  reflective field-accessor path.
 
 The code is not optimized.  Even with heavy optimization, OpenLDK's
 performance will not be competitive to modern Java implementations.
