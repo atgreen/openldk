@@ -96,6 +96,18 @@
               (setf (slot-value thread '|name|) (jstring "main"))))
           thread))))
 
+;; A thread's contextClassLoader defaults to the system class loader (never null
+;; for the main thread in a real JVM). OpenLDK never initializes the field, so
+;; the JIT-compiled getContextClassLoader() returns null, and Clojure's
+;; load-data-readers -> data-reader-urls NPEs calling .getResources on it. Read
+;; the field directly and fall back to the system class loader when unset. An
+;; :around survives JIT compilation of the bytecode body.
+(defmethod |getContextClassLoader()| :around ((thread |java/lang/Thread|))
+  (or (and (slot-exists-p thread '|contextClassLoader|)
+           (slot-boundp thread '|contextClassLoader|)
+           (slot-value thread '|contextClassLoader|))
+      *boot-class-loader*))
+
 (defmethod |setPriority0(I)| ((thread |java/lang/Thread|) priority)
   "Thread priorities are advisory; SBCL threads have none."
   (declare (ignore thread priority))

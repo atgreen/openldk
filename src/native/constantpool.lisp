@@ -434,12 +434,8 @@ not searched -- VarHandle/MethodHandle field access targets declared fields)."
   (declare (ignore member-name))
   nil)
 
-(defun |java/lang/invoke/MethodHandleNatives.objectFieldOffset(Ljava/lang/invoke/MemberName;)| (member-name)
-  "Return a synthetic Unsafe offset for the instance field named by MEMBER-NAME."
-  (let ((f (make-instance '%synthetic-field
-                          :name (slot-value member-name '|name|)
-                          :clazz (slot-value member-name '|clazz|))))
-    (%register-field-offset f)))
+;; objectFieldOffset(MemberName) is defined in methodhandles.lisp (loaded later);
+;; no duplicate here.
 
 (defun |java/lang/invoke/MethodHandleNatives.init(Ljava/lang/invoke/MemberName;Ljava/lang/Object;)| (member-name objref)
   (setf (slot-value member-name '|clazz|) (slot-value objref '|clazz|))

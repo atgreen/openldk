@@ -473,6 +473,26 @@ with ACC_SUPER (0x20) masked out (it is not a source-level modifier)."
 (defmethod |getModifiers()| :around ((class |java/lang/Class|))
   (%class-modifiers class))
 
+;; JDK 25 formats integers via jdk.internal.util.DecimalDigits, whose packed
+;; getChars path computes a wrong buffer size under OpenLDK and throws
+;; ArrayIndexOutOfBoundsException -1 (first hit from Clojure str/pr at
+;; instant.clj). Bypass Integer/Long.toString with a direct Lisp formatter.
+(defun %java-radix-string (n radix)
+  "Java Integer/Long.toString(n, radix): base-RADIX with lowercase digits;
+radix outside 2..36 falls back to decimal."
+  (if (or (< radix 2) (> radix 36))
+      (format nil "~D" n)
+      (string-downcase (write-to-string n :base radix))))
+
+(setf (gethash "java/lang/Long.toString(J)Ljava/lang/String;" *native-overrides*)
+      (lambda (n) (jstring (format nil "~D" n))))
+(setf (gethash "java/lang/Integer.toString(I)Ljava/lang/String;" *native-overrides*)
+      (lambda (n) (jstring (format nil "~D" n))))
+(setf (gethash "java/lang/Long.toString(JI)Ljava/lang/String;" *native-overrides*)
+      (lambda (n radix) (jstring (%java-radix-string n radix))))
+(setf (gethash "java/lang/Integer.toString(II)Ljava/lang/String;" *native-overrides*)
+      (lambda (n radix) (jstring (%java-radix-string n radix))))
+
 (defun %java-simple-name (class)
   "Compute Class.getSimpleName() for CLASS: strip the package and any enclosing
 class ($-separated) and compiler-added local/anonymous digits; arrays get []
