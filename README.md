@@ -105,12 +105,12 @@ public class demo
  (defmethod openldk::|<init>()| ((openldk::|this| openldk::|demo|))
    (openldk::%compile-method "demo" 1)
    (openldk::|<init>()| openldk::|this|))
- (defun openldk::|demo.add(ii)| (openldk::|arg1| openldk::|arg2|)
+ (defun openldk::|demo.add(II)| (openldk::|arg1| openldk::|arg2|)
    (openldk::%compile-method "demo" 2)
-   (openldk::|demo.add(ii)| openldk::|arg1| openldk::|arg2|))
- (defun openldk::|demo.main([ljava/lang/String;)| (openldk::|arg1|)
+   (openldk::|demo.add(II)| openldk::|arg1| openldk::|arg2|))
+ (defun openldk::|demo.main([Ljava/lang/String;)| (openldk::|arg1|)
    (openldk::%compile-method "demo" 3)
-   (openldk::|demo.main([ljava/lang/string;)| openldk::|arg1|)))))
+   (openldk::|demo.main([Ljava/lang/String;)| openldk::|arg1|)))))
 ```
 
 Note that the methods are all stubs that invoke the compiler and then
@@ -120,7 +120,7 @@ When the `add` method is called, the compiler will read `add`'s
 bytecode and generates something like the following:
 
 ```
-(defun openldk::|demo.add(ii)| (openldk::|arg0| openldk::|arg1|)
+(defun openldk::|demo.add(II)| (openldk::|arg0| openldk::|arg1|)
   (let ((openldk::|s{3}|)
         (openldk::|s{2}|)
         (openldk::|s{1}|)
@@ -140,7 +140,7 @@ bytecode and generates something like the following:
             (if (> openldk::result 2147483647)
                 (- openldk::result 4294967296)
                 openldk::result)))
-        (return-from openldk::|demo.add(ii)| openldk::|s{3}|)))))
+        (return-from openldk::|demo.add(II)| openldk::|s{3}|)))))
 ```
 
 ## Hacking
@@ -161,6 +161,7 @@ string of characters that are interpreted as below:
 
 - `b` - trace bytecode compilation
 - `c` - dump all Lisp code prior to evaluation
+- `e` - trace Java exceptions as they are caught
 - `l` - show class loading (prints "; LOADING classname" for each class)
 - `L` - show class loading and method compilation with timing
 - `p` - debug propagation
@@ -202,7 +203,7 @@ Author and License
 
 OpenLDK was written by [Anthony
 Green](https://github.com/atgreen), and is distributed under the terms
-of the GNU General Public License, Version 2, modified by the
+of the GNU General Public License, Version 3, modified by the
 "CLASSPATH" exception to the GPL.  See
-[LICENSE](https://github.com/atgreen/OpenLDK/blob/main/LICENSE)
+[COPYING](https://github.com/atgreen/OpenLDK/blob/main/COPYING)
 for details.
