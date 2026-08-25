@@ -831,6 +831,22 @@ or skip in-progress compilations."
           (bt:condition-notify *method-compilation-cv*))))))
 
 
+(defun %ensure-class-initialized (class clinit-fn)
+  "Run CLINIT-FN (a class's <clinit>) at most once, with JVM class-init
+locking: concurrent initializers block until it completes, while the
+initializing thread may re-enter (its own <clinit> touching the class).
+INITIALIZED-P is set only AFTER <clinit> finishes, so another thread never
+sees the class as initialized while its statics are still unset -- the race
+that made concurrent Math.random()/holder-class first-use throw NPE."
+  (unless (initialized-p class)
+    (bordeaux-threads:with-recursive-lock-held ((%get-class-lock (slot-value class 'name)))
+      (unless (or (initialized-p class) (initializing-p class))
+        (setf (initializing-p class) t)
+        (unwind-protect
+             (funcall clinit-fn)
+          (setf (initialized-p class) t
+                (initializing-p class) nil))))))
+
 (defun %clinit (class)
   (let ((class (gethash (name class) *ldk-classes-by-bin-name*)))
     (assert
@@ -1286,9 +1302,9 @@ shadows a superclass field and needs its own storage."
                                               (or (string= k-name classname)
                                                   (not (interface-p k-ldk-class))
                                                   (%declares-default-method-p k-ldk-class)))
-                                      collect (list 'unless (list 'initialized-p k-ldk-class)
-                                                    (list 'setf (list 'initialized-p k-ldk-class) t)
-                                                    (list clinit-function))))))
+                                      collect (list '%ensure-class-initialized
+                                                    k-ldk-class
+                                                    (list 'function clinit-function))))))
              (%eval icc)))
 
          ;; Check if this is a Throwable subclass - find Throwable in its defining package

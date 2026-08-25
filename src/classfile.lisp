@@ -269,6 +269,7 @@
   ((major-version
     minor-version
     initialized-p
+    initializing-p   ; <clinit> currently running (set before, cleared after)
     name
     super
     interfaces
