@@ -754,34 +754,65 @@ does not reconstruct, so we compute it from the name directly."
   (declare (ignore class-loader))
   nil)
 
+(defun %raf-stream (raf)
+  "The Lisp stream backing RANDOMACCESSFILE RAF.  RAF.fd is a
+java.io.FileDescriptor (created by the RAF constructor); the stream lives
+in the FileDescriptor's own fd slot so that FileDescriptor methods like
+valid() work.  Tolerate a raw stream in fd for robustness."
+  (let ((fd (slot-value raf '|fd|)))
+    (if (typep fd '|java/io/FileDescriptor|)
+        (slot-value fd '|fd|)
+        fd)))
+
 (defmethod |open0(Ljava/lang/String;I)| ((fis |java/io/RandomAccessFile|) filename mode)
   (handler-case
-      (setf (slot-value fis '|fd|) (open (lstring filename)
-                                         :element-type '(unsigned-byte 8)
-                                         :direction (ecase mode
-                                                      (1 :input)
-                                                      (2 :io))))
+      (let ((stream (open (lstring filename)
+                          :element-type '(unsigned-byte 8)
+                          :direction (ecase mode
+                                       (1 :input)
+                                       (2 :io))))
+            (fd (slot-value fis '|fd|)))
+        ;; Store the stream inside the FileDescriptor (the RAF constructor set
+        ;; fis.fd = new FileDescriptor()) so valid()/getFD() see a real fd.
+        (if (typep fd '|java/io/FileDescriptor|)
+            (setf (slot-value fd '|fd|) stream)
+            (let ((newfd (%make-java-instance "java/io/FileDescriptor")))
+              (setf (slot-value newfd '|fd|) stream)
+              (setf (slot-value fis '|fd|) newfd)))
+        stream)
     ((or sb-ext:file-does-not-exist sb-int:simple-file-error) (e)
       (declare (ignore e))
       (let ((fnf (%make-java-instance "java/io/FileNotFoundException")))
         (|<init>(Ljava/lang/String;)| fnf filename)
         (error (%lisp-condition fnf))))))
 
-(defmethod |length()| ((raf |java/io/RandomAccessFile|))
-  (file-length (slot-value raf '|fd|)))
+(defmethod |length0()| ((raf |java/io/RandomAccessFile|))
+  ;; Flush buffered writes so file-length reflects them.
+  (let ((s (%raf-stream raf)))
+    (force-output s)
+    (file-length s)))
 
 (defmethod |getFilePointer()| ((raf |java/io/RandomAccessFile|))
-  (file-position (slot-value raf '|fd|)))
+  (file-position (%raf-stream raf)))
 
 (defmethod |read0()| ((raf |java/io/RandomAccessFile|))
-  (let ((byte (read-byte (slot-value raf '|fd|) nil nil)))
+  (let ((byte (read-byte (%raf-stream raf) nil nil)))
     (if byte byte -1)))
 
 (defmethod |seek0(J)| ((raf |java/io/RandomAccessFile|) position)
-  (file-position (slot-value raf '|fd|) position))
+  (file-position (%raf-stream raf) position))
 
-(defmethod |readBytes([BII)| ((raf |java/io/RandomAccessFile|) byte-array offset length)
-  (let ((in-stream (slot-value raf '|fd|))
+(defmethod |write0(I)| ((raf |java/io/RandomAccessFile|) byte)
+  (write-byte (logand byte #xFF) (%raf-stream raf))
+  nil)
+
+(defmethod |writeBytes0([BII)| ((raf |java/io/RandomAccessFile|) byte-array offset length)
+  (write-sequence (%convert-to-unsigned-8-bit (java-array-data byte-array))
+                  (%raf-stream raf) :start offset :end (+ offset length))
+  nil)
+
+(defmethod |readBytes0([BII)| ((raf |java/io/RandomAccessFile|) byte-array offset length)
+  (let ((in-stream (%raf-stream raf))
         (bytes-read 0))
     (loop for i from offset below (+ offset length)
           for byte = (read-byte in-stream nil nil) ; Read a byte, return NIL on EOF
@@ -1018,6 +1049,14 @@ expect for ordinary interfaces/classes."
 (defmethod |getLength(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
   (with-open-file (stream (lstring (slot-value file '|path|)) :element-type '(unsigned-byte 8))
     (file-length stream)))
+
+(defmethod |delete0(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
+  "Delete the file (or empty directory); return 1 on success, 0 on failure."
+  (handler-case
+      (progn
+        (delete-file (lstring (slot-value file '|path|)))
+        1)
+    (error () 0)))
 
 (defmethod |list(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
   (handler-case
