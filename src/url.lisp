@@ -178,3 +178,124 @@ this; the :around above still intercepts our native protocols."
   (if-let ((url-string (gethash url *native-url-strings*)))
     (jstring url-string)
     (call-next-method)))
+
+(defmethod |getProtocol()| :around ((url |java/net/URL|))
+  "Protocol (scheme) of an OpenLDK-constructed resource URL: the text before
+the first ':' (jar, file, jrt)."
+  (if-let ((url-string (gethash url *native-url-strings*)))
+    (jstring (subseq url-string 0 (position #\: url-string)))
+    (call-next-method)))
+
+(defmethod |getProtocol()| ((url |java/net/URL|))
+  "Fallback primary (before java.net.URL's bytecode is compiled): read the
+protocol field, or parse it out of the URL's string form."
+  (if (and (slot-exists-p url '|protocol|)
+           (slot-boundp url '|protocol|)
+           (slot-value url '|protocol|))
+      (slot-value url '|protocol|)
+      (let ((s (lstring (|toString()| url))))
+        (jstring (subseq s 0 (position #\: s))))))
+
+;;; URL.openConnection() for our synthetic jar:/file:/jrt: resource URLs.
+;;; Clojure's clojure.lang.RT.lastModified() calls url.openConnection() (and,
+;;; for jar URLs, casts to JarURLConnection and walks getJarFile().getEntry().
+;;; getTime()); it must succeed for RT.<clinit> to complete (ldk-uyv).  We
+;;; return a synthetic URLConnection (a JarURLConnection for jar: so the cast
+;;; holds) and record its URL; the getInputStream()/getLastModified()/
+;;; getJarFile() methods below serve it from OpenLDK's zip infrastructure.
+
+;; Stub CLOS classes so the methods below can specialize before the JDK's
+;; java.net.URLConnection / java.net.JarURLConnection are JIT-loaded (they are
+;; merged with the real classes at load time, as with java/net/URL above).
+(defclass |java/net/URLConnection| ()
+  ()
+  (:documentation "Stub for java.net.URLConnection; populated at runtime."))
+
+(defclass |java/net/JarURLConnection| (|java/net/URLConnection|)
+  ()
+  (:documentation "Stub for java.net.JarURLConnection; populated at runtime."))
+
+;; url.lisp loads before zip.lisp, so forward-declare the jar/zip stubs the
+;; connection methods below specialize on (harmlessly redefined in zip.lisp).
+(defclass |java/util/jar/JarFile| ()
+  ()
+  (:documentation "Stub for java.util.jar.JarFile; populated at runtime."))
+
+(defclass |java/util/zip/ZipEntry| ()
+  ()
+  (:documentation "Stub for java.util.zip.ZipEntry; populated at runtime."))
+
+(defvar *connection-urls* (make-hash-table :test #'eq :synchronized t)
+  "Synthetic URLConnection -> its java.net.URL.")
+
+(defun %url-string-of (url)
+  (or (gethash url *native-url-strings*) (lstring (|toString()| url))))
+
+(defun %open-url-connection-1 (url)
+  "A synthetic URLConnection for URLs whose protocol we serve, else :FALLTHROUGH."
+  (let ((url-string (%url-string-of url)))
+    (cond
+      ((starts-with? "jar:" url-string)
+       (let ((conn (%make-java-instance "java/net/JarURLConnection")))
+         (setf (gethash conn *connection-urls*) url)
+         conn))
+      ((or (starts-with? "file:" url-string) (starts-with? "jrt:" url-string))
+       (let ((conn (%make-java-instance "java/net/JarURLConnection")))
+         (setf (gethash conn *connection-urls*) url)
+         conn))
+      (t :fallthrough))))
+
+(defmethod |openConnection()| :around ((url |java/net/URL|))
+  (let ((conn (%open-url-connection-1 url)))
+    (if (eq conn :fallthrough) (call-next-method) conn)))
+
+(defmethod |openConnection()| ((url |java/net/URL|))
+  (let ((conn (%open-url-connection-1 url)))
+    (if (eq conn :fallthrough) nil conn)))
+
+;; URLConnection's stream/metadata methods are abstract in java.net, so these
+;; primary methods (no JDK bytecode to clobber them) serve our synthetic
+;; connections; they no-op to defaults for any connection we didn't create.
+;; :around so the compiled java.net.URLConnection.getInputStream() (which
+;; throws UnknownServiceException by default) doesn't clobber us; we serve our
+;; synthetic connections and defer to that default for any other connection.
+(defmethod |getInputStream()| :around ((conn |java/net/URLConnection|))
+  (if-let ((url (gethash conn *connection-urls*)))
+    (let ((s (%open-url-stream-1 url)))
+      (if (eq s :fallthrough) (call-next-method) s))
+    (call-next-method)))
+
+(defmethod |getLastModified()| ((conn |java/net/URLConnection|))
+  (declare (ignore conn))
+  0)
+
+;; The JDK ZipFile/JarFile/ZipEntry stubs carry no CLOS slots (OpenLDK reads
+;; jars through its own Lisp zip library, not these classes), so we attach the
+;; open zip and per-entry info via side tables instead of object fields.  This
+;; supports RT.lastModified()'s getJarFile().getEntry(name).getTime() walk.
+(defvar *jarfile-zips* (make-hash-table :test #'eq :synchronized t)
+  "java.util.jar.JarFile -> its open zip:zipfile.")
+(defvar *zipentry-times* (make-hash-table :test #'eq :synchronized t)
+  "java.util.zip.ZipEntry -> its last-modified time (millis).")
+
+(defmethod |getJarFile()| ((conn |java/net/JarURLConnection|))
+  (when-let ((url (gethash conn *connection-urls*)))
+    (multiple-value-bind (jar-path entry-path) (%parse-jar-url (%url-string-of url))
+      (declare (ignore entry-path))
+      (when jar-path
+        (let ((jf (%make-java-instance "java/util/jar/JarFile")))
+          (setf (gethash jf *jarfile-zips*) (zip:open-zipfile jar-path))
+          jf)))))
+
+(defmethod |getEntry(Ljava/lang/String;)| ((this |java/util/jar/JarFile|) name)
+  (if-let ((zf (gethash this *jarfile-zips*)))
+    (when (zip:get-zipfile-entry (lstring name) zf)
+      (let ((entry (%make-java-instance "java/util/zip/ZipEntry")))
+        ;; 0 = "very old", so callers reload rather than trust a stale class.
+        (setf (gethash entry *zipentry-times*) 0)
+        entry))
+    (call-next-method)))
+
+(defmethod |getTime()| ((this |java/util/zip/ZipEntry|))
+  (multiple-value-bind (time present) (gethash this *zipentry-times*)
+    (if present time -1)))
