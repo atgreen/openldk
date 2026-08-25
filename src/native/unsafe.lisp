@@ -1157,12 +1157,23 @@ java.* classes."
          (ldk-loader (get-ldk-loader-for-java-loader java-loader)))
     (%get-ldk-class-by-fq-name fq-name t ldk-loader)))
 
-(defmethod |isInterface()| ((this |java/lang/Class|))
+(defun %class-interface-p (this)
   (if (and (eq 0 (|isPrimitive()| this))
            (let ((lclass (get-ldk-class-for-java-class this)))
              (and lclass (interface-p lclass))))
       1
       0))
+
+(defmethod |isInterface()| ((this |java/lang/Class|))
+  (%class-interface-p this))
+
+;; Like getModifiers(), JDK 25's Class.isInterface() reads the `modifiers` field
+;; directly, which is 0 for the pre-baked bootstrap classes (e.g. Comparable) --
+;; so the primary defmethod is clobbered by the JIT-compiled field read and
+;; reports interfaces as non-interfaces (breaking Clojure deftype: "only
+;; interfaces are supported, had: java.lang.Comparable"). An :around survives.
+(defmethod |isInterface()| :around ((this |java/lang/Class|))
+  (%class-interface-p this))
 
 (defclass/std <constant-pool> (|java/lang/Object|)
   ((ldk-class)))

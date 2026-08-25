@@ -359,6 +359,17 @@
             (when super-class
               (find-method-in-class super-class name :static static)))))))
 
+(defun find-field-in-class (class name)
+  "Find a field by name in CLASS, walking the superclass chain (interfaces are
+not searched -- VarHandle/MethodHandle field access targets declared fields)."
+  (or (find-if (lambda (f) (string= (slot-value f 'name) name))
+               (coerce (slot-value class 'fields) 'list))
+      (let ((super-name (slot-value class 'super)))
+        (when super-name
+          (let ((super-class (%get-ldk-class-by-bin-name super-name t)))
+            (when super-class
+              (find-field-in-class super-class name)))))))
+
 (defun |java/lang/invoke/MethodHandleNatives.resolve(Ljava/lang/invoke/MemberName;Ljava/lang/Class;IZ)| (member-name klass speculative-resolve native-access)
   "JDK 17: resolve(MemberName self, Class<?> caller, int speculativeResolve, boolean nativeAccess)"
   (declare (ignore klass speculative-resolve native-access))
@@ -367,13 +378,26 @@
          (mn-flags (slot-value member-name '|flags|))
          ;; Reference kind is in bits 24-27. REF_invokeStatic = 6.
          (ref-kind (logand #xf (ash mn-flags -24)))
+         ;; Field access uses refKind getField/getStatic/putField/putStatic
+         ;; (1-4); MN_IS_FIELD is 0x40000.
+         (is-field (or (not (zerop (logand #x40000 mn-flags)))
+                       (<= 1 ref-kind 4)))
          ;; Also check ACC_STATIC in modifier bits (0x0008)
-         (want-static (or (= ref-kind 6) (not (zerop (logand #x0008 mn-flags)))))
-         (method (when ldk-class
-                   (find-method-in-class ldk-class (lstring (slot-value member-name '|name|))
-                                         :static (if want-static :yes :no)))))
-    (when method
-      (setf (slot-value member-name '|flags|) (logior mn-flags (access-flags method)))))
+         (want-static (or (= ref-kind 6) (not (zerop (logand #x0008 mn-flags))))))
+    (if is-field
+        ;; Field MemberName (VarHandle/MethodHandle field access): OR in the
+        ;; field's real access flags so the JDK's Lookup access check sees the
+        ;; correct modifiers (e.g. ACC_PRIVATE for a class accessing its own
+        ;; private field), rather than treating it as package-private.
+        (let ((field (when ldk-class
+                       (find-field-in-class ldk-class (lstring (slot-value member-name '|name|))))))
+          (when field
+            (setf (slot-value member-name '|flags|) (logior mn-flags (access-flags field)))))
+        (let ((method (when ldk-class
+                        (find-method-in-class ldk-class (lstring (slot-value member-name '|name|))
+                                              :static (if want-static :yes :no)))))
+          (when method
+            (setf (slot-value member-name '|flags|) (logior mn-flags (access-flags method)))))))
   member-name)
 
 (defun |java/lang/invoke/MethodHandleNatives.getMemberVMInfo(Ljava/lang/invoke/MemberName;)| (member-name)
@@ -574,19 +598,31 @@
                 (apply lisp-method-name args)
                 (apply lisp-method-name method-handle args))))))))
 
-(defun |java/lang/invoke/MethodHandles.lookup()| ()
-  "Return a basic MethodHandles.Lookup instance. We intentionally relax access checks for now."
+(defun %make-trusted-lookup ()
+  "Return a trusted MethodHandles.Lookup instance. We intentionally relax access
+checks for now; lookupClass defaults to Object (a NIL lookupClass blows up in
+LambdaMetafactory), allowedModes is TRUSTED (-1) so Lookup.checkAccess is
+bypassed."
   (classload "java/lang/invoke/MethodHandles$Lookup")
   (let ((lk (%make-java-instance "java/lang/invoke/MethodHandles$Lookup"))
-        ;; We don't have caller-sensitive machinery yet; default to Object to
-        ;; avoid NIL lookupClass that blows up in LambdaMetafactory.
         (caller-class (%get-java-class-by-bin-name "java/lang/Object")))
     (when (slot-exists-p lk '|lookupClass|)
       (setf (slot-value lk '|lookupClass|) caller-class))
-    ;; Treat this lookup as trusted to bypass Java access checks for now.
     (when (slot-exists-p lk '|allowedModes|)
       (setf (slot-value lk '|allowedModes|) -1)) ; TRUSTED in JDK sources
     lk))
+
+(defun |java/lang/invoke/MethodHandles.lookup()| ()
+  (%make-trusted-lookup))
+
+;; MethodHandles.lookup() is @CallerSensitive; its JIT-compiled bytecode builds
+;; a Lookup with a wrong lookupClass (OpenLDK has no caller-sensitive intrinsic)
+;; and non-trusted modes, so e.g. LinkedTransferQueue.<clinit> cannot access its
+;; own package-private `head` via findVarHandle. Force our trusted Lookup through
+;; *native-overrides* so it wins over the compiled body. (Calls the helper, not
+;; the same-named native, to avoid overriding itself into infinite recursion.)
+(setf (gethash "java/lang/invoke/MethodHandles.lookup()Ljava/lang/invoke/MethodHandles$Lookup;" *native-overrides*)
+      (lambda () (%make-trusted-lookup)))
 
 (defun |java/lang/invoke/MethodHandles$Lookup.lookupClass()| (this)
   "Return the class this lookup was created for."
