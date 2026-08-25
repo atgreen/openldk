@@ -209,6 +209,74 @@
     (when *debug-trace*
       (incf *call-nesting-level* -1))))
 
+(defun %field-primitive-char (type-class)
+  "Return the descriptor char (I/J/Z/B/S/C/F/D) for a primitive field
+TYPE-CLASS, or NIL when the field type is a reference type."
+  (when (and type-class (eq 1 (|isPrimitive()| type-class)))
+    (let ((n (lstring (slot-value type-class '|name|))))
+      (cond ((string= n "int")     #\I)
+            ((string= n "long")    #\J)
+            ((string= n "boolean") #\Z)
+            ((string= n "byte")    #\B)
+            ((string= n "short")   #\S)
+            ((string= n "char")    #\C)
+            ((string= n "float")   #\F)
+            ((string= n "double")  #\D)
+            (t nil)))))
+
+(defun %field-slot-storage (field obj)
+  "Return the CLOS object holding FIELD's slot: the class's +static-...+
+storage for a static field, otherwise OBJ."
+  (if (not (zerop (logand #x8 (slot-value field '|modifiers|))))
+      (%unsafe-static-storage field :errorp nil)
+      obj))
+
+;; JDK 25 routes java.lang.reflect.Field.get/set through a MethodHandle-based
+;; field accessor (MethodHandleAccessorFactory). OpenLDK cracks MethodHandle
+;; vmentries directly rather than interpreting LambdaForms, so driving that
+;; accessor NPEs in MethodHandle.asType. Bypass it by reading/writing the CLOS
+;; slot directly. Registered via *native-overrides* (not a defmethod) because
+;; java/lang/reflect/Field is not a build-time CLOS class, so it can't be a
+;; method specializer; the override installs before the JIT compiles the body.
+(setf (gethash "java/lang/reflect/Field.get(Ljava/lang/Object;)Ljava/lang/Object;" *native-overrides*)
+      (lambda (field obj)
+        (let* ((char (%field-primitive-char (slot-value field '|type$|)))
+               (slot-key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk))
+               (storage (%field-slot-storage field obj))
+               (raw (if (and storage (slot-exists-p storage slot-key) (slot-boundp storage slot-key))
+                        (slot-value storage slot-key)
+                        (if char 0 nil))))
+          (if char
+              (%box-primitive-return raw char)
+              raw))))
+
+(setf (gethash "java/lang/reflect/Field.set(Ljava/lang/Object;Ljava/lang/Object;)V" *native-overrides*)
+      (lambda (field obj value)
+        (let* ((char (%field-primitive-char (slot-value field '|type$|)))
+               (slot-key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk))
+               (storage (%field-slot-storage field obj))
+               ;; Unbox the wrapper when the field is primitive; wrappers carry
+               ;; the primitive in their |value| slot.
+               (v (if (and char value (slot-exists-p value '|value|))
+                      (slot-value value '|value|)
+                      value)))
+          (when (and storage (slot-exists-p storage slot-key))
+            (setf (slot-value storage slot-key) v))
+          nil)))
+
+;; Constructor.newInstance on JDK 25 builds a MethodHandle-based constructor
+;; accessor (MethodHandleAccessorFactory.makeConstructorHandle), which NPEs in
+;; MethodHandle.asType under OpenLDK's crack-and-bypass MethodHandle model --
+;; the same failure the Field.get/set bypass above avoids. OpenLDK already has a
+;; native reflective constructor path (NativeConstructorAccessorImpl.newInstance0);
+;; route Constructor.newInstance straight to it so the MethodHandle accessor is
+;; never built. Registered via *native-overrides* because java/lang/reflect/
+;; Constructor is not a build-time CLOS class.
+(setf (gethash "java/lang/reflect/Constructor.newInstance([Ljava/lang/Object;)Ljava/lang/Object;" *native-overrides*)
+      (lambda (constructor args)
+        (|jdk/internal/reflect/NativeConstructorAccessorImpl.newInstance0(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)|
+         constructor args)))
+
 (defun |sun/misc/VM.initialize()| ()
   nil)
 

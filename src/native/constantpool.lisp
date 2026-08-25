@@ -419,6 +419,18 @@
 
 (defun |java/lang/invoke/MethodHandleNatives.init(Ljava/lang/invoke/MemberName;Ljava/lang/Object;)| (member-name objref)
   (setf (slot-value member-name '|clazz|) (slot-value objref '|clazz|))
+
+  ;; A MemberName can also be initialized from a reflected Constructor.
+  ;; java.lang.reflect.Constructor has no `name` field (unlike Method/Field), so
+  ;; we must not read it; the JDK names such a MemberName "<init>" with
+  ;; MN_IS_CONSTRUCTOR (0x20000) and refKind REF_newInvokeSpecial (8).
+  (when (typep objref '|java/lang/reflect/Constructor|)
+    (setf (slot-value member-name '|name|) (jstring "<init>"))
+    (setf (slot-value member-name '|flags|)
+          (logior #x20000 (ash 8 24) (slot-value objref '|modifiers|)))
+    (return-from |java/lang/invoke/MethodHandleNatives.init(Ljava/lang/invoke/MemberName;Ljava/lang/Object;)|
+      member-name))
+
   (setf (slot-value member-name '|name|) (slot-value objref '|name|))
 
   ;; A MemberName can be initialized from either a reflected Method or a

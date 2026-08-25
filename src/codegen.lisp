@@ -567,19 +567,26 @@ class is a self-reference to the class currently being compiled."
 
 (defmethod codegen ((insn ir-class) context)
   (let* ((classname (slot-value (slot-value insn 'class) 'name))
-         (loader (slot-value context 'ldk-loader))
-         (ldk-class (or (%get-ldk-class-by-bin-name classname t loader)
-                        ;; A hidden/anonymous class references itself by its
-                        ;; original name, but it is registered under a
-                        ;; uniquified name; resolve that to the class being
-                        ;; compiled rather than failing with (java-class NIL).
-                        (let ((cc (slot-value context 'class)))
-                          (when (and cc (%self-referential-hidden-class-p (name cc) classname))
-                            cc)))))
-    (make-instance '<expression>
-                   :insn insn
-                   :code (java-class ldk-class)
-                   :expression-type :REFERENCE)))
+         (loader (slot-value context 'ldk-loader)))
+    ;; Ensure the referenced class is loaded before resolving it (unless it's
+    ;; an array type).  Mirrors ir-checkcast/ir-new; without this, a class that
+    ;; is referenced but not yet loaded (e.g. java/lang/Enum from
+    ;; clojure/lang/RT.<clinit>) resolves to NIL and (java-class NIL) aborts
+    ;; the JIT compile.
+    (when (and (plusp (length classname)) (not (eql (char classname 0) #\[)))
+      (classload classname))
+    (let ((ldk-class (or (%get-ldk-class-by-bin-name classname t loader)
+                         ;; A hidden/anonymous class references itself by its
+                         ;; original name, but it is registered under a
+                         ;; uniquified name; resolve that to the class being
+                         ;; compiled rather than failing with (java-class NIL).
+                         (let ((cc (slot-value context 'class)))
+                           (when (and cc (%self-referential-hidden-class-p (name cc) classname))
+                             cc)))))
+      (make-instance '<expression>
+                     :insn insn
+                     :code (java-class ldk-class)
+                     :expression-type :REFERENCE))))
 
 (defmethod codegen ((insn ir-branch-target) context)
   (declare (ignore context))
