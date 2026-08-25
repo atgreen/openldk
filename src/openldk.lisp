@@ -1272,13 +1272,20 @@ shadows a superclass field and needs its own storage."
            (closer-mop:finalize-inheritance lisp-class)
            (let ((icc (append (list 'defun (intern (format nil "%clinit-~A" classname) pkg) (list))
                               (loop for k in (reverse (closer-mop:class-precedence-list lisp-class))
-                                    for k-ldk-class = (%get-ldk-class-by-bin-name (format nil "~A" (class-name k)) t ldk-loader)
+                                    for k-name = (format nil "~A" (class-name k))
+                                    for k-ldk-class = (%get-ldk-class-by-bin-name k-name t ldk-loader)
                                     ;; Each superclass's clinit is in its defining loader's package
                                     for k-pkg = (if k-ldk-class
                                                     (loader-package (slot-value k-ldk-class 'ldk-loader))
                                                     pkg)
                                     for clinit-function = (intern (format nil "~a.<clinit>()" (class-name k)) k-pkg)
-                                    when (and k-ldk-class (fboundp clinit-function))
+                                    ;; JLS 12.4.2: initialize this class, its superclasses, and
+                                    ;; only those superinterfaces that declare a default method --
+                                    ;; NOT every superinterface in the precedence list.
+                                    when (and k-ldk-class (fboundp clinit-function)
+                                              (or (string= k-name classname)
+                                                  (not (interface-p k-ldk-class))
+                                                  (%declares-default-method-p k-ldk-class)))
                                       collect (list 'unless (list 'initialized-p k-ldk-class)
                                                     (list 'setf (list 'initialized-p k-ldk-class) t)
                                                     (list clinit-function))))))

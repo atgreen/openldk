@@ -367,6 +367,45 @@ after load, so the table is cached on the <class> object."
                    (or (methods ldk-class) #()))
               table))))
 
+(defun %find-field-declaring-class (class field-name &optional loader)
+  "Bin-name of the class/interface that actually declares FIELD-NAME,
+searching CLASS then its superclass and superinterfaces.  A static field
+access initializes only the declaring class (JLS 12.4.1), not the class
+named in the reference."
+  (let ((ldk-class (%get-ldk-class-by-bin-name class t loader)))
+    (when ldk-class
+      (if (some (lambda (f) (and f (string= (name f) field-name)))
+                (coerce (fields ldk-class) 'list))
+          class
+          (loop for parent in (remove nil (cons (super ldk-class)
+                                                (coerce (interfaces ldk-class) 'list)))
+                for result = (%find-field-declaring-class parent field-name loader)
+                when result return result)))))
+
+(defun %field-declaring-ir-class (ref-ir-class fieldname)
+  "ir-class for the class that DECLARES FIELDNAME, searching up from the
+referenced class REF-IR-CLASS.  Falls back to REF-IR-CLASS when it declares
+the field itself or the declarer can't be resolved.  Used so a static field
+access initializes the declaring class, not the referenced one."
+  (let* ((ref-name (name (ir-class-class ref-ir-class)))
+         (decl-name (%find-field-declaring-class ref-name fieldname)))
+    (if (and decl-name (not (string= decl-name ref-name)))
+        (let ((lc (classload decl-name)))
+          (if lc (make-instance 'ir-class :class lc) ref-ir-class))
+        ref-ir-class)))
+
+(defun %declares-default-method-p (ldk-class)
+  "True when LDK-CLASS is an interface declaring a default method (a
+non-abstract, non-static instance method).  Per JLS 12.4.2, initializing a
+class/interface initializes only those superinterfaces that declare a
+default method -- not every superinterface."
+  (and (interface-p ldk-class)
+       (some (lambda (m)
+               (and m (not (abstract-p m)) (not (static-p m))
+                    (let ((n (name m)))
+                      (not (or (string= n "<clinit>") (string= n "<init>"))))))
+             (coerce (methods ldk-class) 'list))))
+
 (defun %find-declaring-class (class method-name &optional loader)
   "Find the class that declares METHOD-NAME, searching class hierarchy.
    LOADER is the <ldk-class-loader> to use for class lookups."

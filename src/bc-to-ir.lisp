@@ -879,7 +879,9 @@ instruction's byte length in the context's INSN-SIZE array."
                   code
                   (cons (make-instance 'ir-clinit
                                        :address pc-start
-                                       :class class)
+                                       ;; JLS 12.4.1: initialize the class that
+                                       ;; declares the field, not the referenced one.
+                                       :class (%field-declaring-ir-class class fieldname))
                         code)))))))))
 
 (defun unsigned-to-signed-short (unsigned-value)
@@ -1857,7 +1859,7 @@ instruction's byte length in the context's INSN-SIZE array."
                   code
                   (cons (make-instance 'ir-clinit
                                        :address pc-start
-                                       :class class)
+                                       :class (%field-declaring-ir-class class fieldname))
                         code)))))))))
 
 (define-bytecode-transpiler :RETURN (context code)
