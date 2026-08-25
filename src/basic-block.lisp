@@ -274,6 +274,13 @@ Combined with global substitutions during codegen for this block only.")
         (setf (code block) (nreverse (code block))))
 
       ;; Let's create try blocks
+      ;; NOTE: try-catch ends up in REVERSE exception-table order here (PUSH
+      ;; prepends).  That is wrong for catch precedence in general (see
+      ;; ldk-e5u.4: `catch (Throwable)` before `catch (NPE)`), but OpenLDK
+      ;; currently flattens all handlers for a start-block into one
+      ;; HANDLER-CASE, so nested try-finally re-throw only works with this
+      ;; order.  Correcting both needs nested HANDLER-CASEs -- tracked in
+      ;; ldk-e5u.4.
       (when-let ((exception-table (exception-table *context*)))
         (loop for i from 0 below (length exception-table)
               for ete = (aref exception-table i)

@@ -1703,7 +1703,6 @@ FAIL: gcj/pr26990.java execution test
 # here so they remain honest XFAILs now that the typo is fixed.  Root causes
 # tracked as ldk-e5u.1..9; StringBuffer_overflow behaves per JVM-25 (empty)
 # and Divide_2 is timeout-flaky.
-FAIL: gcj/InterfaceDispatch.java execution test
 FAIL: gcj/PR162.java execution test
 FAIL: gcj/SyncTest.java execution test
 FAIL: gcj/TLtest.java execution test

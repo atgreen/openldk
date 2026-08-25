@@ -498,10 +498,7 @@ after load, so the table is cached on the <class> object."
                            (if (eq (char classname 0) #\[)
                              `(let ((objref ,(code (codegen (objref insn) context))))
                                 (when objref
-                                  (unless (and (typep objref 'java-array)
-                                               (|isAssignableFrom(Ljava/lang/Class;)|
-                                                (%array-component-class objref)
-                                                (%bin-type-name-to-class ,(subseq classname 1))))
+                                  (unless (%array-assignable-to-p objref ,classname)
                                     (error (%lisp-condition (%make-throwable '|java/lang/ClassCastException|))))))
                              `(let ((objref ,(code (codegen (objref insn) context))))
                                 (when objref
@@ -979,11 +976,23 @@ after load, so the table is cached on the <class> object."
        boxed))
     (t obj)))
 
+(defun %array-assignable-to-p (objref target-descriptor)
+  "True when array OBJREF's runtime type is assignable to the array type
+named by TARGET-DESCRIPTOR (a JVM array descriptor, e.g. \"[I\", \"[[I\",
+or \"[Lp/C;\"), per JLS array covariance/identity: the object's component
+type must be assignable to the target's component type.  Primitive
+component types must match exactly (short[] is not an int[])."
+  (and (typep objref 'java-array)
+       (let ((obj-comp (%array-component-class objref))
+             (target-comp (%bin-type-name-to-class (subseq target-descriptor 1))))
+         (and obj-comp target-comp
+              ;; target-comp.isAssignableFrom(obj-comp): obj's component is a
+              ;; subtype of (or equal to) the target's component.
+              (eql 1 (|isAssignableFrom(Ljava/lang/Class;)| target-comp obj-comp))))))
+
 (defun %instanceof-array (objref typename)
-  ;; FIXME - this isn't following any of the array instanceof rules
-  (if (typep objref 'java-array)
-      1
-      0))
+  "instanceof against an array target type TYPENAME."
+  (if (%array-assignable-to-p objref typename) 1 0))
 
 ;; Check if a native Lisp value is compatible with a Java class type.
 (defun %native-type-castable-p (obj classname)
@@ -1017,6 +1026,12 @@ after load, so the table is cached on the <class> object."
    Returns 0 when the target class is not loaded (e.g. AWT classes not on classpath)."
   (cond
     ((%native-type-castable-p obj target-class-name) 1)
+    ;; Every array is an instance of Object, Cloneable, and Serializable.
+    ((and (typep obj 'java-array)
+          (member target-class-name
+                  '("java/lang/Object" "java/lang/Cloneable" "java/io/Serializable")
+                  :test #'string=))
+     1)
     ((not (find-class target-class nil)) 0)
     ((typep obj target-class) 1)
     (t 0)))
