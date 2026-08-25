@@ -1208,7 +1208,11 @@ Method/Constructor so reflection reports them (e.g. Method.toString()'s
      (loop for idx in (gethash "Exceptions" (attributes method))
            for class-ref = (aref cp idx)
            for cname = (slot-value (aref cp (index class-ref)) 'value)
-           collect (%get-java-class-by-bin-name cname)))))
+           ;; Load the exception type on demand; skip if it can't be resolved
+           ;; rather than erroring out of the whole reflective lookup.
+           for cls = (progn (ignore-errors (classload cname))
+                            (%get-java-class-by-bin-name cname t))
+           when cls collect cls))))
 
 (defmethod |getDeclaredMethods0(Z)| ((this |java/lang/Class|) public-only)
   (unwind-protect

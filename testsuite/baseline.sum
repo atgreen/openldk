@@ -1,4 +1,4 @@
-Test run by green on Mon Aug 24 16:55:35 2026
+Test run by green on Tue Aug 25 04:05:50 2026
 Native configuration is x86_64-pc-linux-gnu
 
 		=== openldk tests ===
@@ -8,16 +8,16 @@ Schedule of variations:
 
 Running target unix
 Running /home/green/git/openldk/testsuite/jikestst/jikestst.exp ...
-XFAIL: jikestst/derek/ok/exec/TestArithmetic.e
-XFAIL: jikestst/derek/ok/exec/TestArrayAccess.e
+PASS: jikestst/derek/ok/exec/TestArithmetic.e
+PASS: jikestst/derek/ok/exec/TestArrayAccess.e
 PASS: jikestst/derek/ok/exec/TestClassInitializer.e
 PASS: jikestst/derek/ok/exec/TestCompare.e
 PASS: jikestst/derek/ok/exec/TestConstants.e
-XFAIL: jikestst/derek/ok/exec/TestConversions.e
+PASS: jikestst/derek/ok/exec/TestConversions.e
 XFAIL: jikestst/derek/ok/exec/TestFieldAccess.e
 PASS: jikestst/derek/ok/exec/TestFinally.e
 XFAIL: jikestst/derek/ok/exec/TestIO.e
-XFAIL: jikestst/derek/ok/exec/TestInstanceOf.e
+PASS: jikestst/derek/ok/exec/TestInstanceOf.e
 PASS: jikestst/derek/ok/exec/TestInterfaceCall.e
 PASS: jikestst/derek/ok/exec/TestReturn.e
 XFAIL: jikestst/derek/ok/exec/TestStackTrace.e
@@ -28,9 +28,9 @@ PASS: jikestst/derek/ok/exec/TestVirtualCall.e
 XFAIL: jikestst/hpj/ok/exec/AbsClassMain.e
 PASS: jikestst/hpj/ok/exec/BigComp.e
 PASS: jikestst/hpj/ok/exec/Const.e
-XFAIL: jikestst/hpj/ok/exec/DTest.e
+PASS: jikestst/hpj/ok/exec/DTest.e
 XFAIL: jikestst/hpj/ok/exec/FISTest.e
-XFAIL: jikestst/hpj/ok/exec/FOSTest.e
+PASS: jikestst/hpj/ok/exec/FOSTest.e
 XFAIL: jikestst/hpj/ok/exec/FTest.e
 PASS: jikestst/hpj/ok/exec/LoopTest.e
 XFAIL: jikestst/hpj/ok/exec/QuesStmt.e
@@ -38,11 +38,11 @@ XFAIL: jikestst/hpj/ok/exec/RAFTest.e
 PASS: jikestst/hpj/ok/exec/RefComp.e
 PASS: jikestst/hpj/ok/exec/Try1.e
 PASS: jikestst/hpj/ok/exec/Try3.e
-XFAIL: jikestst/hpj/ok/exec/Trychk1.e
+PASS: jikestst/hpj/ok/exec/Trychk1.e
 PASS: jikestst/hpj/ok/exec/Trychk2.e
 PASS: jikestst/hpj/ok/exec/Trychk3.e
-XFAIL: jikestst/hpj/ok/exec/Trychk6.e
-XFAIL: jikestst/hpj/ok/exec/Trychk7.e
+PASS: jikestst/hpj/ok/exec/Trychk6.e
+PASS: jikestst/hpj/ok/exec/Trychk7.e
 PASS: jikestst/hpj/ok/exec/Trychk8.e
 XFAIL: jikestst/hpj/ok/exec/Tryexcept.e
 XFAIL: jikestst/hpj/ok/exec/array2.e
@@ -122,59 +122,6 @@ PASS: df/LocalPropNegative.java (test for excess errors)
 PASS: df/LocalPropNegative.java execution test
 PASS: df/LocalPropPositive.java (test for excess errors)
 PASS: df/LocalPropPositive.java execution test
-Running /home/green/git/openldk/testsuite/aaa/run.exp ...
-PASS: aaa/MethodHandleTest.java (test for excess errors)
-PASS: aaa/MethodHandleTest.java execution test
-PASS: aaa/MethodHandleTest.java output pattern test
-PASS: aaa/TestSuper.java (test for excess errors)
-PASS: aaa/TestSuper.java execution test
-PASS: aaa/TestSuper.java output pattern test
-PASS: aaa/h001.java (test for excess errors)
-PASS: aaa/h001.java execution test
-PASS: aaa/h001.java output pattern test
-PASS: aaa/h002.java (test for excess errors)
-PASS: aaa/h002.java execution test
-PASS: aaa/h002.java output pattern test
-PASS: aaa/h003.java (test for excess errors)
-PASS: aaa/h003.java execution test
-PASS: aaa/h003.java output pattern test
-PASS: aaa/h004.java (test for excess errors)
-PASS: aaa/h004.java execution test
-PASS: aaa/h004.java output pattern test
-PASS: aaa/h005.java (test for excess errors)
-FAIL: aaa/h005.java execution test
-PASS: aaa/h006.java (test for excess errors)
-PASS: aaa/h006.java execution test
-PASS: aaa/h006.java output pattern test
-PASS: aaa/h007.java (test for excess errors)
-PASS: aaa/h007.java execution test
-PASS: aaa/h007.java output pattern test
-PASS: aaa/icmpeq.java (test for excess errors)
-PASS: aaa/icmpeq.java execution test
-PASS: aaa/icmpeq.java output pattern test
-PASS: aaa/ni.java (test for excess errors)
-PASS: aaa/ni.java execution test
-PASS: aaa/ni.java output pattern test
-PASS: aaa/sp.java (test for excess errors)
-PASS: aaa/sp.java execution test
-PASS: aaa/switchindy.java (test for excess errors)
-PASS: aaa/switchindy.java execution test
-PASS: aaa/switchindy.java output pattern test
-
-		=== openldk Summary ===
-
-# of expected passes		108
-# of unexpected failures	1
-# of expected failures		41
-Test run by green on Mon Aug 24 16:58:41 2026
-Native configuration is x86_64-pc-linux-gnu
-
-		=== openldk tests ===
-
-Schedule of variations:
-    unix
-
-Running target unix
 Running /home/green/git/openldk/testsuite/gcj/gcj.exp ...
 PASS: gcj/CompareNaN.java (test for excess errors)
 PASS: gcj/CompareNaN.java execution test
@@ -209,7 +156,7 @@ PASS: gcj/G19990310_01.java execution test
 PASS: gcj/II.java (test for excess errors)
 PASS: gcj/II.java execution test
 PASS: gcj/InterfaceDispatch.java (test for excess errors)
-XFAIL: gcj/InterfaceDispatch.java execution test
+PASS: gcj/InterfaceDispatch.java execution test
 PASS: gcj/InvokeInterface.java (test for excess errors)
 XFAIL: gcj/InvokeInterface.java execution test
 PASS: gcj/InvokeReturn.java (test for excess errors)
@@ -249,7 +196,7 @@ PASS: gcj/PR141.java execution test
 PASS: gcj/PR160.java (test for excess errors)
 PASS: gcj/PR160.java execution test
 PASS: gcj/PR162.java (test for excess errors)
-XFAIL: gcj/PR162.java execution test
+PASS: gcj/PR162.java execution test
 PASS: gcj/PR16867.java (test for excess errors)
 PASS: gcj/PR16867.java execution test
 PASS: gcj/PR18699.java (test for excess errors)
@@ -284,7 +231,7 @@ PASS: gcj/PR3096.java execution test
 PASS: gcj/PR31264.java (test for excess errors)
 PASS: gcj/PR31264.java execution test
 PASS: gcj/PR36252.java (test for excess errors)
-FAIL: gcj/PR36252.java execution test
+PASS: gcj/PR36252.java execution test
 PASS: gcj/PR3731.java (test for excess errors)
 PASS: gcj/PR3731.java execution test
 PASS: gcj/PR5057.java (test for excess errors)
@@ -325,7 +272,7 @@ XFAIL: gcj/Process_6.java execution test
 PASS: gcj/Process_7.java (test for excess errors)
 XFAIL: gcj/Process_7.java execution test
 PASS: gcj/ProxyTest.java (test for excess errors)
-XFAIL: gcj/ProxyTest.java execution test
+PASS: gcj/ProxyTest.java execution test
 PASS: gcj/RH194522.java (test for excess errors)
 PASS: gcj/RH194522.java execution test
 PASS: gcj/Serialization.java (test for excess errors)
@@ -335,7 +282,7 @@ PASS: gcj/Shazam.java execution test
 PASS: gcj/SimpleTest.java (test for excess errors)
 PASS: gcj/SimpleTest.java execution test
 PASS: gcj/StackTrace2.java (test for excess errors)
-FAIL: gcj/StackTrace2.java execution test
+PASS: gcj/StackTrace2.java execution test
 PASS: gcj/StaticConstructor.java (test for excess errors)
 PASS: gcj/StaticConstructor.java execution test
 PASS: gcj/StringBuffer_1.java (test for excess errors)
@@ -347,13 +294,13 @@ XFAIL: gcj/String_overflow.java execution test
 PASS: gcj/SyncGlobal.java (test for excess errors)
 PASS: gcj/SyncGlobal.java execution test
 PASS: gcj/SyncTest.java (test for excess errors)
-XFAIL: gcj/SyncTest.java execution test
+PASS: gcj/SyncTest.java execution test
 PASS: gcj/Synch.java (test for excess errors)
 PASS: gcj/Synch.java execution test
 PASS: gcj/TLtest.java (test for excess errors)
-XFAIL: gcj/TLtest.java execution test
+PASS: gcj/TLtest.java execution test
 PASS: gcj/TestProxy.java (test for excess errors)
-FAIL: gcj/TestProxy.java execution test
+PASS: gcj/TestProxy.java execution test
 PASS: gcj/TestWait0.java (test for excess errors)
 PASS: gcj/TestWait0.java execution test
 PASS: gcj/TestWaitSimple.java (test for excess errors)
@@ -361,16 +308,16 @@ PASS: gcj/TestWaitSimple.java execution test
 PASS: gcj/TestWaitThis.java (test for excess errors)
 PASS: gcj/TestWaitThis.java execution test
 PASS: gcj/Thread_Alive.java (test for excess errors)
-XFAIL: gcj/Thread_Alive.java execution test
+PASS: gcj/Thread_Alive.java execution test
 PASS: gcj/Thread_HoldsLock.java (test for excess errors)
 PASS: gcj/Thread_HoldsLock.java execution test
 PASS: gcj/Thread_Interrupt.java (test for excess errors)
 WARNING: program timed out
 XFAIL: gcj/Thread_Interrupt.java execution test
 PASS: gcj/Thread_Join.java (test for excess errors)
-XFAIL: gcj/Thread_Join.java execution test
+PASS: gcj/Thread_Join.java execution test
 PASS: gcj/Thread_Monitor.java (test for excess errors)
-XFAIL: gcj/Thread_Monitor.java execution test
+PASS: gcj/Thread_Monitor.java execution test
 PASS: gcj/Thread_Sleep.java (test for excess errors)
 PASS: gcj/Thread_Sleep.java execution test
 PASS: gcj/Thread_Sleep_2.java (test for excess errors)
@@ -378,15 +325,17 @@ PASS: gcj/Thread_Sleep_2.java execution test
 PASS: gcj/Thread_Wait.java (test for excess errors)
 PASS: gcj/Thread_Wait.java execution test
 PASS: gcj/Thread_Wait_2.java (test for excess errors)
+WARNING: program timed out
 XFAIL: gcj/Thread_Wait_2.java execution test
 PASS: gcj/Thread_Wait_Interrupt.java (test for excess errors)
+WARNING: program timed out
 XFAIL: gcj/Thread_Wait_Interrupt.java execution test
 PASS: gcj/Throw_1.java (test for excess errors)
-XFAIL: gcj/Throw_1.java execution test
+PASS: gcj/Throw_1.java execution test
 PASS: gcj/Throw_2.java (test for excess errors)
 UNRESOLVED: gcj/Throw_2.java compilation failed to produce executable
 PASS: gcj/Throw_3.java (test for excess errors)
-FAIL: gcj/Throw_3.java execution test
+PASS: gcj/Throw_3.java execution test
 PASS: gcj/anfi.java (test for excess errors)
 PASS: gcj/anfi.java execution test
 PASS: gcj/anon.java (test for excess errors)
@@ -408,7 +357,7 @@ PASS: gcj/anonarray3.java execution test
 PASS: gcj/assign.java (test for excess errors)
 PASS: gcj/assign.java execution test
 PASS: gcj/assign2.java (test for excess errors)
-XFAIL: gcj/assign2.java execution test
+PASS: gcj/assign2.java execution test
 PASS: gcj/bclink.java (test for excess errors)
 PASS: gcj/bclink.java execution test
 PASS: gcj/bytearray.java (test for excess errors)
@@ -511,7 +460,7 @@ PASS: gcj/pr13107_2.java execution test
 PASS: gcj/pr13107_3.java (test for excess errors)
 PASS: gcj/pr13107_3.java execution test
 PASS: gcj/pr133.java (test for excess errors)
-XFAIL: gcj/pr133.java execution test
+PASS: gcj/pr133.java execution test
 PASS: gcj/pr16789.java (test for excess errors)
 PASS: gcj/pr16789.java execution test
 PASS: gcj/pr17536.java (test for excess errors)
@@ -541,7 +490,7 @@ PASS: gcj/pr6388.java execution test
 PASS: gcj/pr83.java (test for excess errors)
 PASS: gcj/pr83.java execution test
 PASS: gcj/pr8415.java (test for excess errors)
-XFAIL: gcj/pr8415.java execution test
+PASS: gcj/pr8415.java execution test
 PASS: gcj/pr8676.java (test for excess errors)
 PASS: gcj/pr8676.java execution test
 PASS: gcj/pr8823.java (test for excess errors)
@@ -561,7 +510,7 @@ PASS: gcj/search_outer.java execution test
 PASS: gcj/shatest.java (test for excess errors)
 PASS: gcj/shatest.java execution test
 PASS: gcj/stacktrace.java (test for excess errors)
-XFAIL: gcj/stacktrace.java execution test
+PASS: gcj/stacktrace.java execution test
 PASS: gcj/stringconst.java (test for excess errors)
 PASS: gcj/stringconst.java execution test
 PASS: gcj/stringconst2.java (test for excess errors)
@@ -582,10 +531,48 @@ PASS: gcj/utilTest.java (test for excess errors)
 PASS: gcj/utilTest.java execution test
 PASS: gcj/verify.java (test for excess errors)
 PASS: gcj/verify.java execution test
+Running /home/green/git/openldk/testsuite/aaa/run.exp ...
+PASS: aaa/MethodHandleTest.java (test for excess errors)
+PASS: aaa/MethodHandleTest.java execution test
+PASS: aaa/MethodHandleTest.java output pattern test
+PASS: aaa/TestSuper.java (test for excess errors)
+PASS: aaa/TestSuper.java execution test
+PASS: aaa/TestSuper.java output pattern test
+PASS: aaa/h001.java (test for excess errors)
+PASS: aaa/h001.java execution test
+PASS: aaa/h001.java output pattern test
+PASS: aaa/h002.java (test for excess errors)
+PASS: aaa/h002.java execution test
+PASS: aaa/h002.java output pattern test
+PASS: aaa/h003.java (test for excess errors)
+PASS: aaa/h003.java execution test
+PASS: aaa/h003.java output pattern test
+PASS: aaa/h004.java (test for excess errors)
+PASS: aaa/h004.java execution test
+PASS: aaa/h004.java output pattern test
+PASS: aaa/h005.java (test for excess errors)
+PASS: aaa/h005.java execution test
+PASS: aaa/h005.java output pattern test
+PASS: aaa/h006.java (test for excess errors)
+PASS: aaa/h006.java execution test
+PASS: aaa/h006.java output pattern test
+PASS: aaa/h007.java (test for excess errors)
+PASS: aaa/h007.java execution test
+PASS: aaa/h007.java output pattern test
+PASS: aaa/icmpeq.java (test for excess errors)
+PASS: aaa/icmpeq.java execution test
+PASS: aaa/icmpeq.java output pattern test
+PASS: aaa/ni.java (test for excess errors)
+PASS: aaa/ni.java execution test
+PASS: aaa/ni.java output pattern test
+PASS: aaa/sp.java (test for excess errors)
+PASS: aaa/sp.java execution test
+PASS: aaa/switchindy.java (test for excess errors)
+PASS: aaa/switchindy.java execution test
+PASS: aaa/switchindy.java output pattern test
 
 		=== openldk Summary ===
 
-# of expected passes		355
-# of unexpected failures	4
-# of expected failures		40
+# of expected passes		491
+# of expected failures		59
 # of unresolved testcases	3
