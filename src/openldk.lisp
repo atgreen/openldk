@@ -865,7 +865,18 @@ that made concurrent Math.random()/holder-class first-use throw NPE."
                  ;; Use per-class lock to prevent concurrent initialization.
                  (when <clinit>-method
                    (bordeaux-threads:with-recursive-lock-held ((%get-class-lock (slot-value class 'name)))
-                     (when (not (initialized-p class))
+                     ;; Skip if this class is already initialized OR currently
+                     ;; being initialized on this thread.  The JIT path
+                     ;; (%ensure-class-initialized) marks INITIALIZING-P during a
+                     ;; <clinit> and only sets INITIALIZED-P afterward; without the
+                     ;; INITIALIZING-P check here, a reentrant %clinit for a class
+                     ;; whose <clinit> is already running via that path would RE-RUN
+                     ;; the <clinit>, re-executing its static initializer.  For
+                     ;; clojure.lang.Namespace that reassigns the static `namespaces`
+                     ;; registry to a fresh empty map, dropping already-registered
+                     ;; namespaces (e.g. clojure.core.protocols during clojure.core
+                     ;; bootstrap) -> "Unable to resolve" at core.clj:6866. (ldk-ia9)
+                     (when (not (or (initialized-p class) (initializing-p class)))
                        (when (search "TwoWayStream" (slot-value class 'name))
                          (format *error-output* "~&;; CLINIT: initializing ~A~%" (slot-value class 'name))
                          (force-output *error-output*))
