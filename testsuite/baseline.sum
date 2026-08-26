@@ -1,4 +1,4 @@
-Test run by green on Tue Aug 25 04:05:50 2026
+Test run by green on Tue Aug 25 23:15:13 2026
 Native configuration is x86_64-pc-linux-gnu
 
 		=== openldk tests ===
@@ -158,7 +158,7 @@ PASS: gcj/II.java execution test
 PASS: gcj/InterfaceDispatch.java (test for excess errors)
 PASS: gcj/InterfaceDispatch.java execution test
 PASS: gcj/InvokeInterface.java (test for excess errors)
-XFAIL: gcj/InvokeInterface.java execution test
+PASS: gcj/InvokeInterface.java execution test
 PASS: gcj/InvokeReturn.java (test for excess errors)
 XFAIL: gcj/InvokeReturn.java execution test
 PASS: gcj/Invoke_1.java (test for excess errors)
@@ -573,6 +573,6 @@ PASS: aaa/switchindy.java output pattern test
 
 		=== openldk Summary ===
 
-# of expected passes		491
-# of expected failures		59
+# of expected passes		492
+# of expected failures		58
 # of unresolved testcases	3
