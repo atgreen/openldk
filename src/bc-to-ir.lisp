@@ -1380,6 +1380,23 @@ instruction's byte length in the context's INSN-SIZE array."
             (push var (stack context))
             code))))))
 
+(defparameter *varhandle-access-modes*
+  '("get" "getVolatile" "getAcquire" "getOpaque"
+    "set" "setVolatile" "setRelease" "setOpaque" "setPlain"
+    "compareAndSet"
+    "weakCompareAndSet" "weakCompareAndSetPlain"
+    "weakCompareAndSetAcquire" "weakCompareAndSetRelease"
+    "compareAndExchange" "compareAndExchangeAcquire" "compareAndExchangeRelease"
+    "getAndSet" "getAndSetAcquire" "getAndSetRelease"
+    "getAndAdd" "getAndAddAcquire" "getAndAddRelease"
+    "getAndBitwiseOr" "getAndBitwiseOrAcquire" "getAndBitwiseOrRelease"
+    "getAndBitwiseAnd" "getAndBitwiseAndAcquire" "getAndBitwiseAndRelease"
+    "getAndBitwiseXor" "getAndBitwiseXorAcquire" "getAndBitwiseXorRelease")
+  "java.lang.invoke.VarHandle signature-polymorphic access-mode method names.
+Only these are lowered to the %VARHANDLE-OP-<op> dispatcher; other VarHandle
+methods (withInvokeExactBehavior, isAccessModeSupported, toMethodHandle, ...)
+are ordinary declared methods and use normal dispatch.")
+
 (defun %transpile-virtual-call (context code &optional (is-interface-call? nil))
   (with-slots (pc class) context
     (let ((pc-start pc))
@@ -1406,20 +1423,37 @@ instruction's byte length in the context's INSN-SIZE array."
                                                 constant-pool))
                  (return-type (get-return-type (emit method-reference constant-pool)))
                  (args (reverse (pop-args parameter-count context)))
-                 (call (if (and (string= class-name "java/lang/invoke/MethodHandle")
-                                (or (string= method-simple-name "invokeExact")
-                                    (string= method-simple-name "invoke")
-                                    (string= method-simple-name "invokeBasic")))
-                           (make-instance 'ir-call-virtual-method
-                                          :address pc-start
-                                          :return-type return-type
-                                          :method-name "%INVOKE-POLYMORPHIC-SIGNATURE"
-                                          :args args)
-                           (make-instance 'ir-call-virtual-method
-                                          :address pc-start
-                                          :return-type return-type
-                                          :method-name (lispize-method-name (emit method-reference constant-pool))
-                                          :args args))))
+                 (call (cond
+                         ((and (string= class-name "java/lang/invoke/MethodHandle")
+                               (or (string= method-simple-name "invokeExact")
+                                   (string= method-simple-name "invoke")
+                                   (string= method-simple-name "invokeBasic")))
+                          (make-instance 'ir-call-virtual-method
+                                         :address pc-start
+                                         :return-type return-type
+                                         :method-name "%INVOKE-POLYMORPHIC-SIGNATURE"
+                                         :args args))
+                         ;; VarHandle access methods are signature-polymorphic:
+                         ;; the call-site descriptor carries the erased coordinate
+                         ;; and value types, so there is no single declared method
+                         ;; to bind.  Route every op to a per-op runtime dispatcher
+                         ;; (%VARHANDLE-OP-<op>, src/native/unsafe-tail.lisp) which
+                         ;; handles field / array-element / byte-array-view handles
+                         ;; alike.  (ldk-304)
+                         ((and (string= class-name "java/lang/invoke/VarHandle")
+                               (member method-simple-name *varhandle-access-modes*
+                                       :test #'string=))
+                          (make-instance 'ir-call-virtual-method
+                                         :address pc-start
+                                         :return-type return-type
+                                         :method-name (format nil "%VARHANDLE-OP-~A" method-simple-name)
+                                         :args args))
+                         (t
+                          (make-instance 'ir-call-virtual-method
+                                         :address pc-start
+                                         :return-type return-type
+                                         :method-name (lispize-method-name (emit method-reference constant-pool))
+                                         :args args)))))
             (list (if (eq return-type :VOID)
                       call
                       (let ((var (make-stack-variable context pc-start return-type)))
