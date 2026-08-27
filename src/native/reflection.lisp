@@ -176,6 +176,18 @@
     (or pt (make-java-array :component-class (%get-java-class-by-fq-name "java.lang.Class")
                             :size 0))))
 
+;; java.lang.Class.getGenericSignature0() is a private native returning the
+;; class's generic-signature string (the class-file Signature attribute), or
+;; null when the class is not generic.  OpenLDK does not retain the Signature
+;; attribute, so return null: callers (e.g. Jackson's type introspection --
+;; getGenericSuperclass/getGenericInterfaces/getTypeParameters -> getGenericInfo)
+;; then treat the type as non-generic/raw.  That is correct for serialization to
+;; dynamically-typed data (Clojure maps/vectors), which is the jet/cheshire/
+;; jsonista use case; typed-generic deserialization would want the real string.
+(defmethod |getGenericSignature0()| ((this |java/lang/Class|))
+  (declare (ignore this))
+  nil)
+
 (defmethod |getDeclaredFields0(Z)| ((this |java/lang/Class|) public-only)
   (unwind-protect
        (progn
