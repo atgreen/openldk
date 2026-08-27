@@ -1232,6 +1232,9 @@ Java byte[] data stores signed bytes, so octets are converted."
   (when (in-fiber-p)
     (sb-thread:fiber-yield)
     (return-from |java/lang/Thread.yield()|))
+  ;; Platform thread: actually yield the OS thread; a no-op busy-spins j.u.c
+  ;; spin-then-yield backoff loops.  See Thread.yield0 in native/threads.lisp.
+  (sb-thread:thread-yield)
   nil)
 
 (defun %set-thread-status (thread status)

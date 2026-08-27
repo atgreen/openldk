@@ -165,6 +165,12 @@ this must hold the real implementation path."
   (when (in-fiber-p)
     (sb-thread:fiber-yield)
     (return-from |java/lang/Thread.yield0()|))
+  ;; Platform thread: actually yield the OS thread (sched_yield).  A no-op here
+  ;; turns java.util.concurrent spin-then-yield-then-park backoff loops
+  ;; (SynchronousQueue rendezvous, AQS, the cached thread pool Clojure uses) into
+  ;; 100%-CPU busy spins that starve the peer thread they wait on -> intermittent
+  ;; hang on Compiler.load-heavy paths (clojure.main startup, specter). (ldk-7eu)
+  (sb-thread:thread-yield)
   nil)
 
 (defvar *scoped-value-cache* nil
