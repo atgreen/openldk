@@ -50,16 +50,21 @@
         (let ((data (java-array-data value))
               (coder (or (ignore-errors (slot-value string '|coder|)) 0)))
           (if (zerop coder)
-              ;; LATIN1: each byte is a char code
-              (map 'string #'code-char data)
+              ;; LATIN1: each byte is a char code.  Java byte[] holds SIGNED
+              ;; bytes, so mask to 0..255 before code-char (e.g. 'é'=233 is
+              ;; stored as -23).
+              (map 'string (lambda (b) (code-char (logand b #xFF))) data)
               ;; UTF16: pairs of bytes (little-endian), recombining
               ;; surrogate pairs into full codepoints
               (let* ((len (floor (length data) 2))
                      (result (make-array len :element-type 'character
                                              :adjustable t :fill-pointer 0))
                      (i 0))
-                (flet ((unit (k) (+ (aref data (* k 2))
-                                    (ash (aref data (1+ (* k 2))) 8))))
+                ;; Mask each signed Java byte to 0..255 before combining, or a
+                ;; high byte (>=128, stored negative) yields a bogus/negative
+                ;; code unit and code-char signals a type-error.
+                (flet ((unit (k) (+ (logand (aref data (* k 2)) #xFF)
+                                    (ash (logand (aref data (1+ (* k 2))) #xFF) 8))))
                   (loop while (< i len)
                         do (let ((u (unit i)))
                              (cond

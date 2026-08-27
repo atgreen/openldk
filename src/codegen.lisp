@@ -151,7 +151,26 @@ implements IR node INSN, generating operand code recursively."))
                  :code (ijstring (slot-value insn 'value))
                  :expression-type :REFERENCE))
 
+(defparameter *trace-npe* nil
+  "When true, %make-throwable prints a Lisp backtrace each time it constructs a
+   NullPointerException. Diagnostic aid for pinning the OpenLDK throw site of an
+   NPE that escapes into a Clojure compile (see ldk-c7c).")
+(defparameter *npe-counter* 0)
+
 (defun %make-throwable (throwable-class)
+  (when (and *trace-npe*
+             (eq throwable-class '|java/lang/NullPointerException|))
+    ;; Print only each frame's function designator (first element), never its
+    ;; arguments: printing a java-array arg re-enters %STRINGIZE-ARRAY which can
+    ;; itself throw NPE, cascading into nested errors.
+    (format *error-output* "~&;;NPE-CREATE #~D~%" (incf *npe-counter*))
+    (ignore-errors
+      (let ((*print-level* 3) (*print-length* 4))
+        (dolist (frame (sb-debug:list-backtrace :count 25))
+          (ignore-errors
+            (format *error-output* "  ~S~%"
+                    (if (consp frame) (first frame) frame))))))
+    (force-output *error-output*))
   (let ((throwable (make-instance throwable-class)))
     (|<init>()| throwable)
     throwable))
