@@ -75,18 +75,30 @@
     ;; Print current thread's backtrace first
     (format stream "~&=== Current Thread: ~A ===~%" current)
     (%print-thread-backtrace :stream stream)
-    ;; Then interrupt other threads to get their backtraces
+    ;; Then interrupt other threads to get their backtraces.  Capture each into
+    ;; a string in the target's own context and wait (with a timeout) on a
+    ;; semaphore it signals when done: interruptible threads (e.g. a 0%-CPU block
+    ;; in condition-wait) dump fully; an uninterruptible 99%-CPU spin that never
+    ;; reaches a safepoint is reported as such instead of racing/truncating.
     (dolist (thread all-threads)
       (unless (eq thread current)
         (format stream "~&~%=== Thread: ~A ===~%" thread)
-        (ignore-errors
-          (sb-thread:interrupt-thread
-           thread
-           (lambda ()
-             (ignore-errors
-               (sb-debug:print-backtrace :stream stream :print-thread nil)))))
-        ;; Give the thread a moment to print
-        (sleep 0.05))))
+        (let ((sem (sb-thread:make-semaphore))
+              (out (make-string-output-stream)))
+          (handler-case
+              (progn
+                (sb-thread:interrupt-thread
+                 thread
+                 (lambda ()
+                   (unwind-protect
+                        (ignore-errors
+                          (sb-debug:print-backtrace :stream out :print-thread nil :count 100))
+                     (sb-thread:signal-semaphore sem))))
+                (if (sb-thread:wait-on-semaphore sem :timeout 3)
+                    (write-string (get-output-stream-string out) stream)
+                    (format stream "  <no response in 3s: uninterruptible (99%-CPU spin, no safepoint)>~%")))
+            (error (e) (format stream "  <could not backtrace: ~A>~%" e)))))
+        (force-output stream)))
   ;; Dump fibers when sb-fiber is available
   #+sb-fiber
   (%dump-all-fiber-stacks :stream stream)
@@ -134,6 +146,28 @@ Send 'kill -3 <pid>' or 'kill -QUIT <pid>' to trigger."
    (lambda (sig info context)
      (declare (ignore sig info context))
      (%dump-all-thread-stacks :stream *error-output*)))
+  (values))
+
+(defvar *dump-trigger-file* "/tmp/openldk-dump-trigger"
+  "When this file appears, the watchdog thread dumps all thread stacks and
+deletes it.")
+
+(defun install-dump-watchdog (&optional (trigger-file *dump-trigger-file*))
+  "Spawn a watchdog thread that dumps all thread stacks (to *error-output*)
+whenever TRIGGER-FILE appears, then deletes it.  A reliable alternative to the
+SIGQUIT handler for diagnosing hangs -- because the watchdog is a separate,
+always-live, interruptible thread, it fires even when the main thread is stuck
+in a 99%-CPU spin or a 0%-CPU block (it reaches other threads via GC-safepoint
+interrupts).  Usage on a hung process:  touch /tmp/openldk-dump-trigger"
+  (let ((err *error-output*))
+    (bordeaux-threads:make-thread
+     (lambda ()
+       (loop
+         (sleep 0.5)
+         (when (probe-file trigger-file)
+           (ignore-errors (delete-file trigger-file))
+           (ignore-errors (%dump-all-thread-stacks :stream err)))))
+     :name "openldk-dump-watchdog"))
   (values))
 
 (defun native-override-p (method)
@@ -240,7 +274,7 @@ the forward pass)."
            (style-warning (lambda (c)
                             (declare (ignore c))
                             (invoke-restart 'muffle-warning)))
-)
+           )
         (eval code)))) ; lint:suppress eval-usage
 
 (defun lispize-method-name (name)
@@ -1514,6 +1548,7 @@ properties, and *CLASSPATH* construction."
   (ensure-JAVA_HOME)
   ;; Install SIGQUIT handler for debugging hangs (send kill -3 to dump all stacks)
   (install-sigquit-handler)
+  (install-dump-watchdog)
   ;; Boot class loader: OPENLDK.SYSTEM package, JDK classes only.
   (unless *boot-ldk-class-loader*
     (let ((system-pkg (or (find-package "OPENLDK.SYSTEM")
