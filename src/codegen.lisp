@@ -2034,8 +2034,15 @@ Used to consult block-local substitutions in addition to global ones.")
                                 (lisp-code (cdr lisp-code)))
                             `(,bt
                               (HANDLER-CASE
-                                  (BLOCK TRY-BODY
-                                    (TAGBODY ,@lisp-code))
+                                  ;; Convert Lisp conditions to Java throwables
+                                  ;; *inside* the protected form: a throwable
+                                  ;; signalled from a handler established
+                                  ;; outside this HANDLER-CASE could never be
+                                  ;; caught by these clauses.
+                                  (openldk::with-java-conditions
+                                      (:arrays ,(and (needs-array-bounds-check *context*) t))
+                                    (BLOCK TRY-BODY
+                                      (TAGBODY ,@lisp-code)))
                                 ;; Condition symbols always in :openldk for cross-loader catching
                                 ,@(loop for (exception-type . handler-block) in try-catch-handlers
                                         when (> (length exception-type) 0)
@@ -2057,8 +2064,12 @@ Used to consult block-local substitutions in addition to global ones.")
                                                   (go ,(intern (format nil "branch-target-~A" (address handler-block)))))))
                               ,@fall-through-go))
                           `((HANDLER-CASE
-                                (BLOCK TRY-BODY
-                                  (TAGBODY ,@lisp-code))
+                                ;; See the note above: the conversion must be
+                                ;; established inside the protected form.
+                                (openldk::with-java-conditions
+                                    (:arrays ,(and (needs-array-bounds-check *context*) t))
+                                  (BLOCK TRY-BODY
+                                    (TAGBODY ,@lisp-code)))
                               ;; Condition symbols always in :openldk for cross-loader catching
                               ,@(loop for (exception-type . handler-block) in try-catch-handlers
                                       do (classload exception-type)

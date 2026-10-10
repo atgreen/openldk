@@ -584,31 +584,16 @@ entry/exit as required."
                                                     ,(car lisp-code)
                                                  (incf *call-nesting-level* -1)))
                                lisp-code))
-         ;; Always install memory-fault-error and type-error handlers
-         ;; to convert null pointer dereferences (SIGSEGV at NIL+offset)
-         ;; to Java NullPointerException.  Array bounds handler is only
-         ;; needed when the method contains array operations.
+         ;; Always convert null pointer dereferences (SIGSEGV at NIL+offset)
+         ;; and Lisp type-errors to Java NullPointerException.  Array bounds
+         ;; conversion is only needed when the method contains array
+         ;; operations.  This method-level wrapper catches what escapes the
+         ;; method's try blocks; each protected form establishes the same
+         ;; conversion inside itself (codegen.lisp) so that a throwable
+         ;; manufactured here is catchable by the catch clauses guarding it.
          (null-checked-lisp-code
-           `((handler-bind
-                 (,@(when (needs-array-bounds-check *context*)
-                      `((sb-int:invalid-array-index-error
-                          (lambda (e)
-                            (declare (ignore e))
-                            (error (openldk::%lisp-condition
-                                    (openldk::%make-throwable
-                                     'openldk::|java/lang/ArrayIndexOutOfBoundsException|)))))))
-                  (sb-sys:memory-fault-error
-                    (lambda (e)
-                      (declare (ignore e))
-                      (error (openldk::%lisp-condition
-                              (openldk::%make-throwable
-                               'openldk::|java/lang/NullPointerException|)))))
-                  (type-error
-                    (lambda (e)
-                      (declare (ignore e))
-                      (error (openldk::%lisp-condition
-                              (openldk::%make-throwable
-                               'openldk::|java/lang/NullPointerException|))))))
+           `((openldk::with-java-conditions
+                 (:arrays ,(and (needs-array-bounds-check *context*) t))
                ,(car traced-lisp-code))))
          ;; For ACC_SYNCHRONIZED methods, wrap body with monitor-enter/exit.
          ;; Instance methods synchronize on 'this'; static methods on the Class object.

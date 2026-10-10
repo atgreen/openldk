@@ -67,3 +67,43 @@
   (error 'unimplemented-error
          :format-control "unimplemented: ~?"
          :format-arguments (list what format-arguments)))
+
+;;; Converting internal Lisp conditions into Java throwables.
+;;;
+;;; A SIGSEGV at NIL+offset (a null dereference in JIT'd code) and a Lisp
+;;; TYPE-ERROR both mean, in Java terms, a NullPointerException; an
+;;; out-of-range array index means ArrayIndexOutOfBoundsException.
+;;;
+;;; WHERE this is established is load-bearing.  A HANDLER-BIND handler runs
+;;; with its own handler cluster -- and every cluster established inside it --
+;;; disestablished, so the throwable it signals is visible only to handlers
+;;; established OUTSIDE that HANDLER-BIND.  Java try/catch compiles to a
+;;; HANDLER-CASE nested in the method body (see codegen.lisp), so wrapping only
+;;; the method body means no catch clause in that method can ever see the
+;;; throwable: it escapes catch (Throwable) and surfaces as an unhandled Java
+;;; exception with no Java frame responsible.  Establish this INSIDE each
+;;; protected form as well, so the throwable propagates outward into the
+;;; enclosing HANDLER-CASE like any other Java exception.
+
+(defmacro with-java-conditions ((&key arrays) &body body)
+  "Run BODY with internal Lisp conditions converted to Java throwables.
+When ARRAYS is true, also convert array index errors.  Establish this inside
+every scope a Java catch clause protects, not merely around a method body."
+  `(handler-bind
+       (,@(when arrays
+            '((sb-int:invalid-array-index-error
+               (lambda (e)
+                 (declare (ignore e))
+                 (error (%lisp-condition
+                         (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|)))))))
+        (sb-sys:memory-fault-error
+         (lambda (e)
+           (declare (ignore e))
+           (error (%lisp-condition
+                   (%make-throwable '|java/lang/NullPointerException|)))))
+        (type-error
+         (lambda (e)
+           (declare (ignore e))
+           (error (%lisp-condition
+                   (%make-throwable '|java/lang/NullPointerException|))))))
+     ,@body))
