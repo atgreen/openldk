@@ -37,7 +37,9 @@
 
 (defun %load-zlib ()
   (unless *zlib-loaded*
-    (sb-alien:load-shared-object "libz.so.1")
+    ;; The system zlib's name differs by platform.  On macOS it lives in
+    ;; dyld's shared cache, where dlopen finds it by this name.
+    (sb-alien:load-shared-object #+darwin "libz.1.dylib" #-darwin "libz.so.1")
     (setf *zlib-loaded* t)))
 
 (defun %zlib-version ()
