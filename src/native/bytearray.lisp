@@ -168,20 +168,10 @@ TimeZone.getTimeZone does not recognize, silently defaulting to GMT."
   (declare (ignore unsafe))
   (%register-field-offset field))
 
-(defun %stringize-array (array)
-  "Convert an array of characters and integers (ASCII values) into a string."
-  (coerce
-   (map 'list
-        (lambda (x)
-          (if (integerp x)
-              (code-char x) ;; Convert integer to character
-              x))           ;; Keep character as is
-        (if array (java-array-data array) nil))
-   'string))
-
 (defmethod print-object ((str |java/lang/String|) out)
   (print-unreadable-object (str out :type t)
-    (format out "~S" (%stringize-array (slot-value str '|value|)))))
+    ;; LSTRING, not the raw bytes: they are signed and may be UTF-16.
+    (format out "~S" (lstring str))))
 
 (defmethod print-object ((class |java/lang/Class|) out)
   (print-unreadable-object (class out :type t)

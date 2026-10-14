@@ -82,23 +82,30 @@
                                 (incf i))))))
                 (coerce result 'string))))))))
 
+(defun %java-byte (octet)
+  "OCTET (0..255) as the signed value a Java byte holds."
+  (if (> octet 127) (- octet 256) octet))
+
 (defun %string-value-bytes (value)
   "Encode Lisp string VALUE per Java compact-string rules.  Returns
 (values BYTES CODER): LATIN1 bytes with coder 0 when every character fits
 in a byte, otherwise UTF-16LE code units (with surrogate pairs for
-supplementary characters) with coder 1."
+supplementary characters) with coder 1.  The bytes are signed, as in a Java
+byte[], because JDK code depends on it: String.encodeUTF8 returns a LATIN1
+value unchanged when StringCoding.hasNegatives finds no negative byte, and
+String.equals compares the bytes."
   (if (every (lambda (c) (< (char-code c) 256)) value)
-      (let ((bytes (make-array (length value) :element-type '(unsigned-byte 8))))
+      (let ((bytes (make-array (length value) :element-type '(signed-byte 8))))
         (dotimes (i (length value))
-          (setf (aref bytes i) (char-code (char value i))))
+          (setf (aref bytes i) (%java-byte (char-code (char value i)))))
         (values bytes 0))
       (let* ((units (loop for c across value
                           sum (if (> (char-code c) #xFFFF) 2 1)))
-             (bytes (make-array (* 2 units) :element-type '(unsigned-byte 8)))
+             (bytes (make-array (* 2 units) :element-type '(signed-byte 8)))
              (j 0))
         (flet ((put-unit (unit)
-                 (setf (aref bytes j) (logand unit #xFF))
-                 (setf (aref bytes (1+ j)) (ash unit -8))
+                 (setf (aref bytes j) (%java-byte (logand unit #xFF)))
+                 (setf (aref bytes (1+ j)) (%java-byte (ash unit -8)))
                  (incf j 2)))
           (loop for c across value
                 for code = (char-code c)
