@@ -753,8 +753,15 @@ compilation fails silently (leaving the self-compiling stub in place)."
 doesn't leave a self-recursing compilation stub behind.  Uses plain Lisp
 errors (not Java exceptions) to avoid triggering further class loading
 during error handling."
+  ;; Instance methods dispatch on a generic function in :openldk, where the
+  ;; lazy compile stub and %build-method-definition both put them.  Interning
+  ;; in the loader's package instead (OPENLDK.APP for the classpath) put the
+  ;; error stub on an unrelated generic function, so the lazy stub survived and
+  ;; every call looped: %compile-method returns at once for a :done method.
   (let ((fn-symbol (intern (%method-fn-name class method)
-                           (%class-loader-package class))))
+                           (if (static-p method)
+                               (%class-loader-package class)
+                               :openldk))))
     (if (static-p method)
         (when (fboundp fn-symbol)
           (setf (symbol-function fn-symbol)
