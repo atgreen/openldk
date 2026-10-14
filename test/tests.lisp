@@ -49,3 +49,16 @@ count as one parameter)."
   (is (equal '(#\Z #\C) (openldk::%descriptor-param-type-chars "(ZC)Ljava/lang/String;")))
   (is (equal '(#\I #\L #\J) (openldk::%descriptor-param-type-chars "(ILjava/lang/String;J)V")))
   (is (equal '(#\[) (openldk::%descriptor-param-type-chars "([I)V"))))
+
+(test vm-nano-time-adjustment
+  ;; VM.getNanoTimeAdjustment(offset): nanoseconds from OFFSET (epoch
+  ;; seconds) to now, or -1 when OFFSET is 2^32 seconds or more away.  It
+  ;; backs Clock.currentInstant, so Instant.now().
+  (let* ((epoch-now (- (get-universal-time) (encode-universal-time 0 0 0 1 1 1970 0)))
+         (adjust (lambda (offset)
+                   (openldk::|jdk/internal/misc/VM.getNanoTimeAdjustment(J)| offset))))
+    (is (<= (* 9 1000000000) (funcall adjust (- epoch-now 10)) (* 12 1000000000)))
+    (is (<= (* (- epoch-now 2) 1000000000) (funcall adjust 0) (* (+ epoch-now 2) 1000000000))
+        "1970 is within 2^32 seconds")
+    (is (= -1 (funcall adjust (- epoch-now (expt 2 32)))))
+    (is (= -1 (funcall adjust (+ epoch-now (expt 2 32)))))))

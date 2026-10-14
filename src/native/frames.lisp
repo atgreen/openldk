@@ -315,6 +315,21 @@ for the Java caller."
           1000000000)
        nanoseconds)))
 
+(defun |jdk/internal/misc/VM.getNanoTimeAdjustment(J)| (offset-in-seconds)
+  "Nanoseconds from OFFSET-IN-SECONDS (seconds since the epoch) to now, or -1
+when the offset is 2^32 seconds or more away, as HotSpot answers.  This backs
+Clock.currentInstant, and so Instant.now()."
+  (assert (eq org.shirakumo.precise-time:precise-time-units-per-second
+              1000000000))
+  (multiple-value-bind (universal-time nanoseconds)
+      (org.shirakumo.precise-time:get-precise-time)
+    (let ((diff (- (local-time:timestamp-to-unix
+                    (local-time:universal-to-timestamp universal-time))
+                   offset-in-seconds)))
+      (if (< (- (expt 2 32)) diff (expt 2 32))
+          (+ (* diff 1000000000) nanoseconds)
+          -1))))
+
 (defun %throw-arraycopy-index-error (format-control &rest format-arguments)
   "System.arraycopy bounds violations throw ArrayIndexOutOfBoundsException."
   (let ((exc (%make-java-instance "java/lang/ArrayIndexOutOfBoundsException")))
