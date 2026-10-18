@@ -82,3 +82,18 @@ file, nothing."
                                         30)))
   (let ((v (%zip-with-prefix 4 #xFFFFFFFF)))
     (is (null (openldk::zip-prefix-length v (length v))))))
+
+(test string-value-bytes-are-java-bytes
+  ;; Java's String.value is a byte[], so its bytes are signed: e-acute (233)
+  ;; is -23.  JDK code relies on that, e.g. String.encodeUTF8 copies a LATIN1
+  ;; value unchanged when StringCoding.hasNegatives finds no negative byte.
+  (multiple-value-bind (bytes coder) (openldk::%string-value-bytes (coerce '(#\h #\LATIN_SMALL_LETTER_E_WITH_ACUTE) 'string))
+    (is (= 0 coder))
+    (is (equalp '(104 -23) (coerce bytes 'list))))
+  ;; UTF16 is little-endian code units, each byte signed too: U+65E5 is E5 65.
+  (multiple-value-bind (bytes coder) (openldk::%string-value-bytes (coerce (list #\a (code-char #x65E5)) 'string))
+    (is (= 1 coder))
+    (is (equalp '(97 0 -27 101) (coerce bytes 'list))))
+  (multiple-value-bind (bytes coder) (openldk::%string-value-bytes "plain")
+    (is (= 0 coder))
+    (is (equalp '(112 108 97 105 110) (coerce bytes 'list)))))
