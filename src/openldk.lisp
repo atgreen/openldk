@@ -854,7 +854,10 @@ or skip in-progress compilations."
           (if compilation-completed
               (setf (gethash method-key *methods-being-compiled*) :done)
               (remhash method-key *methods-being-compiled*))
-          (bt:condition-notify *method-compilation-cv*))))))
+          ;; Broadcast: the condition variable is shared by every method,
+          ;; so waiters on other methods, and several waiters on this one,
+          ;; must all get to re-check their method's status.
+          (sb-thread:condition-broadcast *method-compilation-cv*))))))
 
 
 (defun %ensure-class-initialized (class clinit-fn)
