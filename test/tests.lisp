@@ -49,3 +49,36 @@ count as one parameter)."
   (is (equal '(#\Z #\C) (openldk::%descriptor-param-type-chars "(ZC)Ljava/lang/String;")))
   (is (equal '(#\I #\L #\J) (openldk::%descriptor-param-type-chars "(ILjava/lang/String;J)V")))
   (is (equal '(#\[) (openldk::%descriptor-param-type-chars "([I)V"))))
+
+(defun %zip-with-prefix (prefix-length cd-offset)
+  "Octets of a fake file: PREFIX-LENGTH bytes of prefix, a 10-byte stand-in
+for the local entries, a 46-byte stand-in for the central directory, then an
+end record giving the central directory's size and CD-OFFSET."
+  (let ((v (make-array (+ prefix-length 10 46 22) :element-type '(unsigned-byte 8)
+                                                  :initial-element 0))
+        (eocd (+ prefix-length 10 46)))
+    (replace v #(#x50 #x4B 5 6) :start1 eocd)
+    (loop for k below 4
+          do (setf (aref v (+ eocd 12 k)) (ldb (byte 8 (* 8 k)) 46)
+                   (aref v (+ eocd 16 k)) (ldb (byte 8 (* 8 k)) cd-offset)))
+    v))
+
+(test zip-prefix-length
+  "zip-prefix-length finds the bytes in front of a zip archive, which for a
+JMOD is its 4-byte header or, when its offsets count from the start of the
+file, nothing."
+  ;; Offsets counted from after a 4-byte header, as in OpenJDK's JMODs.
+  (let ((v (%zip-with-prefix 4 10)))
+    (is (= 4 (openldk::zip-prefix-length v (length v)))))
+  ;; Offsets counted from the start of the file, as in some of GraalVM's.
+  (let ((v (%zip-with-prefix 4 14)))
+    (is (= 0 (openldk::zip-prefix-length v (length v)))))
+  ;; Only the last bytes of the file are read.
+  (let ((v (%zip-with-prefix 4 10)))
+    (is (= 4 (openldk::zip-prefix-length (subseq v (- (length v) 22)) (length v)))))
+  ;; No end record, or a zip64 one: NIL, and the caller keeps its default.
+  (is (null (openldk::zip-prefix-length (make-array 30 :element-type '(unsigned-byte 8)
+                                                       :initial-element 0)
+                                        30)))
+  (let ((v (%zip-with-prefix 4 #xFFFFFFFF)))
+    (is (null (openldk::zip-prefix-length v (length v))))))

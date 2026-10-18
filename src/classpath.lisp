@@ -163,21 +163,57 @@ entry's lock with the zipfile open."
 (defmethod close ((s jmod-offset-stream) &key abort)
   (close (slot-value s 'inner) :abort abort))
 
+(defun zip-prefix-length (tail file-length)
+  "Return how many bytes precede the zip archive in a file of FILE-LENGTH
+bytes whose last bytes are the octet vector TAIL, or NIL when TAIL holds no
+end-of-central-directory record or the record is a zip64 one.  It is the
+record's position less the end of the central directory it describes, as
+Info-ZIP computes it for an archive with a prefix.  A JMOD's prefix is its
+4-byte header when its zip offsets count from after the header, as OpenJDK's
+do, and 0 when they count from the start of the file, as 30 of the 84 JMODs
+in GraalVM CE 25.0.1 do."
+  (when-let ((eocd (loop for i from (- (length tail) 22) downto 0
+                         when (and (= (aref tail i) #x50) (= (aref tail (+ i 1)) #x4B)
+                                   (= (aref tail (+ i 2)) 5) (= (aref tail (+ i 3)) 6))
+                           return i)))
+    (flet ((u32 (i)
+             (logior (aref tail i) (ash (aref tail (+ i 1)) 8)
+                     (ash (aref tail (+ i 2)) 16) (ash (aref tail (+ i 3)) 24))))
+      (let ((cd-size (u32 (+ eocd 12)))
+            (cd-offset (u32 (+ eocd 16))))
+        (unless (or (= cd-size #xFFFFFFFF) (= cd-offset #xFFFFFFFF))
+          (let ((prefix (- (+ (- file-length (length tail)) eocd) cd-offset cd-size)))
+            (when (<= 0 prefix)
+              prefix)))))))
+
 (defun open-jmod-zipfile (pathname)
-  "Open a JMOD file as a zipfile, skipping the 4-byte JMOD magic header."
-  (let ((raw (open pathname :element-type '(unsigned-byte 8))))
-    ;; Verify JMOD magic: JM\1\0
-    (let ((magic (make-array 4 :element-type '(unsigned-byte 8))))
-      (read-sequence magic raw)
-      (unless (and (= (aref magic 0) #x4A) ; J
-                   (= (aref magic 1) #x4D) ; M
-                   (= (aref magic 2) #x01)
-                   (= (aref magic 3) #x00))
-        (close raw)
-        (error "Not a valid JMOD file: ~A" pathname)))
-    ;; Wrap in offset stream so ZIP library sees adjusted positions
-    (let ((wrapper (make-instance 'jmod-offset-stream :inner raw :offset 4)))
-      (zip::open-zipfile-from-stream wrapper))))
+  "Open a JMOD file as a zipfile, skipping the bytes in front of its zip
+archive: the 4-byte JMOD header, or nothing for a JMOD whose zip offsets
+count from the start of the file."
+  (let ((raw (open pathname :element-type '(unsigned-byte 8)))
+        (opened nil))
+    (unwind-protect
+         (progn
+           ;; Verify JMOD magic: JM\1\0
+           (let ((magic (make-array 4 :element-type '(unsigned-byte 8))))
+             (read-sequence magic raw)
+             (unless (and (= (aref magic 0) #x4A) ; J
+                          (= (aref magic 1) #x4D) ; M
+                          (= (aref magic 2) #x01)
+                          (= (aref magic 3) #x00))
+               (error "Not a valid JMOD file: ~A" pathname)))
+           (let* ((len (file-length raw))
+                  (tail (make-array (min len 65557) :element-type '(unsigned-byte 8))))
+             (file-position raw (- len (length tail)))
+             (read-sequence tail raw)
+             ;; Wrap in offset stream so ZIP library sees adjusted positions
+             (prog1 (zip::open-zipfile-from-stream
+                     (make-instance 'jmod-offset-stream
+                                    :inner raw
+                                    :offset (or (zip-prefix-length tail len) 4)))
+               (setf opened t))))
+      (unless opened
+        (close raw)))))
 
 ;; --- jmod-classpath-entry methods ---
 
