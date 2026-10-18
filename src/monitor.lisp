@@ -92,4 +92,8 @@ when running in a fiber, so no separate fiber code path is needed."
         (decf (recursion-count monitor))
         (when (zerop (recursion-count monitor))
           (setf (owner monitor) nil)
-          (bordeaux-threads:condition-notify (condition-variable monitor)))))))
+          ;; Broadcast: threads entering share this condition variable with
+          ;; threads in Object.wait(), and a single wakeup can land on a
+          ;; wait(), leaving a thread asleep at the door of a free monitor.
+          ;; notify() and notifyAll() already broadcast here.
+          (sb-thread:condition-broadcast (condition-variable monitor)))))))
