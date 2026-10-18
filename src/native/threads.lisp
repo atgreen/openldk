@@ -470,3 +470,16 @@ this must hold the real implementation path."
   (declare (ignore name))
   nil)
 
+;; NativeLibraries.load: OpenLDK's natives are Lisp functions, so there is no
+;; native library to load.  Report it as not loaded, which the JDK treats as a
+;; library that is absent: BootLoader.loadLibrary ignores the result.  This
+;; matters on macOS, where ClassLoaderHelper.loadLibraryOnlyIfPresent() is
+;; false (dyld's shared cache means a library need not exist as a file), so
+;; the JDK calls load without first checking for the file.  Without this,
+;; anything reaching BootLoader.loadLibrary("nio"), such as the first use of
+;; java.nio.file or MessageDigest.getInstance, signalled UNDEFINED-FUNCTION.
+(defun |jdk/internal/loader/NativeLibraries.load(Ljdk/internal/loader/NativeLibraries$NativeLibraryImpl;Ljava/lang/String;ZZ)|
+    (impl name is-builtin throw-exception-if-fail)
+  (declare (ignore impl name is-builtin throw-exception-if-fail))
+  0)
+
