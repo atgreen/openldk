@@ -1,4 +1,4 @@
-Test run by green on Tue Aug 25 23:15:13 2026
+Test run by green on Sun Oct 18 07:30:06 2026
 Native configuration is x86_64-pc-linux-gnu
 
 		=== openldk tests ===
@@ -328,7 +328,6 @@ PASS: gcj/Thread_Wait_2.java (test for excess errors)
 WARNING: program timed out
 XFAIL: gcj/Thread_Wait_2.java execution test
 PASS: gcj/Thread_Wait_Interrupt.java (test for excess errors)
-WARNING: program timed out
 XFAIL: gcj/Thread_Wait_Interrupt.java execution test
 PASS: gcj/Throw_1.java (test for excess errors)
 PASS: gcj/Throw_1.java execution test
@@ -538,6 +537,9 @@ PASS: aaa/MethodHandleTest.java output pattern test
 PASS: aaa/TestSuper.java (test for excess errors)
 PASS: aaa/TestSuper.java execution test
 PASS: aaa/TestSuper.java output pattern test
+PASS: aaa/digest.java (test for excess errors)
+PASS: aaa/digest.java execution test
+PASS: aaa/digest.java output pattern test
 PASS: aaa/h001.java (test for excess errors)
 PASS: aaa/h001.java execution test
 PASS: aaa/h001.java output pattern test
@@ -562,6 +564,9 @@ PASS: aaa/h007.java output pattern test
 PASS: aaa/icmpeq.java (test for excess errors)
 PASS: aaa/icmpeq.java execution test
 PASS: aaa/icmpeq.java output pattern test
+PASS: aaa/instant.java (test for excess errors)
+PASS: aaa/instant.java execution test
+PASS: aaa/instant.java output pattern test
 PASS: aaa/ni.java (test for excess errors)
 PASS: aaa/ni.java execution test
 PASS: aaa/ni.java output pattern test
@@ -570,9 +575,12 @@ PASS: aaa/sp.java execution test
 PASS: aaa/switchindy.java (test for excess errors)
 PASS: aaa/switchindy.java execution test
 PASS: aaa/switchindy.java output pattern test
+PASS: aaa/zlib.java (test for excess errors)
+PASS: aaa/zlib.java execution test
+PASS: aaa/zlib.java output pattern test
 
 		=== openldk Summary ===
 
-# of expected passes		492
+# of expected passes		501
 # of expected failures		58
 # of unresolved testcases	3
