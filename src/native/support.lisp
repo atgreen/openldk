@@ -120,7 +120,9 @@ defmethod before the JIT would upgrade them), which is why the name check matter
       (let ((saved-recursion (recursion-count monitor)))
         (push current-thread (wait-set monitor))
         (setf (owner monitor) nil (recursion-count monitor) 0)
-        (bordeaux-threads:condition-notify cv)
+        ;; Broadcast, as monitor-exit does: a single wakeup could land on
+        ;; another wait() rather than a thread entering.
+        (sb-thread:condition-broadcast cv)
         (loop while (member current-thread (wait-set monitor))
               do (if (zerop timeout)
                      (bordeaux-threads:condition-wait cv mutex)
