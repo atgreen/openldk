@@ -18,12 +18,17 @@ on:
 jobs:
   tests:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
 
     runs-on: ${{ matrix.os }}
 
     timeout-minutes: 30
+
+    env:
+      OCICL_HTTP_RETRIES: "6"
+      OCICL_DOWNLOAD_CONCURRENCY: "2"
 
     steps:
       - name: Checkout
