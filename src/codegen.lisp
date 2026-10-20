@@ -409,7 +409,7 @@ access initializes the declaring class, not the referenced one."
   (let* ((ref-name (name (ir-class-class ref-ir-class)))
          (decl-name (%find-field-declaring-class ref-name fieldname)))
     (if (and decl-name (not (string= decl-name ref-name)))
-        (let ((lc (classload decl-name)))
+        (let ((lc (%resolve-class-in-context decl-name)))
           (if lc (make-instance 'ir-class :class lc) ref-ir-class))
         ref-ir-class)))
 
@@ -442,7 +442,7 @@ default method -- not every superinterface."
                    :insn insn
                    :code (let* ((loader (slot-value context 'ldk-loader))
                                 ;; Ensure class is loaded before package lookup
-                                (_ (classload class))
+                                (_ (%resolve-class-in-context class))
                                 (declaring-class (or (%find-declaring-class class method-name loader) class))
                                 (pkg (class-package declaring-class loader))
                                 (full-name (format nil "~A.~A" declaring-class method-name))
@@ -549,7 +549,7 @@ default method -- not every superinterface."
   (with-slots (classname) insn
     ;; Ensure class is loaded before package lookup (unless it's an array type)
     (unless (eq (char classname 0) #\[)
-      (classload classname))
+      (%resolve-class-in-context classname))
     (make-instance '<expression>
                    :insn insn
                    :code (progn
@@ -593,7 +593,7 @@ class is a self-reference to the class currently being compiled."
     ;; clojure/lang/RT.<clinit>) resolves to NIL and (java-class NIL) aborts
     ;; the JIT compile.
     (when (and (plusp (length classname)) (not (eql (char classname 0) #\[)))
-      (classload classname))
+      (%resolve-class-in-context classname))
     (let ((ldk-class (or (%get-ldk-class-by-bin-name classname t loader)
                          ;; A hidden/anonymous class references itself by its
                          ;; original name, but it is registered under a
@@ -1142,7 +1142,7 @@ component types must match exactly (short[] is not an int[])."
                    :insn insn
                    :code (let* ((cname (name (slot-value (slot-value insn 'class) 'class)))
                                 ;; Ensure class is loaded before package lookup (unless array type)
-                                (_ (unless (eq (char cname 0) #\[) (classload cname)))
+                                (_ (unless (eq (char cname 0) #\[) (%resolve-class-in-context cname)))
                                 (pkg (class-package cname))
                                 (obj (code (codegen objref context))))
                            (cond
@@ -1330,7 +1330,7 @@ static function in its own defining package rather than the caller's."
         (let* ((paren (position #\( bootstrap-method-name))
                (dot (position #\. bootstrap-method-name :end paren :from-end t))
                (bootstrap-class (subseq bootstrap-method-name 0 dot)))
-          (classload bootstrap-class)
+          (%resolve-class-in-context bootstrap-class)
           (let* ((pkg (class-package bootstrap-class))
                  (fn-sym (static-method-symbol (lispize-method-name bootstrap-method-name) pkg))
                  (param-types (parse-parameter-types bootstrap-method-name))
@@ -1720,7 +1720,7 @@ boolean prints true/false and char prints the character rather than an int."
                          :expression-type :REFERENCE)))
       ;; Ensure class is loaded before package lookup
       (let* ((classname (slot-value class 'name))
-             (_ (classload classname))
+             (_ (%resolve-class-in-context classname))
              (pkg (class-package classname)))
         (make-instance '<expression>
                        :insn insn
@@ -1824,7 +1824,7 @@ type."
                        :expression-type :REFERENCE)))
     (let* ((class-name (slot-value class 'name))
            ;; Ensure class is loaded before package lookup
-           (_ (classload class-name))
+           (_ (%resolve-class-in-context class-name))
            (pkg (class-package class-name))
            ;; Method symbol goes in :openldk - constructors are generic functions
            ;; shared across loaders for CLOS dispatch, like instance methods
@@ -1888,7 +1888,7 @@ own class-qualified slot recorded in *FIELD-SHADOW-SLOTS*."
     (let ((class-name (slot-value (slot-value class 'class) 'name)))
       ;; Ensure class is loaded before looking up its package
       ;; This is necessary because the class might be in a different loader's package
-      (classload class-name)
+      (%resolve-class-in-context class-name)
       (let* ((pkg (class-package class-name))
              (static-sym-name (format nil "+static-~A+" class-name))
              (sym (intern static-sym-name pkg)))
@@ -2046,7 +2046,7 @@ Used to consult block-local substitutions in addition to global ones.")
                                 ;; Condition symbols always in :openldk for cross-loader catching
                                 ,@(loop for (exception-type . handler-block) in try-catch-handlers
                                         when (> (length exception-type) 0)
-                                          do (classload exception-type)
+                                          do (%resolve-class-in-context exception-type)
                                         collect `(,(intern (format nil "condition-~A" (or exception-type
                                                                                           "java/lang/Throwable")) :openldk)
                                                   (|condition|)
@@ -2072,7 +2072,7 @@ Used to consult block-local substitutions in addition to global ones.")
                                     (TAGBODY ,@lisp-code)))
                               ;; Condition symbols always in :openldk for cross-loader catching
                               ,@(loop for (exception-type . handler-block) in try-catch-handlers
-                                      do (classload exception-type)
+                                      do (%resolve-class-in-context exception-type)
                                       collect `(,(intern (format nil "condition-~A" (or exception-type
                                                                                         "java/lang/Throwable")) :openldk)
                                                 (|condition|)

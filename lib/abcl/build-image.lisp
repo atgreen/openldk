@@ -13,12 +13,7 @@
 ;; One REPL session fed through stdin.  Each form pulls in code the image
 ;; should not have to compile at runtime: the reader and printer, function
 ;; definition and calls, CLOS, the condition system, FORMAT, LOOP, hash
-;; tables and strings.
-;;
-;; It deliberately doesn't call COMPILE.  Once ABCL's compiler is loaded,
-;; ABCL compiles forms such as DEFCLASS too, and OpenLDK can't yet load
-;; compiled code containing closures: their classes refer to each other and
-;; only ABCL's in-memory class loader can find them (see docs/ABCL.md).
+;; tables, strings, and ABCL's compiler, closures included.
 (defparameter *abcl-warmup-input* "
 (defpackage :warmup (:use :cl))
 (in-package :warmup)
@@ -37,6 +32,12 @@
   (print (sort (loop for k being the hash-keys of h collect k) #'string<)))
 (print (string-upcase (concatenate 'string \"hello\" \", \" \"world\")))
 (print (with-output-to-string (s) (write 1/3 :stream s)))
+(compile 'fact)
+(print (fact 20))
+(defun make-adder (n) (lambda (x) (+ x n)))
+(compile 'make-adder)
+(print (funcall (make-adder 3) 4))
+(print (funcall (compile nil '(lambda (x) (* x 2))) 21))
 (print (java:jstatic \"getProperty\" \"java.lang.System\" \"java.version\"))
 (in-package :cl-user)
 (delete-package :warmup)

@@ -1586,6 +1586,11 @@ same-named defmethod."
 (defun |sun/misc/Perf.registerNatives()| ()
   nil)
 
+;; JDK 9+ moved Perf to jdk.internal.perf; ClassLoader.loadClass uses it to
+;; count findClass calls.
+(defun |jdk/internal/perf/Perf.registerNatives()| ()
+  nil)
+
 (defmethod |createLong(Ljava/lang/String;IIJ)| (perf name variability units value)
   (classload "java/nio/DirectByteBuffer")
   (let* ((dbb (%make-java-instance "java/nio/DirectByteBuffer"))
@@ -1593,7 +1598,7 @@ same-named defmethod."
          (ptr (sb-sys:sap-int (sb-alien:alien-sap mem))))
     (setf (gethash ptr *unsafe-memory-table*) (cons mem 8))
     (setf (sb-alien:deref mem 0) value)
-    (|<init>(JI)| dbb ptr 8)
+    (|<init>(JJ)| dbb ptr 8)
     dbb))
 
 (defmethod |getBoolean(Ljava/lang/Object;J)|((unsafe |sun/misc/Unsafe|) objref ptr)

@@ -90,7 +90,8 @@ gives every lock a fresh mutex.  `make-javac-image` uses the same function.
 `make abcl` downloads ABCL 1.9.2, compiles its entry point, and runs
 `lib/abcl/build-image.lisp`.  That script warms ABCL up with one REPL
 session covering the reader and printer, `defun`, CLOS, conditions,
-`format`, `loop`, hash tables and strings, then saves `./abcl`.
+`format`, `loop`, hash tables, strings and ABCL's compiler, closures
+included, then saves `./abcl`.
 
 ABCL's compiled Lisp classes get their static fields from its fasl loader,
 so the script uses `:reset-classes nil`: the image holds a fully booted
@@ -108,24 +109,21 @@ Measured on one machine:
 
 | | Cold (`openldk` + `ABCLMain`) | Warm image (`./abcl`) |
 |---|---|---|
-| Launch to prompt, then `(quit)` | ~3.5 min | 0.4 s |
-| A short session (`defun`, `defclass`, `defgeneric`, `defmethod`, `loop`) | over 3.5 min (startup alone) | 7 s |
-| Image size | — | 533 MB |
-| Build time (`make abcl`) | — | ~6 min |
+| Launch to prompt, then `(quit)` | ~3.5 min | 0.1 s |
+| A short session (`defun`, `defclass`, `defgeneric`, `defmethod`, `loop`) | over 3.5 min (startup alone) | 14 s |
+| Compiling closures (`compile` on two closure-making functions, then CLOS) | over 7 min | 11 s |
+| Image size | — | 740 MB |
+| Build time (`make abcl`) | — | ~8.5 min |
 
 Forms the warmup didn't cover still compile their Java code on first use,
-so they take a few seconds the first time.
+so they take a few seconds the first time.  With ABCL's compiler loaded,
+ABCL compiles forms such as `defclass` into new Java classes, and those
+always go through OpenLDK's JIT when first used.
 
-Known limitations of the ABCL image:
+Known limitation of the ABCL image:
 
-- **No `compile` on closures.**  ABCL compiles a function containing a
-  closure into several classes that refer to each other, loaded from memory
-  by its own class loader.  OpenLDK resolves those references without
-  asking that loader, so loading the result fails.  This happens cold too;
-  the warmup avoids `compile` so the image doesn't load ABCL's compiler,
-  which would then also compile forms like `defclass`.
 - **Prompt numbers continue from the warmup** (the first prompt is
-  `CL-USER(20)`).
+  `CL-USER(26)`).
 
 ### Example: `javacl`
 

@@ -250,12 +250,13 @@ for the Java caller."
                    (incf *call-nesting-level* 1) "*" (list name initialize loader caller)))
          (let* ((lname (substitute #\/ #\. (lstring name)))
                 (result
-                  ;; Try user class loader first (if provided and not boot loader),
-                  ;; then fall back to our classpath search.
-                  ;; This mirrors JVM's loadClass delegation: parent first, then findClass.
+                  ;; Ask a user class loader first (if provided and not the boot
+                  ;; loader) through loadClass, as the JVM does: it checks the
+                  ;; loader's own classes, delegates to its parent, and only then
+                  ;; calls findClass.  Then fall back to our classpath search.
                   (or (and (and loader (not (equal loader *boot-class-loader*)))
                            (handler-case
-                               (|findClass(Ljava/lang/String;)| loader name)
+                               (|loadClass(Ljava/lang/String;)| loader name)
                              (|condition-java/lang/ClassNotFoundException| () nil)
                              (error () nil)))
                       (and (eq (char lname 0) #\[)
@@ -271,7 +272,11 @@ for the Java caller."
            ;; and already-loaded branches skipped it, breaking autoloads that
            ;; rely on Class.forName triggering static initialization.
            (when (and result initialize (not (eql initialize 0)))
-             (let ((ldk-class (%get-ldk-class-by-bin-name lname t)))
+             ;; Initialize the class the loader returned, not whichever class
+             ;; of that name the global table holds.
+             (let ((ldk-class (or (and (typep result '|java/lang/Class|)
+                                       (get-ldk-class-for-java-class result))
+                                  (%get-ldk-class-by-bin-name lname t))))
                (when ldk-class
                  (%clinit ldk-class))))
            ;; Only throw ClassNotFoundException at runtime (after app loader is initialized).

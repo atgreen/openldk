@@ -1535,7 +1535,7 @@ are ordinary declared methods and use normal dispatch.")
                                       'index))
                                'value))
                  (parameter-count (count-parameters descriptor)))
-            (classload callee-class)
+            (%resolve-class-in-context callee-class)
             (let* ((return-type (get-return-type (emit method-reference constant-pool)))
                    (call (make-instance 'ir-call-static-method
                                         :address (if (and is-clinit-p (equal callee-class (name context-class))) pc-start (+ pc-start 0.1))
@@ -1554,7 +1554,7 @@ are ordinary declared methods and use normal dispatch.")
                   (list call)
                   (list (make-instance 'ir-clinit
                                        :address pc-start
-                                       :class (make-instance 'ir-class :class (classload callee-class)))
+                                       :class (make-instance 'ir-class :class (%resolve-class-in-context callee-class)))
                         call)))))))))
 
 (define-bytecode-transpiler :INVOKEDYNAMIC (context code)

@@ -324,7 +324,7 @@ Java code (warmups)."
   (setf *vm-start-time-millis* nil)
   ;; Drop stale in-progress compilation claims from dead warmup threads.
   (maphash (lambda (k v)
-             (when (eq v t)
+             (unless (eq v :done)
                (remhash k *methods-being-compiled*)))
            *methods-being-compiled*)
   ;; Classpath entries carry their own locks and open container handles.

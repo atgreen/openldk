@@ -404,7 +404,9 @@ methods on the same generic function survive."
 (defun %claim-method-compilation (method-key)
   "Atomically claim METHOD-KEY for compilation by this thread.  Return T if
 the caller should compile it, NIL if it is already compiled (or, in AOT mode,
-being compiled elsewhere).  Blocks while another thread is compiling it."
+being compiled elsewhere).  Blocks while another thread is compiling it.
+A claim records the compiling thread, since class resolution can run Java
+code mid-compile."
   (bt:with-lock-held (*method-compilation-lock*)
     (loop
       (let ((status (gethash method-key *methods-being-compiled*)))
@@ -412,14 +414,20 @@ being compiled elsewhere).  Blocks while another thread is compiling it."
           ((eq status :done)
            ;; Already compiled by another thread
            (return nil))
-          ((eq status t)
+          ((eq status (bt:current-thread))
+           ;; This thread is already compiling it, further up the stack:
+           ;; waiting would wait on ourselves forever.
+           (if *aot-dir*
+               (return nil)
+               (internal-error "recursive compilation of ~A" method-key)))
+          (status
            ;; In AOT mode, don't wait - just skip methods being compiled to
            ;; avoid recursion; in normal mode, wait for the other thread.
            (if *aot-dir*
                (return nil)
                (bt:condition-wait *method-compilation-cv* *method-compilation-lock*)))
           (t
-           (setf (gethash method-key *methods-being-compiled*) t)
+           (setf (gethash method-key *methods-being-compiled*) (bt:current-thread))
            (return t)))))))
 
 (defun %transpile-method-bytecode (method-key code length)
@@ -1244,11 +1252,14 @@ shadows a superclass field and needs its own storage."
                   (setf (gethash classname *ldk-classes-by-bin-name*) c)
                   (setf (gethash fq-classname *ldk-classes-by-fq-name*) c)
                   c))
+              ;; Resolve through the defining loader, which may be the only
+              ;; one that can find them.
               (super (let ((super (slot-value class 'super)))
-                       (when super (classload super))))
+                       (when super (%resolve-class super ldk-loader))))
               (interfaces (let ((interfaces (slot-value class 'interfaces)))
                             (when interfaces
-                              (mapcar (lambda (i) (classload i)) (coerce interfaces 'list))))))
+                              (mapcar (lambda (i) (%resolve-class i ldk-loader))
+                                      (coerce interfaces 'list))))))
          ;; If superclass couldn't be loaded, bail out (like JVM NoClassDefFoundError).
          ;; Clean up the partially-registered class entries and return nil.
          (when (and (slot-value class 'super) (null super))
@@ -1376,6 +1387,45 @@ shadows a superclass field and needs its own storage."
 
          class)
     (close classfile-stream)))
+
+(defvar *classes-being-resolved* nil
+  "(LDK-LOADER . CLASSNAME) pairs this thread is resolving through a Java
+class loader, to stop a resolution cycle from recursing forever.")
+
+(defun %resolve-class (classname ldk-loader)
+  "Resolve CLASSNAME as referenced from a class defined by LDK-LOADER, and
+return its <class>, or NIL if it cannot be found.  Looks in LDK-LOADER's
+tables and its parents', then the global tables and the classpath, and
+finally, for a user-defined class loader, asks the Java loader itself with
+loadClass.  That last step finds classes a loader only defines on demand
+from findClass, as ABCL's MemoryClassLoader does."
+  (let ((classname (coerce classname 'string)))
+    (or (and ldk-loader
+             (%get-ldk-class-by-bin-name classname t ldk-loader))
+        (classload classname)
+        (let ((java-loader (and ldk-loader (slot-value ldk-loader 'java-loader)))
+              (key (cons ldk-loader classname)))
+          (when (and java-loader
+                     (not (eq ldk-loader *boot-ldk-class-loader*))
+                     (not (eq ldk-loader *app-ldk-class-loader*))
+                     (not (eql (char classname 0) #\[))
+                     (not (member key *classes-being-resolved* :test #'equal)))
+            (let ((*classes-being-resolved* (cons key *classes-being-resolved*))
+                  ;; The Java code loadClass runs must not see the context
+                  ;; of a method compilation in progress.
+                  (*context* nil))
+              (handler-case
+                  (let ((java-class (|loadClass(Ljava/lang/String;)|
+                                     java-loader
+                                     (jstring (substitute #\. #\/ classname)))))
+                    (when java-class
+                      (get-ldk-class-for-java-class java-class)))
+                (|condition-java/lang/ClassNotFoundException| () nil))))))))
+
+(defun %resolve-class-in-context (classname)
+  "Resolve CLASSNAME for the method being compiled: through the loader of
+the class being compiled when there is one, as the JVM resolves references."
+  (%resolve-class classname (and *context* (ldk-loader *context*))))
 
 (defun classload (classname &optional (class-loader nil))
   "Load a class from the classpath using proper JVM class loader delegation.
