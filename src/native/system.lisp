@@ -1315,6 +1315,10 @@ present.  Consumed by Thread.getState()/start()/getThreadGroup()."
     (when fiber
       (setf (gethash fiber *fiber-park-flags*) t)
       (return-from |interrupt0()|)))
+  ;; A parked thread just returns from park, as LockSupport specifies; it
+  ;; checks the interrupted status itself, so don't throw into it.
+  (when (%unpark-java-thread thread)
+    (return-from |interrupt0()|))
   ;; If the thread has an associated Lisp thread, interrupt it.
   (let ((lisp-thread (gethash thread *java-threads*)))
     (when lisp-thread

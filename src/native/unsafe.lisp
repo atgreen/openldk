@@ -771,9 +771,47 @@ the storage object does not (yet) exist."
 
 ;;; Unsafe park/unpark — used by LockSupport and virtual thread infrastructure.
 
+;;; A platform thread's park state: LockSupport's permit, and the mutex and
+;;; condition variable a parked thread waits on.  PARKED is true while the
+;;; thread waits, so interrupt0 wakes it rather than throwing into it.
+(defstruct (park-state (:constructor make-park-state ()))
+  (mutex (sb-thread:make-mutex :name "park"))
+  (waitqueue (sb-thread:make-waitqueue :name "park"))
+  (permit nil)
+  (parked nil))
+
+(defvar *park-states* (make-hash-table :test #'eq :weakness :key :synchronized t)
+  "java.lang.Thread -> its PARK-STATE.")
+
+(defun %park-state (java-thread)
+  (or (gethash java-thread *park-states*)
+      (sb-ext:with-locked-hash-table (*park-states*)
+        (or (gethash java-thread *park-states*)
+            (setf (gethash java-thread *park-states*) (make-park-state))))))
+
+(defun %unpark-java-thread (java-thread)
+  "Give JAVA-THREAD the permit and wake it if it is parked.  Return true if
+it was parked."
+  (let ((state (%park-state java-thread)))
+    (sb-thread:with-mutex ((park-state-mutex state))
+      (setf (park-state-permit state) t)
+      (sb-thread:condition-broadcast (park-state-waitqueue state))
+      (park-state-parked state))))
+
+(defun %park-timeout (is-absolute time)
+  "Seconds to wait for park(IS-ABSOLUTE, TIME): NIL for no limit, or a
+number, zero or less if the deadline has passed.  TIME is nanoseconds from
+now (0 for no limit), or with IS-ABSOLUTE, a deadline in epoch ms."
+  (cond
+    ((and is-absolute (not (eql is-absolute 0)))
+     (/ (- time (|java/lang/System.currentTimeMillis()|)) 1000))
+    ((> time 0) (/ time 1000000000))
+    (t nil)))
+
 (defmethod |park(ZJ)| ((unsafe |jdk/internal/misc/Unsafe|) is-absolute time)
-  "Park the current thread. If time > 0, park with timeout."
-  (declare (ignore unsafe is-absolute))
+  "Park the current thread until it is unparked, interrupted, or the time
+runs out (LockSupport.park)."
+  (declare (ignore unsafe))
   #+sb-fiber
   (when (in-fiber-p)
     (let ((fiber (sb-thread:current-fiber)))
@@ -789,9 +827,22 @@ the storage object does not (yet) exist."
       ;; Consume permit after waking
       (remhash fiber *fiber-park-flags*))
     (return-from |park(ZJ)|))
-  ;; Platform thread fallback
-  (when (> time 0)
-    (sleep (/ time 1000000000.0d0))))
+  ;; Platform thread: consume the permit, or wait for one.
+  (let* ((java-thread (|java/lang/Thread.currentThread()|))
+         (state (%park-state java-thread)))
+    (sb-thread:with-mutex ((park-state-mutex state))
+      (unless (or (park-state-permit state)
+                  (gethash java-thread *thread-interrupted*))
+        (let ((timeout (%park-timeout is-absolute time)))
+          (when (or (null timeout) (plusp timeout))
+            (setf (park-state-parked state) t)
+            (unwind-protect
+                 (sb-thread:condition-wait (park-state-waitqueue state)
+                                           (park-state-mutex state)
+                                           :timeout timeout)
+              (setf (park-state-parked state) nil)))))
+      (setf (park-state-permit state) nil))
+    nil))
 
 (defmethod |unpark(Ljava/lang/Object;)| ((unsafe |jdk/internal/misc/Unsafe|) thread)
   "Unpark a thread by granting a permit."
@@ -802,8 +853,9 @@ the storage object does not (yet) exist."
       ;; Set the permit flag — the fiber's park predicate will see this
       (setf (gethash fiber *fiber-park-flags*) t)
       (return-from |unpark(Ljava/lang/Object;)|)))
-  ;; Platform thread fallback — no-op (Lisp threads don't support park/unpark natively)
-  thread
+  ;; Platform thread
+  (when thread
+    (%unpark-java-thread thread))
   nil)
 
 ;;; JDK 9+ renamed Unsafe CAS and accessor methods.
