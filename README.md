@@ -182,10 +182,10 @@ OpenLDK can run non-trivial Java applications:
   source to class files.  A pre-warmed `javacl` image is built by `make`.
 - **Kawa** - The [Kawa](https://www.gnu.org/software/kawa/) Scheme
   implementation (a JVM language) boots and runs its REPL on OpenLDK.
-- **ABCL** - [Armed Bear Common Lisp](https://abcl.org/) 1.9.2 fully
-  bootstraps on OpenLDK (~3700 classes, ~42s startup), printing its
-  banner and completing both low-level and high-level initialization.
-  REPL interaction is not yet working.  See [docs/ABCL.md](docs/ABCL.md).
+- **ABCL** - [Armed Bear Common Lisp](https://abcl.org/) 1.9.2 boots
+  on OpenLDK and runs its REPL: CLOS, conditions, the compiler and Java
+  interop all work.  It is slow (minutes to the first prompt, most of it
+  first-use JIT compilation).  See [docs/ABCL.md](docs/ABCL.md).
 - **Clojure** - [Clojure](https://clojure.org/) 1.12.0's runtime
   (`clojure.lang.RT`) initializes on OpenLDK and reaches Clojure's own
   compiler loading `clojure/core.clj`.  Full bootstrap is not yet
