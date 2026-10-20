@@ -68,6 +68,9 @@
   (print-unreadable-object (loader out :type t)
     (format out "~A pkg=~A" (slot-value loader 'id) (slot-value loader 'pkg))))
 
+(defvar *ldk-loaders-by-package* (make-hash-table :test #'eq :synchronized t)
+  "Lisp package -> the <ldk-class-loader> whose classes are named in it.")
+
 (defun make-ldk-class-loader (&key parent-loader java-loader package-name)
   "Create a new LDK class loader with its own package and class maps.
    PARENT-LOADER is the parent <ldk-class-loader> for delegation.
@@ -90,16 +93,23 @@
                          (slot-value parent-loader 'pkg)
                          (find-package :openldk)))
          (pkg (or (find-package pkg-name)
-                  (make-package pkg-name :use (list parent-pkg)))))
-    (make-instance '<ldk-class-loader>
-                   :id id
-                   :pkg pkg
-                   :parent-loader parent-loader
-                   :java-loader java-loader
-                   :ldk-classes-by-bin-name (make-hash-table :test #'equal :synchronized t)
-                   :ldk-classes-by-fq-name (make-hash-table :test #'equal :synchronized t)
-                   :java-classes-by-bin-name (make-hash-table :test #'equal :synchronized t)
-                   :java-classes-by-fq-name (make-hash-table :test #'equal :synchronized t))))
+                  (make-package pkg-name :use (list parent-pkg))))
+         (loader (make-instance '<ldk-class-loader>
+                                :id id
+                                :pkg pkg
+                                :parent-loader parent-loader
+                                :java-loader java-loader
+                                :ldk-classes-by-bin-name (make-hash-table :test #'equal :synchronized t)
+                                :ldk-classes-by-fq-name (make-hash-table :test #'equal :synchronized t)
+                                :java-classes-by-bin-name (make-hash-table :test #'equal :synchronized t)
+                                :java-classes-by-fq-name (make-hash-table :test #'equal :synchronized t))))
+    (setf (gethash pkg *ldk-loaders-by-package*) loader)
+    loader))
+
+(defun %ldk-loader-for-symbol (symbol)
+  "The <ldk-class-loader> whose package SYMBOL (a CLOS class name) is in,
+or NIL for the boot loader's packages."
+  (gethash (symbol-package symbol) *ldk-loaders-by-package*))
 
 ;; The boot class loader - created during initialization with OPENLDK.SYSTEM package
 ;; Loads core JDK classes (java/*, javax/*, sun/*, etc.) into :openldk package
@@ -126,11 +136,8 @@
   "Get or create the <ldk-class-loader> for a java.lang.ClassLoader object.
    Returns the boot loader if JAVA-LOADER is NIL.
 
-   For user-defined loaders (children of the app loader), we reuse the parent's
-   package to avoid package proliferation. This is safe because:
-   1. User loaders typically generate uniquely-named classes (e.g., Clojure's fn__123)
-   2. The per-loader class maps still track which loader defined each class
-   3. Symbol resolution via :use chains works correctly"
+   Each user-defined loader gets its own package, so classes of the same name
+   defined by different loaders are distinct CLOS classes."
   (if (null java-loader)
       *boot-ldk-class-loader*
       (or (gethash java-loader *java-to-ldk-loaders*)
@@ -140,17 +147,12 @@
                  (parent-ldk-loader (if parent-java-loader
                                         (get-ldk-loader-for-java-loader parent-java-loader)
                                         *boot-ldk-class-loader*))
-                 ;; For user-defined loaders (children of app loader or other user loaders),
-                 ;; share the app loader's package to avoid creating hundreds of packages.
-                 ;; Boot loader and app loader get their own packages.
-                 (share-parent-pkg (and *app-ldk-class-loader*
-                                        parent-ldk-loader
-                                        (not (eq parent-ldk-loader *boot-ldk-class-loader*))))
-                 (pkg-name (when share-parent-pkg
-                             (package-name (slot-value parent-ldk-loader 'pkg))))
+                 ;; Every user-defined loader gets its own package
+                 ;; (OPENLDK.L<n>).  Sharing the parent's package made two
+                 ;; loaders' classes of the same name one CLOS class: the second
+                 ;; definition redefined the first in place.
                  (new-loader (make-ldk-class-loader :parent-loader parent-ldk-loader
-                                                    :java-loader java-loader
-                                                    :package-name pkg-name)))
+                                                    :java-loader java-loader)))
             (setf (gethash java-loader *java-to-ldk-loaders*) new-loader)
             new-loader))))
 
@@ -167,9 +169,17 @@
       ;; No loader means boot loader - use :openldk
       (find-package :openldk)))
 
-(defun class-package (class-name &optional fallback-loader)
+(defun %context-loader ()
+  "The <ldk-class-loader> of the class whose method is being compiled, or NIL."
+  (declare (special *context*))
+  (and (boundp '*context*) *context* (slot-value *context* 'ldk-loader)))
+
+(defun class-package (class-name &optional (fallback-loader (%context-loader)))
   "Get the Lisp package for a class by its binary name.
-   When FALLBACK-LOADER is provided, searches that loader's hierarchy first.
+   When FALLBACK-LOADER is provided, searches that loader's hierarchy first;
+   it defaults to the loader of the class being compiled, if any, so a
+   reference resolves among that loader's classes before the global table,
+   which holds the last-defined class of each name.
    Falls back to global tables, then app loader, then :openldk."
   ;; Search with fallback-loader first if provided, then global table
   (let ((class (or (and fallback-loader
@@ -228,18 +238,21 @@ loaders, whose classes are not in the global or app loader tables."
         openldk-sym
         (intern method-name loader-pkg))))
 
-(defun %make-java-instance (class-name)
+(defun %make-java-instance (class-name &optional ldk-loader)
   "Create an instance of a Java class using the correct class symbol.
    CLASS-NAME is the binary name (e.g. \"java/lang/String\").
    First checks :openldk for bootstrap/shared classes, then falls back to
-   the class's defining loader's package."
+   the class's defining loader's package, looked up through LDK-LOADER when
+   given (another loader may have a class of the same name)."
   ;; First try :openldk - this handles bootstrap classes and ensures
   ;; method dispatch works for methods defined on bootstrap classes
   (let ((openldk-sym (find-symbol class-name :openldk)))
     (when (and openldk-sym (find-class openldk-sym nil))
       (return-from %make-java-instance (make-instance openldk-sym))))
   ;; Fall back to the loader's package for user-defined classes
-  (let* ((pkg (class-package class-name))
+  (let* ((pkg (if ldk-loader
+                  (class-package class-name ldk-loader)
+                  (class-package class-name)))
          (sym (intern class-name pkg)))
     (unless (find-class sym nil)
       ;; Not loaded yet (e.g. ArrayIndexOutOfBoundsException thrown before
@@ -467,10 +480,38 @@ loaders, whose classes are not in the global or app loader tables."
         (internal-error "Class ~A not found in %get-ldk-class-by-fq-name" fq-name))
       result)))
 
+(defun %user-ldk-loader-p (ldk-loader)
+  "True when LDK-LOADER belongs to a user-defined Java class loader, not the
+boot or app loader."
+  (and ldk-loader
+       (not (eq ldk-loader *boot-ldk-class-loader*))
+       (not (eq ldk-loader *app-ldk-class-loader*))
+       (not (eq (slot-value ldk-loader 'pkg) (find-package "OPENLDK.SYSTEM")))))
+
+(defun %defined-by-user-loader-p (class slot-name)
+  "True when CLASS, found in a table named SLOT-NAME (an LDK class or a
+java.lang.Class), was defined by a user-defined class loader."
+  (if (member slot-name '(ldk-classes-by-bin-name ldk-classes-by-fq-name))
+      (%user-ldk-loader-p (and (slot-boundp class 'ldk-loader)
+                               (slot-value class 'ldk-loader)))
+      (let ((java-loader (and (slot-exists-p class '|classLoader|)
+                              (slot-boundp class '|classLoader|)
+                              (slot-value class '|classLoader|))))
+        (and java-loader
+             (%user-ldk-loader-p (gethash java-loader *java-to-ldk-loaders*))))))
+
 (defun %lookup-class-with-delegation (loader name slot-name)
   "Look up a class in LOADER's hash table (SLOT-NAME) with parent delegation.
-   Returns NIL if not found in any loader in the chain."
+   Returns NIL if not found in any loader in the chain.
+   The boot loader's tables are the global tables, which also hold every
+   user loader's classes; delegating to the boot loader never returns
+   those, or a loader would find a same-named class of an unrelated one."
   (when loader
-    (or (gethash name (slot-value loader slot-name))
+    (or (let ((class (gethash name (slot-value loader slot-name))))
+          (if (and class
+                   (eq loader *boot-ldk-class-loader*)
+                   (%defined-by-user-loader-p class slot-name))
+              nil
+              class))
         (when-let ((parent (slot-value loader 'parent-loader)))
           (%lookup-class-with-delegation parent name slot-name)))))

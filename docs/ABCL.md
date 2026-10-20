@@ -208,10 +208,7 @@ Java classes implementing ABCL's built-in functions.
 2. **Thread support** - ABCL's stock `org.armedbear.lisp.Main`, which runs
    the REPL on a new thread, exits at once with status 0 and no output on
    JDK 25: the interpreter thread never runs.  `ABCLMain` is still needed
-3. **Reflective static field reads** - `Field.get(null)` on a static field
-   of a class defined by a custom class loader returns null, although the
-   class's own methods see the right value.
-4. **Missing file-system natives** - `createDirectory0`, `rename0`,
+3. **Missing file-system natives** - `createDirectory0`, `rename0`,
    `createFileExclusively0`, `setLastModifiedTime0`, `setPermission0`,
    `setReadOnly0`, `getSpace0` and `getNameMax0` are not implemented, so
    Lisp code that creates directories, renames files or makes temp files

@@ -789,19 +789,31 @@ during error handling."
                      (declare (ignore ,this-sym ,@param-names))
                      (internal-error "JIT compilation failed for ~A" ,method-key))))))))
 
-(defun %compile-method (class-name method-index)
-  "JIT-compile method METHOD-INDEX of CLASS-NAME: transpile its bytecode to
-IR, optimize, generate Lisp code, and install the resulting function
-(or write it out in AOT mode).  Thread-safe; concurrent callers wait for
-or skip in-progress compilations."
-  (let* ((class (%get-ldk-class-by-bin-name class-name))
+(defun %compile-method (class-or-name method-index)
+  "JIT-compile method METHOD-INDEX of CLASS-OR-NAME (a <class>, or in AOT
+output a class name): transpile its bytecode to IR, optimize, generate Lisp
+code, and install the resulting function (or write it out in AOT mode).
+Thread-safe; concurrent callers wait for or skip in-progress compilations.
+Method stubs pass the <class> itself, because two class loaders can define
+classes with the same name."
+  (let* ((class (if (stringp class-or-name)
+                    (%get-ldk-class-by-bin-name class-or-name)
+                    class-or-name))
+         (class-name (slot-value class 'name))
          (method (aref (slot-value class 'methods) (1- method-index)))
-         (method-key (format nil "~A.~A~A" class-name (slot-value method 'name) (slot-value method 'descriptor))))
+         (method-key (format nil "~A.~A~A" class-name (slot-value method 'name) (slot-value method 'descriptor)))
+         ;; Compile claims for a user loader's classes also carry the
+         ;; loader, so a same-named class in another loader has its own.
+         (claim-key (let ((loader (and (slot-boundp class 'ldk-loader)
+                                       (slot-value class 'ldk-loader))))
+                      (if (%user-ldk-loader-p loader)
+                          (cons loader method-key)
+                          method-key))))
     ;; Skip bytecode compilation for methods with native overrides.
     ;; Replace the stub with the native function so the stub doesn't loop.
     (when (%install-native-override class method method-key)
       (return-from %compile-method nil))
-    (unless (%claim-method-compilation method-key)
+    (unless (%claim-method-compilation claim-key)
       (return-from %compile-method nil))
     (let ((compilation-completed nil))
       (unwind-protect
@@ -860,8 +872,8 @@ or skip in-progress compilations."
         ;; clear the status so a future call can retry.
         (bt:with-lock-held (*method-compilation-lock*)
           (if compilation-completed
-              (setf (gethash method-key *methods-being-compiled*) :done)
-              (remhash method-key *methods-being-compiled*))
+              (setf (gethash claim-key *methods-being-compiled*) :done)
+              (remhash claim-key *methods-being-compiled*))
           ;; Broadcast: the condition variable is shared by every method,
           ;; so waiters on other methods, and several waiters on this one,
           ;; must all get to re-check their method's status.
@@ -1169,7 +1181,7 @@ shadows a superclass field and needs its own storage."
                                                              pkg)
                                                      (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
                                                            collect (intern (format nil "arg~A" i) :openldk))
-                                                     (list '%compile-method (slot-value class 'name) (incf method-index))
+                                                     (list '%compile-method (%stub-class-reference class) (incf method-index))
                                                      (cons (intern (format nil "~A.~A"
                                                                            (slot-value class 'name)
                                                                            (lispize-method-name
@@ -1199,7 +1211,7 @@ shadows a superclass field and needs its own storage."
                                                              (cons (list (intern "this" :openldk) (intern (slot-value (slot-value m 'class) 'name) pkg))
                                                                    (loop for i from 1 upto param-count
                                                                          collect (intern (format nil "arg~A" i) :openldk)))
-                                                             (list '%compile-method (slot-value class 'name) (incf method-index))
+                                                             (list '%compile-method (%stub-class-reference class) (incf method-index))
                                                              (list 'invoke-special
                                                                    (list 'quote method-name)
                                                                    (list 'quote (intern (slot-value (slot-value m 'class) 'name) pkg))
@@ -1388,39 +1400,82 @@ shadows a superclass field and needs its own storage."
          class)
     (close classfile-stream)))
 
+(defun %classload-system (classname)
+  "Load CLASSNAME as the boot or app class loader would, from the JDK and
+the classpath, or return NIL.  CLASSLOAD also consults the global by-name
+table, which can hold a class of this name defined by an unrelated user
+loader; that is never the answer here."
+  (let ((class (classload classname)))
+    (when (and class
+               (not (%user-ldk-loader-p (and (slot-boundp class 'ldk-loader)
+                                             (slot-value class 'ldk-loader)))))
+      class)))
+
+(defun %stub-class-reference (class)
+  "How a method stub names CLASS to %COMPILE-METHOD: the <class> itself, or
+its name in AOT output, which is written out as Lisp source."
+  (if *aot-dir* (slot-value class 'name) class))
+
 (defvar *classes-being-resolved* nil
   "(LDK-LOADER . CLASSNAME) pairs this thread is resolving through a Java
 class loader, to stop a resolution cycle from recursing forever.")
 
+(defvar *loaders-overriding-load-class* (make-hash-table :test #'eq :weakness :key :synchronized t)
+  "CLOS class of a Java class loader -> whether it overrides loadClass.")
+
+(defun %overrides-load-class-p (java-loader)
+  "True when JAVA-LOADER's class, or a superclass below the JDK's, declares
+loadClass: a child-first loader, which may define a class itself that its
+parent could also provide."
+  (let ((clos-class (class-of java-loader)))
+    (multiple-value-bind (overrides found) (gethash clos-class *loaders-overriding-load-class*)
+      (if found
+          overrides
+          (setf (gethash clos-class *loaders-overriding-load-class*)
+                (loop with class = (get-ldk-class-for-java-class (|getClass()| java-loader))
+                      while (and class (not (jdk-class-p (name class))))
+                      thereis (some (lambda (m) (and m (string= (slot-value m 'name) "loadClass")))
+                                    (coerce (methods class) 'list))
+                      do (setf class (and (super class)
+                                          (%get-ldk-class-by-bin-name (super class) t
+                                                                      (ldk-loader class))))))))))
+
 (defun %resolve-class (classname ldk-loader)
   "Resolve CLASSNAME as referenced from a class defined by LDK-LOADER, and
 return its <class>, or NIL if it cannot be found.  Looks in LDK-LOADER's
-tables and its parents', then the global tables and the classpath, and
-finally, for a user-defined class loader, asks the Java loader itself with
-loadClass.  That last step finds classes a loader only defines on demand
-from findClass, as ABCL's MemoryClassLoader does."
-  (let ((classname (coerce classname 'string)))
-    (or (and ldk-loader
-             (%get-ldk-class-by-bin-name classname t ldk-loader))
-        (classload classname)
-        (let ((java-loader (and ldk-loader (slot-value ldk-loader 'java-loader)))
-              (key (cons ldk-loader classname)))
-          (when (and java-loader
-                     (not (eq ldk-loader *boot-ldk-class-loader*))
-                     (not (eq ldk-loader *app-ldk-class-loader*))
-                     (not (eql (char classname 0) #\[))
-                     (not (member key *classes-being-resolved* :test #'equal)))
-            (let ((*classes-being-resolved* (cons key *classes-being-resolved*))
-                  ;; The Java code loadClass runs must not see the context
-                  ;; of a method compilation in progress.
-                  (*context* nil))
-              (handler-case
-                  (let ((java-class (|loadClass(Ljava/lang/String;)|
-                                     java-loader
-                                     (jstring (substitute #\. #\/ classname)))))
-                    (when java-class
-                      (get-ldk-class-for-java-class java-class)))
-                (|condition-java/lang/ClassNotFoundException| () nil))))))))
+tables and its parents', then the JDK and the classpath, and finally, for
+a user-defined class loader, asks the Java loader itself with loadClass.
+That last step finds classes a loader only defines on demand from
+findClass, as ABCL's MemoryClassLoader does.  A loader that overrides
+loadClass (child-first) is asked before the classpath, since it may define
+its own class of a name the classpath also has."
+  (let* ((classname (coerce classname 'string))
+         (java-loader (and ldk-loader (slot-value ldk-loader 'java-loader)))
+         (askable (and java-loader
+                       (%user-ldk-loader-p ldk-loader)
+                       (not (eql (char classname 0) #\[)))))
+    (flet ((ask-java-loader ()
+             (let ((key (cons ldk-loader classname)))
+               (unless (member key *classes-being-resolved* :test #'equal)
+                 (let ((*classes-being-resolved* (cons key *classes-being-resolved*))
+                       ;; The Java code loadClass runs must not see the
+                       ;; context of a method compilation in progress.
+                       (*context* nil))
+                   (handler-case
+                       (let ((java-class (|loadClass(Ljava/lang/String;)|
+                                          java-loader
+                                          (jstring (substitute #\. #\/ classname)))))
+                         (when java-class
+                           (get-ldk-class-for-java-class java-class)))
+                     (|condition-java/lang/ClassNotFoundException| () nil)))))))
+      (or (and ldk-loader
+               (%get-ldk-class-by-bin-name classname t ldk-loader))
+          (and askable
+               (%overrides-load-class-p java-loader)
+               (ask-java-loader))
+          (%classload-system classname)
+          (and askable
+               (ask-java-loader))))))
 
 (defun %resolve-class-in-context (classname)
   "Resolve CLASSNAME for the method being compiled: through the loader of
@@ -1463,10 +1518,14 @@ the class being compiled when there is one, as the JVM resolves references."
                                                               :java-classes-by-fq-name *java-classes-by-fq-name*)))
                              (%classload-from-stream classname classfile-stream class-loader temp-loader)))
                          nil)))))))
-      ;; Check if already loaded by boot loader
-      ((gethash classname (slot-value *boot-ldk-class-loader* 'ldk-classes-by-bin-name)))
-      ;; Check global tables (classes loaded during warm-up before loaders were created)
-      ((gethash classname *ldk-classes-by-bin-name*))
+      ;; Check if already loaded by boot loader, or during warm-up before the
+      ;; loaders were created.  The boot loader's table is the global table,
+      ;; which also holds user loaders' classes: those are not the system
+      ;; loaders' to hand out, and a same-named class may be on the classpath.
+      ((let ((class (gethash classname *ldk-classes-by-bin-name*)))
+         (and class
+              (not (%defined-by-user-loader-p class 'ldk-classes-by-bin-name))
+              class)))
       ;; JDK classes always loaded by boot loader (into :openldk)
       ((jdk-class-p classname)
        (bordeaux-threads:with-recursive-lock-held ((%get-class-lock classname))

@@ -218,7 +218,13 @@ for the Java caller."
                        (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
                         (jstring array-name) nil nil nil)))
                     (t
-                     (let ((jc (%get-java-class-by-bin-name (format nil "~A" (type-of object)) t)))
+                     ;; The class's symbol is in its defining loader's package;
+                     ;; look the name up in that loader, as two loaders can
+                     ;; each have a class of this name.
+                     (let* ((class-symbol (type-of object))
+                            (jc (%get-java-class-by-bin-name (format nil "~A" class-symbol) t
+                                                             (and (symbolp class-symbol)
+                                                                  (%ldk-loader-for-symbol class-symbol)))))
                        (or jc
                            (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
                             (jstring (format nil "~A" (type-of object))) nil nil nil)))))))
@@ -237,7 +243,7 @@ for the Java caller."
       (lambda (module name)
         (declare (ignore module))
         (handler-case
-            (let ((lclass (classload (substitute #\/ #\. (lstring name)))))
+            (let ((lclass (%classload-system (substitute #\/ #\. (lstring name)))))
               (when lclass
                 (java-class lclass)))
           (condition () nil))))

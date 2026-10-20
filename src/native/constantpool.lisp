@@ -152,7 +152,7 @@
 
 (defmethod |allocateInstance(Ljava/lang/Class;)| ((unsafe |sun/misc/Unsafe|) class)
   (let* ((bin-name (substitute #\/ #\. (lstring (slot-value class '|name|))))
-         (pkg (class-package bin-name)))
+         (pkg (%java-class-package class)))
     (make-instance (intern bin-name pkg))))
 
 (defmethod |getLocalHostName()| ((inet4 |java/net/Inet4AddressImpl|))

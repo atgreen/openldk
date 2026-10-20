@@ -84,7 +84,7 @@
   (declare (ignore unsafe))
   (let* ((bin-name (substitute #\/ #\.
                                (lstring (slot-value class '|name|))))
-         (pkg (class-package bin-name)))
+         (pkg (%java-class-package class)))
     (make-instance (intern bin-name pkg))))
 
 (defmethod |throwException(Ljava/lang/Throwable;)|
