@@ -265,9 +265,13 @@ TYPE-CLASS, or NIL when the field type is a reference type."
 
 (defun %field-slot-storage (field obj)
   "Return the CLOS object holding FIELD's slot: the class's +static-...+
-storage for a static field, otherwise OBJ."
+storage for a static field, otherwise OBJ.  For a static field, first
+initialize the declaring class, as the JVM does before reflective access."
   (if (not (zerop (logand #x8 (slot-value field '|modifiers|))))
-      (%unsafe-static-storage field :errorp nil)
+      (let ((class (get-ldk-class-for-java-class (slot-value field '|clazz|))))
+        (when class
+          (%clinit class))
+        (%unsafe-static-storage field :errorp nil))
       obj))
 
 ;; JDK 25 routes java.lang.reflect.Field.get/set through a MethodHandle-based
