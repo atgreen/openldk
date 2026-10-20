@@ -36,3 +36,4 @@ data/
 /testsuite/LargeFile.tmp
 /testsuite/test.ser
 /testsuite/raftmpfile
+/lib/abcl/abcl.jar

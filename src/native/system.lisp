@@ -1114,9 +1114,16 @@ expect for ordinary interfaces/classes."
       (declare (ignore e))
       0)))
 
+(defmethod |getLength0(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
+  "Length of FILE in bytes, or 0 if it cannot be read, as the JDK's native does."
+  (handler-case
+      (with-open-file (stream (lstring (slot-value file '|path|)) :element-type '(unsigned-byte 8))
+        (file-length stream))
+    (error () 0)))
+
 (defmethod |getLength(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
-  (with-open-file (stream (lstring (slot-value file '|path|)) :element-type '(unsigned-byte 8))
-    (file-length stream)))
+  "Legacy name for getLength0 — older JDKs call this directly."
+  (|getLength0(Ljava/io/File;)| this file))
 
 (defmethod |delete0(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
   "Delete the file (or empty directory); return 1 on success, 0 on failure."
@@ -1126,7 +1133,7 @@ expect for ordinary interfaces/classes."
         1)
     (error () 0)))
 
-(defmethod |list(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
+(defmethod |list0(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
   (handler-case
       (let* ((path (lstring (slot-value file '|path|)))
              (dir (uiop:directory-files (uiop:ensure-directory-pathname path)))
@@ -1138,6 +1145,10 @@ expect for ordinary interfaces/classes."
     (error (e)
       (declare (ignore e))
       nil)))
+
+(defmethod |list(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
+  "Legacy name for list0 — older JDKs call this directly."
+  (|list0(Ljava/io/File;)| this file))
 
 (defun |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedAction;Ljava/security/AccessControlContext;)| (action context)
   (declare (ignore context))
@@ -1559,11 +1570,18 @@ same-named defmethod."
   "Legacy public native checkAccess — older JDKs call this directly."
   (|checkAccess0(Ljava/io/File;I)| ufs file access-mode))
 
-(defmethod |getLastModifiedTime(Ljava/io/File;)| ((ufs |java/io/UnixFileSystem|) file)
+(defmethod |getLastModifiedTime0(Ljava/io/File;)| ((ufs |java/io/UnixFileSystem|) file)
+  "Modification time of FILE in milliseconds, or 0 if it does not exist."
   (declare (ignore ufs))
-  (* (org.shirakumo.file-attributes:modification-time
-      (lstring (slot-value file '|path|)))
-     1000))
+  (handler-case
+      (* (org.shirakumo.file-attributes:modification-time
+          (lstring (slot-value file '|path|)))
+         1000)
+    (error () 0)))
+
+(defmethod |getLastModifiedTime(Ljava/io/File;)| ((ufs |java/io/UnixFileSystem|) file)
+  "Legacy name for getLastModifiedTime0 — older JDKs call this directly."
+  (|getLastModifiedTime0(Ljava/io/File;)| ufs file))
 
 (defun |sun/misc/Perf.registerNatives()| ()
   nil)

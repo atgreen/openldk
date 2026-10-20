@@ -68,6 +68,18 @@
   ()
   (:documentation "Stub for ZipFile's JavaUtilZipFileAccess bridge class."))
 
+;; ZipFile and JarFile take their fields from the JDK's class files, and
+;; JDK 25's have neither the name nor the jzfile field these methods once
+;; kept their state in, so the path and the open zip live in a side table.
+(defvar *zipfile-state* (make-hash-table :test #'eq :weakness :key :synchronized t)
+  "java.util.zip.ZipFile -> (path . zip:zipfile).")
+
+(defun %zipfile-name (zip-file)
+  (car (gethash zip-file *zipfile-state*)))
+
+(defun %zipfile-zip (zip-file)
+  (cdr (gethash zip-file *zipfile-state*)))
+
 
 (defun |java/util/zip/ZipFile.<clinit>()| ()
   "Class initializer for ZipFile (no-op stub).")
@@ -75,32 +87,38 @@
 (defun |<init>| ()
   "Default constructor stub (no-op).")
 
+(defun %zipfile-open (zip-file name)
+  "Open the zip file at path NAME (a Java string) for ZIP-FILE."
+  (setf (gethash zip-file *zipfile-state*)
+        (cons name (zip:open-zipfile (lstring name)))))
+
 (defmethod |<init>(Ljava/io/File;I)| ((this |java/util/zip/ZipFile|) file mode)
   (assert (= mode 1)) ; only support read for now
-  (with-slots (|name| |jzfile|) this
-    (setf |name| (|getPath()| file))
-    (setf |jzfile| (zip:open-zipfile (lstring |name|)))))
+  (%zipfile-open this (|getPath()| file)))
 
 (defmethod |<init>(Ljava/io/File;)| ((this |java/util/zip/ZipFile|) file)
   (|<init>(Ljava/io/File;I)| this file 1))
 
+(defmethod |<init>(Ljava/lang/String;)| ((this |java/util/zip/ZipFile|) name)
+  (%zipfile-open this name))
+
 (defmethod |getEntry(Ljava/lang/String;)| ((this |java/util/zip/ZipFile|) name)
-  ; (format t "GET-ENTRY: ~A in ~A~%" (lstring name) (slot-value this '|jzfile|))
-  (when-let (ze (zip:get-zipfile-entry (lstring name) (slot-value this '|jzfile|)))
+  ; (format t "GET-ENTRY: ~A in ~A~%" (lstring name) (%zipfile-zip this))
+  (when-let (ze (zip:get-zipfile-entry (lstring name) (%zipfile-zip this)))
+    (classload "java/util/zip/ZipEntry")
     (let ((entry (%make-java-instance "java/util/zip/ZipEntry")))
       (|<init>(Ljava/lang/String;)| entry name)
       entry)))
 
 (defmethod |getMetaInfEntryNames()| ((this |java/util/jar/JarFile|))
-  (with-slots (|jzfile|) this
-    (let ((meta-entries (list)))
-      (zip:do-zipfile-entries (name entry |jzfile|)
-        (when (and (< 9 (length name))
-                   (string= (take 9 name) "META-INF/"))
-          (push (jstring name) meta-entries)))
-      (make-java-array
-       :component-class (%get-java-class-by-bin-name "java/lang/String")
-       :initial-contents meta-entries))))
+  (let ((meta-entries (list)))
+    (zip:do-zipfile-entries (name entry (%zipfile-zip this))
+      (when (and (< 9 (length name))
+                 (string= (take 9 name) "META-INF/"))
+        (push (jstring name) meta-entries)))
+    (make-java-array
+     :component-class (%get-java-class-by-bin-name "java/lang/String")
+     :initial-contents meta-entries)))
 
 (defmethod |<init>(Ljava/io/InputStream;Z)| ((this |java/util/jar/JarInputStream|) is verify)
   (with-slots (|in|) this
@@ -122,24 +140,23 @@
   (with-slots (zip-file entry buffer index) this
     (unless buffer
       (setf buffer (zip:zipfile-entry-contents (zip:get-zipfile-entry (lstring (slot-value entry '|name|))
-                                                                      (slot-value zip-file '|jzfile|))))
+                                                                      (%zipfile-zip zip-file))))
       (setf index -1))
     (if (< index (1- (length buffer)))
         (aref buffer (incf index))
         -1)))
 
 (defmethod |getName()| ((this |java/util/zip/ZipFile|))
-  (slot-value this '|name|))
+  (%zipfile-name this))
 
 (defun %zip-manifest-count (jar-file)
   "Return the number of META-INF/MANIFEST.MF entries within JAR-FILE."
-  (with-slots (|jzfile|) jar-file
-    (let ((count 0))
-      (zip:do-zipfile-entries (entry-name entry |jzfile|)
-        (declare (ignore entry))
-        (when (string-equal entry-name "META-INF/MANIFEST.MF")
-          (incf count)))
-      count)))
+  (let ((count 0))
+    (zip:do-zipfile-entries (entry-name entry (%zipfile-zip jar-file))
+      (declare (ignore entry))
+      (when (string-equal entry-name "META-INF/MANIFEST.MF")
+        (incf count)))
+    count))
 
 (defmethod |getManifestNum(Ljava/util/jar/JarFile;)| ((this |java/util/zip/ZipFile$1|) jar-file)
   (declare (ignore this))
@@ -151,15 +168,16 @@
 
 (defmethod |startsWithLocHeader(Ljava/util/zip/ZipFile;)| ((this |java/util/zip/ZipFile$1|) zip-file)
   (declare (ignore this))
-  (not (null (slot-value zip-file '|jzfile|))))
+  (not (null (%zipfile-zip zip-file))))
 
 (defmethod |startsWithLocHeader(Ljava/util/zip/ZipFile;)| ((this t) zip-file)
   (declare (ignore this))
-  (not (null (slot-value zip-file '|jzfile|))))
+  (not (null (%zipfile-zip zip-file))))
 
 (defmethod |close()| ((this |java/util/zip/ZipFile|))
-  (with-slots (|name| |jzfile|) this
-    (zip:close-zipfile |jzfile|)))
+  (when-let ((zip (%zipfile-zip this)))
+    (zip:close-zipfile zip)
+    (remhash this *zipfile-state*)))
 
 (defclass/std <buffer-input-stream> (|java/io/InputStream|)
   ((buf)

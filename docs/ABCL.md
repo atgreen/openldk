@@ -11,15 +11,9 @@ See also: https://github.com/atgreen/openldk/issues/4
 
 ### Prerequisites
 
-- OpenLDK binary (built from this repo)
-- Java 8 JDK (for rt.jar)
-- ABCL 1.9.2 jar (already Java 8 / class version 52.0)
-
-On this system:
-```
-JAVA_HOME=/home/linuxbrew/.linuxbrew/Cellar/openjdk@8/1.8.0-482/libexec/jre
-JAVA8_JAVAC=/home/linuxbrew/.linuxbrew/Cellar/openjdk@8/1.8.0-482/libexec/bin/javac
-```
+- OpenLDK binary (built from this repo with `make`)
+- JDK 25, with `JAVA_HOME` pointing at it
+- ABCL 1.9.2 jar (class version 52.0, which OpenLDK loads as-is)
 
 ### Getting the ABCL jar
 
@@ -29,7 +23,7 @@ curl -sL "https://abcl.org/releases/1.9.2/abcl-bin-1.9.2.tar.gz" | tar xz -C /tm
 cp /tmp/abcl-bin-1.9.2/abcl.jar lib/abcl/
 ```
 
-The release jar is already compiled for Java 8 (class version 52.0).
+`lib/abcl/abcl.jar` is in `.gitignore`.
 
 ### The Thread Problem
 
@@ -40,16 +34,17 @@ to run the interpreter:
 new Thread(null, r, "interpreter", 4194304L).start();
 ```
 
-OpenLDK needs the interpreter to run on the **main thread**. Rather than
+OpenLDK needed the interpreter to run on the **main thread**. Rather than
 patching ABCL itself, we wrote a custom entry point: `lib/abcl/ABCLMain.java`
 in the `org.armedbear.lisp` package. This calls
 `Interpreter.createDefaultInstance(args)` and `interpreter.run()` directly.
 
 ### Compiling the custom entry point
 
+`javac` can compile it with the same JDK 25 (`java -m jdk.compiler/...`
+works where only a JRE-style `bin/` is installed):
 ```bash
-cd lib/abcl
-$JAVA8_JAVAC -source 1.8 -target 1.8 -cp abcl.jar -d . ABCLMain.java
+$JAVA_HOME/bin/javac -cp lib/abcl/abcl.jar -d lib/abcl lib/abcl/ABCLMain.java
 ```
 
 This creates `org/armedbear/lisp/ABCLMain.class` under `lib/abcl/`.
@@ -57,47 +52,70 @@ This creates `org/armedbear/lisp/ABCLMain.class` under `lib/abcl/`.
 ### Running
 
 ```bash
-export JAVA_HOME=/home/linuxbrew/.linuxbrew/Cellar/openjdk@8/1.8.0-482/libexec/jre
+export JAVA_HOME=/usr/lib/jvm/java-25-openjdk
 export LDK_CLASSPATH="lib/abcl/abcl.jar:lib/abcl"
 ./openldk org.armedbear.lisp.ABCLMain
 ```
 
-## Current Status (2026-02-22)
+The REPL reads from stdin, so a script can be piped in:
+```bash
+echo '(progn (print (+ 1 2)) (quit))' | ./openldk org.armedbear.lisp.ABCLMain
+```
+
+## Current Status (2026-10-20, JDK 25)
 
 ### What Works
 
-- **Full ABCL bootstrap completes successfully**
-- Custom ABCLMain entry point runs the interpreter on the main thread
-- ABCL loads 3700+ classes successfully (JDK + ABCL core + CLOS + compiled Lisp)
-- `Interpreter.createDefaultInstance()` and `initializeLisp()` run to completion
-- ABCL's bootstrap Lisp file (`boot.lisp`) is fully loaded
-- All FASL-compiled Lisp files (`.cls`) load via `FaslClassLoader`:
-  - `macros`, `read-circle`, `early-defuns`, `defstruct`, `defpackage`, etc.
-  - Full CLOS implementation (`clos_1` through `clos_1642`)
-  - `print_object`, `format`, `ldb`, etc.
-- ABCL banner prints with both init phases completing:
+- **Full bootstrap and a working REPL.** ABCL starts, prints its prompt,
+  reads forms from stdin, evaluates them and exits cleanly with `(quit)`.
+- Checked by piping in a script: recursive `defun` with bignum results,
+  `defclass`/`defmethod`/`make-instance`, `handler-case` around `error`,
+  `mapcar` with a lambda, `format` directives, `compile` (and
+  `compiled-function-p` on the result), and Java interop
+  (`java:jstatic "getProperty" "java.lang.System" "java.version"` returns
+  `"25"`).
+- All FASL-compiled Lisp files (`.cls`) load via `FaslClassLoader`,
+  including the full CLOS implementation.
+- Banner:
   ```
   Armed Bear Common Lisp 1.9.2
-  Java 8.0 OpenLDK
+  Java 25 OpenLDK
   OpenLDK
-  Low-level initialization completed in -0.001 seconds.
-  Startup completed in 42.173 seconds.
+  Low-level initialization completed in -0.002 seconds.
+  Startup completed in 62.45 seconds.
+  Type ":help" for a list of available commands.
+  CL-USER(1):
   ```
 
-### Current Blocker
+### What Fixed the REPL
 
-**REPL stdin interaction**
+The February blocker (the REPL hanging on stdin, a stray `Go` on EOF) no
+longer reproduces; it went away with the intervening runtime work. Moving
+to JDK 25 then exposed two gaps, fixed alongside this update:
 
-After full startup, `interpreter.run()` enters the REPL but hangs waiting
-for stdin. When stdin is `/dev/null`, the REPL eventually throws an
-`org.armedbear.lisp.Go` exception (ABCL's `tagbody`/`go` control transfer)
-which escapes to the top level. With a pipe or FIFO, the REPL simply hangs
-without producing a prompt or processing input.
+- `java.util.zip.ZipFile` (implemented in Lisp in `src/zip.lisp`) kept its
+  state in JDK 8's `name` and `jzfile` fields, which JDK 25's class does not
+  have, so ABCL died opening its own jar right after low-level
+  initialization.
+- `UnixFileSystem`'s natives `getLastModifiedTime0`, `getLength0` and
+  `list0` were only defined under their JDK 8 names.
 
-The `--batch` and `--eval` flags are passed through to ABCL's
-`Interpreter.createDefaultInstance(args)` but don't appear to take effect,
-suggesting the argument processing or stream setup during `interpreter.run()`
-has an issue (possibly related to OpenLDK's stdin stream implementation).
+### Performance
+
+It is slow, almost all of it first-use JIT compilation of Java methods:
+
+| Phase | Time |
+|---|---|
+| OpenLDK start to ABCL banner | ~26 s |
+| ABCL startup (its own figure) | ~62 s |
+| Startup to first prompt | ~2 min |
+| Each new kind of form, first time | 10–60 s |
+| First `compile` (loads ABCL's compiler) | ~4 min |
+
+Repeated forms are fast once their code paths are compiled.
+Java single-dispatch (`java-generic-function` metaclass) was critical to
+getting this far: the earlier PCL discrimination-net approach slowed down
+exponentially with thousands of classes.
 
 ### ABCL `.cls` Extension
 
@@ -125,6 +143,16 @@ jar files.
   compilation
 - `handler-case` around `%eval` in `%compile-method`: catch compiler errors
   and skip the method (log which method failed) instead of crashing
+
+### src/zip.lisp
+- `ZipFile` state (path and open zip) kept in a weak side table, since JDK 25's
+  `ZipFile` has no `name`/`jzfile` fields; `ZipFile(String)` constructor;
+  `getEntry` loads `ZipEntry` before instantiating it
+
+### src/native/system.lisp
+- JDK 25 names for `UnixFileSystem` natives: `getLastModifiedTime0`,
+  `getLength0`, `list0` (returning 0 for a missing file, as the JDK does);
+  the JDK 8 names delegate to them
 
 ### lib/abcl/ABCLMain.java
 - Custom entry point that runs ABCL on the main thread
@@ -159,18 +187,15 @@ LDK_DEBUG=L ./openldk org.armedbear.lisp.ABCLMain       # loading + compile timi
 Each loaded Lisp file triggers class loading and JIT compilation for the
 Java classes implementing ABCL's built-in functions.
 
-## Performance Notes
-
-- Full startup takes ~42 seconds (3700+ classes JIT-compiled)
-- Java single-dispatch optimization (`java-generic-function` metaclass)
-  was critical for reaching this point — the previous PCL discrimination-net
-  approach caused exponential slowdowns with thousands of classes
-- `kill -3` is essential for diagnosing apparent hangs during compilation
-
 ## Known Issues / TODO
 
-1. **REPL stdin interaction** - REPL hangs after startup; `--eval`/`--batch`
-   flags don't appear to work; `Go` exception on EOF
-2. **Thread support** - ABCL may try to create threads during later use
-3. **Performance** - 42s startup is acceptable but could improve with
-   lazy/deferred compilation
+1. **Performance** - see the table above; startup to first prompt is about
+   3.5 minutes, and the first `compile` about 4 more
+2. **Thread support** - ABCL may try to create threads during later use;
+   the stock `Main` entry point (which runs the REPL on a new thread) has
+   not been re-tested on JDK 25
+3. **Missing file-system natives** - `createDirectory0`, `rename0`,
+   `createFileExclusively0`, `setLastModifiedTime0`, `setPermission0`,
+   `setReadOnly0`, `getSpace0` and `getNameMax0` are not implemented, so
+   Lisp code that creates directories, renames files or makes temp files
+   will fail
