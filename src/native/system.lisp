@@ -394,10 +394,10 @@ target component is assignable from the source component."
                      (other-ldk-class (get-ldk-class-for-java-class other)))
                  (if (and this-ldk-class
                           other-ldk-class
-                          (find-class (intern (name other-ldk-class) (class-package (name other-ldk-class))) nil)
-                          (find-class (intern (name this-ldk-class) (class-package (name this-ldk-class))) nil)
-                          (closer-mop:subclassp (find-class (intern (name other-ldk-class) (class-package (name other-ldk-class))))
-                                                (find-class (intern (name this-ldk-class) (class-package (name this-ldk-class))))))
+                          (find-class (intern (name other-ldk-class) (ldk-class-package other-ldk-class)) nil)
+                          (find-class (intern (name this-ldk-class) (ldk-class-package this-ldk-class)) nil)
+                          (closer-mop:subclassp (find-class (intern (name other-ldk-class) (ldk-class-package other-ldk-class)))
+                                                (find-class (intern (name this-ldk-class) (ldk-class-package this-ldk-class)))))
                      1
                      0))))))))
 
@@ -585,7 +585,7 @@ does not reconstruct, so we compute it from the name directly."
          (bin-class-name (substitute #\/ #\. (lstring (slot-value java-class '|name|)))))
     (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring bin-class-name) nil nil nil)
     ;; Get class package from loader - class symbols live in loader's package
-    (let* ((pkg (class-package bin-class-name))
+    (let* ((pkg (%java-class-package java-class))
            (class-sym (intern bin-class-name pkg))
            (obj (make-instance class-sym))
            (descriptor (build-method-descriptor (slot-value constructor '|parameterTypes|))))
@@ -963,7 +963,7 @@ valid() work.  Tolerate a raw stream in fd for robustness."
   (let* ((class-name (lstring (slot-value this '|name|)))
          (normalized-name (substitute #\/ #\. class-name))
          ;; Get class's loader package for correct type lookup
-         (pkg (class-package normalized-name))
+         (pkg (%java-class-package this))
          (class-symbol (intern normalized-name pkg)))
     ;; Handle native Lisp types (integers, floats, doubles, characters)
     (cond
@@ -1421,16 +1421,18 @@ parent delegation is the Java caller's job)."
 
 (defmethod |findBootstrapClass(Ljava/lang/String;)| ((loader |java/lang/ClassLoader|) name)
   (handler-case
-      (let ((ldk-class (classload (substitute #\/ #\. (lstring name)))))
+      (let ((ldk-class (%classload-system (substitute #\/ #\. (lstring name)))))
         (java-class ldk-class))
     (condition (c)
       (declare (ignore c))
       nil)))
 
-;; JDK 17: findBootstrapClass is a private static native method
+;; JDK 17: findBootstrapClass is a private static native method.  Only the
+;; boot and app loaders' classes: a class a user loader defined is not a
+;; bootstrap class, though the global by-name table holds it too.
 (defun |java/lang/ClassLoader.findBootstrapClass(Ljava/lang/String;)| (name)
   (handler-case
-      (let ((ldk-class (classload (substitute #\/ #\. (lstring name)))))
+      (let ((ldk-class (%classload-system (substitute #\/ #\. (lstring name)))))
         (java-class ldk-class))
     (condition (c)
       (declare (ignore c))
@@ -1708,7 +1710,7 @@ same-named defmethod."
                 (let* ((clazz (slot-value field '|clazz|))
                        (lname (lstring (slot-value clazz '|name|)))
                        (bin-name (substitute #\/ #\. lname))
-                       (pkg (class-package bin-name)))
+                       (pkg (%java-class-package clazz)))
                   (slot-value
                    (eval (intern (format nil "+static-~A+" bin-name) pkg)) key))
                 (sb-sys:signed-sap-ref-64 (sb-sys:int-sap ptr) 0))))))

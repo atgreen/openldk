@@ -72,7 +72,7 @@
                         (format nil "~A.~A" class-name lispized)
                         lispized))
            (pkg (if is-static
-                    (class-package class-name)
+                    (%java-class-package declaring-class)
                     (find-package :openldk)))
            (sym (find-symbol fn-name pkg)))
       (unless (and sym (fboundp sym))
@@ -118,7 +118,9 @@
          (pkg (find-package :openldk))
          (sym (find-symbol lispized pkg)))
     (classload class-name)
-    (let ((instance (%make-java-instance class-name))
+    (let ((instance (%make-java-instance class-name
+                                         (get-ldk-loader-for-java-loader
+                                          (slot-value declaring-class '|classLoader|))))
           (lisp-args (when args
                        (coerce (java-array-data args) 'list))))
       (if (and sym (fboundp sym))

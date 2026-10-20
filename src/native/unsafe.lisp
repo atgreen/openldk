@@ -290,7 +290,7 @@ declaring class.  With ERRORP NIL, return NIL instead of signalling when
 the storage object does not (yet) exist."
   (let* ((clazz (slot-value field '|clazz|))
          (bin-name (substitute #\/ #\. (lstring (slot-value clazz '|name|))))
-         (pkg (class-package bin-name))
+         (pkg (%java-class-package clazz))
          (name (format nil "+static-~A+" bin-name)))
     (if errorp
         (symbol-value (intern name pkg))
@@ -1156,6 +1156,15 @@ java.* classes."
          (java-loader (slot-value java-class '|classLoader|))
          (ldk-loader (get-ldk-loader-for-java-loader java-loader)))
     (%get-ldk-class-by-fq-name fq-name t ldk-loader)))
+
+(defun %java-class-package (java-class)
+  "The Lisp package of the class JAVA-CLASS (a java.lang.Class) stands for,
+found through its class loader: looking the class up by name alone can find
+a same-named class from another loader."
+  (let ((ldk-class (get-ldk-class-for-java-class java-class)))
+    (if ldk-class
+        (ldk-class-package ldk-class)
+        (class-package (substitute #\/ #\. (lstring (slot-value java-class '|name|)))))))
 
 (defun %class-interface-p (this)
   (if (and (eq 0 (|isPrimitive()| this))
