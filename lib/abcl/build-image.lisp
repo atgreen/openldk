@@ -13,7 +13,8 @@
 ;; One REPL session fed through stdin.  Each form pulls in code the image
 ;; should not have to compile at runtime: the reader and printer, function
 ;; definition and calls, CLOS, the condition system, FORMAT, LOOP, hash
-;; tables, strings, and ABCL's compiler, closures included.
+;; tables, strings, ABCL's compiler, closures included, and starting a
+;; child process (the :ls command, through ProcessBuilder).
 (defparameter *abcl-warmup-input* "
 (defpackage :warmup (:use :cl))
 (in-package :warmup)
@@ -41,6 +42,7 @@
 (print (java:jstatic \"getProperty\" \"java.lang.System\" \"java.version\"))
 (in-package :cl-user)
 (delete-package :warmup)
+:ls
 (quit)
 ")
 

@@ -159,4 +159,8 @@ Things to watch for:
   during a warmup reopens its file on first use in the image, so keep the
   file where it was.
 - **Threads don't survive.**  Any thread a warmup started is killed before
-  saving.
+  saving.  A thread pool the warmup created keeps believing in its dead
+  workers, and a task handed to one never runs, so with `:reset-classes
+  nil`, don't let a warmup create pools the program will use again.  The
+  JDK's own process reaper pool (`ProcessHandleImpl`) is reset before
+  saving, so warmups may start child processes.
