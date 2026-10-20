@@ -223,6 +223,242 @@
              (format *error-output* "~&Error: ~A~%" condition)))
           (uiop:quit 1))))))
 
+(defun %static-storage (bin-name)
+  "Return the instance holding the static fields of class BIN-NAME, or NIL
+if the class has not been loaded."
+  (handler-case
+      (let* ((pkg (class-package bin-name))
+             (sym (and pkg (find-symbol (format nil "+static-~A+" bin-name) pkg))))
+        (when (and sym (boundp sym))
+          (symbol-value sym)))
+    (condition () nil)))
+
+(defvar *file-streams-to-reopen* nil
+  "Files open in Java objects when the image was saved, as
+(object path direction position), reopened when the image starts.")
+
+(defun %reopen-saved-file-streams ()
+  "SB-EXT:*INIT-HOOKS* function: reopen the files Java objects held open
+when the image was saved, at the position they had, and store the new
+streams where the old ones were."
+  (dolist (entry *file-streams-to-reopen*)
+    (destructuring-bind (object path direction position) entry
+      (let ((stream (ignore-errors
+                     (open path :element-type '(unsigned-byte 8)
+                                :direction direction
+                                :if-exists (if (eq direction :input) nil :append)))))
+        (when stream
+          (when position
+            (ignore-errors (file-position stream position)))
+          (setf (slot-value object '|fd|) stream)))))
+  (setf *file-streams-to-reopen* nil))
+
+(defun %record-file-streams-to-reopen ()
+  "Find the Java objects (FileDescriptors, file streams, RandomAccessFiles)
+holding open Lisp file streams in their fd slot, and arrange for those files
+to reopen when the saved image starts: the streams themselves are closed by
+SAVE-LISP-AND-DIE."
+  (let ((entries '()))
+    (sb-vm:map-allocated-objects
+     (lambda (obj type size)
+       (declare (ignore type size))
+       (when (and (typep obj '|java/lang/Object|)
+                  (slot-exists-p obj '|fd|)
+                  (slot-boundp obj '|fd|))
+         (let ((stream (slot-value obj '|fd|)))
+           (when (and (typep stream 'sb-sys:fd-stream)
+                      (open-stream-p stream))
+             (let ((path (ignore-errors (namestring (pathname stream)))))
+               (when path
+                 (push (list obj path
+                             (cond ((and (input-stream-p stream) (output-stream-p stream)) :io)
+                                   ((output-stream-p stream) :output)
+                                   (t :input))
+                             (ignore-errors (file-position stream)))
+                       entries)))))))
+     :all)
+    (setf *file-streams-to-reopen* entries)
+    (pushnew '%reopen-saved-file-streams sb-ext:*init-hooks*)
+    (length entries)))
+
+(defun %reset-runtime-for-save ()
+  "Put the runtime in a state that survives SAVE-LISP-AND-DIE and a restart:
+kill other threads, drop process-local handles, and give every lock a fresh
+mutex.  Call this last, right before saving, after any build-time runs of
+Java code (warmups)."
+  ;; Clear unsafe memory table — foreign heap pointers from warmup
+  ;; won't survive image save/load.
+  (clrhash *unsafe-memory-table*)
+  ;; Force ProcessEnvironment to re-initialize at runtime so it reads
+  ;; the actual runtime environment, not stale warmup state.
+  (let ((pe (%get-ldk-class-by-bin-name "java/lang/ProcessEnvironment" t)))
+    (when pe (setf (initialized-p pe) nil)))
+  ;; Likewise the NIO default filesystem: its clinit captures user.dir
+  ;; (the BUILD directory) into UnixFileSystem.defaultDirectory, sending
+  ;; relative-path I/O to the wrong place after restart.
+  (dolist (cname '("sun/nio/fs/DefaultFileSystemProvider"
+                   "java/nio/file/FileSystems$DefaultFileSystemHolder"))
+    (let ((c (%get-ldk-class-by-bin-name cname t)))
+      (when c (setf (initialized-p c) nil))))
+  ;; Kill ALL helper threads before dumping the image — warmup can spawn
+  ;; NIO/cleaner threads with arbitrary names, and save-lisp-and-die
+  ;; refuses to run with any other thread alive.
+  (loop for thread in (bt:all-threads)
+        unless (eq thread (bt:current-thread))
+          do (ignore-errors (bt:destroy-thread thread)))
+  (loop repeat 50
+        while (rest (bt:all-threads))
+        do (sleep 0.1))
+  ;; Reset ALL lock state.  A lock or monitor saved mid-acquisition (a
+  ;; warmup thread killed while holding it, or a warmup that died from
+  ;; stack exhaustion inside a synchronized region) blocks the restarted
+  ;; image forever on its first acquisition.
+  (clrhash *class-load-locks*)
+  (setf *class-load-locks-lock* (bt:make-lock "class-load-locks"))
+  (clrhash *monitors*)
+  (setf *method-compilation-lock* (bt:make-lock "method-compilation-lock"))
+  (setf *method-compilation-cv* (bt:make-condition-variable :name "method-compilation-cv"))
+  (setf *identity-hash-counter-lock* (bt:make-lock "identity-hash-lock"))
+  (setf *cas-lock* (bt:make-recursive-lock "unsafe-cas"))
+  ;; Let the restarted image stamp its own start time.
+  (setf *vm-start-time-millis* nil)
+  ;; Drop stale in-progress compilation claims from dead warmup threads.
+  (maphash (lambda (k v)
+             (when (eq v t)
+               (remhash k *methods-being-compiled*)))
+           *methods-being-compiled*)
+  ;; Classpath entries carry their own locks and open container handles.
+  (mapc #'%reset-classpath-entry-runtime-state *classpath*)
+  ;; So do java.util.zip.ZipFile objects the program opened itself, and the
+  ;; JarFiles JarURLConnection hands out.
+  (%zipfile-reset-for-save)
+  (clrhash *jarfile-zips*)
+  (clrhash *zipentry-times*)
+  ;; Files a Java program opened itself (FileInputStream, FileOutputStream,
+  ;; RandomAccessFile) reopen when the image starts.
+  (%record-file-streams-to-reopen)
+  ;; jrt: filesystem state (providers, mmapped jimage buffers) is
+  ;; process-local; drop it so the restarted image rebuilds it.
+  (setf *installed-file-system-providers* nil)
+  (clrhash *jimage-native-maps*)
+  ;; Java-side static caches also hold the build-time ImageReader whose
+  ;; mmapped buffer dies with this process; using them after restart
+  ;; segfaults.  Clear them so the runtime rebuilds the jrt filesystem.
+  (let ((sir (%static-storage "jdk/internal/jimage/ImageReader$SharedImageReader")))
+    (when (and sir (slot-exists-p sir '|OPEN_FILES|))
+      (let ((map (slot-value sir '|OPEN_FILES|)))
+        (when map (ignore-errors (|clear()| map))))))
+  ;; ResourceBundle negative-caches failed lookups; a NONEXISTENT
+  ;; marker cached during warmup would be baked into the image and
+  ;; poison the same lookup forever at runtime.
+  (let ((rb (%static-storage "java/util/ResourceBundle")))
+    (when (and rb (slot-exists-p rb '|cacheList|))
+      (let ((m (slot-value rb '|cacheList|)))
+        (when m (ignore-errors (|clear()| m))))))
+  ;; Synchronized hash tables carry an internal mutex; one saved in the
+  ;; locked state (a warmup thread killed mid-access) deadlocks the
+  ;; restarted image on its first table access.  Sweep the heap and give
+  ;; every synchronized table a fresh lock.
+  (let ((tables '())
+        (gfs '()))
+    (sb-vm:map-allocated-objects
+     (lambda (obj type size)
+       (declare (ignore type size))
+       (cond
+         ((and (hash-table-p obj)
+               (sb-ext:hash-table-synchronized-p obj))
+          (push obj tables))
+         ((typep obj 'java-generic-function)
+          (push obj gfs))))
+     :all)
+    (dolist (ht tables)
+      (setf (sb-impl::hash-table-%lock ht)
+            (sb-thread:make-mutex :name "hash-table lock")))
+    ;; java-generic-function dispatch-cache locks are ordinary mutex
+    ;; slots with the same saved-locked hazard.
+    (dolist (gf gfs)
+      (setf (slot-value gf 'cache-lock)
+            (bt:make-lock "java-gf-cache")))))
+
+(defun %reset-app-classes ()
+  "Return every application class to its uninitialized state: clear its
+initialized flag and put its static fields back to their initial values,
+so its <clinit> runs again on first use.  Compiled methods are kept.
+Returns the number of classes reset."
+  (let ((count 0))
+    (when *app-ldk-class-loader*
+      (maphash (lambda (bin-name class)
+                 (declare (ignore bin-name))
+                 (setf (initialized-p class) nil
+                       (initializing-p class) nil)
+                 (let ((clos-class (find-class (intern (name class) (ldk-class-package class)) nil)))
+                   (when clos-class
+                     (dolist (slot (sb-mop:class-direct-slots clos-class))
+                       (when (eq (sb-mop:slot-definition-allocation slot) :class)
+                         (let ((init (sb-mop:slot-definition-initfunction slot))
+                               (proto (sb-mop:class-prototype clos-class)))
+                           (setf (slot-value proto (sb-mop:slot-definition-name slot))
+                                 (and init (funcall init))))))))
+                 (incf count))
+               (slot-value *app-ldk-class-loader* 'ldk-classes-by-bin-name)))
+    count))
+
+(defun %run-warmup (mainclass args classpath &key input (timeout 600))
+  "Run MAINCLASS with ARGS once at build time, with INPUT (a string, or
+NIL for no input) as its standard input.  Errors, timeouts and System.exit
+are reported and survived, so one bad warmup doesn't stop the build."
+  (let ((input-file (when input
+                      (uiop:with-temporary-file (:stream s :pathname p :keep t)
+                        (write-string input s)
+                        p)))
+        (*ignore-quit* t))
+    (unwind-protect
+         (handler-case
+             (sb-ext:with-timeout timeout
+               (if input-file
+                   (with-open-file (*standard-input* input-file :element-type :default)
+                     (main mainclass args :classpath classpath))
+                   (main mainclass args :classpath classpath)))
+           (sb-ext:timeout ()
+             (format *error-output* "~&;; WARMUP ~S timed out after ~Ds~%" args timeout))
+           (condition (c)
+             (format *error-output* "~&;; WARMUP ~S caught: ~A~%" args c)))
+      (when input-file
+        (delete-file input-file)))))
+
+(defun dump-warm-image (output-path default-mainclass
+                        &key classpath warmups (timeout 600) (reset-classes t))
+  "Build an executable image for a Java application whose code is already
+compiled: run the application on sample inputs, keep the compiled methods,
+reset the application's own classes, and save.
+   OUTPUT-PATH:       Path for the saved executable.
+   DEFAULT-MAINCLASS: The Java class to run when no class is given on the CLI.
+   CLASSPATH:         Classpath string to bake in. If nil, reads CLASSPATH env var.
+   WARMUPS:           List of runs, each a plist (:args LIST :input STRING);
+                      a run with neither runs main once with no arguments.
+   TIMEOUT:           Seconds allowed for each warmup run.
+   RESET-CLASSES:     When true (the default), reset the application's
+                      classes after warming up, so their <clinit>s run again
+                      and main starts from scratch in the saved image.  When
+                      NIL, the image keeps the state the warmups left, and
+                      main must be written to reuse it.
+JDK classes always keep their state."
+  (initialize)
+  (let ((cp (or classpath (uiop:getenv "CLASSPATH") ".")))
+    (setf *default-mainclass* default-mainclass
+          *default-classpath* cp)
+    (dolist (warmup (or warmups (list nil)))
+      (destructuring-bind (&key args input) warmup
+        (format *error-output* "~&;; WARMUP ~A ~{~A~^ ~}~%" default-mainclass args)
+        (%run-warmup default-mainclass args cp :input input :timeout timeout))))
+  (when reset-classes
+    (format *error-output* "~&;; Reset ~D application classes~%" (%reset-app-classes)))
+  (%reset-runtime-for-save)
+  (sb-ext:save-lisp-and-die output-path
+                            :executable t
+                            :save-runtime-options t
+                            :toplevel #'app-main-wrapper))
+
 (defun make-image (&optional (output-path "openldk"))
   (initialize)
   ;; Clear all monitor state to prevent deadlocks in the saved image.

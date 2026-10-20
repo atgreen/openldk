@@ -325,101 +325,12 @@
 			    "TestHarness.java")))))
     (progn
       (setf openldk::*ignore-quit* nil)
-      ;; Clear unsafe memory table — foreign heap pointers from warmup
-      ;; won't survive image save/load.
-      (clrhash openldk::*unsafe-memory-table*)
-      ;; Force ProcessEnvironment to re-initialize at runtime so it reads
-      ;; the actual runtime environment, not stale warmup state.
-      (let ((pe (openldk::%get-ldk-class-by-bin-name "java/lang/ProcessEnvironment" t)))
-        (when pe (setf (openldk::initialized-p pe) nil)))
-      ;; Likewise the NIO default filesystem: its clinit captures user.dir
-      ;; (the BUILD directory) into UnixFileSystem.defaultDirectory, sending
-      ;; relative-path I/O to the wrong place after restart.
-      (dolist (cname '("sun/nio/fs/DefaultFileSystemProvider"
-                       "java/nio/file/FileSystems$DefaultFileSystemHolder"))
-        (let ((c (openldk::%get-ldk-class-by-bin-name cname t)))
-          (when c (setf (openldk::initialized-p c) nil))))
-      ;; Kill ALL helper threads before dumping the image — warmup can spawn
-      ;; NIO/cleaner threads with arbitrary names, and save-lisp-and-die
-      ;; refuses to run with any other thread alive.
-      (loop for thread in (bt:all-threads)
-            unless (eq thread (bt:current-thread))
-              do (ignore-errors (bt:destroy-thread thread)))
-      (loop repeat 50
-            while (rest (bt:all-threads))
-            do (sleep 0.1))
-      ;; Reset ALL lock state.  A lock or monitor saved mid-acquisition (a
-      ;; warmup thread killed while holding it, or a warmup that died from
-      ;; stack exhaustion inside a synchronized region) blocks the restarted
-      ;; image forever on its first acquisition.
-      (clrhash openldk::*class-load-locks*)
-      (setf openldk::*class-load-locks-lock* (bt:make-lock "class-load-locks"))
-      (clrhash openldk::*monitors*)
-      (setf openldk::*method-compilation-lock* (bt:make-lock "method-compilation-lock"))
-      (setf openldk::*method-compilation-cv* (bt:make-condition-variable :name "method-compilation-cv"))
-      (setf openldk::*identity-hash-counter-lock* (bt:make-lock "identity-hash-lock"))
-      (setf openldk::*cas-lock* (bt:make-recursive-lock "unsafe-cas"))
-      ;; Let the restarted image stamp its own start time.
-      (setf openldk::*vm-start-time-millis* nil)
-      ;; Drop stale in-progress compilation claims from dead warmup threads.
-      (maphash (lambda (k v)
-                 (when (eq v t)
-                   (remhash k openldk::*methods-being-compiled*)))
-               openldk::*methods-being-compiled*)
-      ;; Classpath entries carry their own locks and open container handles.
-      (mapc #'openldk::%reset-classpath-entry-runtime-state openldk::*classpath*)
-      ;; jrt: filesystem state (providers, mmapped jimage buffers) is
-      ;; process-local; drop it so the restarted image rebuilds it.
-      (setf openldk::*installed-file-system-providers* nil)
-      (clrhash openldk::*jimage-native-maps*)
-      ;; Java-side static caches also hold the build-time ImageReader whose
-      ;; mmapped buffer dies with this process; using them after restart
-      ;; segfaults.  Clear them so the runtime rebuilds the jrt filesystem.
-      (flet ((static-storage (bin-name)
-               (handler-case
-                   (let* ((pkg (openldk::class-package bin-name))
-                          (sym (and pkg (find-symbol (format nil "+static-~A+" bin-name) pkg))))
-                     (when (and sym (boundp sym))
-                       (symbol-value sym)))
-                 (condition () nil))))
-        (let ((sir (static-storage "jdk/internal/jimage/ImageReader$SharedImageReader")))
-          (when (and sir (slot-exists-p sir '|OPEN_FILES|))
-            (let ((map (slot-value sir '|OPEN_FILES|)))
-              (when map (ignore-errors (openldk::|clear()| map))))))
-        (let ((jrti (static-storage "com/sun/tools/javac/file/JRTIndex")))
-          (when (and jrti (slot-exists-p jrti '|sharedInstance|))
-            (setf (slot-value jrti '|sharedInstance|) nil)))
-        ;; ResourceBundle negative-caches failed lookups; a NONEXISTENT
-        ;; marker cached during warmup would be baked into the image and
-        ;; poison the same lookup forever at runtime.
-        (let ((rb (static-storage "java/util/ResourceBundle")))
-          (when (and rb (slot-exists-p rb '|cacheList|))
-            (let ((m (slot-value rb '|cacheList|)))
-              (when m (ignore-errors (openldk::|clear()| m)))))))
-      ;; Synchronized hash tables carry an internal mutex; one saved in the
-      ;; locked state (a warmup thread killed mid-access) deadlocks the
-      ;; restarted image on its first table access.  Sweep the heap and give
-      ;; every synchronized table a fresh lock.
-      (let ((tables '())
-            (gfs '()))
-        (sb-vm:map-allocated-objects
-         (lambda (obj type size)
-           (declare (ignore type size))
-           (cond
-             ((and (hash-table-p obj)
-                   (sb-ext:hash-table-synchronized-p obj))
-              (push obj tables))
-             ((typep obj 'openldk::java-generic-function)
-              (push obj gfs))))
-         :all)
-        (dolist (ht tables)
-          (setf (sb-impl::hash-table-%lock ht)
-                (sb-thread:make-mutex :name "hash-table lock")))
-        ;; java-generic-function dispatch-cache locks are ordinary mutex
-        ;; slots with the same saved-locked hazard.
-        (dolist (gf gfs)
-          (setf (slot-value gf 'openldk::cache-lock)
-                (bt:make-lock "java-gf-cache"))))
+      ;; javac's JRTIndex caches the build-time ImageReader, whose mmapped
+      ;; buffer dies with this process.
+      (let ((jrti (openldk::%static-storage "com/sun/tools/javac/file/JRTIndex")))
+        (when (and jrti (slot-exists-p jrti '|sharedInstance|))
+          (setf (slot-value jrti '|sharedInstance|) nil)))
+      (openldk::%reset-runtime-for-save)
       (sb-ext:save-lisp-and-die output-path
 				:executable t
 				:save-runtime-options t

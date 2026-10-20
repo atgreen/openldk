@@ -5,10 +5,18 @@
 
 package org.armedbear.lisp;
 
+//
+// In a warm image (make abcl, docs/IMAGES.md) the interpreter was already
+// created and initialized at build time, so reuse it instead of returning
+// without a REPL, as createDefaultInstance does when an instance exists.
+// Its command-line arguments were processed then, not now.
+
 public final class ABCLMain {
     public static void main(final String[] args) {
         try {
-            Interpreter interpreter = Interpreter.createDefaultInstance(args);
+            Interpreter interpreter = Interpreter.getInstance();
+            if (interpreter == null)
+                interpreter = Interpreter.createDefaultInstance(args);
             if (interpreter != null)
                 interpreter.run();
         } catch (ProcessingTerminated e) {
