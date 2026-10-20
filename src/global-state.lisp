@@ -197,6 +197,16 @@
       (t
        (find-package :openldk)))))
 
+
+(defun ldk-class-package (class)
+  "Get the Lisp package for CLASS, an LDK class object, from its defining
+loader.  Unlike CLASS-PACKAGE, this finds classes defined by user class
+loaders, whose classes are not in the global or app loader tables."
+  (if (and (slot-boundp class 'ldk-loader)
+           (slot-value class 'ldk-loader))
+      (loader-package (slot-value class 'ldk-loader))
+      (class-package (slot-value class 'name))))
+
 (defun class-symbol-for-reference (class-name loader)
   "Get the Lisp symbol for CLASS-NAME when referenced from LOADER.
    Looks up the class in the loader hierarchy to find its defining loader's package.

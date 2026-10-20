@@ -49,6 +49,12 @@ $JAVA_HOME/bin/javac -cp lib/abcl/abcl.jar -d lib/abcl lib/abcl/ABCLMain.java
 
 This creates `org/armedbear/lisp/ABCLMain.class` under `lib/abcl/`.
 
+### A warm image
+
+`make abcl` builds `./abcl`, an image with ABCL already booted and its Java
+code compiled.  It downloads the jar and compiles `ABCLMain` itself.  See
+[IMAGES.md](IMAGES.md).
+
 ### Running
 
 ```bash
@@ -70,8 +76,8 @@ echo '(progn (print (+ 1 2)) (quit))' | ./openldk org.armedbear.lisp.ABCLMain
   reads forms from stdin, evaluates them and exits cleanly with `(quit)`.
 - Checked by piping in a script: recursive `defun` with bignum results,
   `defclass`/`defmethod`/`make-instance`, `handler-case` around `error`,
-  `mapcar` with a lambda, `format` directives, `compile` (and
-  `compiled-function-p` on the result), and Java interop
+  `mapcar` with a lambda, `format` directives, `compile` of a function
+  without closures (see Known Issues for closures), and Java interop
   (`java:jstatic "getProperty" "java.lang.System" "java.version"` returns
   `"25"`).
 - All FASL-compiled Lisp files (`.cls`) load via `FaslClassLoader`,
@@ -190,11 +196,23 @@ Java classes implementing ABCL's built-in functions.
 ## Known Issues / TODO
 
 1. **Performance** - see the table above; startup to first prompt is about
-   3.5 minutes, and the first `compile` about 4 more
-2. **Thread support** - ABCL may try to create threads during later use;
-   the stock `Main` entry point (which runs the REPL on a new thread) has
-   not been re-tested on JDK 25
-3. **Missing file-system natives** - `createDirectory0`, `rename0`,
+   3.5 minutes, and the first `compile` about 4 more.  The warm image from
+   `make abcl` starts in under a second ([IMAGES.md](IMAGES.md))
+2. **Thread support** - ABCL's stock `org.armedbear.lisp.Main`, which runs
+   the REPL on a new thread, exits at once with status 0 and no output on
+   JDK 25: the interpreter thread never runs.  `ABCLMain` is still needed
+3. **`compile` fails on functions containing closures** - ABCL compiles
+   them into several classes that refer to each other, which only its
+   in-memory `MemoryClassLoader` can find.  OpenLDK resolves class
+   references at JIT time without asking the defining class loader
+   (`emit` for class constants in `src/classfile.lisp` calls `classload`
+   with no loader) and substitutes an empty stub class, so the generated
+   code calls an undefined `OPENLDK::%clinit-abcl_...`.  `compile` on
+   functions without closures works.
+4. **Reflective static field reads** - `Field.get(null)` on a static field
+   of a class defined by a custom class loader returns null, although the
+   class's own methods see the right value.
+5. **Missing file-system natives** - `createDirectory0`, `rename0`,
    `createFileExclusively0`, `setLastModifiedTime0`, `setPermission0`,
    `setReadOnly0`, `getSpace0` and `getNameMax0` are not implemented, so
    Lisp code that creates directories, renames files or makes temp files

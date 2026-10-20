@@ -78,7 +78,22 @@
   (car (gethash zip-file *zipfile-state*)))
 
 (defun %zipfile-zip (zip-file)
-  (cdr (gethash zip-file *zipfile-state*)))
+  "The open zip:zipfile for ZIP-FILE, reopening it if a saved image has
+restarted since it was opened."
+  (let ((state (gethash zip-file *zipfile-state*)))
+    (when state
+      (or (cdr state)
+          (setf (cdr state) (zip:open-zipfile (lstring (car state))))))))
+
+(defun %zipfile-reset-for-save ()
+  "Close every open zip, keeping its path: file descriptors don't survive
+SAVE-LISP-AND-DIE, so each one reopens on first use after a restart."
+  (maphash (lambda (zip-file state)
+             (declare (ignore zip-file))
+             (when (cdr state)
+               (ignore-errors (zip:close-zipfile (cdr state)))
+               (setf (cdr state) nil)))
+           *zipfile-state*))
 
 
 (defun |java/util/zip/ZipFile.<clinit>()| ()

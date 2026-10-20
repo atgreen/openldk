@@ -17,6 +17,11 @@ KAWA_VERSION = 3.1.1
 KAWA_JAR = lib/kawa-$(KAWA_VERSION).jar
 KAWA_URL = https://repo1.maven.org/maven2/com/github/arvyy/kawa/$(KAWA_VERSION)/kawa-$(KAWA_VERSION).jar
 
+ABCL_VERSION = 1.9.2
+ABCL_JAR = lib/abcl/abcl.jar
+ABCL_URL = https://abcl.org/releases/$(ABCL_VERSION)/abcl-bin-$(ABCL_VERSION).tar.gz
+ABCL_MAIN = lib/abcl/org/armedbear/lisp/ABCLMain.class
+
 all: openldk javacl
 
 # Fail fast when JAVA_HOME is not a JDK 25 (e.g. the environment exports an
@@ -39,6 +44,18 @@ $(KAWA_JAR):
 
 kawa: src/*.lisp src/native/*.lisp *.asd Makefile $(KAWA_JAR)
 	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))" --eval "(openldk::dump-app-image \"kawa\" \"kawa.repl\" :classpath \"$(KAWA_JAR)\")"
+
+$(ABCL_JAR):
+	curl -sSfL $(ABCL_URL) | tar xzO abcl-bin-$(ABCL_VERSION)/abcl.jar > $@.tmp
+	mv $@.tmp $@
+
+# javac through the JDK's own module, so a JDK without bin/javac works too.
+$(ABCL_MAIN): lib/abcl/ABCLMain.java $(ABCL_JAR)
+	$(JAVA_HOME)/bin/java -m jdk.compiler/com.sun.tools.javac.Main -cp $(ABCL_JAR) -d lib/abcl lib/abcl/ABCLMain.java
+
+# A warm image: ABCL's Java code is compiled at build time (see docs/IMAGES.md).
+abcl: src/*.lisp src/native/*.lisp *.asd Makefile lib/abcl/build-image.lisp $(ABCL_MAIN) | check-jdk
+	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))" --load lib/abcl/build-image.lisp
 
 check: openldk testsuite/mauve/gnu/testlet/config.class
 	(cd testsuite; runtest --tool openldk $(RUNTESTFLAGS))
