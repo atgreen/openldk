@@ -214,7 +214,7 @@
     (if (char= (aref classname 0) #\[)
         (make-instance 'ir-class
                        :class (%get-array-ldk-class-from-name classname))
-        (let ((ldk-class (classload classname)))
+        (let ((ldk-class (%resolve-class-in-context classname)))
           (make-instance 'ir-class
                          :class (or ldk-class
                                     ;; Class not on classpath (e.g. AWT) — create a stub
@@ -252,7 +252,7 @@
 (defun emit-static-method-reference (v cp)
   "Return the string name of a static method reference V using constant pool CP."
   (let ((klass (ir-class-class (emit (aref cp (slot-value v 'class-index)) cp))))
-    (classload (name klass)))
+    (%resolve-class-in-context (name klass)))
   (format nil "~A.~A"
           (name (ir-class-class (emit (aref cp (slot-value v 'class-index)) cp)))
           (lispize-method-name (emit (aref cp (slot-value v 'method-descriptor-index)) cp))))
