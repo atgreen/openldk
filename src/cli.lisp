@@ -333,6 +333,16 @@ Java code (warmups)."
   ;; JarFiles JarURLConnection hands out.
   (%zipfile-reset-for-save)
   (clrhash *jarfile-zips*)
+  ;; Child processes the warmups started, and their pipes, belong to this
+  ;; process.  ProcessHandleImpl's reaper thread pool lost its worker with
+  ;; the other threads, yet would hand the next child's reaping to it, so
+  ;; Process.waitFor would never return: reset the class, and its <clinit>
+  ;; makes a new pool.
+  (clrhash *child-processes*)
+  (clrhash *fd-streams*)
+  (let ((process-handle (%get-ldk-class-by-bin-name "java/lang/ProcessHandleImpl" t)))
+    (when (and process-handle (initialized-p process-handle))
+      (%reset-class process-handle)))
   (clrhash *zipentry-times*)
   ;; Files a Java program opened itself (FileInputStream, FileOutputStream,
   ;; RandomAccessFile) reopen when the image starts.
@@ -380,25 +390,29 @@ Java code (warmups)."
       (setf (slot-value gf 'cache-lock)
             (bt:make-lock "java-gf-cache")))))
 
-(defun %reset-app-classes ()
-  "Return every application class to its uninitialized state: clear its
+(defun %reset-class (class)
+  "Return CLASS, an LDK class, to its uninitialized state: clear its
 initialized flag and put its static fields back to their initial values,
-so its <clinit> runs again on first use.  Compiled methods are kept.
-Returns the number of classes reset."
+so its <clinit> runs again on first use.  Compiled methods are kept."
+  (setf (initialized-p class) nil
+        (initializing-p class) nil)
+  (let ((clos-class (find-class (intern (name class) (ldk-class-package class)) nil)))
+    (when clos-class
+      (dolist (slot (sb-mop:class-direct-slots clos-class))
+        (when (eq (sb-mop:slot-definition-allocation slot) :class)
+          (let ((init (sb-mop:slot-definition-initfunction slot))
+                (proto (sb-mop:class-prototype clos-class)))
+            (setf (slot-value proto (sb-mop:slot-definition-name slot))
+                  (and init (funcall init)))))))))
+
+(defun %reset-app-classes ()
+  "Reset every application class with %RESET-CLASS.  Returns the number of
+classes reset."
   (let ((count 0))
     (when *app-ldk-class-loader*
       (maphash (lambda (bin-name class)
                  (declare (ignore bin-name))
-                 (setf (initialized-p class) nil
-                       (initializing-p class) nil)
-                 (let ((clos-class (find-class (intern (name class) (ldk-class-package class)) nil)))
-                   (when clos-class
-                     (dolist (slot (sb-mop:class-direct-slots clos-class))
-                       (when (eq (sb-mop:slot-definition-allocation slot) :class)
-                         (let ((init (sb-mop:slot-definition-initfunction slot))
-                               (proto (sb-mop:class-prototype clos-class)))
-                           (setf (slot-value proto (sb-mop:slot-definition-name slot))
-                                 (and init (funcall init))))))))
+                 (%reset-class class)
                  (incf count))
                (slot-value *app-ldk-class-loader* 'ldk-classes-by-bin-name)))
     count))
