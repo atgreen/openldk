@@ -85,6 +85,19 @@
 ;;; protected form as well, so the throwable propagates outward into the
 ;;; enclosing HANDLER-CASE like any other Java exception.
 
+(defun %java-method-name-p (name)
+  "True when NAME, a function name, is a Java method's: OpenLDK names
+methods by their signature, as in |java/lang/Thread.start0()| or |foo(I)V|."
+  (and (symbolp name)
+       (let ((s (symbol-name name)))
+         (and (find #\( s) (find #\) s)))))
+
+(defun %make-unsatisfied-link-error (name)
+  "A java.lang.UnsatisfiedLinkError naming the method NAME."
+  (let ((exc (%make-java-instance "java/lang/UnsatisfiedLinkError")))
+    (|<init>(Ljava/lang/String;)| exc (jstring (symbol-name name)))
+    exc))
+
 (defmacro with-java-conditions ((&key arrays) &body body)
   "Run BODY with internal Lisp conditions converted to Java throwables.
 When ARRAYS is true, also convert array index errors.  Establish this inside
@@ -105,5 +118,15 @@ every scope a Java catch clause protects, not merely around a method body."
          (lambda (e)
            (declare (ignore e))
            (error (%lisp-condition
-                   (%make-throwable '|java/lang/NullPointerException|))))))
+                   (%make-throwable '|java/lang/NullPointerException|)))))
+        ;; A call to a Java method with no definition -- in practice a native
+        ;; method OpenLDK doesn't implement -- is UnsatisfiedLinkError, as on
+        ;; a JVM, so Java code can catch it instead of the Lisp error
+        ;; unwinding past every Java handler.
+        (undefined-function
+         (lambda (e)
+           (let ((name (cell-error-name e)))
+             (when (%java-method-name-p name)
+               (error (%lisp-condition
+                       (%make-unsatisfied-link-error name))))))))
      ,@body))
