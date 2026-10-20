@@ -219,10 +219,7 @@
       (|java/lang/System.currentTimeMillis()|)))
 
 (defmethod |read0()| ((this |java/io/FileInputStream|))
-  (let* ((file-descriptor (slot-value this '|fd|))
-         (fd (if (and file-descriptor (slot-exists-p file-descriptor '|fd|))
-                 (slot-value file-descriptor '|fd|)
-                 file-descriptor)))
+  (let ((fd (%stream-fd this)))
     (cond
       ((eql fd 0) (force-output *standard-output*)
                   (let ((b (read-byte *standard-input* nil nil)))

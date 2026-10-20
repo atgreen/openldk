@@ -906,11 +906,29 @@ valid() work.  Tolerate a raw stream in fd for robustness."
         (|<init>(Ljava/lang/String;)| fnf filename)
         (error (%lisp-condition fnf))))))
 
+;; File descriptors OpenLDK hands to Java as plain integers -- the pipes to a
+;; child process (see process.lisp) -- and their Lisp streams.  Java keeps
+;; such an integer in a FileDescriptor; the file stream natives below map it
+;; back through %RESOLVE-FD.
+(defvar *fd-streams* (make-hash-table :synchronized t)
+  "Integer file descriptor -> the Lisp stream for it.")
+
+(defun %resolve-fd (fd)
+  "FD as the file stream natives use it: the Lisp stream for an integer
+descriptor in *FD-STREAMS*, otherwise FD unchanged (0, 1, 2 or a stream)."
+  (or (and (integerp fd) (gethash fd *fd-streams*))
+      fd))
+
+(defun %stream-fd (holder)
+  "The fd a FileInputStream/FileOutputStream/RandomAccessFile HOLDER uses:
+its FileDescriptor's fd (or its own fd slot), resolved by %RESOLVE-FD."
+  (let ((file-descriptor (slot-value holder '|fd|)))
+    (%resolve-fd (if (and file-descriptor (slot-exists-p file-descriptor '|fd|))
+                     (slot-value file-descriptor '|fd|)
+                     file-descriptor))))
+
 (defmethod |skip0(J)| ((fis |java/io/FileInputStream|) n)
-  (let* ((file-descriptor (slot-value fis '|fd|))
-         (in-stream (if (and file-descriptor (slot-exists-p file-descriptor '|fd|))
-                        (slot-value file-descriptor '|fd|)
-                        file-descriptor))
+  (let* ((in-stream (%stream-fd fis))
          (bytes-read 0))
     (when (eq n :END)
       (setf n 999999999999))
@@ -921,10 +939,7 @@ valid() work.  Tolerate a raw stream in fd for robustness."
     bytes-read))
 
 (defmethod |readBytes([BII)| ((fis |java/io/FileInputStream|) byte-array offset length)
-  (let* ((file-descriptor (slot-value fis '|fd|))
-         (fd (if (and file-descriptor (slot-exists-p file-descriptor '|fd|))
-                 (slot-value file-descriptor '|fd|)
-                 file-descriptor))
+  (let* ((fd (%stream-fd fis))
          (in-stream (cond ((eql fd 0)
                            ;; Flush stdout before blocking on stdin, like C stdio.
                            (force-output *standard-output*)
@@ -950,13 +965,13 @@ valid() work.  Tolerate a raw stream in fd for robustness."
     (if (and (zerop bytes-read) (plusp length)) -1 bytes-read)))
 
 (defmethod |available0()| ((fis |java/io/FileInputStream|))
-  (let* ((file-descriptor (slot-value fis '|fd|))
-         (fd (if (and file-descriptor (slot-exists-p file-descriptor '|fd|))
-                 (slot-value file-descriptor '|fd|)
-                 file-descriptor)))
+  (let ((fd (%stream-fd fis)))
     (cond
       ((eql fd 0) 0)
-      ((streamp fd) (- (file-length fd) (file-position fd)))
+      ((streamp fd)
+       ;; A pipe has no length: report whether a byte is waiting.
+       (handler-case (- (file-length fd) (file-position fd))
+         (error () (if (listen fd) 1 0))))
       (t 0))))
 
 (defmethod |isInstance(Ljava/lang/Object;)| ((this |java/lang/Class|) objref)
@@ -996,10 +1011,7 @@ valid() work.  Tolerate a raw stream in fd for robustness."
 
 (defmethod |writeBytes([BIIZ)| ((fos |java/io/FileOutputStream|) byte-array offset length append?)
   (declare (ignore append?))
-  (let* ((file-descriptor (slot-value fos '|fd|))
-         (fd (if (and file-descriptor (slot-exists-p file-descriptor '|fd|))
-                 (slot-value file-descriptor '|fd|)
-                 file-descriptor)))
+  (let ((fd (%stream-fd fos)))
     (cond
       ((eq fd 1)
        (write-sequence (%convert-to-unsigned-8-bit (java-array-data byte-array)) *standard-output* :start offset :end (+ offset length)))
@@ -1010,15 +1022,23 @@ valid() work.  Tolerate a raw stream in fd for robustness."
       (t
        (unimplemented "fd ~A in FileOutputStream.writeBytes" fd)))))
 
+(defmethod |write(IZ)| ((fos |java/io/FileOutputStream|) byte append?)
+  (declare (ignore append?))
+  (let ((fd (%stream-fd fos))
+        (b (logand byte #xFF)))
+    (cond
+      ((eql fd 1) (write-byte b *standard-output*))
+      ((eql fd 2) (write-byte b *error-output*))
+      ((streamp fd) (write-byte b fd))
+      (t (unimplemented "fd ~A in FileOutputStream.write" fd)))
+    nil))
+
 ;; Flush the underlying Lisp stream for stdout/stderr.
 ;; In standard Java, FileOutputStream.write() calls the OS write() directly
 ;; (no Lisp-level buffering). In OpenLDK, writes go through SBCL's stream
 ;; buffering, so we need explicit force-output when Java code calls flush().
 (defmethod |flush()| ((fos |java/io/FileOutputStream|))
-  (let* ((file-descriptor (slot-value fos '|fd|))
-         (fd (if (and file-descriptor (slot-exists-p file-descriptor '|fd|))
-                 (slot-value file-descriptor '|fd|)
-                 file-descriptor)))
+  (let ((fd (%stream-fd fos)))
     (cond
       ((eq fd 1) (force-output *standard-output*))
       ((eq fd 2) (force-output *error-output*))
@@ -1049,9 +1069,12 @@ valid() work.  Tolerate a raw stream in fd for robustness."
     (let* ((fd-holder (slot-value this '|fd|))
            (fd (if (and fd-holder (slot-exists-p fd-holder '|fd|))
                    (slot-value fd-holder '|fd|)
-                   fd-holder)))
-      (when (streamp fd)
-        (close fd))))
+                   fd-holder))
+           (stream (%resolve-fd fd)))
+      (when (streamp stream)
+        (ignore-errors (close stream)))
+      (when (integerp fd)
+        (remhash fd *fd-streams*))))
   nil)
 
 (defmethod |getEnclosingMethod0()| ((this |java/lang/Class|))

@@ -218,6 +218,12 @@ this must hold the real implementation path."
   (let ((lisp-thread (bordeaux-threads:current-thread)))
     (setf (gethash lisp-thread *lisp-to-java-threads*) new-thread)))
 
+(defmethod |setNativeName(Ljava/lang/String;)| ((thread |java/lang/Thread|) name)
+  "Name the OS thread; JDK 25's setName and InnocuousThread call it.  The
+name is recorded in the Java thread already, so there is nothing to do."
+  (declare (ignore thread name))
+  nil)
+
 (defmethod |getStackTrace0()| ((thread |java/lang/Thread|))
   "Return stack trace elements for the thread."
   (declare (ignore thread))
