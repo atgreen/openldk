@@ -85,6 +85,7 @@
                (:file "src/native/constantpool")
                (:file "src/native/methodhandles")
                (:file "src/native/unsafe-tail")
+               (:file "src/native/process")
                (:file "src/zlib-native")
                (:file "src/url")
                (:file "src/streams")
