@@ -1,4 +1,4 @@
-Test run by green on Sun Oct 18 07:30:06 2026
+Test run by green on Tue Oct 20 11:36:33 2026
 Native configuration is x86_64-pc-linux-gnu
 
 		=== openldk tests ===
@@ -537,9 +537,15 @@ PASS: aaa/MethodHandleTest.java output pattern test
 PASS: aaa/TestSuper.java (test for excess errors)
 PASS: aaa/TestSuper.java execution test
 PASS: aaa/TestSuper.java output pattern test
+PASS: aaa/childfirst.java (test for excess errors)
+PASS: aaa/childfirst.java execution test
+PASS: aaa/childfirst.java output pattern test
 PASS: aaa/digest.java (test for excess errors)
 PASS: aaa/digest.java execution test
 PASS: aaa/digest.java output pattern test
+PASS: aaa/filestat.java (test for excess errors)
+PASS: aaa/filestat.java execution test
+PASS: aaa/filestat.java output pattern test
 PASS: aaa/h001.java (test for excess errors)
 PASS: aaa/h001.java execution test
 PASS: aaa/h001.java output pattern test
@@ -567,20 +573,41 @@ PASS: aaa/icmpeq.java output pattern test
 PASS: aaa/instant.java (test for excess errors)
 PASS: aaa/instant.java execution test
 PASS: aaa/instant.java output pattern test
+PASS: aaa/jitwake.java (test for excess errors)
+PASS: aaa/jitwake.java execution test
+PASS: aaa/jitwake.java output pattern test
+PASS: aaa/lazyloader.java (test for excess errors)
+PASS: aaa/lazyloader.java execution test
+PASS: aaa/lazyloader.java output pattern test
+PASS: aaa/monitorwake.java (test for excess errors)
+PASS: aaa/monitorwake.java execution test
+PASS: aaa/monitorwake.java output pattern test
 PASS: aaa/ni.java (test for excess errors)
 PASS: aaa/ni.java execution test
 PASS: aaa/ni.java output pattern test
+PASS: aaa/reflstatic.java (test for excess errors)
+PASS: aaa/reflstatic.java execution test
+PASS: aaa/reflstatic.java output pattern test
+PASS: aaa/siblingloaders.java (test for excess errors)
+PASS: aaa/siblingloaders.java execution test
+PASS: aaa/siblingloaders.java output pattern test
 PASS: aaa/sp.java (test for excess errors)
 PASS: aaa/sp.java execution test
 PASS: aaa/switchindy.java (test for excess errors)
 PASS: aaa/switchindy.java execution test
 PASS: aaa/switchindy.java output pattern test
+PASS: aaa/waitwake.java (test for excess errors)
+PASS: aaa/waitwake.java execution test
+PASS: aaa/waitwake.java output pattern test
+PASS: aaa/zipfile.java (test for excess errors)
+PASS: aaa/zipfile.java execution test
+PASS: aaa/zipfile.java output pattern test
 PASS: aaa/zlib.java (test for excess errors)
 PASS: aaa/zlib.java execution test
 PASS: aaa/zlib.java output pattern test
 
 		=== openldk Summary ===
 
-# of expected passes		501
+# of expected passes		528
 # of expected failures		58
 # of unresolved testcases	3
