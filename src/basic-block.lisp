@@ -303,6 +303,26 @@ Combined with global substitutions during codegen for this block only.")
                 do (push end-block (exception-end-blocks start-block))
                 do (push (list (end-pc ete) i (catch-type ete) handler)
                          (gethash start-block tuples-by-block)))
+          ;; A range that contains another entry's handler protects that
+          ;; handler's code too.  Handler blocks are emitted outside every
+          ;; try's HANDLER-CASE, so give such a handler block the entry
+          ;; itself -- what javac does by splitting the range at the handler
+          ;; (see MERGE-EXCEPTION-ENTRIES).  Kawa doesn't split: its guard
+          ;; and with-exception-handler compile to an outer range covering an
+          ;; inner catch block, whose exception the outer catch must see.
+          (loop for i from 0 below (length exception-table)
+                for ete = (aref exception-table i)
+                for handler = (gethash (handler-pc ete) block-by-address)
+                do (loop for other across exception-table
+                         for inner-handler-pc = (handler-pc other)
+                         for inner-handler = (gethash inner-handler-pc block-by-address)
+                         when (and inner-handler
+                                   (< (start-pc ete) inner-handler-pc (end-pc ete))
+                                   (/= inner-handler-pc (handler-pc ete))
+                                   (not (find i (gethash inner-handler tuples-by-block)
+                                              :key #'second)))
+                           do (push (list (end-pc ete) i (catch-type ete) handler)
+                                    (gethash inner-handler tuples-by-block))))
           (maphash
            (lambda (start-block tuples)
              (setf (try-catch start-block)
