@@ -489,7 +489,10 @@ initializations.  Returns the IR instruction list."
                                               ;; Assigned here too: not single-assignment,
                                               ;; so copy propagation leaves it alone.
                                               (push (incf (svcount *context*)) (var-numbers normal)))
-                                             (t (push var (stack *context*))))
+                                             ;; The handler's stack is just the exception,
+                                             ;; whatever the code before it left.
+                                             (t (setf (stack *context*)
+                                                      (list var (make-instance '<stack-bottom-marker>)))))
                                            (cons (make-instance 'ir-assign
                                                                 :address pc-start
                                                                 :lvalue var
