@@ -54,6 +54,7 @@
   ((jmodfile :initarg :jmodfile)
    (zipfile :initform nil)
    (zipfile-entries)
+   (packages :initform nil)             ; hashtable: package name (a/b/c) -> T, built on demand
    (lock :initform (bt:make-lock "jmod-classpath-lock")))
   (:documentation "Classpath entry backed by a JMOD file. Like JAR but prepends classes/ to lookups."))
 
@@ -372,9 +373,12 @@ saved image was dumped)."
       (read-sequence bytes (slot-value cpe 'stream))
       bytes)))
 
-(defun jimage-has-package-p (cpe package-name)
-  "True when the jimage CPE has a class or resource in PACKAGE-NAME, in
-internal form (java/lang)."
+(defgeneric runtime-image-has-package-p (cpe package-name)
+  (:documentation "True when CPE, a part of the JDK's runtime image (the
+jimage, or a jmod), has a class or resource in PACKAGE-NAME, in internal
+form (java/lang)."))
+
+(defmethod runtime-image-has-package-p ((cpe jimage-classpath-entry) package-name)
   (with-slots (index packages lock) cpe
     (bt:with-lock-held (lock)
       (%ensure-entry-open cpe)
@@ -386,6 +390,22 @@ internal form (java/lang)."
                        (when slash
                          (setf (gethash (subseq path 0 slash) table) t))))
                    index)
+          (setf packages table)))
+      (gethash package-name packages))))
+
+(defmethod runtime-image-has-package-p ((cpe jmod-classpath-entry) package-name)
+  (with-slots (zipfile-entries packages lock) cpe
+    (bt:with-lock-held (lock)
+      (%ensure-entry-open cpe)
+      (unless packages
+        (let ((table (make-hash-table :test 'equal)))
+          (maphash (lambda (path entry)
+                     (declare (ignore entry))
+                     ;; classes/<package>/<name>; module-info.class has no package.
+                     (let ((slash (position #\/ path :from-end t)))
+                       (when (and slash (> slash 8) (starts-with? "classes/" path))
+                         (setf (gethash (subseq path 8 slash) table) t))))
+                   zipfile-entries)
           (setf packages table)))
       (gethash package-name packages))))
 
