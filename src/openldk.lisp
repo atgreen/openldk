@@ -1122,45 +1122,33 @@ that made concurrent Math.random()/holder-class first-use throw NPE."
                             ifaces))))
              ifaces))
 
-(defun %consistent-super-order (supers)
-  "SUPERS (class symbols), reordered so that CLOS can compute the class
-precedence list.  Java doesn't constrain the order a class lists its
-interfaces in, but CLOS requires the class precedence list to agree with
-every class's order of direct superclasses: IntelliJ's PSI interfaces
-(the Kotlin compiler's) order theirs so that some Java orders form a
-cycle.  The new class's own order is free, so merge the precedence lists
-of SUPERS (C3's merge, preferring earlier lists) and order SUPERS as the
-merge does.  When even that fails, return SUPERS unchanged."
-  (let* ((classes (mapcar (lambda (sym) (find-class sym nil)) supers)))
-    (if (or (null (rest supers)) (some #'null classes))
-        supers
-        (handler-case
-            (let ((lists (mapcar (lambda (class)
-                                   (closer-mop:ensure-finalized class)
-                                   (copy-list (closer-mop:class-precedence-list class)))
-                                 classes))
-                  (merged '()))
-              (loop while (some #'identity lists)
-                    do (let ((next (loop for list in lists
-                                         for head = (first list)
-                                         when (and head
-                                                   (notany (lambda (other) (member head (rest other)))
-                                                           lists))
-                                           return head)))
-                         (unless next
-                           (return-from %consistent-super-order supers))
-                         (push next merged)
-                         (setf lists (mapcar (lambda (list) (remove next list)) lists))))
-              (setf merged (nreverse merged))
-              (mapcar #'class-name
-                      (sort (copy-list classes) #'< :key (lambda (class) (position class merged)))))
-          (error () supers)))))
+(defvar *supertype-counts* (make-hash-table :test #'equal :synchronized t)
+  "Binary class name -> how many distinct supertypes it has.")
+
+(defun %supertype-count (class-name)
+  "How many distinct supertypes (superclasses and superinterfaces, all the
+way up) the class CLASS-NAME has, from its class file: more for any
+subtype, and fixed once the class is loaded."
+  (or (gethash class-name *supertype-counts*)
+      (setf (gethash class-name *supertype-counts*)
+            (let ((seen (make-hash-table :test #'equal)))
+              (labels ((walk (name)
+                         (let ((ldk-class (gethash name *ldk-classes-by-bin-name*)))
+                           (when ldk-class
+                             (dolist (super (append (and (slot-value ldk-class 'super)
+                                                         (list (slot-value ldk-class 'super)))
+                                                    (coerce (interfaces ldk-class) 'list)))
+                               (unless (gethash super seen)
+                                 (setf (gethash super seen) t)
+                                 (walk super)))))))
+                (walk class-name))
+              (hash-table-count seen)))))
 
 (defun %topo-sort-interfaces (ifaces)
   "Order interface symbols so that CLOS can always compute class precedence
 lists: removing redundant interfaces, then sorting by one global order that
-agrees with subtyping -- longest class precedence list (most specific)
-first, then by name.  Java gives the order of a class's interfaces no
+agrees with subtyping -- most supertypes (most specific) first, then by
+name.  Java gives the order of a class's interfaces no
 meaning, but CLOS requires the precedence list to agree with every class's
 order of direct superclasses; ordering each class's interfaces as Java
 lists them made some combinations contradict (IntelliJ's PSI and the
@@ -1168,14 +1156,7 @@ Kotlin compiler's Java model, which list the same interfaces in opposite
 orders), while one order shared by all classes never can."
   (when (null ifaces)
     (return-from %topo-sort-interfaces nil))
-  (flet ((depth (sym)
-           (let ((class (find-class sym nil)))
-             (if class
-                 (handler-case
-                     (progn (closer-mop:ensure-finalized class)
-                            (length (closer-mop:class-precedence-list class)))
-                   (error () 0))
-                 0))))
+  (flet ((depth (sym) (%supertype-count (symbol-name sym))))
     (stable-sort (copy-list (%remove-redundant-interfaces ifaces))
                  (lambda (a b)
                    (let ((da (depth a)) (db (depth b)))
@@ -1270,7 +1251,6 @@ one generic function: the bridge would call itself."
                                                          (coerce interfaces 'list)))))
                                     (%topo-sort-interfaces ifaces)))
                           (list))))
-                (setf supers (%consistent-super-order supers))
                 ;; JDK 9+: jdk/internal/misc/Unsafe must inherit from sun/misc/Unsafe
                 ;; so that existing native method stubs dispatch correctly.
                 ;; Replace java/lang/Object with sun/misc/Unsafe (which itself extends Object).
