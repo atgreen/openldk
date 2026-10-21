@@ -41,6 +41,7 @@ dref-test-package-inferred, ghcr.io/ocicl/mgl-pax-bootstrap@sha256:5cc19f28d326d
 fast-io, ghcr.io/ocicl/fast-io@sha256:7ba35a0eddf00b3c25656b3c5a93e95460f6cb8f807afbc04ef4f50076d95aff, fast-io-20240503-a4c5ad6/fast-io.asd
 fast-io-test, ghcr.io/ocicl/fast-io@sha256:7ba35a0eddf00b3c25656b3c5a93e95460f6cb8f807afbc04ef4f50076d95aff, fast-io-20240503-a4c5ad6/fast-io-test.asd
 file-attributes, ghcr.io/ocicl/file-attributes@sha256:5fff5d603e92c057f590ed6919e789524a8b2fbf9c9317be0063c67af4b8b37b, file-attributes-20260218-531dbc8/file-attributes.asd
+fiveam, ghcr.io/ocicl/fiveam@sha256:e283043dc8d31e8df2b214465cf5a06ea07bdbea10e600a40e17aaf9518226ac, fiveam-20240928-e43d6c8/fiveam.asd
 flexi-streams, ghcr.io/ocicl/flexi-streams@sha256:95005b06a8a95c82780c75ead53810bcb273d07fcf5fe76b527f1856df9923f2, flexi-streams-20240503-4951d57/flexi-streams.asd
 flexi-streams-test, ghcr.io/ocicl/flexi-streams@sha256:95005b06a8a95c82780c75ead53810bcb273d07fcf5fe76b527f1856df9923f2, flexi-streams-20240503-4951d57/flexi-streams-test.asd
 float-features, ghcr.io/ocicl/float-features@sha256:584413c7c013aa8bad9fc78360e25eb4030c4ad0936f589a5a7c04d33a5f5799, float-features-20260218-daecae2/float-features.asd
@@ -65,6 +66,7 @@ mt19937, ghcr.io/ocicl/mt19937@sha256:49c0a25a535cd22212343c67e17635b8e05675ad9c
 multilang-documentation-utils, ghcr.io/ocicl/documentation-utils@sha256:b2a1b3f3bcd1a738af85ae2b0168d408c177661eab6d6bbebb254e394d983f54, documentation-utils-20230511-98630dd/multilang-documentation-utils.asd
 named-readtables, ghcr.io/ocicl/named-readtables@sha256:cdfd96fd6f3c20f796f511fd2a92d3006261fe32daf6d7d1af868be9c72f273c, named-readtables-20260112-aa6dab5/named-readtables.asd
 named-readtables-test, ghcr.io/ocicl/named-readtables@sha256:cdfd96fd6f3c20f796f511fd2a92d3006261fe32daf6d7d1af868be9c72f273c, named-readtables-20260112-aa6dab5/named-readtables-test.asd
+net.didierverna.asdf-flv, ghcr.io/ocicl/net.didierverna.asdf-flv@sha256:e5cd087d41cf24302a92d9bac426a925f8868b554be2414c0f012c961e3ddb8c, asdf-flv-20240503-3f1de41/net.didierverna.asdf-flv.asd
 parse-declarations-1.0, ghcr.io/ocicl/parse-declarations-1.0@sha256:9305fa9624205b16fd1fc51cb1cc4282a18e50eee9ac75b66a14f6f2c5df9518, parse-declarations-20240503-549aebb/parse-declarations-1.0.asd
 parse-number, ghcr.io/ocicl/parse-number@sha256:11f3f9f512871e1f96cea6b8260aa3610e34e8fd7272bbcdb210fd3c5dd8025c, parse-number-20240503-cb9e487/parse-number.asd
 pathname-utils, ghcr.io/ocicl/pathname-utils@sha256:3f51de441bea45b3f83d6780f7b418ea1a243a8f6e2aa119e8dbf9f5d35f60b0, pathname-utils-20260218-c0aa51a/pathname-utils.asd
