@@ -219,9 +219,14 @@ loaders, whose classes are not in the global or app loader tables."
 
 (defun class-symbol-for-reference (class-name loader)
   "Get the Lisp symbol for CLASS-NAME when referenced from LOADER.
-   Looks up the class in the loader hierarchy to find its defining loader's package.
-   If not found, interns in LOADER's package (the class will be defined there)."
-  (if-let ((klass (%get-ldk-class-by-bin-name class-name t loader)))
+   Looks up the class in the loader hierarchy to find its defining loader's
+   package, then resolves it as the JVM would (%RESOLVE-CLASS, which can ask
+   the Java loader): a class from a loader outside LOADER's parent chain,
+   such as one of Clojure's per-evaluation DynamicClassLoaders, is named in
+   its own loader's package.  If not found, interns in LOADER's package
+   (the class will be defined there)."
+  (if-let ((klass (or (%get-ldk-class-by-bin-name class-name t loader)
+                      (%resolve-class class-name loader))))
     ;; Class found - use its defining loader's package via loader-package
     ;; (loader-package handles boot loader -> :openldk mapping)
     (let ((pkg (loader-package (slot-value klass 'ldk-loader))))
