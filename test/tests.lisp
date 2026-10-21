@@ -110,3 +110,42 @@ file, nothing."
         "1970 is within 2^32 seconds")
     (is (= -1 (funcall adjust (- epoch-now (expt 2 32)))))
     (is (= -1 (funcall adjust (+ epoch-now (expt 2 32)))))))
+
+(defmacro with-fetch-environment ((cache &rest variables) &body body)
+  "Run BODY with LDK_CACHE_DIR set to a fresh directory bound to CACHE,
+and the environment VARIABLES ((name value) ...) set, restoring all after."
+  (let ((saved (gensym "SAVED")))
+    `(let* ((,cache (merge-pathnames (format nil "openldk-fetch-test-~36R/"
+                                             (random (expt 36 8) (make-random-state t)))
+                                     (uiop:temporary-directory)))
+            (,saved (mapcar (lambda (name) (cons name (uiop:getenv name)))
+                            (list "LDK_CACHE_DIR" ,@(mapcar #'first variables)))))
+       (unwind-protect
+            (progn
+              (setf (uiop:getenv "LDK_CACHE_DIR") (uiop:native-namestring ,cache))
+              ,@(loop for (name value) in variables
+                      collect `(setf (uiop:getenv ,name) ,value))
+              ,@body)
+         (loop for (name . value) in ,saved
+               do (if value (setf (uiop:getenv name) value) (sb-posix:unsetenv name)))
+         (uiop:delete-directory-tree ,cache :validate t :if-does-not-exist :ignore)))))
+
+(test fetch-url
+  "fetch-url downloads into the cache, verifying the checksum, and leaves
+nothing behind when it refuses."
+  (with-fetch-environment (cache ("LDK_OFFLINE" "0"))
+    (is (equal cache (openldk::ldk-cache-dir)))
+    (let ((source (merge-pathnames "source.txt" cache))
+          (destination (merge-pathnames "fetched/copy.txt" cache))
+          (*error-output* (make-broadcast-stream)))
+      (ensure-directories-exist source)
+      (alexandria:write-string-into-file "abc" source)
+      (let ((url (format nil "file://~A" (uiop:native-namestring source)))
+            (sha256 "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"))
+        (signals openldk::fetch-error
+          (openldk::fetch-url url destination :sha256 (substitute #\0 #\b sha256)))
+        (is (null (directory (merge-pathnames "fetched/*.*" cache))))
+        (openldk::fetch-url url destination :sha256 (string-upcase sha256))
+        (is (equal "abc" (alexandria:read-file-into-string destination)))
+        (setf (uiop:getenv "LDK_OFFLINE") "1")
+        (signals openldk::fetch-error (openldk::fetch-url url destination))))))

@@ -53,6 +53,7 @@
   :serial t
   :components ((:file "src/package")
                (:file "src/conditions")
+               (:file "src/fetch")
                (:file "src/global-state")
                (:file "src/fiber")
                (:file "src/java-gf")
