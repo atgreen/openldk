@@ -39,3 +39,5 @@ data/
 /lib/abcl/abcl.jar
 /abcl
 /.cache/
+/lib/kawa-*.jar
+/kawa

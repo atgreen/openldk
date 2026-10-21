@@ -249,7 +249,7 @@ It exercises many JVM features (reflection, class generation, module loading) an
 as a good integration test for OpenLDK.
 
 ```bash
-# Build the Kawa SBCL image (uses lib/kawa-3.1.1.jar)
+# Build the warm Kawa SBCL image (downloads lib/kawa-3.1.1.jar; see docs/IMAGES.md)
 make kawa
 
 # Run Kawa interactively
@@ -268,7 +268,7 @@ LDK_DEBUG=L ./kawa
 - **Java 21**: Class file parser supports JDK 21 class files
 - **JAVA_HOME required**: Must point to JDK 21 (e.g., `/home/linuxbrew/.linuxbrew/opt/openjdk@21/libexec`). JDK classes are read directly from `$JAVA_HOME/jmods/*.jmod` files.
 - **ocicl**: Package manager - run `ocicl install` before building
-- **Build targets**: `make` builds openldk and javacl; `make kawa` builds the Kawa SBCL image; `make check` runs the test suite
+- **Build targets**: `make` builds openldk and javacl; `make kawa` and `make abcl` build warm Kawa and ABCL images; `make check` runs the test suite
 
 ## Code Organization
 
