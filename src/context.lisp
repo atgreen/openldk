@@ -70,6 +70,9 @@
     :std (make-hash-table)
     :doc "A tabled keyed on addresses, where if the value is T, then this is the end of a TRY region.")
    (stack-variables)
+   (shared-handler-table
+    :std (make-hash-table)
+    :doc "Handler addresses that normal code also reaches.")
    (single-assignment-table
     :std (make-hash-table :test #'equal))
    (pc :std 0)
