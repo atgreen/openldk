@@ -1076,9 +1076,16 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
   "Location of a boot-loader (system) package: everything OpenLDK loads
 from the jimage lives in the runtime image, so report jrt:.  A non-null
 result is what lets Class.getPackage() define Package objects for
-java.* classes."
-  (declare (ignore name))
-  (jstring "jrt:/java.base"))
+java.* classes.  Only a package the runtime image has gets one: for any
+other name the JVM answers null, and a made-up Package for it misleads
+callers (Kawa resolved unknown names as java.lang.Package objects).
+Without a jimage on the classpath, every name is reported, as before."
+  (let ((jimages (remove-if-not (lambda (cpe) (typep cpe 'jimage-classpath-entry))
+                                *classpath*))
+        (package (substitute #\/ #\. (lstring name))))
+    (when (or (null jimages)
+              (some (lambda (cpe) (jimage-has-package-p cpe package)) jimages))
+      (jstring "jrt:/java.base"))))
 
 ;; JDK 9+: BootLoader native — associate unnamed module with boot loader (no-op)
 (defun |jdk/internal/loader/BootLoader.setBootLoaderUnnamedModule0(Ljava/lang/Module;)| (module)

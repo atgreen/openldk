@@ -263,6 +263,7 @@ count from the start of the file."
    (stream :initform nil)               ; open binary stream for resource data reads
    (index :initform nil)                ; hashtable: resource path -> location list
    (data-base :initform 0)              ; file offset where the resource data begins
+   (packages :initform nil)             ; hashtable: package name (a/b/c) -> T, built on demand
    (lock :initform (bt:make-lock "jimage-classpath-lock")))
   (:documentation "Classpath entry backed by a JDK jimage file ($JAVA_HOME/lib/modules)."))
 
@@ -370,6 +371,23 @@ saved image was dumped)."
       (file-position (slot-value cpe 'stream) offset)
       (read-sequence bytes (slot-value cpe 'stream))
       bytes)))
+
+(defun jimage-has-package-p (cpe package-name)
+  "True when the jimage CPE has a class or resource in PACKAGE-NAME, in
+internal form (java/lang)."
+  (with-slots (index packages lock) cpe
+    (bt:with-lock-held (lock)
+      (%ensure-entry-open cpe)
+      (unless packages
+        (let ((table (make-hash-table :test 'equal)))
+          (maphash (lambda (path location)
+                     (declare (ignore location))
+                     (let ((slash (position #\/ path :from-end t)))
+                       (when slash
+                         (setf (gethash (subseq path 0 slash) table) t))))
+                   index)
+          (setf packages table)))
+      (gethash package-name packages))))
 
 (defmethod %ensure-entry-open ((cpe jimage-classpath-entry))
   (ensure-jimage-loaded cpe))
