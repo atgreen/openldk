@@ -50,3 +50,5 @@ data/
 /clojure
 /lib/jscheme/tmp1
 /lib/jscheme/tmp2
+/sbcl-jscheme
+/sbcl-clojure

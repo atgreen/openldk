@@ -152,3 +152,21 @@
   :perform (test-op (o c)
              (unless (uiop:symbol-call :fiveam '#:run! :openldk-jscheme-tests)
                (error "openldk/jscheme tests failed"))))
+
+(asdf:defsystem "openldk/clojure"
+  :description "Use Clojure from Common Lisp"
+  :author "Anthony Green <green@moxielogic.com>"
+  :license "GPL3+Classpath Exception"
+  :depends-on ("openldk/interop")
+  :components ((:file "interop/clojure"))
+  :in-order-to ((test-op (test-op "openldk/clojure/tests"))))
+
+(asdf:defsystem "openldk/clojure/tests"
+  :description "Tests for openldk/clojure; need `make clojure`"
+  :depends-on ("openldk/clojure" "fiveam")
+  :pathname "test"
+  :components ((:file "clojure"))
+  :perform (test-op (o c)
+             (unless (uiop:symbol-call :fiveam '#:run! :openldk-clojure-tests)
+               (error "openldk/clojure tests failed"))))
+
