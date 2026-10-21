@@ -1,0 +1,79 @@
+;;;; Tests for openldk/jscheme: JScheme from Common Lisp (FiveAM).
+;;;;
+;;;; Needs JScheme's classes, built by `make jscheme`.  Run with
+;;;; `make check-jscheme' or (asdf:test-system "openldk/jscheme").
+
+(defpackage :openldk-jscheme-tests
+  (:use :cl :fiveam))
+
+(in-package :openldk-jscheme-tests)
+
+(def-suite :openldk-jscheme-tests
+  :description "Using JScheme from Common Lisp.")
+
+(in-suite :openldk-jscheme-tests)
+
+(test startup
+  (is (not (null (jscheme:startup))))
+  (is (eq (jscheme:startup) jscheme:*interpreter*) "STARTUP twice gives the same interpreter"))
+
+(test eval-forms-and-strings
+  (is (= 5 (jscheme:eval '(+ 2 3))))
+  (is (= 0.25d0 (jscheme:eval '(/ 1 4))))
+  (is (= 3628800 (jscheme:eval "(define (fact n) (if (< n 2) 1 (* n (fact (- n 1))))) (fact 10)"))))
+
+(test values-to-lisp
+  (is (equal '(1 "two" #\3 four t nil)
+             (jscheme:eval '(list 1 "two" #\3 'four t :false))))
+  (is (equalp #(1 2 3) (jscheme:eval '(vector 1 2 3))))
+  (is (equal '(1 . 2) (jscheme:eval '(cons 1 2))))
+  (is (null (jscheme:eval ''()))))
+
+(test values-round-trip
+  (dolist (value '(42 -7 2.5d0 "a string" #\x some-symbol (1 (2 3) "four") (a . b)))
+    (is (equalp value (jscheme:to-lisp (jscheme:from-lisp value))))))
+
+(test call-scheme-from-lisp
+  (jscheme:eval '(define (add3 a b c) (+ a b c)))
+  (is (= 6 (jscheme:funcall "add3" 1 2 3)))
+  (is (= 6 (jscheme:funcall 'add3 1 2 3)))
+  (is (string= "foobar" (jscheme:funcall (jscheme:lookup 'string-append) "foo" "bar"))))
+
+(test call-lisp-from-scheme
+  (jscheme:define "square" (lambda (x) (* x x)))
+  (is (equal '(1 4 9) (jscheme:eval '(map square '(1 2 3)))))
+  (jscheme:define 'lisp-upcase #'string-upcase)
+  (is (string= "SHOUT" (jscheme:eval '(lisp-upcase "shout"))))
+  (jscheme:define 'make-pair (lambda (a b) (cons a b)))
+  (is (equal '(1 . 2) (jscheme:eval '(make-pair 1 2)))))
+
+(test predicates
+  (jscheme:define "small?" (lambda (x) (< x 10)) :predicate t)
+  (is (eq 'big (jscheme:eval '(if (small? 50) 'small 'big))))
+  (is (eq 'small (jscheme:eval '(if (small? 5) 'small 'big))))
+  ;; Without :PREDICATE, NIL is '(), which Scheme treats as true.
+  (jscheme:define "nil-returner" (lambda (x) (declare (ignore x)) nil))
+  (is (eq 'true (jscheme:eval '(if (nil-returner 0) 'true 'false)))))
+
+(test scheme-errors
+  (signals openldk.interop:foreign-error (jscheme:eval '(no-such-procedure 1)))
+  (handler-case (jscheme:eval '(no-such-procedure 1))
+    (openldk.interop:foreign-error (e)
+      (is (string= "JScheme" (openldk.interop:foreign-error-language e)))
+      (is (search "no-such-procedure" (openldk.interop:foreign-error-message e))))))
+
+(test lisp-errors-in-callbacks
+  (jscheme:define "fails" (lambda () (error "from Lisp: ~A" 42)))
+  (handler-case (progn (jscheme:eval '(fails)) (fail "no error"))
+    (simple-error (e) (is (string= "from Lisp: 42" (princ-to-string e)))))
+  (jscheme:define "type-fails" (lambda (x) (+ x "a")))
+  (signals type-error (jscheme:eval '(type-fails 1))))
+
+(test load-file
+  (let ((file (uiop:with-temporary-file (:stream s :pathname p :keep t :type "scm")
+                (write-string "(define loaded-value 99)" s)
+                p)))
+    (unwind-protect
+         (progn (jscheme:load file)
+                (is (= 99 (jscheme:eval 'loaded-value))))
+      (delete-file file))))

@@ -126,3 +126,29 @@
 #+sb-core-compression
 (defmethod asdf:perform ((o asdf:image-op) (c asdf:system))
   (uiop:dump-image (asdf:output-file o c) :executable t :compression t))
+
+;;; Using other JVM languages from Lisp, on OpenLDK (see docs/INTEROP.md).
+
+(asdf:defsystem "openldk/interop"
+  :description "Shared core of OpenLDK's language systems: Java calls, values, callbacks, errors"
+  :author "Anthony Green <green@moxielogic.com>"
+  :license "GPL3+Classpath Exception"
+  :depends-on ("openldk")
+  :components ((:file "interop/core")))
+
+(asdf:defsystem "openldk/jscheme"
+  :description "Use Peter Norvig's JScheme from Common Lisp"
+  :author "Anthony Green <green@moxielogic.com>"
+  :license "GPL3+Classpath Exception"
+  :depends-on ("openldk/interop")
+  :components ((:file "interop/jscheme"))
+  :in-order-to ((test-op (test-op "openldk/jscheme/tests"))))
+
+(asdf:defsystem "openldk/jscheme/tests"
+  :description "Tests for openldk/jscheme; need `make jscheme`"
+  :depends-on ("openldk/jscheme" "fiveam")
+  :pathname "test"
+  :components ((:file "jscheme"))
+  :perform (test-op (o c)
+             (unless (uiop:symbol-call :fiveam '#:run! :openldk-jscheme-tests)
+               (error "openldk/jscheme tests failed"))))
