@@ -41,3 +41,12 @@ data/
 /.cache/
 /lib/kawa-*.jar
 /kawa
+/lib/jscheme/jscheme-src.jar
+/lib/jscheme/r4rstest.scm
+/lib/jscheme/src/
+/lib/jscheme/classes/
+/jscheme
+/lib/clojure/*.jar
+/clojure
+/lib/jscheme/tmp1
+/lib/jscheme/tmp2

@@ -182,15 +182,20 @@ OpenLDK can run non-trivial Java applications:
   source to class files.  A pre-warmed `javacl` image is built by `make`.
 - **Kawa** - The [Kawa](https://www.gnu.org/software/kawa/) Scheme
   implementation (a JVM language) boots and runs its REPL on OpenLDK.
+  `make kawa` builds a warm image that starts in seconds.
 - **ABCL** - [Armed Bear Common Lisp](https://abcl.org/) 1.9.2 boots
   on OpenLDK and runs its REPL: CLOS, conditions, the compiler and Java
-  interop all work.  It is slow (minutes to the first prompt, most of it
-  first-use JIT compilation).  See [docs/ABCL.md](docs/ABCL.md).
-- **Clojure** - [Clojure](https://clojure.org/) 1.12.0's runtime
-  (`clojure.lang.RT`) initializes on OpenLDK and reaches Clojure's own
-  compiler loading `clojure/core.clj`.  Full bootstrap is not yet
-  complete: it is currently blocked in the JDK's MethodHandle-based
-  reflective field-accessor path.
+  interop all work.  Cold, it takes minutes to the first prompt (most of
+  it first-use JIT compilation); `make abcl` builds a warm image that
+  starts in under a second.  See [docs/ABCL.md](docs/ABCL.md).
+- **Clojure** - [Clojure](https://clojure.org/) 1.12.4 boots and runs its
+  REPL, including protocols, records, atoms and futures.  Cold startup
+  takes about six minutes; `make clojure` builds a warm image with
+  `clojure.core` loaded that starts in under a second.
+- **JScheme** - Peter Norvig's [JScheme](https://norvig.com/jscheme.html)
+  passes its R4RS test suite.  `make jscheme` builds a warm image.
+
+The warm images are described in [docs/IMAGES.md](docs/IMAGES.md).
 
 The code is not optimized.  Even with heavy optimization, OpenLDK's
 performance will not be competitive to modern Java implementations.
