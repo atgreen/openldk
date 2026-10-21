@@ -1991,6 +1991,20 @@ Used to consult block-local substitutions in addition to global ones.")
           (push basic-block (first (emitted-block-scopes *context*)))
           (pop (slot-value *context* 'blocks))
 
+          ;; The last block of a catch handler doesn't emit its fall-through
+          ;; successor (the merge point after the try/catch), which is
+          ;; emitted on another path -- possibly earlier, as when the
+          ;; try/catch sits inside an IF whose false branch skips to the same
+          ;; place.  Jump there explicitly, or the handler would run off the
+          ;; end of the TAGBODY and the method would return NIL.
+          (when (and (end-of-handler? basic-block)
+                     (not stop-emitting-blocks?)
+                     (fall-through-address basic-block))
+            (setf lisp-code
+                  (nconc lisp-code
+                         (list (list 'go (intern (format nil "branch-target-~A"
+                                                         (address (car (code (fall-through-address basic-block)))))))))))
+
           (unless (end-of-handler? basic-block)
 
             ;; Emit code for successors if not stopping
