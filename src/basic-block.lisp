@@ -129,12 +129,19 @@ Combined with global substitutions during codegen for this block only.")
   (let* ((sorted-entries (sort (coerce entries 'list)
                                #'<
                                :key (lambda (entry) (start-pc entry))))
+         (handler-pcs (mapcar #'handler-pc sorted-entries))
          (merged (loop
                   with result = nil
                   for entry in sorted-entries
                   unless (eq (start-pc entry) (handler-pc entry)) ;; Ignore self-serving ranges
                     do (if (and result
                                 (= (1- (start-pc entry)) (slot-value (first result) 'end-pc))
+                                ;; Never merge in a range that starts at a handler:
+                                ;; handler blocks are emitted outside the try's
+                                ;; HANDLER-CASE, so the merged range would leave
+                                ;; that handler unprotected (an inner catch block
+                                ;; whose exception an outer try should catch).
+                                (not (member (start-pc entry) handler-pcs))
                                 (= (handler-pc entry) (handler-pc (first result)))
                                 (equal (catch-type entry) (catch-type (first result))))
                            ;; Merge the current entry into the last merged one
