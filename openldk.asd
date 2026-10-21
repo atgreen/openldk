@@ -79,6 +79,7 @@
                (:file "src/native/bytearray")
                (:file "src/native/threads")
                (:file "src/native/management")
+               (:file "src/native/jsr292")
                (:file "src/native/unsafe")
                (:file "src/native/reflection")
                (:file "src/native/system")

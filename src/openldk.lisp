@@ -1342,7 +1342,53 @@ shadows a superclass field and needs its own storage."
                                                                                      collect (intern (format nil "arg~A" i) :openldk))))))))))))
                                    methods)))))))
 
-    (append defclass-code methods-code)))
+    (append defclass-code methods-code (%boxing-bridge-methods class pkg))))
+
+(defun %boxing-bridge-methods (class pkg)
+  "Methods are named without their return type, so a bridge collides with
+the method it bridges to, and only the latter is emitted.  For references
+that loses nothing, but a bridge returning Object for a method returning
+boolean or char boxes the result (Scala's BooleanSetting.value), which
+callers expecting an Object rely on.  Box such methods' results with an
+:around method; call sites expecting a boolean or char unbox (see
+%PRIMITIVE-RESULT)."
+  (let ((by-name (make-hash-table :test #'equal))
+        (class-sym (intern (slot-value class 'name) pkg)))
+    (loop for m across (slot-value class 'methods)
+          unless (static-p m)
+            do (push m (gethash (lispize-method-name (format nil "~A~A" (slot-value m 'name)
+                                                              (slot-value m 'descriptor)))
+                                by-name)))
+    (loop for name being the hash-keys of by-name using (hash-value ms)
+          for return-chars = (mapcar (lambda (m)
+                                       (let ((d (slot-value m 'descriptor)))
+                                         (char d (1+ (position #\) d)))))
+                                     ms)
+          for primitive = (find-if (lambda (c) (member c '(#\Z #\C))) return-chars)
+          when (and primitive (some (lambda (c) (member c '(#\L #\[))) return-chars))
+            collect (let ((params (loop for i from 1 upto (count-parameters (slot-value (first ms) 'descriptor))
+                                        collect (intern (format nil "arg~A" i) :openldk))))
+                      `(defmethod ,(intern name :openldk) :around ((,(intern "this" :openldk) ,class-sym) ,@params)
+                         (declare (ignorable ,@params))
+                         (%box-primitive-result (call-next-method) ,primitive))))))
+
+(defun %box-primitive-result (value char)
+  "VALUE boxed as the primitive type CHAR (Z or C) boxes, unless already boxed."
+  (if (integerp value)
+      (if (char= char #\Z)
+          (%boolean-object (not (zerop value)))
+          (%box-primitive-return value #\C))
+      value))
+
+(declaim (inline %primitive-result))
+(defun %primitive-result (value)
+  "The boolean or char a call site expects, from VALUE, which a method
+returning it boxed for a bridge (see %BOXING-BRIDGE-METHODS) may have."
+  (if (integerp value)
+      value
+      (cond ((%java-class-p value "java/lang/Boolean") (slot-value value '|value|))
+            ((%java-class-p value "java/lang/Character") (slot-value value '|value|))
+            (t value))))
 
 
 (defun find-class-in-loader-hierarchy (classname ldk-loader)

@@ -521,84 +521,18 @@ not searched -- VarHandle/MethodHandle field access targets declared fields)."
     (java-class result)))
 
 (defun %invoke-polymorphic-signature (method-handle &rest args)
-  "Invoke a MethodHandle's target method with the given arguments.
-   The first argument is the MethodHandle, the rest are passed to the target."
-  ;; Extract the target MemberName from the MethodHandle
-  (let* ((form (when (and (slot-exists-p method-handle '|form|)
-                          (slot-boundp method-handle '|form|))
-                 (slot-value method-handle '|form|)))
-         (vmentry (when (and form
-                             (slot-exists-p form '|vmentry|)
-                             (slot-boundp form '|vmentry|))
-                    (slot-value form '|vmentry|))))
-    (unless vmentry
-      (internal-error "MethodHandle.invokeExact: no vmentry found in ~A" method-handle))
+  "MethodHandle.invokeExact, invoke and invokeBasic: run METHOD-HANDLE on
+ARGS (see %MH-INVOKE, in jsr292.lisp)."
+  (%mh-invoke method-handle args))
 
-    ;; Extract method information from the MemberName
-    (let* ((clazz (when (and (slot-exists-p vmentry '|clazz|)
-                            (slot-boundp vmentry '|clazz|))
-                   (slot-value vmentry '|clazz|)))
-           (name (when (and (slot-exists-p vmentry '|name|)
-                           (slot-boundp vmentry '|name|))
-                  (slot-value vmentry '|name|)))
-           (type (when (and (slot-exists-p vmentry '|type$|)
-                           (slot-boundp vmentry '|type$|))
-                  (slot-value vmentry '|type$|)))
-           (flags (when (and (slot-exists-p vmentry '|flags|)
-                            (slot-boundp vmentry '|flags|))
-                   (slot-value vmentry '|flags|))))
-
-      (unless (and clazz name type)
-        (internal-error "MethodHandle.invokeExact: incomplete MemberName ~A" vmentry))
-
-      ;; Get the class name and method name as strings
-      (let* ((class-name-raw (lstring (slot-value clazz '|name|)))
-             ;; Class names from Class.getName() use . separator, but we need /
-             (class-name (substitute #\/ #\. class-name-raw))
-             (method-name (lstring name))
-             ;; type can be either a String (descriptor) or a MethodType
-             (method-type (if (typep type '|java/lang/String|)
-                              ;; It's already a string descriptor
-                              (lstring type)
-                              ;; It's a MethodType, build descriptor from rtype/ptypes
-                              (let ((rtype (slot-value type '|rtype|))
-                                    (ptypes (when (slot-exists-p type '|ptypes|)
-                                              (slot-value type '|ptypes|))))
-                                (%build-method-descriptor rtype ptypes))))
-             ;; Check if it's a static method (REF_invokeStatic = 6, shifted left by 24 bits)
-             (ref-kind (ash (logand flags #x0F000000) -24))
-             (is-static (= ref-kind 6)))
-
-        ;; Construct the lispized method name: class.method(descriptor)
-        ;; Static methods use loader's package (include class name)
-        ;; Instance methods use :openldk (generic function dispatch)
-        (let* ((full-method-sig (format nil "~A.~A~A" class-name method-name method-type))
-               (lispized-name (lispize-method-name full-method-sig))
-               (pkg (if is-static
-                        (class-package class-name)
-                        (find-package :openldk)))
-               (lisp-method-name (intern lispized-name pkg)))
-
-          ;; Invoke the method.
-          ;; LambdaForm internal methods (invokeStaticInit_*, etc.) expect the
-          ;; MethodHandle as their first argument (part of the LambdaForm calling
-          ;; convention).  Actual target methods do NOT -- they receive only the
-          ;; user-visible arguments.  We distinguish by checking the parameter
-          ;; count: if the method takes exactly (length args) parameters, skip the
-          ;; MethodHandle; if it takes (1+ (length args)), prepend it.
-          (let ((param-count (count-parameters method-type)))
-            (if (= param-count (length args))
-                (apply lisp-method-name args)
-                (apply lisp-method-name method-handle args))))))))
-
-(defun %make-trusted-lookup ()
+(defun %make-trusted-lookup (&optional lookup-class)
   "Return a trusted MethodHandles.Lookup instance. We intentionally relax access
-checks for now; lookupClass defaults to Object (a NIL lookupClass blows up in
-LambdaMetafactory), allowedModes is TRUSTED (-1) so Lookup.checkAccess is
-bypassed."
+checks for now; lookupClass is LOOKUP-CLASS, by default Object (a NIL
+lookupClass blows up in LambdaMetafactory), allowedModes is TRUSTED (-1) so
+Lookup.checkAccess is bypassed."
   (classload "java/lang/invoke/MethodHandles$Lookup")
   (let ((lk (%make-java-instance "java/lang/invoke/MethodHandles$Lookup"))
-        (caller-class (%get-java-class-by-bin-name "java/lang/Object")))
+        (caller-class (or lookup-class (%get-java-class-by-bin-name "java/lang/Object"))))
     (when (slot-exists-p lk '|lookupClass|)
       (setf (slot-value lk '|lookupClass|) caller-class))
     (when (slot-exists-p lk '|allowedModes|)

@@ -206,7 +206,7 @@
                         +encoding-properties+
                         (%vm-dynamic-properties)
                         `(("user.home" . ,(uiop:getenv "HOME"))
-                          ("user.dir" . ,(namestring (uiop:getcwd)))
+                          ("user.dir" . ,(%current-directory-string))
                           ("user.name" . ,(%user-name))
                           ("os.name" . ,(%os-name))
                           ("os.version" . ,(%os-version))
@@ -502,16 +502,24 @@ radix outside 2..36 falls back to decimal."
 (defun %java-simple-name (class)
   "Compute Class.getSimpleName() for CLASS: strip the package and any enclosing
 class ($-separated) and compiler-added local/anonymous digits; arrays get []
-suffixes. Java's own getSimpleName relies on getEnclosingClass(), which OpenLDK
-does not reconstruct, so we compute it from the name directly."
+suffixes.  A nested class's simple name comes from its InnerClasses entry, as
+on a JVM; a class without one (generated, or hand-assembled) keeps the whole
+name after its package, $ and all."
   (if (eq (|isArray()| class) 1)
       (concatenate 'string (%java-simple-name (|getComponentType()| class)) "[]")
-      (let* ((n (lstring (slot-value class '|name|)))
-             (dot (position #\. n :from-end t))
-             (n (if dot (subseq n (1+ dot)) n))
-             (dollar (position #\$ n :from-end t))
-             (n (if dollar (subseq n (1+ dollar)) n)))
-        (string-left-trim "0123456789" n))))
+      (let* ((lclass (and (eq 0 (|isPrimitive()| class)) (get-ldk-class-for-java-class class)))
+             (entry (and lclass (%inner-class-entry lclass))))
+        (if entry
+            ;; A nested class: the simple name its InnerClasses entry gives
+            ;; it, or none for an anonymous class.
+            (let ((index (slot-value entry 'inner-name-index)))
+              (if (zerop index)
+                  ""
+                  (slot-value (aref (constant-pool lclass) index) 'value)))
+            ;; A top-level class: its name without the package.
+            (let* ((n (lstring (slot-value class '|name|)))
+                   (dot (position #\. n :from-end t)))
+              (if dot (subseq n (1+ dot)) n))))))
 
 ;; Class.getSimpleName() is bytecoded and depends on getEnclosingClass(), which
 ;; we don't reconstruct (so it would return e.g. "Outer$Inner"). Override it.
@@ -595,10 +603,6 @@ does not reconstruct, so we compute it from the name directly."
            (class-sym (intern bin-class-name pkg))
            (obj (make-instance class-sym))
            (descriptor (build-method-descriptor (slot-value constructor '|parameterTypes|))))
-      ;; Ensure clazz metadata is populated
-      (when (slot-exists-p obj '|clazz|)
-        (let ((klass (%get-java-class-by-bin-name bin-class-name t)))
-          (when klass (setf (slot-value obj '|clazz|) klass))))
       (if (string= "()V" descriptor)
           (|<init>()| obj)
           (progn
@@ -1123,6 +1127,27 @@ attribute; nil for top-level, local, and anonymous classes."
                                                     'value)))
                        (%get-java-class-by-bin-name outer-name t))))))
 
+(defun %inner-class-entry (lclass)
+  "LCLASS's own entry in its InnerClasses attribute, or NIL."
+  (loop for ic in (gethash "InnerClasses" (attributes lclass))
+        when (let* ((inner-ref (aref (constant-pool lclass) (inner-class-info-index ic)))
+                    (inner-name (slot-value (aref (constant-pool lclass) (index inner-ref))
+                                            'value)))
+               (string= inner-name (name lclass)))
+          return ic))
+
+(defmethod |getSimpleBinaryName0()| ((this |java/lang/Class|))
+  "The simple name THIS's InnerClasses entry gives it; nil for a top-level
+or anonymous class (Class.isAnonymousClass, getSimpleName)."
+  (let* ((lclass (and (eq 0 (|isArray()| this))
+                      (eq 0 (|isPrimitive()| this))
+                      (get-ldk-class-for-java-class this)))
+         (entry (and lclass (%inner-class-entry lclass))))
+    (when entry
+      (let ((index (slot-value entry 'inner-name-index)))
+        (unless (zerop index)
+          (jstring (slot-value (aref (constant-pool lclass) index) 'value)))))))
+
 (defmethod |getPermittedSubclasses0()| ((this |java/lang/Class|))
   "JDK 17+ native for sealed classes: return the PermittedSubclasses array,
 or null when the class is not sealed.  OpenLDK does not track the
@@ -1557,6 +1582,13 @@ parent delegation is the Java caller's job)."
     (setf (gethash url *native-url-strings*) url-string)
     (%set-url-fields url url-string)
     url))
+
+(defun %current-directory-string ()
+  "The current directory, as user.dir has it: without a trailing slash."
+  (let ((dir (namestring (uiop:getcwd))))
+    (if (and (> (length dir) 1) (char= (char dir (1- (length dir))) #\/))
+        (subseq dir 0 (1- (length dir)))
+        dir)))
 
 (defun %set-url-fields (url url-string)
   "Fill URL's fields from URL-STRING as URL's constructor would, so Java

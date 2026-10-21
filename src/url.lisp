@@ -265,9 +265,55 @@ protocol field, or parse it out of the URL's string form."
       (if (eq s :fallthrough) (call-next-method) s))
     (call-next-method)))
 
+(defmethod |getInputStream()| ((conn |java/net/URLConnection|))
+  "Fallback primary, before java.net.URLConnection is loaded: standard method
+combination signals NO-PRIMARY-METHOD if only the :around above applies."
+  (when-let ((url (gethash conn *connection-urls*)))
+    (let ((s (%open-url-stream-1 url)))
+      (unless (eq s :fallthrough) s))))
+
 (defmethod |getLastModified()| ((conn |java/net/URLConnection|))
   (declare (ignore conn))
   0)
+
+;; The rest of what callers configure or ask a connection before reading it
+;; (Groovy's class-file reader turns caching off).  The synthetic connection
+;; is an instance of the stub class above until java.net.URLConnection is
+;; loaded, whose methods then replace these.
+(defmethod |setUseCaches(Z)| ((conn |java/net/URLConnection|) use-caches)
+  (declare (ignore conn use-caches))
+  nil)
+
+(defmethod |getUseCaches()| ((conn |java/net/URLConnection|))
+  (declare (ignore conn))
+  0)
+
+(defmethod |setDefaultUseCaches(Z)| ((conn |java/net/URLConnection|) use-caches)
+  (declare (ignore conn use-caches))
+  nil)
+
+(defmethod |connect()| ((conn |java/net/URLConnection|))
+  (declare (ignore conn))
+  nil)
+
+(defmethod |setConnectTimeout(I)| ((conn |java/net/URLConnection|) timeout)
+  (declare (ignore conn timeout))
+  nil)
+
+(defmethod |setReadTimeout(I)| ((conn |java/net/URLConnection|) timeout)
+  (declare (ignore conn timeout))
+  nil)
+
+(defmethod |getURL()| ((conn |java/net/URLConnection|))
+  (gethash conn *connection-urls*))
+
+(defmethod |getContentLength()| ((conn |java/net/URLConnection|))
+  (declare (ignore conn))
+  -1)
+
+(defmethod |getContentLengthLong()| ((conn |java/net/URLConnection|))
+  (declare (ignore conn))
+  -1)
 
 ;; The JDK ZipFile/JarFile/ZipEntry stubs carry no CLOS slots (OpenLDK reads
 ;; jars through its own Lisp zip library, not these classes), so we attach the

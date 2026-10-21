@@ -1348,14 +1348,15 @@ component types must match exactly (short[] is not an int[])."
 
 (defparameter *invokedynamic-cache* (make-hash-table :test #'equal))
 
-(defun %resolve-invokedynamic (method-name bootstrap-method-name address fname &rest args)
+(defun %resolve-invokedynamic (method-name bootstrap-method-name site-key caller fname &rest args)
   "Resolve an invokedynamic call site by invoking its bootstrap method.
 BOOTSTRAP-METHOD-NAME is the full \"class/name.method(descriptor)\" string of the
 bootstrap method (e.g. java/lang/runtime/SwitchBootstraps.typeSwitch(...)). The
 bootstrap class is always a boot/library class, so we load it and resolve the
-static function in its own defining package rather than the caller's."
+static function in its own defining package rather than the caller's.
+SITE-KEY identifies the call site; CALLER is the binary name of its class."
   (declare (ignore method-name))
-  (let* ((key (list bootstrap-method-name address))
+  (let* ((key site-key)
          (cached (gethash key *invokedynamic-cache*)))
     (or cached
         (let* ((paren (position #\( bootstrap-method-name))
@@ -1366,7 +1367,9 @@ static function in its own defining package rather than the caller's."
                  (fn-sym (static-method-symbol (lispize-method-name bootstrap-method-name) pkg))
                  (param-types (parse-parameter-types bootstrap-method-name))
                  (nparams (length param-types))
-                 (full-args (append (list (|java/lang/invoke/MethodHandles.lookup()|) fname) args))
+                 (full-args (append (list (%make-trusted-lookup (%get-java-class-by-bin-name caller t))
+                                          fname)
+                                    args))
                  ;; Bootstrap methods are frequently varargs (last parameter an
                  ;; Object[]), e.g. SwitchBootstraps.typeSwitch and
                  ;; ObjectMethods.bootstrap. Collect the trailing arguments into a
@@ -1693,17 +1696,20 @@ boolean prints true/false and char prints the character rather than an int."
          (make-instance '<expression>
                         :insn insn
                         :code
+                        ;; Each call site resolves once: its own key, and a
+                        ;; lookup on the class it is in, as the bootstrap
+                        ;; method expects (Groovy dispatches on it).  The
+                        ;; target has the call site's type: invoke it exactly.
                         `(let ((callsite (%resolve-invokedynamic ,method-name
                                                                  ,bootstrap-method-name
-                                                                 ,address
+                                                                 ',(gensym "INDY-SITE")
+                                                                 ,(slot-value (slot-value context 'class) 'name)
                                                                  ,(jstring method-name)
                                                                  ,@(remove nil (mapcar (lambda (a)
                                                                                         (when a (code (codegen a context))))
                                                                                       args)))))
-                           (let ((target (|getTarget()| callsite)))
-                             (let ((args-array (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Object")
-                                                                :initial-contents (list ,@(mapcar (lambda (a) (code (codegen a context))) dynamic-args)))))
-                               (|invokeWithArguments([Ljava/lang/Object;)| target args-array))))))))))
+                           (%mh-invoke (|getTarget()| callsite)
+                                       (list ,@(mapcar (lambda (a) (code (codegen a context))) dynamic-args))))))))))
 
 (defmethod codegen ((insn ir-clinit) context)
   (with-slots (class) insn
@@ -1761,12 +1767,9 @@ boolean prints true/false and char prints the character rather than an int."
              (pkg (class-package classname)))
         (make-instance '<expression>
                        :insn insn
-                       :code `(let* ((obj (make-instance ',(intern classname pkg)))
-                                     (klass ,(java-class class)))
-                                ;; Ensure clazz slot is populated for instanceof/reflection
-                                (when (and klass (slot-exists-p obj '|clazz|))
-                                  (setf (slot-value obj '|clazz|) klass))
-                                obj)
+                       ;; A new object's fields are all default: a Java field
+                       ;; named clazz too (Groovy's ClassNode has one).
+                       :code `(make-instance ',(intern classname pkg))
                        :expression-type :REFERENCE)))))
 
 (defmethod codegen ((insn ir-new-array) context)
@@ -2143,3 +2146,20 @@ Used to consult block-local substitutions in addition to global ones.")
                                                 (go ,(intern (format nil "branch-target-~A" (address handler-block)))))))
                             ,@fall-through-go))))))
           lisp-code)))))
+
+;; A method returning boolean or char may return it boxed, when a bridge
+;; returning Object shares its name (see %BOXING-BRIDGE-METHODS): unbox at
+;; instance-method call sites expecting one.
+(defmethod codegen :around ((insn ir-call) context)
+  (declare (ignore context))
+  (let ((expression (call-next-method)))
+    (if (and (typep insn '(or ir-call-virtual-method ir-call-special-method))
+             (not (typep insn 'ir-call-static-method))
+             (member (slot-value insn 'return-type) '(:BOOLEAN :CHAR))
+             (let ((name (format nil "~A" (slot-value insn 'method-name))))
+               (and (plusp (length name)) (char/= #\% (char name 0)))))
+        (make-instance '<expression>
+                       :insn insn
+                       :code `(%primitive-result ,(code expression))
+                       :expression-type (expression-type expression))
+        expression)))

@@ -281,6 +281,13 @@ SAVE-LISP-AND-DIE."
     (pushnew '%reopen-saved-file-streams sb-ext:*init-hooks*)
     (length entries)))
 
+(defun %reinitialize-static-properties ()
+  "Make StaticProperty read user.dir, user.home and the like again at
+runtime: at build time it captured the build's (java.io.File resolves
+relative paths against its user.dir)."
+  (let ((class (gethash "jdk/internal/util/StaticProperty" *ldk-classes-by-bin-name*)))
+    (when class (setf (initialized-p class) nil))))
+
 (defun %reset-runtime-for-save ()
   "Put the runtime in a state that survives SAVE-LISP-AND-DIE and a restart:
 kill other threads, drop process-local handles, and give every lock a fresh
@@ -296,6 +303,7 @@ Java code (warmups)."
   ;; Likewise the NIO default filesystem: its clinit captures user.dir
   ;; (the BUILD directory) into UnixFileSystem.defaultDirectory, sending
   ;; relative-path I/O to the wrong place after restart.
+  (%reinitialize-static-properties)
   (dolist (cname '("sun/nio/fs/DefaultFileSystemProvider"
                    "java/nio/file/FileSystems$DefaultFileSystemHolder"))
     (let ((c (%get-ldk-class-by-bin-name cname t)))
@@ -487,6 +495,7 @@ JDK classes always keep their state."
   ;; Clear stale thread mappings — after image restore the Lisp thread objects are different.
   (clrhash *lisp-to-java-threads*)
   (setf *current-thread* nil)
+  (%reinitialize-static-properties)
   ;; Kill all Java threads before saving core (SBCL can't save with threads running)
   (loop for thread in (bt:all-threads)
         when (and (not (eq thread (bt:current-thread)))
@@ -518,6 +527,7 @@ JDK classes always keep their state."
   ;; Clear stale thread mappings — after image restore the Lisp thread objects are different.
   (clrhash *lisp-to-java-threads*)
   (setf *current-thread* nil)
+  (%reinitialize-static-properties)
   ;; Kill all Java threads before saving core (SBCL can't save with threads running)
   (loop for thread in (bt:all-threads)
         when (and (not (eq thread (bt:current-thread)))

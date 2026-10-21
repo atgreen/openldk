@@ -1427,9 +1427,22 @@ are ordinary declared methods and use normal dispatch.")
                  (return-type (get-return-type (emit method-reference constant-pool)))
                  (args (reverse (pop-args parameter-count context)))
                  (call (cond
+                         ;; MethodHandle.invoke adapts the handle to the call
+                         ;; site's type (asType) first: pass that descriptor.
+                         ((and (string= class-name "java/lang/invoke/MethodHandle")
+                               (string= method-simple-name "invoke"))
+                          (make-instance 'ir-call-virtual-method
+                                         :address pc-start
+                                         :return-type return-type
+                                         :method-name "%INVOKE-GENERIC"
+                                         :args (list* (first args)
+                                                      (make-instance 'ir-literal
+                                                                     :address pc-start
+                                                                     :value descriptor
+                                                                     :type :REFERENCE)
+                                                      (rest args))))
                          ((and (string= class-name "java/lang/invoke/MethodHandle")
                                (or (string= method-simple-name "invokeExact")
-                                   (string= method-simple-name "invoke")
                                    (string= method-simple-name "invokeBasic")))
                           (make-instance 'ir-call-virtual-method
                                          :address pc-start
