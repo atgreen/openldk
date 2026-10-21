@@ -120,10 +120,8 @@ so they take a few seconds the first time.  With ABCL's compiler loaded,
 ABCL compiles forms such as `defclass` into new Java classes, and those
 always go through OpenLDK's JIT when first used.
 
-Known limitation of the ABCL image:
-
-- **Prompt numbers continue from the warmup** (the first prompt is
-  `CL-USER(26)`).
+The warmup's last form resets ABCL's prompt counter
+(`top-level::*cmd-number*`), so the image's first prompt is `CL-USER(1)`.
 
 ### Example: `javacl`
 

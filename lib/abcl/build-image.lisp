@@ -14,7 +14,9 @@
 ;; should not have to compile at runtime: the reader and printer, function
 ;; definition and calls, CLOS, the condition system, FORMAT, LOOP, hash
 ;; tables, strings, ABCL's compiler, closures included, and starting a
-;; child process (the :ls command, through ProcessBuilder).
+;; child process (the :ls command, through ProcessBuilder).  Its last form
+;; resets the prompt number, which the REPL then advances to 1, so the
+;; image's first prompt is CL-USER(1).
 (defparameter *abcl-warmup-input* "
 (defpackage :warmup (:use :cl))
 (in-package :warmup)
@@ -43,6 +45,7 @@
 (in-package :cl-user)
 (delete-package :warmup)
 :ls
+(setf top-level::*cmd-number* 0)
 (quit)
 ")
 
