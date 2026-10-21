@@ -430,6 +430,45 @@ code mid-compile."
            (setf (gethash method-key *methods-being-compiled*) (bt:current-thread))
            (return t)))))))
 
+(defvar *stack-hints* nil
+  "PC -> the operand stack a previous pass recorded there, for a PC only a
+later (backward) branch reaches; see %TRANSPILE-WITH-STACK-HINTS.")
+
+(defun %hinted-stack (hint pc)
+  "A stack shaped like HINT, a recorded stack, of fresh stack variables."
+  (append (mapcar (lambda (var) (make-stack-variable *context* pc (slot-value var 'var-type)))
+                  (butlast hint))
+          (list (make-instance '<stack-bottom-marker>))))
+
+(defun %transpile-with-stack-hints (method-key code length)
+  "Transpile, as %TRANSPILE-METHOD-BYTECODE, once more if needed.  The
+single forward pass reaches an instruction after an unconditional branch
+with an empty stack when only a later backward branch leads to it, and
+javac never leaves values on the stack across one -- but other compilers
+do (Kawa keeps an array there while filling it).  If that instruction turns
+out to need a deeper stack, transpile again in a fresh context, starting it
+with fresh variables shaped like the stack recorded there."
+  (let ((result (catch '%retry-transpile
+                  (list :done (%transpile-method-bytecode method-key code length)))))
+    (if (and (consp result) (eq (first result) :done))
+        (second result)
+        (let ((template *context*))
+          (setf *context* (make-instance '<context>
+                                         :class (slot-value template 'class)
+                                         :ldk-loader (slot-value template 'ldk-loader)
+                                         :classes (slot-value template 'classes)
+                                         :exception-table (slot-value template 'exception-table)
+                                         :bytecode code
+                                         :insn-size (make-array length :element-type 'fixnum :initial-element -1)
+                                         :next-insn-list (make-array length :initial-element nil)
+                                         :stack-state-table (make-hash-table)
+                                         :pc 0
+                                         :is-clinit-p (slot-value template 'is-clinit-p)))
+          (setf (svcount *context*) 0
+                (fn-name *context*) (slot-value template 'fn-name))
+          (let ((*stack-hints* result))
+            (%transpile-method-bytecode method-key code length))))))
+
 (defun %transpile-method-bytecode (method-key code length)
   "Transpile METHOD-KEY's bytecode CODE into IR: run the per-opcode
 transpilers, tracking reachability and per-PC stack state in *CONTEXT*;
@@ -438,6 +477,8 @@ initializations.  Returns the IR instruction list."
   (let* ((exception-handler-table (make-exception-handler-table *context*))
          (branch-targets (%find-branch-targets code length))
          (in-dead-code nil) ;; Track unreachable code after unconditional branches
+         (after-jump nil)   ;; The previous instruction was an unconditional branch
+         (guessed-pcs '())  ;; Branch targets entered with an empty stack after one
          (ir-code
            (apply #'append
                   (loop
@@ -452,10 +493,26 @@ initializations.  Returns the IR instruction list."
                                    ;; Check if we're at a branch target - exit dead code mode
                                    (let ((stk (gethash (pc *context*) (stack-state-table *context*))))
                                      (when stk
-                                       (setf (stack *context*) (car stk))
+                                       ;; Normally the latest recorded stack.
+                                       ;; After a guess, the earliest: later
+                                       ;; ones may descend from the guess.
+                                       (setf (stack *context*) (if guessed-pcs
+                                                                   (car (last stk))
+                                                                   (car stk)))
                                        (setf in-dead-code nil)
                                        (setf (in-dead-code *context*) nil)
-                                       (setf was-in-dead-code nil)))
+                                       (setf was-in-dead-code nil))
+                                     ;; A branch target after an unconditional
+                                     ;; branch, reached only by a later branch:
+                                     ;; use the stack a previous pass recorded,
+                                     ;; or note that the empty one is a guess.
+                                     (when (and (null stk) after-jump
+                                                (gethash (pc *context*) branch-targets))
+                                       (let ((hint (and *stack-hints*
+                                                        (gethash (pc *context*) *stack-hints*))))
+                                         (if hint
+                                             (setf (stack *context*) (%hinted-stack (car hint) (pc *context*)))
+                                             (push (pc *context*) guessed-pcs)))))
                                    ;; Check if we're at an exception handler - exit dead code mode
                                    (let ((pc-start (pc *context*)))
                                      (when (gethash pc-start exception-handler-table)
@@ -512,6 +569,7 @@ initializations.  Returns the IR instruction list."
                     ;; but NOT if the next instruction is a branch target
                     ;; (it may be reachable via a backward branch that
                     ;; hasn't been processed yet in this forward pass).
+                    do (setf after-jump no-record-stack-state?)
                     when no-record-stack-state?
                       do (unless (gethash (pc *context*) branch-targets)
                            (setf in-dead-code t)
@@ -520,6 +578,14 @@ initializations.  Returns the IR instruction list."
                       do (%record-stack-state (pc *context*) *context*)
                     unless (or (null result) was-in-dead-code)
                       collect result))))
+    ;; A guessed (empty) stack was wrong if a branch later recorded a deeper
+    ;; one there: start over with what was recorded.
+    (when (and (null *stack-hints*)
+               (some (lambda (pc)
+                       (some (lambda (stack) (> (length stack) 1))
+                             (gethash pc (stack-state-table *context*))))
+                     guessed-pcs))
+      (throw '%retry-transpile (stack-state-table *context*)))
     ;; Do stack analysis to merge stack variables
     ;; When multiple control flow paths reach the same PC, we need to
     ;; unify the stack variables. merge-stacks has side effects - it
@@ -862,7 +928,7 @@ classes with the same name."
                        (format t "~&; COMPILING ~A~%" method-key))
                      (setf (fn-name *context*) (%method-fn-name class method))
                      (let* ((ir-code (setf (ir-code *context*)
-                                           (%transpile-method-bytecode method-key code length)))
+                                           (%transpile-with-stack-hints method-key code length)))
                             (blocks-after-dce (%optimize-method-blocks ir-code))
                             (definition-code (%build-method-definition class method blocks-after-dce
                                                                        parameter-hints max-locals)))
