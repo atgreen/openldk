@@ -214,9 +214,12 @@
 
          ;; Get the lclass for THIS (use correct loader)
          (let ((lclass (get-ldk-class-for-java-class this)))
+           ;; Only this class's own fields, as on a JVM: Class.getFields walks
+           ;; the superclasses itself, and a field's annotations are read with
+           ;; its declaring class's constant pool.
            (labels ((get-fields (lclass)
                       (when lclass
-                        (append (loop for field across (fields lclass)
+                        (progn (loop for field across (fields lclass)
                                       ;; When public-only is 1 (true), skip non-public fields
                                       when (or (zerop public-only)
                                                (not (zerop (logand #x1 (access-flags field)))))
@@ -248,9 +251,7 @@
                                                  (let ((attributes (slot-value field 'attributes)))
                                                    (and (hash-table-p attributes)
                                                         (gethash "RuntimeVisibleAnnotations" attributes))))
-                                                f))
-                                (when (super lclass)
-                                  (get-fields (%get-ldk-class-by-bin-name (super lclass) t)))))))
+                                                f))))))
 
              (make-java-array
               :component-class (%get-java-class-by-fq-name "java.lang.reflect.Field")
@@ -354,6 +355,21 @@ initialize the declaring class, as the JVM does before reflective access."
 ;; unnamed module, so report the module system as inited.
 (setf (gethash "jdk/internal/misc/VM.isModuleSystemInited()Z" *native-overrides*)
       (lambda () 1))
+
+;; Likewise VM.isBooted (initLevel 4).  ServiceLoader, before the VM has
+;; booted, serves only java.base code; once booted it lets any caller whose
+;; module can use the service (an unnamed module can use them all), such as
+;; the application's (kotlin-reflect's ServiceLoader.load).
+(setf (gethash "jdk/internal/misc/VM.isBooted()Z" *native-overrides*)
+      (lambda () 1))
+
+;; OpenLDK builds no boot module layer, so ModuleLayer.boot() is null, which
+;; code running in a booted VM doesn't expect (ManagementFactory looks for
+;; java.logging in it).  Answer the empty layer: lookups in it find nothing.
+(setf (gethash "java/lang/ModuleLayer.boot()Ljava/lang/ModuleLayer;" *native-overrides*)
+      (lambda ()
+        (%clinit (classload "java/lang/ModuleLayer"))
+        (|java/lang/ModuleLayer.empty()|)))
 
 ;; Reporting the module system as inited (above) has one side effect worth
 ;; neutralizing: StackTraceElement.isHashedInJavaBase() short-circuits to false

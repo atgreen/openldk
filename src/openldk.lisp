@@ -1122,6 +1122,40 @@ that made concurrent Math.random()/holder-class first-use throw NPE."
                             ifaces))))
              ifaces))
 
+(defun %consistent-super-order (supers)
+  "SUPERS (class symbols), reordered so that CLOS can compute the class
+precedence list.  Java doesn't constrain the order a class lists its
+interfaces in, but CLOS requires the class precedence list to agree with
+every class's order of direct superclasses: IntelliJ's PSI interfaces
+(the Kotlin compiler's) order theirs so that some Java orders form a
+cycle.  The new class's own order is free, so merge the precedence lists
+of SUPERS (C3's merge, preferring earlier lists) and order SUPERS as the
+merge does.  When even that fails, return SUPERS unchanged."
+  (let* ((classes (mapcar (lambda (sym) (find-class sym nil)) supers)))
+    (if (or (null (rest supers)) (some #'null classes))
+        supers
+        (handler-case
+            (let ((lists (mapcar (lambda (class)
+                                   (closer-mop:ensure-finalized class)
+                                   (copy-list (closer-mop:class-precedence-list class)))
+                                 classes))
+                  (merged '()))
+              (loop while (some #'identity lists)
+                    do (let ((next (loop for list in lists
+                                         for head = (first list)
+                                         when (and head
+                                                   (notany (lambda (other) (member head (rest other)))
+                                                           lists))
+                                           return head)))
+                         (unless next
+                           (return-from %consistent-super-order supers))
+                         (push next merged)
+                         (setf lists (mapcar (lambda (list) (remove next list)) lists))))
+              (setf merged (nreverse merged))
+              (mapcar #'class-name
+                      (sort (copy-list classes) #'< :key (lambda (class) (position class merged)))))
+          (error () supers)))))
+
 (defun %topo-sort-interfaces (ifaces)
   "Sort interface symbols so that subtypes come before supertypes.
    For CLOS C3 linearization, if A is a subtype of B, A must come before B.
@@ -1210,6 +1244,7 @@ shadows a superclass field and needs its own storage."
                                                          (coerce interfaces 'list)))))
                                     (%topo-sort-interfaces ifaces)))
                           (list))))
+                (setf supers (%consistent-super-order supers))
                 ;; JDK 9+: jdk/internal/misc/Unsafe must inherit from sun/misc/Unsafe
                 ;; so that existing native method stubs dispatch correctly.
                 ;; Replace java/lang/Object with sun/misc/Unsafe (which itself extends Object).

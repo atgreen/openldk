@@ -86,7 +86,9 @@ instruction's byte length in the context's INSN-SIZE array."
     (let ((pc-start pc))
       (incf pc)
       (push pc (aref (next-insn-list context) pc-start))
-      nil)))
+      ;; An instruction, not nothing: a block or an exception range can
+      ;; start here (kotlinc starts a try with a nop).
+      (list (make-instance 'ir-nop :address pc-start)))))
 
 (define-bytecode-transpiler :AASTORE (context code)
   (declare (ignore code))

@@ -117,19 +117,32 @@ for the Java caller."
      (%caller-class-name-from-stack-frame (nth index backtrace)))))
 
 (defun |sun/reflect/Reflection.getCallerClass()| ()
-  ;; Skip internal frames to find the actual caller
-  ;; The caller is the first non-internal Java method frame after:
-  ;; - getCallerClass() itself (frame 0)
-  ;; - The method that called getCallerClass (e.g., registerAsParallelCapable) (frame 1)
-  (let ((backtrace (nthcdr 2 (%filtered-backtrace))))
-    (loop for frame in backtrace
-          unless (%internal-frame-p frame)
-            do (let ((class-name (%caller-class-name-from-stack-frame frame)))
-                 (when (and (stringp class-name)
-                            (not (find #\. class-name))
-                            (gethash class-name *java-classes-by-bin-name*))
-                   (return (%get-java-class-by-bin-name class-name))))
-          finally (return (%get-java-class-by-bin-name "java/lang/System")))))
+  "The class of the method that called the caller-sensitive method that
+called getCallerClass: past the getCallerClass frames, skip one Java
+frame (the caller-sensitive method, AtomicReferenceFieldUpdater.newUpdater
+say) and return the next one's class."
+  (flet ((java-class-of (frame)
+           (unless (%internal-frame-p frame)
+             (let ((class-name (%caller-class-name-from-stack-frame frame)))
+               (when (and (stringp class-name)
+                          (not (find #\. class-name))
+                          (gethash class-name *java-classes-by-bin-name*))
+                 (%get-java-class-by-bin-name class-name))))))
+    (let* ((backtrace (%filtered-backtrace))
+           (last-get-caller (position-if (lambda (frame)
+                                           (and (eq (%frame-head-kind (%frame-head frame)) :symbol)
+                                                (search "Reflection.getCallerClass"
+                                                        (symbol-name (%frame-head frame)))))
+                                         backtrace :from-end t))
+           (frames (nthcdr (if last-get-caller (1+ last-get-caller) 0) backtrace))
+           (caller-sensitive (position-if #'java-class-of frames)))
+      (or (and caller-sensitive
+               (some #'java-class-of (nthcdr (1+ caller-sensitive) frames)))
+          (%get-java-class-by-bin-name "java/lang/System")))))
+
+(defun |jdk/internal/reflect/Reflection.areNestMates(Ljava/lang/Class;Ljava/lang/Class;)| (a b)
+  "True when classes A and B belong to the same nest."
+  (if (eq (%nest-host a) (%nest-host b)) 1 0))
 
 (defun |jdk/internal/reflect/Reflection.getCallerClass()| ()
   (|sun/reflect/Reflection.getCallerClass()|))

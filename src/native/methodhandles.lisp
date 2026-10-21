@@ -334,6 +334,10 @@ Returns the class symbol."
                           desc)
                         "()Ljava/lang/Object;"))
          (lispized-name (lispize-method-name (format nil "~A~A" method-str descriptor)))
+         ;; The interface method returns a reference: box a primitive result.
+         (box-return (let ((return-type (subseq descriptor (1+ (position #\) descriptor)))))
+                       (and (plusp (length return-type))
+                            (find (char return-type 0) "L["))))
          ;; Use interface name as cache key when available for proper CHECKCAST
          (class-name-str (format nil "~A~{+~A~}"
                                  (if interface-type-name
@@ -346,7 +350,7 @@ Returns the class symbol."
         (let ((method-sym (intern lispized-name :openldk)))
           (unless (and (fboundp method-sym)
                        (typep (fdefinition method-sym) 'generic-function))
-            (%define-lambda-method method-sym cached param-count))
+            (%define-lambda-method method-sym cached param-count box-return))
           cached)
         ;; Create new dynamic lambda class, extending the interface if known
         (let* ((class-sym (intern class-name-str :openldk))
@@ -361,12 +365,14 @@ Returns the class symbol."
           (eval `(defclass/std ,class-sym ,superclasses
                    ((target) (captures))))
           ;; Define the dispatch method
-          (%define-lambda-method method-sym class-sym param-count)
+          (%define-lambda-method method-sym class-sym param-count box-return)
           (setf (gethash class-name-str *dynamic-lambda-classes*) class-sym)
           class-sym))))
 
-(defun %define-lambda-method (method-sym class-sym param-count)
-  "Define a lambda dispatch method METHOD-SYM on CLASS-SYM with PARAM-COUNT parameters."
+(defun %define-lambda-method (method-sym class-sym param-count &optional box-return)
+  "Define a lambda dispatch method METHOD-SYM on CLASS-SYM with PARAM-COUNT
+parameters.  BOX-RETURN boxes a primitive the implementation returns, for an
+interface method returning a reference (Kotlin's Function1.invoke)."
   (let ((params (loop for i below param-count
                       collect (intern (format nil "P~A" i) :openldk))))
     ;; Only create/change GF if not already a GF (avoid change-class violation)
@@ -378,7 +384,8 @@ Returns the class symbol."
     (eval `(defmethod ,method-sym ((|this| ,class-sym) ,@params)
              (%lambda-invoke (slot-value |this| 'target)
                              (slot-value |this| 'captures)
-                             (list ,@params))))))
+                             (list ,@params)
+                             :box-return ,box-return)))))
 
 (defun %prebuilt-lambda-class (method-str sam-param-count interface-type-name)
   "Return the prebuilt openldk/Lambda* class for METHOD-STR when it

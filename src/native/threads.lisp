@@ -149,6 +149,21 @@
     (or java-thread
         (|java/lang/Thread.currentThread()|))))
 
+(defun |java/lang/Thread.getThreads()| ()
+  "The live platform threads (Thread.activeCount, getAllStackTraces)."
+  (let ((threads (list (|java/lang/Thread.currentThread()|))))
+    (maphash (lambda (lisp-thread java-thread)
+               (when (bordeaux-threads:thread-alive-p lisp-thread)
+                 (pushnew java-thread threads)))
+             *lisp-to-java-threads*)
+    (maphash (lambda (java-thread lisp-thread)
+               (when (and (bordeaux-threads:threadp lisp-thread)
+                          (bordeaux-threads:thread-alive-p lisp-thread))
+                 (pushnew java-thread threads)))
+             *java-threads*)
+    (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Thread")
+                     :initial-contents (coerce (remove nil threads) 'vector))))
+
 (defun |java/lang/Thread.sleep0(J)| (milliseconds)
   "JDK 21 private native sleep0 — replaces public native sleep(J)."
   (%java-thread-sleep milliseconds))

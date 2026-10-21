@@ -403,7 +403,7 @@ stream."
       (let* ((name-index (read-u2))
              (name (slot-value (aref constant-pool name-index) 'value))
              (attributes-length (read-u4)))
-        (eswitch (name :test 'string=)
+        (switch (name :test 'string=)
           ("BootstrapMethods"
            (let ((num-bootstrap-methods (read-u2)))
              (setf (gethash "BootstrapMethods" attributes)
@@ -513,6 +513,10 @@ stream."
           ("RuntimeVisibleTypeAnnotations"
            (read-buffer attributes-length))
           ("RuntimeInvisibleTypeAnnotations"
+           (read-buffer attributes-length))
+          ;; The JVM ignores attributes it doesn't know, such as Scala's
+          ;; ScalaSig and ScalaInlineInfo.
+          (t
            (read-buffer attributes-length)))))
     attributes))
 

@@ -78,6 +78,7 @@
                (:file "src/native/frames")
                (:file "src/native/bytearray")
                (:file "src/native/threads")
+               (:file "src/native/management")
                (:file "src/native/unsafe")
                (:file "src/native/reflection")
                (:file "src/native/system")

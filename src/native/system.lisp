@@ -1143,6 +1143,78 @@ expect for ordinary interfaces/classes."
       (declare (ignore e))
       0)))
 
+(defmethod |getNameMax0(Ljava/lang/String;)| ((this |java/io/UnixFileSystem|) path)
+  "The longest file name allowed in the directory PATH: pathconf's
+_PC_NAME_MAX.  File.createTempFile asks for it."
+  (declare (ignore path))
+  255)
+
+;;; The rest of UnixFileSystem's natives.  Results follow the JDK's: 1 or 0
+;;; for success or failure (an IOException only where the JDK throws one).
+
+(defun %file-path (file)
+  (lstring (slot-value file '|path|)))
+
+(defmethod |createFileExclusively0(Ljava/lang/String;)| ((this |java/io/UnixFileSystem|) path)
+  "Create the file PATH unless it exists: 1 if this created it, 0 if it
+already existed."
+  (handler-case
+      (progn
+        (sb-posix:close (sb-posix:open (lstring path)
+                                       (logior sb-posix:o-wronly sb-posix:o-creat sb-posix:o-excl)
+                                       #o666))
+        1)
+    (sb-posix:syscall-error (e)
+      (if (= (sb-posix:syscall-errno e) sb-posix:eexist)
+          0
+          (error (%lisp-condition
+                  (%make-throwable '|java/io/IOException|
+                                   (sb-int:strerror (sb-posix:syscall-errno e)))))))))
+
+(defmethod |createDirectory0(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
+  (handler-case (progn (sb-posix:mkdir (%file-path file) #o777) 1)
+    (error () 0)))
+
+(defmethod |rename0(Ljava/io/File;Ljava/io/File;)| ((this |java/io/UnixFileSystem|) from to)
+  (handler-case (progn (sb-posix:rename (%file-path from) (%file-path to)) 1)
+    (error () 0)))
+
+(defmethod |setLastModifiedTime0(Ljava/io/File;J)| ((this |java/io/UnixFileSystem|) file millis)
+  (handler-case
+      (let* ((path (%file-path file))
+             (atime (sb-posix:stat-atime (sb-posix:stat path))))
+        (sb-posix:utimes path atime (/ millis 1000))
+        1)
+    (error () 0)))
+
+(defmethod |setPermission0(Ljava/io/File;IZZ)| ((this |java/io/UnixFileSystem|) file access enable owner-only)
+  "ACCESS is 4 (read), 2 (write) or 1 (execute): set or clear it for the
+owner, or for everyone unless OWNER-ONLY."
+  (handler-case
+      (let* ((path (%file-path file))
+             (mode (sb-posix:stat-mode (sb-posix:stat path)))
+             (bits (if (eql owner-only 1)
+                       (ash access 6)
+                       (logior (ash access 6) (ash access 3) access))))
+        (sb-posix:chmod path (logand (if (eql enable 1) (logior mode bits) (logandc2 mode bits))
+                                     #o7777))
+        1)
+    (error () 0)))
+
+(defmethod |setReadOnly0(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
+  (handler-case
+      (let* ((path (%file-path file))
+             (mode (sb-posix:stat-mode (sb-posix:stat path))))
+        (sb-posix:chmod path (logand (logandc2 mode #o222) #o7777))
+        1)
+    (error () 0)))
+
+(defmethod |getSpace0(Ljava/io/File;I)| ((this |java/io/UnixFileSystem|) file kind)
+  "Total, free or usable space of FILE's file system.  OpenLDK doesn't ask
+the file system: 0, what the JDK answers when it can't tell."
+  (declare (ignore file kind))
+  0)
+
 (defmethod |getLength0(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
   "Length of FILE in bytes, or 0 if it cannot be read, as the JDK's native does."
   (handler-case
@@ -1157,8 +1229,10 @@ expect for ordinary interfaces/classes."
 (defmethod |delete0(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
   "Delete the file (or empty directory); return 1 on success, 0 on failure."
   (handler-case
-      (progn
-        (delete-file (lstring (slot-value file '|path|)))
+      (let ((path (lstring (slot-value file '|path|))))
+        (if (sb-posix:s-isdir (sb-posix:stat-mode (sb-posix:lstat path)))
+            (sb-posix:rmdir path)
+            (sb-posix:unlink path))
         1)
     (error () 0)))
 
@@ -1481,7 +1555,44 @@ parent delegation is the Java caller's job)."
     ;; relying on the overloaded URL constructors, whose invokespecial owner
     ;; cannot be recovered from a direct Lisp call.
     (setf (gethash url *native-url-strings*) url-string)
+    (%set-url-fields url url-string)
     url))
+
+(defun %set-url-fields (url url-string)
+  "Fill URL's fields from URL-STRING as URL's constructor would, so Java
+code can take it apart (getFile, toExternalForm, toURI: IntelliJ's
+PathManager finds the Kotlin compiler's jar this way)."
+  (let* ((colon (position #\: url-string))
+         (protocol (subseq url-string 0 colon))
+         (rest (subseq url-string (1+ colon)))
+         (authority nil))
+    (when (starts-with? "//" rest)
+      (let ((slash (or (position #\/ rest :start 2) (length rest))))
+        (setf authority (subseq rest 2 slash)
+              rest (subseq rest slash))))
+    (let* ((hash (position #\# rest))
+           (ref (and hash (subseq rest (1+ hash))))
+           (file (if hash (subseq rest 0 hash) rest))
+           (question (position #\? file))
+           (path (if question (subseq file 0 question) file))
+           (query (and question (subseq file (1+ question)))))
+      (flet ((put (slot value)
+               (when (slot-exists-p url slot)
+                 (setf (slot-value url slot) value))))
+        (put '|protocol| (jstring protocol))
+        (put '|host| (jstring (or authority "")))
+        (put '|port| -1)
+        (put '|authority| (and authority (jstring authority)))
+        (put '|file| (jstring file))
+        (put '|path| (jstring path))
+        (put '|query| (and query (jstring query)))
+        (put '|ref| (and ref (jstring ref)))
+        (put '|hashCode| -1)
+        (when (and (slot-exists-p url '|handler|)
+                   (fboundp '|java/net/URL.getURLStreamHandler(Ljava/lang/String;)|))
+          (put '|handler| (ignore-errors
+                           (funcall '|java/net/URL.getURLStreamHandler(Ljava/lang/String;)|
+                                    (jstring protocol)))))))))
 
 (defmethod |getBootstrapResource(Ljava/lang/String;)| ((loader |java/lang/ClassLoader|) name)
   "Find a resource by NAME on the bootstrap classpath."
@@ -1594,12 +1705,10 @@ Java byte arrays hold SIGNED bytes; read-byte yields 0..255."
   "JDK 25 private native checkAccess0 — must hold the implementation;
 the bytecode checkAccess wrapper delegates here and clobbers any
 same-named defmethod."
-  ;; TODO: check actual POSIX permissions (R_OK/W_OK/X_OK) instead of just file existence
-  (declare (ignore ufs access-mode))
-  (let ((path (lstring (slot-value file '|path|))))
-    (handler-case
-        (if (probe-file path) 1 0)
-      (error () 0))))
+  ;; ACCESS-MODE is 4 (read), 2 (write) or 1 (execute), as access(2)'s.
+  (declare (ignore ufs))
+  (handler-case (progn (sb-posix:access (lstring (slot-value file '|path|)) access-mode) 1)
+    (error () 0)))
 
 (defmethod |checkAccess(Ljava/io/File;I)| ((ufs |java/io/UnixFileSystem|) file access-mode)
   "Legacy public native checkAccess — older JDKs call this directly."
@@ -1608,10 +1717,12 @@ same-named defmethod."
 (defmethod |getLastModifiedTime0(Ljava/io/File;)| ((ufs |java/io/UnixFileSystem|) file)
   "Modification time of FILE in milliseconds, or 0 if it does not exist."
   (declare (ignore ufs))
+  ;; MODIFICATION-TIME is a universal time, counted from 1900.
   (handler-case
-      (* (org.shirakumo.file-attributes:modification-time
-          (lstring (slot-value file '|path|)))
-         1000)
+      (round (* (- (org.shirakumo.file-attributes:modification-time
+                    (lstring (slot-value file '|path|)))
+                   (encode-universal-time 0 0 0 1 1 1970 0))
+                1000))
     (error () 0)))
 
 (defmethod |getLastModifiedTime(Ljava/io/File;)| ((ufs |java/io/UnixFileSystem|) file)

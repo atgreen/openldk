@@ -157,7 +157,7 @@ implements IR node INSN, generating operand code recursively."))
    NPE that escapes into a Clojure compile (see ldk-c7c).")
 (defparameter *npe-counter* 0)
 
-(defun %make-throwable (throwable-class)
+(defun %make-throwable (throwable-class &optional message)
   (when (and *trace-npe*
              (eq throwable-class '|java/lang/NullPointerException|))
     ;; Print only each frame's function designator (first element), never its
@@ -176,7 +176,9 @@ implements IR node INSN, generating operand code recursively."))
   (unless (find-class throwable-class nil)
     (classload (symbol-name throwable-class)))
   (let ((throwable (make-instance throwable-class)))
-    (|<init>()| throwable)
+    (if message
+        (|<init>(Ljava/lang/String;)| throwable (jstring message))
+        (|<init>()| throwable))
     throwable))
 
 (defmethod codegen ((insn ir-aastore) context)
@@ -251,7 +253,7 @@ implements IR node INSN, generating operand code recursively."))
                                   (value1 ,(code (codegen (value1 insn) context))))
                               (unsigned-to-signed-integer (logand (truncate value1 value2) #xFFFFFFFF)))
                           (division-by-zero ()
-                            (error (%lisp-condition (%make-throwable '|java/lang/ArithmeticException|)))))
+                            (error (%lisp-condition (%make-throwable '|java/lang/ArithmeticException| "/ by zero")))))
                  :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-ldiv) context)
@@ -263,7 +265,7 @@ implements IR node INSN, generating operand code recursively."))
                                   (value1 ,(code (codegen (value1 insn) context))))
                               (unsigned-to-signed-long (logand (truncate value1 value2) #xFFFFFFFFFFFFFFFF)))
                           (division-by-zero ()
-                            (error (%lisp-condition (%make-throwable '|java/lang/ArithmeticException|)))))
+                            (error (%lisp-condition (%make-throwable '|java/lang/ArithmeticException| "/ by zero")))))
                  :expression-type :LONG))
 
 (defun %codegen-binop (insn operator jtype context)
@@ -641,7 +643,7 @@ class is a self-reference to the class currently being compiled."
                                               (list 'value1 (code (codegen (value1 insn) context))))
                                    (list 'rem 'value1 'value2))
                              (list 'division-by-zero ()
-                                   (list 'error (list '%lisp-condition (list '%make-throwable (list 'quote '|java/lang/ArithmeticException|))))))
+                                   (list 'error (list '%lisp-condition (list '%make-throwable (list 'quote '|java/lang/ArithmeticException|) "/ by zero")))))
                  :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-lrem) context)
@@ -652,7 +654,7 @@ class is a self-reference to the class currently being compiled."
                                               (list 'value1 (code (codegen (value1 insn) context))))
                                    (list 'rem 'value1 'value2))
                              (list 'division-by-zero ()
-                                   (list 'error (list '%lisp-condition (list '%make-throwable (list 'quote '|java/lang/ArithmeticException|))))))
+                                   (list 'error (list '%lisp-condition (list '%make-throwable (list 'quote '|java/lang/ArithmeticException|) "/ by zero")))))
                  :expression-type :LONG))
 
 (defmethod codegen ((insn ir-fdiv) context)
