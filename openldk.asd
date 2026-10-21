@@ -170,3 +170,20 @@
              (unless (uiop:symbol-call :fiveam '#:run! :openldk-clojure-tests)
                (error "openldk/clojure tests failed"))))
 
+(asdf:defsystem "openldk/kawa"
+  :description "Use Kawa Scheme from Common Lisp"
+  :author "Anthony Green <green@moxielogic.com>"
+  :license "GPL3+Classpath Exception"
+  :depends-on ("openldk/interop")
+  :components ((:file "interop/kawa"))
+  :in-order-to ((test-op (test-op "openldk/kawa/tests"))))
+
+(asdf:defsystem "openldk/kawa/tests"
+  :description "Tests for openldk/kawa; need `make kawa`"
+  :depends-on ("openldk/kawa" "fiveam")
+  :pathname "test"
+  :components ((:file "kawa"))
+  :perform (test-op (o c)
+             (unless (uiop:symbol-call :fiveam '#:run! :openldk-kawa-tests)
+               (error "openldk/kawa tests failed"))))
+

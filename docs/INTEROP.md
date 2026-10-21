@@ -11,8 +11,9 @@ both ways, with no serialization and no process boundary.
 | `openldk/interop` | (shared core) | `openldk.interop` |
 | `openldk/jscheme` | Peter Norvig's [JScheme](https://norvig.com/jscheme.html) | `openldk.jscheme`, nickname `jscheme` |
 | `openldk/clojure` | [Clojure](https://clojure.org/) 1.12.4 | `openldk.clojure`, nickname `clojure` |
+| `openldk/kawa` | [Kawa](https://www.gnu.org/software/kawa/) Scheme 3.1.1 | `openldk.kawa`, nickname `kawa` |
 
-Kawa and ABCL are next, on the same core.
+ABCL is next, on the same core.
 
 ## SBCL images with a language started
 
@@ -24,6 +25,7 @@ Lisp REPL:
 ```sh
 make sbcl-clojure && ./sbcl-clojure      # Clojure ready at once
 make sbcl-jscheme && ./sbcl-jscheme
+make sbcl-kawa && ./sbcl-kawa
 ```
 
 ```lisp
@@ -31,8 +33,8 @@ make sbcl-jscheme && ./sbcl-jscheme
 (2 3 4)
 ```
 
-Both are built with `openldk.interop:dump-lisp-image`; see below.  (The
-`./clojure` and `./jscheme` images of [IMAGES.md](IMAGES.md) are different:
+They are built with `openldk.interop:dump-lisp-image`; see below.  (The
+`./clojure`, `./jscheme` and `./kawa` images of [IMAGES.md](IMAGES.md) are different:
 they run the language's own REPL.)
 
 ## JScheme
@@ -169,6 +171,64 @@ back as the original condition, and Clojure code can catch it as an
 `Exception`.
 
 Tests: `make check-clojure` runs them in `sbcl-clojure`.
+
+## Kawa
+
+`make kawa` downloads Kawa's jar; `make sbcl-kawa` builds an SBCL with Kawa
+started.
+
+```lisp
+(asdf:load-system "openldk/kawa")
+(kawa:startup)                                     ; already done in sbcl-kawa
+
+(kawa:eval '(+ 1 2))                               ; => 3
+(kawa:eval '(map (lambda (x) (* x x)) '(1 2 3)))   ; => (1 4 9)
+(kawa:eval "(define (fact n) (if (< n 2) 1 (* n (fact (- n 1))))) (fact 25)")
+                                                   ; => 15511210043330985984000000
+(kawa:funcall 'string-append "foo" "bar")          ; => "foobar"
+(kawa:eval "(guard (e (#t 'caught)) (raise 'oops))") ; => CAUGHT
+
+;; Lisp functions callable from Scheme, with any number of arguments
+(kawa:define "square" (lambda (x) (* x x)))
+(kawa:eval '(map square '(1 2 3)))                 ; => (1 4 9)
+(kawa:define "small?" (lambda (x) (< x 10)) :predicate t)
+```
+
+Code is evaluated in Kawa's user environment, so a definition can shadow a
+built-in (Kawa has its own `square`).  Symbols are lowercased.  Kawa's
+colon notation for Java, `(java.lang.Math:max 3 7)`, is read by Kawa's
+reader, so write such code as a string.
+
+| Function | |
+|---|---|
+| `startup &key classpath` | Start Kawa (by default from the jar `make kawa` downloads). |
+| `eval form` | Evaluate an s-expression or a source string; return Lisp data. |
+| `eval-string source` | Evaluate every form in a string; return the last value. |
+| `load file` | Load a Scheme source file. |
+| `funcall procedure &rest args` | Call a procedure, given as an object or by name.  A name bound to something that isn't a procedure object, such as `list` (a type in Kawa), is called as Scheme code would call it. |
+| `lookup name` | The value a name is bound to, unconverted. |
+| `define name value &key predicate` | Bind a name; a Lisp function becomes a Scheme procedure. |
+| `to-lisp object`, `from-lisp value` | Convert values. |
+| `*environment*` | The Kawa environment code is evaluated in. |
+
+| Kawa | Lisp |
+|---|---|
+| integer, rational | integer, ratio |
+| real | `double-float` |
+| string, character | string, character |
+| symbol | symbol, upcased, interned in `*package*` |
+| keyword (`foo:`) | keyword |
+| list, pair, `'()` | list, cons, `NIL` |
+| vector | simple-vector |
+| `#t`, `#f` | `T`, `NIL` (write `:false` for `#f`) |
+| procedure, other objects | left as is |
+
+As with JScheme, `NIL` goes to Scheme as `'()`, which is true, so give a
+Lisp predicate `:predicate t`.  Kawa errors are signalled as
+`foreign-error`, and a Lisp error in a Lisp function that Kawa called comes
+back as the original condition.
+
+Tests: `make check-kawa` runs them in `sbcl-kawa`.
 
 ## The shared core: `openldk/interop`
 

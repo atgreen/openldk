@@ -52,3 +52,4 @@ data/
 /lib/jscheme/tmp2
 /sbcl-jscheme
 /sbcl-clojure
+/sbcl-kawa
