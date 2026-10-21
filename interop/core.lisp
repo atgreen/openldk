@@ -65,7 +65,8 @@
            #:with-foreign-errors
            #:define-java-subclass
            #:make-java-subclass-instance
-           #:call-from-java))
+           #:call-from-java
+           #:dump-lisp-image))
 
 (in-package #:openldk.interop)
 
@@ -202,10 +203,19 @@ holding the elements of the sequence CONTENTS."
                      (foreign-error-message condition)))))
 
 (defun %throwable-message (throwable)
-  (let ((message (ignore-errors (java-call "getMessage()" throwable))))
-    (if message
-        (lstring message)
-        (lstring (java-call "toString()" throwable)))))
+  "THROWABLE's message, followed by those of its causes: a wrapper's own
+message (Clojure's \"Syntax error compiling ...\") often says less than
+its cause's."
+  (flet ((message-of (throwable)
+           (let ((message (ignore-errors (java-call "getMessage()" throwable))))
+             (lstring (or message (java-call "toString()" throwable))))))
+    (let ((messages (loop for cause = throwable
+                            then (ignore-errors (java-call "getCause()" cause))
+                          for depth below 10
+                          while cause
+                          collect (message-of cause))))
+      (format nil "~A~{ (caused by: ~A)~}" (first messages)
+              (remove-duplicates (rest messages) :test #'string= :from-end t)))))
 
 (defmacro with-foreign-errors ((language) &body body)
   "Run BODY, turning a Java exception that escapes it into a FOREIGN-ERROR
@@ -265,3 +275,23 @@ fields MAKE-INSTANCE alone leaves unset."
   (let ((object (apply #'make-instance class initargs)))
     (java-call "<init>()" object)
     object))
+
+;;; Development images
+
+(defun %restart-runtime ()
+  "SB-EXT:*INIT-HOOKS* function: redo OpenLDK's per-run setup (system
+properties such as user.dir, the VM start time) in a restarted image."
+  (when *runtime-started*
+    (openldk::%main-runtime-setup (format nil "~{~A~^:~}" (reverse *classpath-entries*))
+                                  nil nil)))
+
+(defun dump-lisp-image (path &key init)
+  "Save an SBCL executable at PATH whose top level is the Lisp REPL, after
+calling INIT, which typically starts a language and evaluates some code so
+its Java methods are compiled into the image.  A language that takes
+minutes to start (Clojure) is then ready in under a second."
+  (when init (cl:funcall init))
+  (pushnew '%restart-runtime sb-ext:*init-hooks*)
+  (openldk::%reset-runtime-for-save)
+  (sb-ext:save-lisp-and-die path :executable t :save-runtime-options t))
+

@@ -197,9 +197,10 @@ OpenLDK can run non-trivial Java applications:
 
 The warm images are described in [docs/IMAGES.md](docs/IMAGES.md).
 
-These languages can also be used from Lisp, in the same process:
-`openldk/jscheme` evaluates JScheme code, calls Scheme procedures, and
-lets Scheme call Lisp functions.  See [docs/INTEROP.md](docs/INTEROP.md).
+JScheme and Clojure can also be used from Lisp, in the same process:
+`openldk/jscheme` and `openldk/clojure` evaluate code, call the language's
+functions, and let it call Lisp functions.  `make sbcl-clojure` builds an
+SBCL with Clojure already started.  See [docs/INTEROP.md](docs/INTEROP.md).
 
 The code is not optimized.  Even with heavy optimization, OpenLDK's
 performance will not be competitive to modern Java implementations.

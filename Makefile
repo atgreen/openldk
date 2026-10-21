@@ -101,6 +101,17 @@ $(JSCHEME_MAIN): $(JSCHEME_SRC_JAR)
 check-jscheme: $(JSCHEME_MAIN) | check-jdk
 	sbcl --dynamic-space-size 32768 --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:test-system \"openldk/jscheme\"))"
 
+# Tests for openldk/clojure, run in sbcl-clojure, where Clojure is started.
+check-clojure: sbcl-clojure
+	./sbcl-clojure --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:test-system \"openldk/clojure\"))"
+
+# SBCLs with a language started, for using it from Lisp (see docs/INTEROP.md).
+sbcl-jscheme: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(JSCHEME_MAIN) | check-jdk
+	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/jscheme\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-jscheme\" :init (lambda () (jscheme:startup) (jscheme:eval-string \"(define (f n) (if (< n 2) 1 (* n (f (- n 1))))) (f 10) (map (lambda (x) (* x x)) (list 1 2 3))\")))"
+
+sbcl-clojure: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(CLOJURE_JARS) | check-jdk
+	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/clojure\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-clojure\" :init (lambda () (clojure:startup) (clojure:eval-string \"(defn f [n] (if (< n 2) 1 (*' n (f (dec n))))) (f 20) (mapv inc (range 5)) (into {} [[:a 1]]) (str 1 :k)\")))"
+
 # A warm image: JScheme's Java code is compiled at build time (see docs/IMAGES.md).
 jscheme: src/*.lisp src/native/*.lisp *.asd Makefile lib/jscheme/build-image.lisp $(JSCHEME_MAIN) lib/jscheme/r4rstest.scm | check-jdk
 	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))" --load lib/jscheme/build-image.lisp

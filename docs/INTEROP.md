@@ -10,8 +10,30 @@ both ways, with no serialization and no process boundary.
 |---|---|---|
 | `openldk/interop` | (shared core) | `openldk.interop` |
 | `openldk/jscheme` | Peter Norvig's [JScheme](https://norvig.com/jscheme.html) | `openldk.jscheme`, nickname `jscheme` |
+| `openldk/clojure` | [Clojure](https://clojure.org/) 1.12.4 | `openldk.clojure`, nickname `clojure` |
 
-Clojure, Kawa and ABCL are next, on the same core.
+Kawa and ABCL are next, on the same core.
+
+## SBCL images with a language started
+
+Starting a language can take a while: Clojure loads `clojure.core` for about
+six minutes cold.  These targets build an SBCL executable with the language
+started and its common code paths compiled, whose top level is the ordinary
+Lisp REPL:
+
+```sh
+make sbcl-clojure && ./sbcl-clojure      # Clojure ready at once
+make sbcl-jscheme && ./sbcl-jscheme
+```
+
+```lisp
+* (clojure:eval '(map inc #(1 2 3)))
+(2 3 4)
+```
+
+Both are built with `openldk.interop:dump-lisp-image`; see below.  (The
+`./clojure` and `./jscheme` images of [IMAGES.md](IMAGES.md) are different:
+they run the language's own REPL.)
 
 ## JScheme
 
@@ -84,6 +106,70 @@ A Lisp error inside a Lisp function that Scheme called comes back out of
 `jscheme:eval` as the original Lisp condition, a `type-error` stays a
 `type-error`, so Lisp code can handle it as usual.
 
+## Clojure
+
+`make clojure` downloads Clojure's jars.  Starting Clojure from a plain SBCL
+takes minutes; `make sbcl-clojure` builds an SBCL with it started.
+
+```lisp
+(asdf:load-system "openldk/clojure")
+(clojure:startup)                                  ; already done in sbcl-clojure
+
+(clojure:eval '(+ 1 2))                            ; => 3
+(clojure:eval '(map inc #(1 2 3)))                 ; => (2 3 4)
+(clojure:eval "(defn fact [n] (if (< n 2) 1 (*' n (fact (dec n))))) (fact 25)")
+                                                   ; => 15511210043330985984000000
+(clojure:funcall 'clojure.string/upper-case "hi")  ; => "HI"
+(clojure:require "clojure.set")
+
+;; Lisp functions callable from Clojure, with any number of arguments
+(clojure:define "square" (lambda (x) (* x x)))
+(clojure:eval '(mapv square (range 5)))            ; => #(0 1 4 9 16)
+```
+
+In an s-expression, Lisp vectors are Clojure vectors and hash tables are
+maps, so `(defn add3 [a b c] ...)` is written `(defn add3 #(a b c) ...)`.
+Symbols are lowercased, so a case-sensitive name, such as a Java class or
+method, needs bars: `(|Exception.| "oops")`, `(|.getMessage| e)`.  Or pass
+the code as a string.
+
+| Function | |
+|---|---|
+| `startup &key classpath` | Start Clojure (by default from the jars `make clojure` downloads) in the `user` namespace. |
+| `eval form` | Evaluate an s-expression or a source string; return Lisp data. |
+| `eval-string source` | Evaluate every form in a string; return the last value. |
+| `load file`, `require namespace` | Load a source file; load a namespace. |
+| `funcall fn &rest args` | Call a function or var, given as an object or by name (`"clojure.string/upper-case"`, or a name resolved in `user`). |
+| `lookup name` | The var a name resolves to, unconverted. |
+| `define name value` | Define a var in `user`; a Lisp function becomes a Clojure function. |
+| `ex-data condition` | The `ex-data` map of the Clojure exception behind a `foreign-error`. |
+| `to-lisp object`, `from-lisp value` | Convert values. |
+
+| Clojure | Lisp |
+|---|---|
+| `nil` | `NIL` |
+| `true`, `false` | `T`, `NIL` (write `:false` for `false`) |
+| long, BigInt, Ratio | integer, ratio |
+| double | `double-float` |
+| string, character | string, character |
+| keyword | keyword (`:foo` ↔ `:FOO`) |
+| symbol | symbol, upcased, interned in `*package*` |
+| list, seq | list |
+| vector | simple-vector |
+| map | `equal` hash table |
+| set | list |
+| function, var, other objects | left as is |
+
+A lazy sequence is realized when converted, so don't convert an infinite
+one.  Clojure errors are signalled as `foreign-error`, whose message
+includes the causes (`Syntax error compiling ... (caused by: Unable to
+resolve symbol: foo in this context)`); `clojure:ex-data` gets an
+`ex-info`'s data.  A Lisp error in a Lisp function that Clojure called comes
+back as the original condition, and Clojure code can catch it as an
+`Exception`.
+
+Tests: `make check-clojure` runs them in `sbcl-clojure`.
+
 ## The shared core: `openldk/interop`
 
 The language systems are built on a small set of functions, also usable
@@ -101,6 +187,7 @@ directly for calling Java:
 | `jstring`, `lstring`, `java-double`, `java-array-list`, `make-java-array-of` | Values. |
 | `with-foreign-errors (language) &body` | Signal a Java exception escaping the body as `foreign-error`. |
 | `define-java-subclass`, `make-java-subclass-instance`, `call-from-java` | Callbacks; see below. |
+| `dump-lisp-image path &key init` | Save an SBCL with the Lisp REPL as its top level, after calling `init` (start a language, warm it up). |
 
 Methods are named as OpenLDK names them: the method name and its argument
 descriptor, like `"valueOf(D)"`.
