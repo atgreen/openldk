@@ -117,13 +117,49 @@ SAVE-LISP-AND-DIE, so each one reopens on first use after a restart."
 (defmethod |<init>(Ljava/lang/String;)| ((this |java/util/zip/ZipFile|) name)
   (%zipfile-open this name))
 
+;; The Charset overloads (the IntelliJ platform's): entry names are decoded
+;; by the zip library, so the charset goes unused.
+(defmethod |<init>(Ljava/io/File;Ljava/nio/charset/Charset;)| ((this |java/util/zip/ZipFile|) file charset)
+  (declare (ignore charset))
+  (|<init>(Ljava/io/File;I)| this file 1))
+
+(defmethod |<init>(Ljava/io/File;ILjava/nio/charset/Charset;)| ((this |java/util/zip/ZipFile|) file mode charset)
+  (declare (ignore charset))
+  (|<init>(Ljava/io/File;I)| this file mode))
+
+(defmethod |<init>(Ljava/lang/String;Ljava/nio/charset/Charset;)| ((this |java/util/zip/ZipFile|) name charset)
+  (declare (ignore charset))
+  (%zipfile-open this name))
+
+(defun %make-zip-entry (name ze)
+  "A java.util.zip.ZipEntry named NAME (a Java string) for the zip library's
+entry ZE."
+  (classload "java/util/zip/ZipEntry")
+  (let ((entry (%make-java-instance "java/util/zip/ZipEntry")))
+    (|<init>(Ljava/lang/String;)| entry name)
+    (|setSize(J)| entry (zip::zipfile-entry-size ze))
+    (|setCompressedSize(J)| entry (zip::zipfile-entry-compressed-size ze))
+    entry))
+
 (defmethod |getEntry(Ljava/lang/String;)| ((this |java/util/zip/ZipFile|) name)
-  ; (format t "GET-ENTRY: ~A in ~A~%" (lstring name) (%zipfile-zip this))
   (when-let (ze (zip:get-zipfile-entry (lstring name) (%zipfile-zip this)))
-    (classload "java/util/zip/ZipEntry")
-    (let ((entry (%make-java-instance "java/util/zip/ZipEntry")))
-      (|<init>(Ljava/lang/String;)| entry name)
-      entry)))
+    (%make-zip-entry name ze)))
+
+(defmethod |entries()| ((this |java/util/zip/ZipFile|))
+  "An Enumeration of the entries (Scala's compiler lists jars this way)."
+  (classload "java/util/ArrayList")
+  (let ((list (%make-java-instance "java/util/ArrayList")))
+    (|<init>()| list)
+    (zip:do-zipfile-entries (name ze (%zipfile-zip this))
+      (|add(Ljava/lang/Object;)| list (%make-zip-entry (jstring name) ze)))
+    (|java/util/Collections.enumeration(Ljava/util/Collection;)| list)))
+
+(defmethod |size()| ((this |java/util/zip/ZipFile|))
+  (let ((count 0))
+    (zip:do-zipfile-entries (name ze (%zipfile-zip this))
+      (declare (ignore name ze))
+      (incf count))
+    count))
 
 (defmethod |getMetaInfEntryNames()| ((this |java/util/jar/JarFile|))
   (let ((meta-entries (list)))

@@ -121,8 +121,9 @@
     (let ((instance (%make-java-instance class-name
                                          (get-ldk-loader-for-java-loader
                                           (slot-value declaring-class '|classLoader|))))
+          ;; Constructor.newInstance passes primitives boxed.
           (lisp-args (when args
-                       (coerce (java-array-data args) 'list))))
+                       (%unbox-args-for-descriptor descriptor (coerce (java-array-data args) 'list)))))
       (if (and sym (fboundp sym))
           (apply (symbol-function sym) instance lisp-args)
           (internal-error "Reflective newInstance0: constructor ~A not found for class ~A"

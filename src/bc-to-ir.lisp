@@ -1670,33 +1670,56 @@ are ordinary declared methods and use normal dispatch.")
 (define-bytecode-transpiler :FRETURN (context code)
   (:IRETURN context code))
 
+(defun %ldc-operand (context index)
+  "The IR for loading constant INDEX, and its stack type."
+  (with-slots (class) context
+    (with-slots (constant-pool) class
+      (let ((constant (aref constant-pool index)))
+        (if (typep constant 'constant-dynamic)
+            ;; A dynamically computed constant (JSR-292, JDK 11+).
+            (let* ((nat (aref constant-pool (slot-value constant 'name-and-type-index)))
+                   (name (slot-value (aref constant-pool (slot-value nat 'name-index)) 'value))
+                   (descriptor (slot-value (aref constant-pool (slot-value nat 'type-descriptor-index)) 'value))
+                   (bootstrap-method (nth (bootstrap-method-attr-index constant)
+                                          (gethash "BootstrapMethods" (attributes class))))
+                   (bsm-handle (aref constant-pool (method-ref bootstrap-method))))
+              (values (make-instance 'ir-constant-dynamic
+                                     :bootstrap-method-name (emit-static-method-reference
+                                                             (aref constant-pool (reference-index bsm-handle))
+                                                             constant-pool)
+                                     :name name
+                                     :descriptor descriptor
+                                     :args (mapcar (lambda (arg) (emit (aref constant-pool arg) constant-pool))
+                                                   (method-args bootstrap-method))
+                                     :caller (slot-value class 'name))
+                      (get-stack-type-from-descriptor descriptor)))
+            (values (emit constant constant-pool) (get-stack-jtype constant)))))))
+
 (define-bytecode-transpiler :LDC (context code)
   (with-slots (pc class stack) context
     (let* ((pc-start pc))
-      (with-slots (constant-pool) class
-        (let* ((index (aref code (incf pc)))
-               (var (make-stack-variable context pc-start (get-stack-jtype (aref constant-pool index)))))
+      (multiple-value-bind (rvalue jtype) (%ldc-operand context (aref code (incf pc)))
+        (let ((var (make-stack-variable context pc-start jtype)))
           (incf pc)
           (push pc (aref (next-insn-list context) pc-start))
           (push var (stack context))
           (list (make-instance 'ir-assign
                                :address pc-start
                                :lvalue var
-                               :rvalue (emit (aref constant-pool index) constant-pool))))))))
+                               :rvalue rvalue)))))))
 
 (define-bytecode-transpiler :LDC_W (context code)
   (with-slots (pc class) context
     (let* ((pc-start pc))
-      (with-slots (constant-pool) class
-            (let* ((index (+ (* (aref code (incf pc)) 256)
-                         (aref code (incf pc))))
-               (var (make-stack-variable context pc-start (get-stack-jtype (aref constant-pool index)))))
+      (multiple-value-bind (rvalue jtype)
+          (%ldc-operand context (+ (* (aref code (incf pc)) 256) (aref code (incf pc))))
+        (let ((var (make-stack-variable context pc-start jtype)))
           (incf pc)
           (push pc (aref (next-insn-list context) pc-start))
           (let ((code (list (make-instance 'ir-assign
                                            :address pc-start
                                            :lvalue var
-                                           :rvalue (emit (aref constant-pool index) constant-pool)))))
+                                           :rvalue rvalue))))
             (push var (stack context))
             code))))))
 

@@ -1157,39 +1157,30 @@ merge does.  When even that fails, return SUPERS unchanged."
           (error () supers)))))
 
 (defun %topo-sort-interfaces (ifaces)
-  "Sort interface symbols so that subtypes come before supertypes.
-   For CLOS C3 linearization, if A is a subtype of B, A must come before B.
-   First removes redundant interfaces to avoid CPL circularity.
-   Uses an insertion-based approach that compares all pairs."
+  "Order interface symbols so that CLOS can always compute class precedence
+lists: removing redundant interfaces, then sorting by one global order that
+agrees with subtyping -- longest class precedence list (most specific)
+first, then by name.  Java gives the order of a class's interfaces no
+meaning, but CLOS requires the precedence list to agree with every class's
+order of direct superclasses; ordering each class's interfaces as Java
+lists them made some combinations contradict (IntelliJ's PSI and the
+Kotlin compiler's Java model, which list the same interfaces in opposite
+orders), while one order shared by all classes never can."
   (when (null ifaces)
     (return-from %topo-sort-interfaces nil))
-  (setf ifaces (%remove-redundant-interfaces ifaces))
-  (let ((result (copy-list ifaces)))
-    ;; For each pair (i, j) where i < j, if result[j] is a supertype of result[i],
-    ;; that's fine. But if result[i] is a supertype of result[j], we need to move
-    ;; result[j] before result[i].
-    ;; Repeat until stable.
-    (loop with changed = t
-          while changed
-          do (setf changed nil)
-             (loop for i from 0 below (1- (length result))
-                   do (loop for j from (1+ i) below (length result)
-                            do (let ((a (nth i result))
-                                     (b (nth j result)))
-                                 (let ((fc-a (find-class a nil))
-                                       (fc-b (find-class b nil)))
-                                   ;; If B is a (strict) subtype of A, B should come before A
-                                   (when (and fc-a fc-b
-                                              (subtypep fc-b fc-a)
-                                              (not (subtypep fc-a fc-b)))
-                                     ;; Move B to position i (before A)
-                                     (setf result (append (subseq result 0 i)
-                                                          (list b)
-                                                          (subseq result i j)
-                                                          (subseq result (1+ j))))
-                                     (setf changed t)
-                                     (return)))))))
-    result))
+  (flet ((depth (sym)
+           (let ((class (find-class sym nil)))
+             (if class
+                 (handler-case
+                     (progn (closer-mop:ensure-finalized class)
+                            (length (closer-mop:class-precedence-list class)))
+                   (error () 0))
+                 0))))
+    (stable-sort (copy-list (%remove-redundant-interfaces ifaces))
+                 (lambda (a b)
+                   (let ((da (depth a)) (db (depth b)))
+                     (or (> da db)
+                         (and (= da db) (string< (symbol-name a) (symbol-name b)))))))))
 
 (defun %field-shadows-super-p (class field ldk-loader)
   "True when instance FIELD of CLASS shadows an instance field of the same
@@ -1220,6 +1211,41 @@ shadows a superclass field and needs its own storage."
                 sym)
           sym)
         (intern mangled :openldk))))
+
+(defun %bridge-target-descriptor (class method)
+  "The descriptor of the method of the same name the bridge METHOD calls,
+from its code, which is only loads, calls (its target, and boxing or
+unboxing), a checkcast and a return; or NIL."
+  (let* ((code-attr (gethash "Code" (attributes method)))
+         (code (and code-attr (slot-value code-attr 'code)))
+         (cp (constant-pool class)))
+    (when code
+      (loop with pc = 0
+            while (< pc (length code))
+            do (let ((op (aref code pc)))
+                 (cond
+                   ((<= #xb6 op #xb9)    ; invokevirtual/special/static/interface
+                    (let* ((ref (aref cp (+ (* 256 (aref code (1+ pc))) (aref code (+ pc 2)))))
+                           (nat (aref cp (slot-value ref 'method-descriptor-index))))
+                      (when (string= (slot-value (aref cp (slot-value nat 'name-index)) 'value)
+                                     (slot-value method 'name))
+                        (return (slot-value (aref cp (slot-value nat 'type-descriptor-index)) 'value)))
+                      (incf pc (if (= op #xb9) 5 3))))
+                   ((<= #x15 op #x19) (incf pc 2))      ; xload index
+                   ((= op #xc0) (incf pc 3))            ; checkcast
+                   ((or (<= #x1a op #x35) (<= #xac op #xb1)) (incf pc 1)) ; xload_n, returns
+                   (t (return nil))))))))
+
+(defun %same-name-bridge-p (class method)
+  "True when METHOD is a bridge to a method differing only in its return
+type.  OpenLDK names methods without their return types, so the two are
+one generic function: the bridge would call itself."
+  (and (bridge-p method)
+       (let ((target (%bridge-target-descriptor class method))
+             (descriptor (slot-value method 'descriptor)))
+         (and target
+              (string= (subseq target 0 (1+ (position #\) target)))
+                       (subseq descriptor 0 (1+ (position #\) descriptor))))))))
 
 (defun emit-<class> (class ldk-loader)
   "Emit CLOS class and method definitions for a Java class.
@@ -1279,6 +1305,7 @@ shadows a superclass field and needs its own storage."
                                      (if (or (native-p m)
                                              (native-override-p m)
                                              (null (gethash "Code" (attributes m)))
+                                             (%same-name-bridge-p class m)
                                              (and (bridge-p m)
                                                   (gethash (lispize-method-name
                                                             (format nil "~A~A"
@@ -1360,10 +1387,13 @@ callers expecting an Object rely on.  Box such methods' results with an
                                                               (slot-value m 'descriptor)))
                                 by-name)))
     (loop for name being the hash-keys of by-name using (hash-value ms)
-          for return-chars = (mapcar (lambda (m)
-                                       (let ((d (slot-value m 'descriptor)))
-                                         (char d (1+ (position #\) d)))))
-                                     ms)
+          for return-chars = (loop for m in ms
+                                   for d = (slot-value m 'descriptor)
+                                   collect (char d (1+ (position #\) d)))
+                                   ;; A bridge's target may be in a superclass.
+                                   when (%same-name-bridge-p class m)
+                                     collect (let ((target (%bridge-target-descriptor class m)))
+                                               (char target (1+ (position #\) target)))))
           for primitive = (find-if (lambda (c) (member c '(#\Z #\C))) return-chars)
           when (and primitive (some (lambda (c) (member c '(#\L #\[))) return-chars))
             collect (let ((params (loop for i from 1 upto (count-parameters (slot-value (first ms) 'descriptor))

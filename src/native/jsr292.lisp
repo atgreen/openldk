@@ -230,3 +230,56 @@ Objects (asType boxes, unboxes and collects varargs)."
 ;;; method handles.
 (setf (gethash "sun/misc/Unsafe.beforeMemoryAccess()V" *native-overrides*)
       (lambda () nil))
+
+;;; MethodHandleProxies.asInterfaceInstance: JDK 25 generates a hidden
+;;; proxy class with the ClassFile API.  Instead, a Lisp class implementing
+;;; the interface, whose single abstract method invokes the handle, adapted
+;;; to that method's type, exactly.
+
+(defvar *mh-proxy-classes* (make-hash-table :test #'equal :synchronized t)
+  "Interface binary name -> its proxy class symbol.")
+
+(defun %single-abstract-method (lclass)
+  "The <method> of the interface LCLASS (or a superinterface) that is
+abstract, as (values method declaring-class)."
+  (or (loop for m across (slot-value lclass 'methods)
+            when (and (logtest #x400 (access-flags m)) (not (static-p m)))
+              return (values m lclass))
+      (loop for iname across (interfaces lclass)
+            for super = (classload iname)
+            do (multiple-value-bind (m c) (and super (%single-abstract-method super))
+                 (when m (return (values m c)))))))
+
+(defun %mh-proxy-class (interface-name method)
+  (or (gethash interface-name *mh-proxy-classes*)
+      (setf (gethash interface-name *mh-proxy-classes*)
+            (let* ((class-sym (intern (format nil "openldk/MHProxy_~A" (substitute #\_ #\/ interface-name))
+                                      :openldk))
+                   (descriptor (slot-value method 'descriptor))
+                   (method-sym (intern (lispize-method-name (format nil "~A~A" (slot-value method 'name) descriptor))
+                                       :openldk))
+                   (params (loop for i from 1 upto (count-parameters descriptor)
+                                 collect (intern (format nil "P~A" i) :openldk))))
+              (eval `(defclass/std ,class-sym (|java/lang/Object| ,(%interface-class-symbol interface-name))
+                       ((target))))
+              (unless (and (fboundp method-sym) (typep (fdefinition method-sym) 'generic-function))
+                (ensure-generic-function method-sym :generic-function-class 'java-generic-function
+                                                    :lambda-list (cons '|this| params)))
+              (eval `(defmethod ,method-sym ((|this| ,class-sym) ,@params)
+                       (%mh-invoke (slot-value |this| 'target) (list ,@params))))
+              class-sym))))
+
+(setf (gethash "java/lang/invoke/MethodHandleProxies.asInterfaceInstance(Ljava/lang/Class;Ljava/lang/invoke/MethodHandle;)Ljava/lang/Object;"
+               *native-overrides*)
+      (lambda (interface mh)
+        (let* ((interface-name (substitute #\/ #\. (lstring (slot-value interface '|name|))))
+               (method (%single-abstract-method (classload interface-name))))
+          (unless method
+            (error (%lisp-condition
+                    (%make-throwable '|java/lang/IllegalArgumentException|
+                                     (format nil "not a single-method interface: ~A" interface-name)))))
+          (let ((proxy (make-instance (%mh-proxy-class interface-name method))))
+            (setf (slot-value proxy 'target)
+                  (|asType(Ljava/lang/invoke/MethodType;)|
+                   mh (%descriptor-method-type (slot-value method 'descriptor))))
+            proxy))))

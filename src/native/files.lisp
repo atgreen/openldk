@@ -167,14 +167,23 @@ current0 for why it must not delegate to the wrapper name)."
   (declare (ignore unsafe))
   (sb-thread:barrier (:memory)))
 
+(defun %raw-fd (fd)
+  "The OS file descriptor of FD: a java/io/FileDescriptor or a raw int fd.
+FileInputStream keeps a Lisp file stream in its FileDescriptor; its
+channel (FileInputStream.getChannel) reads that stream's descriptor."
+  (let ((value (if (and (typep fd 'standard-object) (slot-exists-p fd '|fd|) (slot-boundp fd '|fd|))
+                   (slot-value fd '|fd|)
+                   fd)))
+    (if (typep value 'sb-sys:fd-stream)
+        (sb-sys:fd-stream-fd value)
+        value)))
+
 (defun |sun/nio/ch/FileDispatcherImpl.init()| ()
   nil)
 
 (defun |sun/nio/ch/FileDispatcherImpl.size0(Ljava/io/FileDescriptor;)| (fd)
   "Return the size of the file associated with FD."
-  (let ((real-fd (if (and (slot-exists-p fd '|fd|) (slot-boundp fd '|fd|))
-                     (slot-value fd '|fd|)
-                     fd)))
+  (let ((real-fd (%raw-fd fd)))
     (handler-case
         (let ((stat (sb-posix:fstat real-fd)))
           (sb-posix:stat-size stat))
@@ -183,9 +192,7 @@ current0 for why it must not delegate to the wrapper name)."
 
 (defun |sun/nio/ch/FileDispatcherImpl.close0(Ljava/io/FileDescriptor;)| (fd)
   "Close the file descriptor."
-  (let ((real-fd (if (and (slot-exists-p fd '|fd|) (slot-boundp fd '|fd|))
-                     (slot-value fd '|fd|)
-                     fd)))
+  (let ((real-fd (%raw-fd fd)))
     (handler-case
         (sb-posix:close real-fd)
       (sb-posix:syscall-error ()
@@ -210,9 +217,7 @@ current0 for why it must not delegate to the wrapper name)."
 
 (defun |sun/nio/ch/FileDispatcherImpl.seek0(Ljava/io/FileDescriptor;J)| (fd offset)
   "lseek(2) — return current position or seek to OFFSET."
-  (let ((real-fd (if (and (slot-exists-p fd '|fd|) (slot-boundp fd '|fd|))
-                     (slot-value fd '|fd|)
-                     fd)))
+  (let ((real-fd (%raw-fd fd)))
     (handler-case
         (if (= offset -1)
             ;; -1 means query current position (SEEK_CUR with offset 0)
@@ -224,9 +229,7 @@ current0 for why it must not delegate to the wrapper name)."
 (defun |sun/nio/ch/FileDispatcherImpl.force0(Ljava/io/FileDescriptor;Z)| (fd metadata)
   "fsync/fdatasync the file descriptor."
   (declare (ignore metadata))
-  (let ((real-fd (if (and (slot-exists-p fd '|fd|) (slot-boundp fd '|fd|))
-                     (slot-value fd '|fd|)
-                     fd)))
+  (let ((real-fd (%raw-fd fd)))
     (handler-case
         (sb-posix:fsync real-fd)
       (sb-posix:syscall-error ()
@@ -234,29 +237,34 @@ current0 for why it must not delegate to the wrapper name)."
 
 (defun |sun/nio/ch/FileDispatcherImpl.write0(Ljava/io/FileDescriptor;JI)| (fd ptr length)
   "Write LENGTH bytes from native buffer at PTR to file descriptor FD."
-  (let ((real-fd (if (and (slot-exists-p fd '|fd|) (slot-boundp fd '|fd|))
-                     (slot-value fd '|fd|)
-                     fd))
+  (let ((real-fd (%raw-fd fd))
         (sap (sb-sys:int-sap ptr)))
     (sb-unix:unix-write real-fd sap 0 length)))
 
 (defun |sun/nio/ch/FileDispatcherImpl.truncate0(Ljava/io/FileDescriptor;J)| (fd size)
   "Truncate the file to SIZE bytes."
-  (let ((real-fd (if (and (slot-exists-p fd '|fd|) (slot-boundp fd '|fd|))
-                     (slot-value fd '|fd|)
-                     fd)))
+  (let ((real-fd (%raw-fd fd)))
     (handler-case
         (progn (sb-posix:ftruncate real-fd size) 0)
       (sb-posix:syscall-error ()
         (error (%lisp-condition (%make-throwable '|java/io/IOException|)))))))
 
+(defun %native-io-result (n errno)
+  "The JDK's convention for a read(2)-style result N: -1 (IOStatus.EOF) at
+end of file, and an IOException on failure."
+  (cond
+    ((null n)
+     (error (%lisp-condition (%make-throwable '|java/io/IOException| (sb-int:strerror errno)))))
+    ((zerop n) -1)
+    (t n)))
+
 (defun |sun/nio/ch/FileDispatcherImpl.read0(Ljava/io/FileDescriptor;JI)| (fd ptr length)
   "read(2) — read up to LENGTH bytes from FD into native buffer at PTR."
-  (let ((real-fd (if (and (slot-exists-p fd '|fd|) (slot-boundp fd '|fd|))
-                     (slot-value fd '|fd|)
-                     fd))
+  (let ((real-fd (%raw-fd fd))
         (sap (sb-sys:int-sap ptr)))
-    (sb-unix:unix-read real-fd sap length)))
+    (if (zerop length)
+        0
+        (multiple-value-call #'%native-io-result (sb-unix:unix-read real-fd sap length)))))
 
 ;;; JDK 25 moved the per-fd dispatcher natives from FileDispatcherImpl to
 ;;; UnixFileDispatcherImpl (FileDispatcherImpl keeps only init0/transfer*).
@@ -266,11 +274,7 @@ current0 for why it must not delegate to the wrapper name)."
 (defun |sun/nio/ch/FileDispatcherImpl.init0()| ()
   nil)
 
-(defun %raw-fd (fd)
-  "Unwrap a java/io/FileDescriptor object (or pass through a raw int fd)."
-  (if (and (slot-exists-p fd '|fd|) (slot-boundp fd '|fd|))
-      (slot-value fd '|fd|)
-      fd))
+
 
 (defun |sun/nio/ch/UnixFileDispatcherImpl.read0(Ljava/io/FileDescriptor;JI)| (fd ptr length)
   (|sun/nio/ch/FileDispatcherImpl.read0(Ljava/io/FileDescriptor;JI)| fd ptr length))
@@ -299,12 +303,30 @@ current0 for why it must not delegate to the wrapper name)."
 (defun |sun/nio/ch/UnixFileDispatcherImpl.closeIntFD(I)| (fd)
   (|sun/nio/ch/FileDispatcherImpl.closeIntFD(I)| fd))
 
+(defun |sun/nio/ch/UnixFileDispatcherImpl.map0(Ljava/io/FileDescriptor;IJJZ)| (fd prot position length sync)
+  "mmap(2) LENGTH bytes of FD from POSITION (page-aligned by the caller):
+PROT is 0 (read-only), 1 (read-write) or 2 (private, copy-on-write).
+Native memory in OpenLDK is addressed directly, so the mapping's address
+serves the MappedByteBuffer as is."
+  (declare (ignore sync))
+  (sb-sys:sap-int
+   (sb-posix:mmap nil length
+                  (if (zerop prot) sb-posix:prot-read (logior sb-posix:prot-read sb-posix:prot-write))
+                  (if (= prot 2) sb-posix:map-private sb-posix:map-shared)
+                  (%raw-fd fd) position)))
+
+(defun |sun/nio/ch/UnixFileDispatcherImpl.unmap0(JJ)| (address length)
+  (sb-posix:munmap (sb-sys:int-sap address) length)
+  0)
+
 (defun |sun/nio/ch/UnixFileDispatcherImpl.pread0(Ljava/io/FileDescriptor;JIJ)| (fd ptr length offset)
   "pread(2) — positioned read into native buffer at PTR."
   (let ((real-fd (%raw-fd fd))
         (sap (sb-sys:int-sap ptr)))
     (sb-posix:lseek real-fd offset sb-posix:seek-set)
-    (sb-unix:unix-read real-fd sap length)))
+    (if (zerop length)
+        0
+        (multiple-value-call #'%native-io-result (sb-unix:unix-read real-fd sap length)))))
 
 (defun |sun/nio/ch/UnixFileDispatcherImpl.pwrite0(Ljava/io/FileDescriptor;JIJ)| (fd ptr length offset)
   "pwrite(2) — positioned write from native buffer at PTR."
@@ -388,7 +410,9 @@ current0 for why it must not delegate to the wrapper name)."
 ;;; allocation → Bits.tryReserveMemory CAS loops) triggers dozens of
 ;;; first-time JIT compilations.  Short-circuit with a direct read().
 (setf (gethash "sun/nio/ch/ChannelInputStream.read([BII)I" *native-overrides*)
-      (lambda (this b off len)
+      (lambda (this b off len) (%channel-input-stream-read this b off len)))
+
+(defun %channel-input-stream-read (this b off len)
         (if (zerop len)
             0
             (let* ((ch (slot-value this '|ch|))
@@ -396,22 +420,26 @@ current0 for why it must not delegate to the wrapper name)."
                              (slot-value ch '|fd|)))
                    (fd (when fd-obj (slot-value fd-obj '|fd|))))
               (unless fd
-                (unimplemented "ChannelInputStream.read: unsupported channel type ~A"
-                       (type-of ch)))
+                ;; Another kind of channel (the jrt: file system's): read
+                ;; through it, as ChannelInputStream does.
+                (return-from %channel-input-stream-read
+                  (|read(Ljava/nio/ByteBuffer;)|
+                   ch (|java/nio/ByteBuffer.wrap([BII)| b off len))))
               (let* ((mem (sb-alien:make-alien sb-alien:char len))
                      (sap (sb-alien:alien-sap mem))
                      (n (sb-unix:unix-read fd sap len)))
                 (cond
                   ((and n (> n 0))
                    (let ((data (java-array-data b)))
+                     ;; Java bytes are signed.
                      (loop for i below n
                            do (setf (aref data (+ off i))
-                                    (sb-sys:sap-ref-8 sap i))))
+                                    (sb-sys:signed-sap-ref-8 sap i))))
                    (sb-alien:free-alien mem)
                    n)
                   (t
                    (sb-alien:free-alien mem)
-                   -1)))))))
+                   -1))))))
 
 ;;; Channels$1.write([BII) native override — bypass heavy NIO write path
 ;;; The Java NIO write path (FileChannelImpl → IOUtil → DirectByteBuffer
@@ -424,9 +452,11 @@ current0 for why it must not delegate to the wrapper name)."
                  (fd-obj (when (typep ch '|sun/nio/ch/FileChannelImpl|)
                            (slot-value ch '|fd|)))
                  (fd (when fd-obj (slot-value fd-obj '|fd|))))
-            (unless fd
-              (unimplemented "Channels$1.write: unsupported channel type ~A"
-                     (type-of ch)))
+            (if (null fd)
+                ;; Another kind of channel: write through it, as Channels does.
+                (let ((bb (|java/nio/ByteBuffer.wrap([BII)| b off len)))
+                  (loop while (plusp (|remaining()| bb))
+                        do (|write(Ljava/nio/ByteBuffer;)| ch bb)))
             (let* ((data (java-array-data b))
                    (mem (sb-alien:make-alien sb-alien:char len))
                    (sap (sb-alien:alien-sap mem)))
@@ -435,7 +465,7 @@ current0 for why it must not delegate to the wrapper name)."
                              (let ((v (aref data (+ off i))))
                                (if (< v 0) (+ v 256) v))))
               (sb-unix:unix-write fd sap 0 len)
-              (sb-alien:free-alien mem))))))
+              (sb-alien:free-alien mem)))))))
 
 (defun |java/nio/MappedByteBuffer.checkBounds(III)| (off len size)
   (declare (ignore off)

@@ -1348,48 +1348,73 @@ component types must match exactly (short[] is not an int[])."
 
 (defparameter *invokedynamic-cache* (make-hash-table :test #'equal))
 
+(defun %call-bootstrap-method (bootstrap-method-name caller name args)
+  "Call the bootstrap method BOOTSTRAP-METHOD-NAME (the full
+\"class/name.method(descriptor)\" string) with a lookup on the class CALLER
+(a binary name), the Java string NAME, and ARGS (the call site's type, then
+the static arguments).  The bootstrap class is always a boot/library class
+or the caller's, so load it and resolve the static function in its own
+defining package rather than the caller's."
+  (let* ((paren (position #\( bootstrap-method-name))
+         (dot (position #\. bootstrap-method-name :end paren :from-end t))
+         (bootstrap-class (subseq bootstrap-method-name 0 dot)))
+    (%resolve-class-in-context bootstrap-class)
+    (let* ((pkg (class-package bootstrap-class))
+           (fn-sym (static-method-symbol (lispize-method-name bootstrap-method-name) pkg))
+           (param-types (parse-parameter-types bootstrap-method-name))
+           (nparams (length param-types))
+           (full-args (append (list (%make-trusted-lookup (%get-java-class-by-bin-name caller t)) name)
+                              args))
+           ;; Bootstrap methods are frequently varargs (last parameter an
+           ;; Object[]), e.g. SwitchBootstraps.typeSwitch and
+           ;; ObjectMethods.bootstrap. Collect the trailing arguments into a
+           ;; single Object[] so the fixed-arity Lisp function receives them
+           ;; the way the JVM would after varargs packing.
+           (final-args
+             (if (and (plusp nparams)
+                      (let ((last (car (last param-types))))
+                        (and (stringp last) (>= (length last) 2)
+                             (string= "[]" (subseq last (- (length last) 2)))))
+                      (>= (length full-args) nparams))
+                 (let ((fixed (1- nparams)))
+                   (append (subseq full-args 0 fixed)
+                           (list (make-java-array
+                                  :component-class (%get-java-class-by-bin-name "java/lang/Object")
+                                  :initial-contents (coerce (nthcdr fixed full-args) 'vector)))))
+                 full-args)))
+      (apply fn-sym final-args))))
+
 (defun %resolve-invokedynamic (method-name bootstrap-method-name site-key caller fname &rest args)
-  "Resolve an invokedynamic call site by invoking its bootstrap method.
-BOOTSTRAP-METHOD-NAME is the full \"class/name.method(descriptor)\" string of the
-bootstrap method (e.g. java/lang/runtime/SwitchBootstraps.typeSwitch(...)). The
-bootstrap class is always a boot/library class, so we load it and resolve the
-static function in its own defining package rather than the caller's.
+  "Resolve an invokedynamic call site by invoking its bootstrap method, once:
 SITE-KEY identifies the call site; CALLER is the binary name of its class."
   (declare (ignore method-name))
-  (let* ((key site-key)
-         (cached (gethash key *invokedynamic-cache*)))
-    (or cached
-        (let* ((paren (position #\( bootstrap-method-name))
-               (dot (position #\. bootstrap-method-name :end paren :from-end t))
-               (bootstrap-class (subseq bootstrap-method-name 0 dot)))
-          (%resolve-class-in-context bootstrap-class)
-          (let* ((pkg (class-package bootstrap-class))
-                 (fn-sym (static-method-symbol (lispize-method-name bootstrap-method-name) pkg))
-                 (param-types (parse-parameter-types bootstrap-method-name))
-                 (nparams (length param-types))
-                 (full-args (append (list (%make-trusted-lookup (%get-java-class-by-bin-name caller t))
-                                          fname)
-                                    args))
-                 ;; Bootstrap methods are frequently varargs (last parameter an
-                 ;; Object[]), e.g. SwitchBootstraps.typeSwitch and
-                 ;; ObjectMethods.bootstrap. Collect the trailing arguments into a
-                 ;; single Object[] so the fixed-arity Lisp function receives them
-                 ;; the way the JVM would after varargs packing.
-                 (final-args
-                   (if (and (plusp nparams)
-                            (let ((last (car (last param-types))))
-                              (and (stringp last) (>= (length last) 2)
-                                   (string= "[]" (subseq last (- (length last) 2)))))
-                            (>= (length full-args) nparams))
-                       (let ((fixed (1- nparams)))
-                         (append (subseq full-args 0 fixed)
-                                 (list (make-java-array
-                                        :component-class (%get-java-class-by-bin-name "java/lang/Object")
-                                        :initial-contents (coerce (nthcdr fixed full-args) 'vector)))))
-                       full-args))
-                 (resolved (apply fn-sym final-args)))
-            (setf (gethash key *invokedynamic-cache*) resolved)
-            resolved)))))
+  (or (gethash site-key *invokedynamic-cache*)
+      (setf (gethash site-key *invokedynamic-cache*)
+            (%call-bootstrap-method bootstrap-method-name caller fname args))))
+
+(defvar *constant-dynamic-cache* (make-hash-table :test #'eq :synchronized t)
+  "ldc site key -> (value), once its CONSTANT_Dynamic is resolved.")
+
+(defun %resolve-constant-dynamic (site-key bootstrap-method-name caller name descriptor &rest args)
+  "The value of a CONSTANT_Dynamic: its bootstrap method's result, called
+once per ldc site with the constant's type, unboxed if primitive."
+  (car (or (gethash site-key *constant-dynamic-cache*)
+           (setf (gethash site-key *constant-dynamic-cache*)
+                 (let ((value (%call-bootstrap-method
+                               bootstrap-method-name caller (jstring name)
+                               (cons (%bin-type-name-to-class descriptor) args))))
+                   (list (if (find (char descriptor 0) "ZBCSIJFD")
+                             (%maybe-unbox value)
+                             value)))))))
+
+(defmethod codegen ((insn ir-constant-dynamic) context)
+  (with-slots (bootstrap-method-name name descriptor args caller) insn
+    (make-instance '<expression>
+                   :insn insn
+                   :code `(%resolve-constant-dynamic ',(gensym "CONDY-SITE") ,bootstrap-method-name
+                                                     ,caller ,name ,descriptor
+                                                     ,@(mapcar (lambda (a) (code (codegen a context))) args))
+                   :expression-type (get-stack-type-from-descriptor descriptor))))
 
 (defun %extract-string-concat-recipe (args)
   "Extract the recipe string from StringConcatFactory bootstrap args.
