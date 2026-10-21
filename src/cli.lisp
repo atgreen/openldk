@@ -417,15 +417,20 @@ classes reset."
                (slot-value *app-ldk-class-loader* 'ldk-classes-by-bin-name)))
     count))
 
-(defun %run-warmup (mainclass args classpath &key input (timeout 600))
+(defun %run-warmup (mainclass args classpath &key input directory (timeout 600))
   "Run MAINCLASS with ARGS once at build time, with INPUT (a string, or
-NIL for no input) as its standard input.  Errors, timeouts and System.exit
-are reported and survived, so one bad warmup doesn't stop the build."
+NIL for no input) as its standard input, and relative file names resolved
+against DIRECTORY when given.  Errors, timeouts and System.exit are
+reported and survived, so one bad warmup doesn't stop the build."
   (let ((input-file (when input
                       (uiop:with-temporary-file (:stream s :pathname p :keep t)
                         (write-string input s)
                         p)))
-        (*ignore-quit* t))
+        (*ignore-quit* t)
+        (*default-pathname-defaults*
+          (if directory
+              (merge-pathnames (uiop:ensure-directory-pathname directory))
+              *default-pathname-defaults*)))
     (unwind-protect
          (handler-case
              (sb-ext:with-timeout timeout
@@ -448,8 +453,9 @@ reset the application's own classes, and save.
    OUTPUT-PATH:       Path for the saved executable.
    DEFAULT-MAINCLASS: The Java class to run when no class is given on the CLI.
    CLASSPATH:         Classpath string to bake in. If nil, reads CLASSPATH env var.
-   WARMUPS:           List of runs, each a plist (:args LIST :input STRING);
-                      a run with neither runs main once with no arguments.
+   WARMUPS:           List of runs, each a plist (:args LIST :input STRING
+                      :directory DIR), DIR being where relative file names
+                      resolve; a run with none runs main once, no arguments.
    TIMEOUT:           Seconds allowed for each warmup run.
    RESET-CLASSES:     When true (the default), reset the application's
                       classes after warming up, so their <clinit>s run again
@@ -462,9 +468,10 @@ JDK classes always keep their state."
     (setf *default-mainclass* default-mainclass
           *default-classpath* cp)
     (dolist (warmup (or warmups (list nil)))
-      (destructuring-bind (&key args input) warmup
+      (destructuring-bind (&key args input directory) warmup
         (format *error-output* "~&;; WARMUP ~A ~{~A~^ ~}~%" default-mainclass args)
-        (%run-warmup default-mainclass args cp :input input :timeout timeout))))
+        (%run-warmup default-mainclass args cp :input input :directory directory
+                                               :timeout timeout))))
   (when reset-classes
     (format *error-output* "~&;; Reset ~D application classes~%" (%reset-app-classes)))
   (%reset-runtime-for-save)

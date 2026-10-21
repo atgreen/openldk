@@ -9,7 +9,7 @@ to have done already.
 |---|---|---|
 | `make-image` | The OpenLDK runtime, JDK bootstrap done | `openldk` |
 | `dump-app-image` | The above, plus a default main class and classpath | — |
-| `dump-warm-image` | The above, plus the program's code already compiled | `make abcl`, `make kawa` |
+| `dump-warm-image` | The above, plus the program's code already compiled | `make abcl`, `make kawa`, `make jscheme`, `make clojure` |
 
 All three are in `src/cli.lisp`.  OpenLDK compiles each Java method the
 first time it is called, and for a large program that is most of its startup
@@ -49,6 +49,7 @@ then saves.  Each warmup is a plist:
 
 - `:args` – a list of strings passed to `main`
 - `:input` – a string the program reads as its standard input
+- `:directory` – the directory relative file names resolve against
 
 Every method a warmup calls is compiled into the image, so pick warmups that
 exercise the code paths real runs will take.  Each warmup is limited to
@@ -142,6 +143,47 @@ reset works: `main` starts fresh, and the prompt starts at `#|kawa:1|#`.
 ```bash
 make kawa
 echo '(+ 2 3)' | ./kawa
+```
+
+### Example: `make jscheme`
+
+`make jscheme` downloads Peter Norvig's JScheme (Java 1.4 sources), compiles
+it with the JDK's `javac`, and runs `lib/jscheme/build-image.lisp`.  The
+warmup runs Norvig's R4RS test suite (`r4rstest.scm`, from its own directory
+via `:directory`, since it reopens itself by name) and a short REPL session.
+The default reset works.
+
+| | Cold | Warm image (`./jscheme`) |
+|---|---|---|
+| A short REPL session | 12.7 s | 0.2 s |
+| The R4RS test suite (passes) | 15 s | 2.2 s |
+| Image size | — | 148 MB |
+| Build time | — | ~35 s |
+
+```bash
+make jscheme
+echo '(+ 2 3)' | ./jscheme
+cd lib/jscheme && ../../jscheme jscheme.Scheme r4rstest.scm
+```
+
+### Example: `make clojure`
+
+`make clojure` downloads Clojure 1.12.4 with spec.alpha and core.specs.alpha
+and runs `lib/clojure/build-image.lisp`.  Loading `clojure.core` is most of
+Clojure's startup and happens in its runtime's static initializers, so the
+script keeps the warmed state (`:reset-classes nil`): the image starts with
+`clojure.core` loaded, and `clojure.main` opens its REPL on it.  The warmup
+works in a scratch namespace that it removes.
+
+| | Cold | Warm image (`./clojure`) |
+|---|---|---|
+| Startup and four forms (`defn`, `map`, `clojure-version`) | 5 min 48 s | 0.8 s |
+| Image size | — | 593 MB |
+| Build time | — | ~8 min |
+
+```bash
+make clojure
+echo '(map inc [1 2 3])' | ./clojure
 ```
 
 ### Example: `javacl`
