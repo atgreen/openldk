@@ -12,8 +12,9 @@ both ways, with no serialization and no process boundary.
 | `openldk/jscheme` | Peter Norvig's [JScheme](https://norvig.com/jscheme.html) | `openldk.jscheme`, nickname `jscheme` |
 | `openldk/clojure` | [Clojure](https://clojure.org/) 1.12.4 | `openldk.clojure`, nickname `clojure` |
 | `openldk/kawa` | [Kawa](https://www.gnu.org/software/kawa/) Scheme 3.1.1 | `openldk.kawa`, nickname `kawa` |
+| `openldk/abcl` | [ABCL](https://abcl.org/) (Armed Bear Common Lisp) 1.9.2 | `openldk.abcl`, nickname `abcl` |
 
-ABCL is next, on the same core.
+Groovy, Scala and Kotlin are next, on the same core.
 
 ## SBCL images with a language started
 
@@ -26,6 +27,7 @@ Lisp REPL:
 make sbcl-clojure && ./sbcl-clojure      # Clojure ready at once
 make sbcl-jscheme && ./sbcl-jscheme
 make sbcl-kawa && ./sbcl-kawa
+make sbcl-abcl && ./sbcl-abcl
 ```
 
 ```lisp
@@ -34,7 +36,7 @@ make sbcl-kawa && ./sbcl-kawa
 ```
 
 They are built with `openldk.interop:dump-lisp-image`; see below.  (The
-`./clojure`, `./jscheme` and `./kawa` images of [IMAGES.md](IMAGES.md) are different:
+`./clojure`, `./jscheme`, `./kawa` and `./abcl` images of [IMAGES.md](IMAGES.md) are different:
 they run the language's own REPL.)
 
 ## JScheme
@@ -229,6 +231,65 @@ Lisp predicate `:predicate t`.  Kawa errors are signalled as
 back as the original condition.
 
 Tests: `make check-kawa` runs them in `sbcl-kawa`.
+
+## ABCL
+
+A second Common Lisp, running on the JVM inside SBCL.  `make abcl`
+downloads ABCL's jar.  Starting ABCL takes about a minute and a half
+cold; `make sbcl-abcl` builds an SBCL with it started.
+
+```lisp
+(asdf:load-system "openldk/abcl")
+(abcl:startup)                                     ; already done in sbcl-abcl
+
+(abcl:eval '(lisp-implementation-type))            ; => "Armed Bear Common Lisp"
+(abcl:eval '(mapcar (lambda (x) (* x x)) '(1 2 3))) ; => (1 4 9)
+(abcl:eval "(defun fact (n) (if (< n 2) 1 (* n (fact (1- n))))) (fact 25)")
+                                                   ; => 15511210043330985984000000
+(abcl:funcall 'fact 10)                            ; => 3628800
+(abcl:eval "(java:jstatic \"max\" \"java.lang.Math\" 3 7)") ; => 7
+
+;; SBCL functions callable from ABCL, with any number of arguments
+(abcl:define 'square (lambda (x) (* x x)))
+(abcl:eval '(mapcar 'square '(1 2 3)))             ; => (1 4 9)
+(abcl:define '*limit* 10)                          ; a special variable
+```
+
+ABCL has its own packages, symbols and objects.  An s-expression given to
+`eval` is converted to ABCL data: keywords and CL symbols become ABCL's,
+another symbol goes to ABCL's package of the same name if it has one, and
+otherwise to its CL-USER.  A symbol in a package only ABCL has, such as
+`java:jstatic`, can't be read by SBCL, so write such code as a string.  A
+string is read by ABCL's reader one form at a time, in ABCL's current
+package (CL-USER unless the code changes it).
+
+| Function | |
+|---|---|
+| `startup &key classpath` | Start ABCL (by default from the jar `make abcl` downloads). |
+| `eval form` | Evaluate an s-expression or a source string; return the primary value as SBCL data. |
+| `eval-string source` | Read and evaluate the forms in a string; return the last value. |
+| `load file` | Load an ABCL source or fasl file. |
+| `funcall function &rest args` | Call a function, given as an object or by name (a string is read by ABCL's reader). |
+| `lookup name` | The function a name names, unconverted. |
+| `define name value` | Make a symbol name an SBCL function, or a special variable bound to a value. |
+| `to-lisp object`, `from-lisp value` | Convert values. |
+
+| ABCL | SBCL |
+|---|---|
+| integer, ratio, single-float, double-float | the same |
+| string, character | string, character |
+| `NIL`, `T`, keyword, CL symbol | the same symbol |
+| other symbol | symbol of the same name: in `*package*` for ABCL's CL-USER, otherwise in the SBCL package of the same name if there is one |
+| cons, list, simple-vector | cons, list, simple-vector |
+| function, other objects | left as is |
+
+An error ABCL code doesn't handle is signalled in SBCL as `foreign-error`
+(`foreign-error-object` is the ABCL condition), after ABCL has unwound
+its own stack, so its special bindings and `unwind-protect` cleanups are
+done.  A Lisp error in an SBCL function that ABCL called comes back as the
+original condition.
+
+Tests: `make check-abcl` runs them in `sbcl-abcl`.
 
 ## The shared core: `openldk/interop`
 
