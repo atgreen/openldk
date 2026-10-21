@@ -171,6 +171,10 @@ implements IR node INSN, generating operand code recursively."))
             (format *error-output* "  ~S~%"
                     (if (consp frame) (first frame) frame))))))
     (force-output *error-output*))
+  ;; Nothing may have loaded the exception class yet: a ClassCastException
+  ;; from a checkcast in a method with no handler for it, say.
+  (unless (find-class throwable-class nil)
+    (classload (symbol-name throwable-class)))
   (let ((throwable (make-instance throwable-class)))
     (|<init>()| throwable)
     throwable))
