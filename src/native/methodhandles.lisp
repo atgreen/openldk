@@ -304,11 +304,23 @@ so that SAM methods returning Object get proper boxed values."
 (defvar *dynamic-lambda-classes* (make-hash-table :test #'equal)
   "Cache of dynamically created lambda classes keyed by SAM method lispized name.")
 
-(defun %ensure-dynamic-lambda-class (method-str sam-method-type &optional interface-type-name)
+(defun %interface-class-symbol (interface-name)
+  "The CLOS class name of the interface INTERFACE-NAME (binary form), loading
+it, in its loader's package (OPENLDK.APP for the application's classes), or
+NIL."
+  (handler-case
+      (let* ((ldk-class (classload interface-name))
+             (sym (and ldk-class
+                       (find-symbol (name ldk-class) (ldk-class-package ldk-class)))))
+        (and sym (find-class sym nil) sym))
+    (condition () nil)))
+
+(defun %ensure-dynamic-lambda-class (method-str sam-method-type &optional interface-type-name markers)
   "Get or create a dynamic lambda class for the given SAM method name and type.
 INTERFACE-TYPE-NAME is the binary name of the functional interface (e.g.
 \"com/sun/tools/javac/util/JavacMessages$ResourceBundleHelper\") so that
-instances pass CHECKCAST for that interface.
+instances pass CHECKCAST for that interface, and MARKERS those of marker
+interfaces (java/io/Serializable) the class implements too.
 Returns the class symbol."
   (let* ((param-count (if (and sam-method-type
                                (slot-exists-p sam-method-type '|ptypes|)
@@ -323,9 +335,11 @@ Returns the class symbol."
                         "()Ljava/lang/Object;"))
          (lispized-name (lispize-method-name (format nil "~A~A" method-str descriptor)))
          ;; Use interface name as cache key when available for proper CHECKCAST
-         (class-name-str (if interface-type-name
-                             (format nil "openldk/DynamicLambda_~A" (substitute #\_ #\/ interface-type-name))
-                             (format nil "openldk/DynamicLambda_~A_~A" method-str param-count)))
+         (class-name-str (format nil "~A~{+~A~}"
+                                 (if interface-type-name
+                                     (format nil "openldk/DynamicLambda_~A" (substitute #\_ #\/ interface-type-name))
+                                     (format nil "openldk/DynamicLambda_~A_~A" method-str param-count))
+                                 (mapcar (lambda (marker) (substitute #\_ #\/ marker)) markers)))
          (cached (gethash class-name-str *dynamic-lambda-classes*)))
     (if cached
         ;; Ensure the method is defined for this specific lispized name
@@ -338,16 +352,11 @@ Returns the class symbol."
         (let* ((class-sym (intern class-name-str :openldk))
                (method-sym (intern lispized-name :openldk))
                (interface-sym (when interface-type-name
-                                (handler-case
-                                    (progn
-                                      (classload interface-type-name)
-                                      (let ((sym (find-symbol interface-type-name :openldk)))
-                                        (when (and sym (find-class sym nil))
-                                          sym)))
-                                  (condition () nil))))
-               (superclasses (if interface-sym
-                                 (list '|java/lang/Object| interface-sym)
-                                 (list '|java/lang/Object|))))
+                                (%interface-class-symbol interface-type-name)))
+               (marker-syms (remove nil (mapcar #'%interface-class-symbol markers)))
+               (superclasses (append (list '|java/lang/Object|)
+                                     (when interface-sym (list interface-sym))
+                                     marker-syms)))
           ;; Define the class with target and captures slots
           (eval `(defclass/std ,class-sym ,superclasses
                    ((target) (captures))))
@@ -403,14 +412,33 @@ unknown, preserving legacy behavior), else NIL."
             (covers "java/util/function/BiConsumer"))
        '|openldk/LambdaBiConsumer|))))
 
-(defun %lambda-metafactory (impl-handle captures &optional (method-name "get") sam-method-type interface-type-name)
+(defun %alt-metafactory-markers (alt-args)
+  "The binary names of the marker interfaces that altMetafactory's extra
+static arguments ALT-ARGS (flags, then optional counted lists of marker
+classes and bridges) ask a lambda to implement."
+  (let ((flags (first alt-args))
+        (rest (rest alt-args))
+        (markers '()))
+    (when (logtest flags 2)             ; FLAG_MARKERS
+      (let ((count (pop rest)))
+        (dotimes (i count)
+          (push (substitute #\/ #\. (lstring (slot-value (pop rest) '|name|))) markers))))
+    (when (logtest flags 1)             ; FLAG_SERIALIZABLE
+      (pushnew "java/io/Serializable" markers :test #'string=))
+    (nreverse markers)))
+
+(defun %lambda-metafactory (impl-handle captures &optional (method-name "get") sam-method-type
+                                                           interface-type-name alt-args)
   "Construct a functional interface implementation for Java lambdas.
 METHOD-NAME is the interface method name (get, test, apply, accept, etc.).
 CAPTURES is a list of pre-bound values for captured variables.
 SAM-METHOD-TYPE is the MethodType of the functional interface method,
 used to determine the correct arity (e.g. Consumer vs BiConsumer).
-INTERFACE-TYPE-NAME is the binary name of the target functional interface."
-  (let* ((method-str (if (stringp method-name) method-name (lstring method-name)))
+INTERFACE-TYPE-NAME is the binary name of the target functional interface.
+ALT-ARGS are altMetafactory's static arguments after the first three: the
+lambda also implements the marker interfaces they name (Serializable)."
+  (let* ((markers (and alt-args (%alt-metafactory-markers alt-args)))
+         (method-str (if (stringp method-name) method-name (lstring method-name)))
          (sam-param-count (if (and sam-method-type
                                    (slot-exists-p sam-method-type '|ptypes|)
                                    (slot-boundp sam-method-type '|ptypes|)
@@ -433,9 +461,10 @@ INTERFACE-TYPE-NAME is the binary name of the target functional interface."
                         ;; custom SAM like java.util.stream.Sink (accept, but
                         ;; NOT a Consumer as far as checkcast is concerned)
                         ;; must get a generated class implementing it.
-                        (unless (and interface-type-name sam-has-primitive-param)
+                        (unless (or markers (and interface-type-name sam-has-primitive-param))
                           (%prebuilt-lambda-class method-str sam-param-count interface-type-name))
-                        (%ensure-dynamic-lambda-class method-str sam-method-type interface-type-name)))
+                        (%ensure-dynamic-lambda-class method-str sam-method-type interface-type-name
+                                                      markers)))
          (instance (make-instance lambda-class)))
     (setf (slot-value instance 'target) impl-handle)
     (setf (slot-value instance 'captures) captures)

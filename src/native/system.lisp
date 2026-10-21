@@ -455,10 +455,16 @@ target component is assignable from the source component."
 (defun %class-modifiers (class)
   "Source-level modifiers for CLASS, computed from the ldk-class access flags
 with ACC_SUPER (0x20) masked out (it is not a source-level modifier)."
-  (if (eq (|isArray()| class) 1)
-      0
-      (let ((lclass (get-ldk-class-for-java-class class)))
-        (if lclass (logandc2 (access-flags lclass) #x20) 0))))
+  (cond
+    ;; A primitive type: public, final and abstract, as on a JVM.
+    ((eq (|isPrimitive()| class) 1) #x411)
+    ;; An array: its component's access, final and abstract, as on a JVM.
+    ((eq (|isArray()| class) 1)
+     (let ((component (|getComponentType()| class)))
+       (logior (logand (%class-modifiers component) #x7) #x410)))
+    (t
+     (let ((lclass (get-ldk-class-for-java-class class)))
+       (if lclass (logandc2 (access-flags lclass) #x20) 0)))))
 
 (defmethod |getModifiers()| ((class |java/lang/Class|))
   (%class-modifiers class))

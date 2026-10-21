@@ -492,7 +492,8 @@ stream."
           ("SourceDebugExtension"
            (read-buffer attributes-length))
           ("Signature"
-           (read-buffer attributes-length))
+           (setf (gethash "Signature" attributes)
+                 (slot-value (aref constant-pool (read-u2)) 'value)))
           ("NestHost"
            (setf (gethash "NestHost" attributes) (read-u2)))
           ("NestMembers"

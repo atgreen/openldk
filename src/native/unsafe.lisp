@@ -1016,7 +1016,9 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
 (defmethod |getComponentType()| ((class |java/lang/Class|))
   (let ((cn (lstring (slot-value class '|name|))))
     (if (eq #\[ (char cn 0))
-        (let ((ct (%bin-type-name-to-class (subseq cn 1))))
+        (let ((ct (or (and (slot-exists-p class '|componentType|)
+                           (slot-value class '|componentType|))
+                      (%bin-type-name-to-class (subseq cn 1)))))
           (unless ct
             (error (format nil "ERROR: can't determine component type for ~A" cn)))
           ct)
@@ -1081,13 +1083,8 @@ other name the JVM answers null, and a made-up Package for it misleads
 callers (Kawa resolved unknown names as java.lang.Package objects).
 The runtime image is the jimage or, in a JDK that has them, the jmods.
 Without either on the classpath, every name is reported, as before."
-  (let ((image (remove-if-not (lambda (cpe)
-                                (typep cpe '(or jimage-classpath-entry jmod-classpath-entry)))
-                              *classpath*))
-        (package (substitute #\/ #\. (lstring name))))
-    (when (or (null image)
-              (some (lambda (cpe) (runtime-image-has-package-p cpe package)) image))
-      (jstring "jrt:/java.base"))))
+  (when (%runtime-image-package-p (substitute #\/ #\. (lstring name)))
+    (jstring "jrt:/java.base")))
 
 ;; JDK 9+: BootLoader native — associate unnamed module with boot loader (no-op)
 (defun |jdk/internal/loader/BootLoader.setBootLoaderUnnamedModule0(Ljava/lang/Module;)| (module)
@@ -1229,6 +1226,7 @@ a same-named class from another loader."
 
 (defun %class-interface-p (this)
   (if (and (eq 0 (|isPrimitive()| this))
+           (eq 0 (|isArray()| this))
            (let ((lclass (get-ldk-class-for-java-class this)))
              (and lclass (interface-p lclass))))
       1

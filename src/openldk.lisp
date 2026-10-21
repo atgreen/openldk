@@ -1372,9 +1372,15 @@ shadows a superclass field and needs its own storage."
                             (with-slots (|name| |classLoader|) klass
                               (setf |name| cname)
                               (setf |classLoader| class-loader))
-                            ;; JDK 9+: set unnamed module so Class.getModule() is non-null
+                            ;; JDK 9+: set unnamed module so Class.getModule() is non-null.
+                            ;; The application's classes are in their loader's.
                             (when (and *unnamed-module* (slot-exists-p klass '|module|))
-                              (setf (slot-value klass '|module|) *unnamed-module*))
+                              (setf (slot-value klass '|module|)
+                                    (or (and (eq ldk-loader *app-ldk-class-loader*)
+                                             *boot-class-loader*
+                                             (slot-exists-p *boot-class-loader* '|unnamedModule|)
+                                             (slot-value *boot-class-loader* '|unnamedModule|))
+                                        *unnamed-module*)))
                             klass))))
            (setf (java-class class) klass)
            ;; JDK 25: Class.getModifiers(), isInterface() and isEnum() read the
@@ -1385,7 +1391,12 @@ shadows a superclass field and needs its own storage."
              ;; access flags: mask out ACC_SUPER (0x20), set on every modern class,
              ;; which would otherwise render as "synchronized".
              (setf (slot-value klass '|modifiers|) (logandc2 (access-flags class) #x20)))
-           (setf (slot-value klass '|classLoader|) class-loader)
+           ;; The application's classes report the system class loader, as on
+           ;; a JVM, where code asks it for their resources (Groovy's
+           ;; META-INF/dgminfo).
+           (setf (slot-value klass '|classLoader|)
+                 (or class-loader
+                     (and (eq ldk-loader *app-ldk-class-loader*) *boot-class-loader*)))
            ;; Store in loader's java-class hash tables
            (setf (gethash classname (slot-value ldk-loader 'java-classes-by-bin-name)) klass)
            (setf (gethash fq-classname (slot-value ldk-loader 'java-classes-by-fq-name)) klass)
@@ -1759,6 +1770,10 @@ properties, and *CLASSPATH* construction."
           (make-ldk-class-loader :parent-loader *boot-ldk-class-loader*
                                  :java-loader nil
                                  :package-name "OPENLDK.APP")))
+  ;; The system class loader (getSystemClassLoader) is the application
+  ;; classes' loader, as on a JVM.
+  (when *boot-class-loader*
+    (setf (gethash *boot-class-loader* *java-to-ldk-loaders*) *app-ldk-class-loader*))
   (%parse-ldk-debug-flags)
   ;; Enable DCE via environment variable LDK_DCE=1 (or any non-empty value)
   (let ((LDK_DCE (uiop:getenv "LDK_DCE")))

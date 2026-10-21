@@ -159,13 +159,28 @@ for the Java caller."
                (java-class (%make-java-instance "java/lang/Class")))
           (setf (slot-value java-class '|name|) (ijstring fq-name))
           (setf (slot-value java-class '|classLoader|) nil)
+          ;; Every array type implements these.
+          (setf (slot-value lclass 'interfaces) (vector "java/lang/Cloneable" "java/io/Serializable"))
           ;; JDK 17: getComponentType() reads the componentType field directly
           ;; (no longer native). Set it so array types resolve correctly.
-          (when (and (> (length cname) 1)
-                     (slot-exists-p java-class '|componentType|))
-            (let ((ct (%bin-type-name-to-class (subseq cname 1))))
+          (when (> (length cname) 1)
+            (let ((ct (if (char= (char cname 1) #\[)
+                          (java-class (%get-array-ldk-class-from-name (subseq cname 1)))
+                          (%bin-type-name-to-class (subseq cname 1)))))
               (when ct
-                (setf (slot-value java-class '|componentType|) ct))))
+                (when (slot-exists-p java-class '|componentType|)
+                  (setf (slot-value java-class '|componentType|) ct))
+                ;; JDK 25 reads the modifiers field (getModifiers, isInterface):
+                ;; the component's access, final and abstract, as on a JVM.
+                (when (slot-exists-p java-class '|modifiers|)
+                  (let ((access (if (slot-exists-p ct '|modifiers|)
+                                    (logand (or (slot-value ct '|modifiers|) 1) #x7)
+                                    1)))
+                    (setf (slot-value java-class '|modifiers|) (logior access #x10 #x400))))
+                ;; An array of the application's classes has their loader.
+                (when (and *boot-class-loader*
+                           (eq (slot-value ct '|classLoader|) *boot-class-loader*))
+                  (setf (slot-value java-class '|classLoader|) *boot-class-loader*)))))
           (setf (slot-value lclass 'java-class) java-class)
           ;; Store by fq-name (with dots) in *-by-fq-name* tables
           (setf (gethash fq-name *ldk-classes-by-fq-name*) lclass)

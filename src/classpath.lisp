@@ -409,6 +409,32 @@ form (java/lang)."))
           (setf packages table)))
       (gethash package-name packages))))
 
+(defun %runtime-image-package-p (package-name)
+  "True when PACKAGE-NAME (internal form, java/lang) is in the JDK's runtime
+image (the jimage, or the jmods), or when no runtime image is on the
+classpath."
+  (let ((image (remove-if-not (lambda (cpe)
+                                (typep cpe '(or jimage-classpath-entry jmod-classpath-entry)))
+                              *classpath*)))
+    (or (null image)
+        (some (lambda (cpe) (runtime-image-has-package-p cpe package-name)) image))))
+
+(defun %application-class-name-p (class-name)
+  "True when CLASS-NAME (binary form: a.b.C, or an array's [La.b.C;) names
+a class from outside the JDK's runtime image."
+  (let ((element (string-left-trim "[" class-name)))
+    (when (< (length element) (length class-name))
+      ;; An array: its element class, unless that is a primitive type.
+      (unless (and (> (length element) 2) (char= (char element 0) #\L))
+        (return-from %application-class-name-p nil))
+      (setf element (subseq element 1 (1- (length element)))))
+    (unless (member element '("boolean" "byte" "char" "short" "int" "long"
+                              "float" "double" "void")
+                    :test #'string=)
+      (let ((dot (position #\. element :from-end t)))
+        (or (null dot)                  ; the default package
+            (not (%runtime-image-package-p (substitute #\/ #\. (subseq element 0 dot)))))))))
+
 (defmethod %ensure-entry-open ((cpe jimage-classpath-entry))
   (ensure-jimage-loaded cpe))
 

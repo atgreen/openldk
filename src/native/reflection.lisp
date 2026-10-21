@@ -194,15 +194,15 @@
 
 ;; java.lang.Class.getGenericSignature0() is a private native returning the
 ;; class's generic-signature string (the class-file Signature attribute), or
-;; null when the class is not generic.  OpenLDK does not retain the Signature
-;; attribute, so return null: callers (e.g. Jackson's type introspection --
-;; getGenericSuperclass/getGenericInterfaces/getTypeParameters -> getGenericInfo)
-;; then treat the type as non-generic/raw.  That is correct for serialization to
-;; dynamically-typed data (Clojure maps/vectors), which is the jet/cheshire/
-;; jsonista use case; typed-generic deserialization would want the real string.
+;; null when the class is not generic.  Generic reflection needs it: a field's
+;; List<String> is checked against List's type parameters.
 (defmethod |getGenericSignature0()| ((this |java/lang/Class|))
-  (declare (ignore this))
-  nil)
+  (let* ((lclass (and (eq 0 (|isArray()| this))
+                      (eq 0 (|isPrimitive()| this))
+                      (get-ldk-class-for-java-class this)))
+         (attributes (and lclass (slot-boundp lclass 'attributes) (attributes lclass)))
+         (signature (and (hash-table-p attributes) (gethash "Signature" attributes))))
+    (and signature (ijstring signature))))
 
 (defmethod |getDeclaredFields0(Z)| ((this |java/lang/Class|) public-only)
   (unwind-protect
@@ -239,7 +239,15 @@
                                                  (access-flags field)
                                                  nil  ; trustedFinal
                                                  0    ; slot
-                                                 nil nil)
+                                                 ;; signature (getGenericType) and
+                                                 ;; annotations: picocli's @Option List<String>
+                                                 (let* ((attributes (slot-value field 'attributes))
+                                                        (signature (and (hash-table-p attributes)
+                                                                        (gethash "Signature" attributes))))
+                                                   (and signature (ijstring signature)))
+                                                 (let ((attributes (slot-value field 'attributes)))
+                                                   (and (hash-table-p attributes)
+                                                        (gethash "RuntimeVisibleAnnotations" attributes))))
                                                 f))
                                 (when (super lclass)
                                   (get-fields (%get-ldk-class-by-bin-name (super lclass) t)))))))
@@ -621,3 +629,11 @@ initialize the declaring class, as the JVM does before reflective access."
 ;; and stdin/stdout/stderr encodings were added), so FIXED_LENGTH is now 40.
 ;; vmProperties() returns String[] of key-value pairs (like -D properties).
 
+
+;; Executable.getParameters0() returns the MethodParameters attribute's
+;; parameters.  OpenLDK doesn't keep that attribute; null makes
+;; Executable.getParameters() synthesize them (arg0, arg1, ...), as a JVM
+;; does for a class compiled without -parameters.
+(defmethod |getParameters0()| (this)
+  (declare (ignore this))
+  nil)

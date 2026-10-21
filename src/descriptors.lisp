@@ -246,9 +246,7 @@ as strings."
            res)))
 
       ((char= ch #\[)
-       (let ((res (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
-                   (jstring bin-type-name) nil nil nil)))
-         res)))))
+       (java-class (%get-array-ldk-class-from-name (substitute #\/ #\. bin-type-name)))))))
 
 (defun %get-return-type (descriptor)
   (let* ((return-type-descriptor

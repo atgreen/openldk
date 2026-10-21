@@ -440,6 +440,19 @@ default method -- not every superinterface."
                 for result = (%find-declaring-class parent method-name loader)
                 when result return result)))))
 
+(defun %linkto-varargs-symbol (full-name method-sym)
+  "METHOD-SYM, or for a MethodHandle.linkTo<Kind> intrinsic with a
+signature OpenLDK defines no fixed-arity variant for (primitive arguments,
+as in DirectMethodHandle$Holder.invokeStatic's), its varargs variant: all
+take the method's arguments followed by the MemberName."
+  (let ((prefix "java/lang/invoke/MethodHandle.linkTo"))
+    (if (and (starts-with? prefix full-name)
+             (not (fboundp method-sym)))
+        (intern (format nil "~A(Ljava/lang/invoke/MemberName;)"
+                        (subseq full-name 0 (position #\( full-name)))
+                :openldk)
+        method-sym)))
+
 (defmethod codegen ((insn ir-call-static-method) context)
   (with-slots (class method-name args return-type) insn
     (make-instance '<expression>
@@ -451,7 +464,8 @@ default method -- not every superinterface."
                                 (pkg (class-package declaring-class loader))
                                 (full-name (format nil "~A.~A" declaring-class method-name))
                                 ;; Use static-method-symbol to check :openldk first (for native methods)
-                                (method-sym (static-method-symbol full-name pkg))
+                                (method-sym (%linkto-varargs-symbol
+                                             full-name (static-method-symbol full-name pkg)))
                                 (nargs (length args))
                                 (call (cond
                                         ((eq nargs 0)
@@ -1656,8 +1670,11 @@ boolean prints true/false and char prints the character rather than an int."
                                                                                                    (length type-chars)))))
                                                             collect (%string-concat-arg-form c tc)))))
                               :expression-type :REFERENCE))))
-        ;; Fast path for LambdaMetafactory
-        ((search "LambdaMetafactory.metafactory" bootstrap-method-name)
+        ;; Fast path for LambdaMetafactory.  altMetafactory (serializable
+        ;; lambdas, such as Comparator.comparing's) takes the same first three
+        ;; static arguments, then flags, marker interfaces and bridges.
+        ((or (search "LambdaMetafactory.metafactory" bootstrap-method-name)
+             (search "LambdaMetafactory.altMetafactory" bootstrap-method-name))
          (make-instance '<expression>
                         :insn insn
                         :code `(openldk::%lambda-metafactory
@@ -1665,7 +1682,10 @@ boolean prints true/false and char prints the character rather than an int."
                                 (list ,@(mapcar (lambda (a) (code (codegen a context))) dynamic-args))
                                 ,method-name
                                 ,(code (codegen (second args) context))
-                                ,interface-type-name)))
+                                ,interface-type-name
+                                ,@(when (search "altMetafactory" bootstrap-method-name)
+                                    `((list ,@(mapcar (lambda (a) (code (codegen a context)))
+                                                      (nthcdr 4 args))))))))
         ;; Fallback: generic invokedynamic handling
         (t
          (make-instance '<expression>
