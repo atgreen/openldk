@@ -779,8 +779,9 @@ instruction's byte length in the context's INSN-SIZE array."
       (incf pc)
       (push pc (aref (next-insn-list context) pc-start))
       (let* ((value1 (pop (stack context))))
-        (if (find (var-type value1) '(:DOUBLE :LONG))
-            ;; Category-2: ..., val2, val1 (cat2) => ..., val1, val2, val1
+        ;; VALUE1 is always category 1; the form depends on VALUE2.
+        (if (find (var-type (car (stack context))) '(:DOUBLE :LONG))
+            ;; Category-2 value2: ..., val2 (cat2), val1 => ..., val1, val2, val1
             (let ((value2 (pop (stack context))))
               (push value1 (stack context))
               (push value2 (stack context))
