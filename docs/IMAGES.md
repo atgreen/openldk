@@ -8,8 +8,8 @@ to have done already.
 | Builder | What the image contains | Example |
 |---|---|---|
 | `make-image` | The OpenLDK runtime, JDK bootstrap done | `openldk` |
-| `dump-app-image` | The above, plus a default main class and classpath | `make kawa` |
-| `dump-warm-image` | The above, plus the program's code already compiled | `make abcl` |
+| `dump-app-image` | The above, plus a default main class and classpath | — |
+| `dump-warm-image` | The above, plus the program's code already compiled | `make abcl`, `make kawa` |
 
 All three are in `src/cli.lisp`.  OpenLDK compiles each Java method the
 first time it is called, and for a large program that is most of its startup
@@ -30,9 +30,9 @@ default `main`, name the class first:
 ./kawa kawa.repl -e '(display 42)'
 ```
 
-The program still compiles its own code as it runs.
-
-`make kawa` builds this example.
+The program still compiles its own code as it runs, so for a program of
+any size, `dump-warm-image` is the better choice.  (`make kawa` used this
+until Kawa got a warm image.)
 
 ## `dump-warm-image`: a program whose code is already compiled
 
@@ -122,6 +122,27 @@ always go through OpenLDK's JIT when first used.
 
 The warmup's last form resets ABCL's prompt counter
 (`top-level::*cmd-number*`), so the image's first prompt is `CL-USER(1)`.
+
+### Example: `make kawa`
+
+`make kawa` downloads Kawa 3.1.1 and runs `lib/kawa/build-image.lisp`,
+which warms Kawa up with one REPL session (definitions and closures, named
+`let`, lists, vectors, strings, numbers, `apply`, continuations, output).
+Kawa compiles each REPL form to bytecode, so its compiler is exercised too.
+
+Kawa's classes rebuild their state in their `<clinit>`s, so the default
+reset works: `main` starts fresh, and the prompt starts at `#|kawa:1|#`.
+
+| | Cold (`openldk kawa.repl`) | Warm image (`./kawa`) |
+|---|---|---|
+| Five forms (`(+ 2 3)`, `fact`, `map`, `string-append`) | 88 s | 2.7 s |
+| Image size | — | 312 MB |
+| Build time (`make kawa`) | — | ~2 min |
+
+```bash
+make kawa
+echo '(+ 2 3)' | ./kawa
+```
 
 ### Example: `javacl`
 

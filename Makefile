@@ -42,8 +42,9 @@ $(KAWA_JAR):
 	mkdir -p lib
 	curl -L -o $(KAWA_JAR) $(KAWA_URL)
 
-kawa: src/*.lisp src/native/*.lisp *.asd Makefile $(KAWA_JAR)
-	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))" --eval "(openldk::dump-app-image \"kawa\" \"kawa.repl\" :classpath \"$(KAWA_JAR)\")"
+# A warm image: Kawa's Java code is compiled at build time (see docs/IMAGES.md).
+kawa: src/*.lisp src/native/*.lisp *.asd Makefile lib/kawa/build-image.lisp $(KAWA_JAR) | check-jdk
+	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))" --load lib/kawa/build-image.lisp
 
 $(ABCL_JAR):
 	curl -sSfL $(ABCL_URL) | tar xzO abcl-bin-$(ABCL_VERSION)/abcl.jar > $@.tmp
