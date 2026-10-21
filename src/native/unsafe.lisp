@@ -1079,12 +1079,14 @@ result is what lets Class.getPackage() define Package objects for
 java.* classes.  Only a package the runtime image has gets one: for any
 other name the JVM answers null, and a made-up Package for it misleads
 callers (Kawa resolved unknown names as java.lang.Package objects).
-Without a jimage on the classpath, every name is reported, as before."
-  (let ((jimages (remove-if-not (lambda (cpe) (typep cpe 'jimage-classpath-entry))
-                                *classpath*))
+The runtime image is the jimage or, in a JDK that has them, the jmods.
+Without either on the classpath, every name is reported, as before."
+  (let ((image (remove-if-not (lambda (cpe)
+                                (typep cpe '(or jimage-classpath-entry jmod-classpath-entry)))
+                              *classpath*))
         (package (substitute #\/ #\. (lstring name))))
-    (when (or (null jimages)
-              (some (lambda (cpe) (jimage-has-package-p cpe package)) jimages))
+    (when (or (null image)
+              (some (lambda (cpe) (runtime-image-has-package-p cpe package)) image))
       (jstring "jrt:/java.base"))))
 
 ;; JDK 9+: BootLoader native — associate unnamed module with boot loader (no-op)
