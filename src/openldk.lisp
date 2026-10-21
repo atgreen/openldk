@@ -472,12 +472,29 @@ initializations.  Returns the IR instruction list."
                                    (let* ((pc-start (pc *context*)))
                                      (if (and (gethash pc-start exception-handler-table)
                                               (not was-in-dead-code))
-                                         (let ((var (make-stack-variable *context* pc-start :REFERENCE)))
-                                           (push var (stack *context*))
+                                         ;; Normally the handler's stack is just the
+                                         ;; exception.  If normal code also reaches the
+                                         ;; handler, with one value on its stack (Kawa's
+                                         ;; try-finally passes null), share that value's
+                                         ;; variable and take the exception only on entry
+                                         ;; from a HANDLER-CASE clause.
+                                         (let* ((normal (and (gethash pc-start (stack-state-table *context*))
+                                                             (typep (first (stack *context*)) '<stack-variable>)
+                                                             (typep (second (stack *context*)) '<stack-bottom-marker>)
+                                                             (first (stack *context*))))
+                                                (var (or normal (make-stack-variable *context* pc-start :REFERENCE))))
+                                           (cond
+                                             (normal
+                                              (setf (gethash pc-start (shared-handler-table *context*)) t)
+                                              ;; Assigned here too: not single-assignment,
+                                              ;; so copy propagation leaves it alone.
+                                              (push (incf (svcount *context*)) (var-numbers normal)))
+                                             (t (push var (stack *context*))))
                                            (cons (make-instance 'ir-assign
                                                                 :address pc-start
                                                                 :lvalue var
-                                                                :rvalue (make-instance 'ir-condition-exception))
+                                                                :rvalue (make-instance 'ir-condition-exception
+                                                                                       :normal-value normal))
                                                  (mapcar (lambda (insn)
                                                            (with-slots (address) insn
                                                              (setf address (+ address 0.1)))
@@ -656,7 +673,7 @@ entry/exit as required."
                       (list (format nil "bridge=~A" (bridge-p method))
                             (append (list 'let (if (static-p method)
                                                    (append
-                                                    (list (list '|condition-cache|))
+                                                    (list (list '|condition-cache|) (list '|handler-entry|))
                                                     (remove-duplicates
                                                      (loop for var in (stack-variables *context*)
                                                            unless (or (gethash var (single-assignment-table *context*))
@@ -672,7 +689,7 @@ entry/exit as required."
                                                     (loop for pc from (- parameter-count 2) upto max-locals
                                                           collect (list (intern (format nil "local-~A" (1- (incf i))) :openldk))))
                                                    (append
-                                                    (list (list '|condition-cache|))
+                                                    (list (list '|condition-cache|) (list '|handler-entry|))
                                                     (remove-duplicates
                                                      (loop for var in (stack-variables *context*)
                                                            unless (or (gethash var (single-assignment-table *context*))

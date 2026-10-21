@@ -1034,12 +1034,23 @@ class is a self-reference to the class currently being compiled."
                    :code (list 'when (list 'not (list 'eq (code (codegen value context)) 0))
                                (list 'go (intern (format nil "branch-target-~A" offset)))))))
 
+(defun %handler-entry-flag (handler-block)
+  "Code for a HANDLER-CASE clause that jumps to HANDLER-BLOCK: tell a
+handler that normal code also reaches that it was entered for an exception."
+  (when (gethash (address handler-block) (shared-handler-table *context*))
+    (list '(setf |handler-entry| t))))
+
 (defmethod codegen ((insn ir-condition-exception) context)
-  (declare (ignore context))
   ;; condition-cache and objref are runtime symbols in :openldk
-  (make-instance '<expression>
-                 :insn insn
-                 :code (list 'slot-value '|condition-cache| (list 'quote 'openldk::|objref|))))
+  (let ((exception (list 'slot-value '|condition-cache| (list 'quote 'openldk::|objref|))))
+    (make-instance '<expression>
+                   :insn insn
+                   :code (if-let ((normal (normal-value insn)))
+                           ;; HANDLER-ENTRY is set by the clause that jumped here.
+                           `(if |handler-entry|
+                                (progn (setf |handler-entry| nil) ,exception)
+                                ,(code (codegen normal context)))
+                           exception))))
 
 (defmethod codegen ((insn ir-ifnonnull) context)
   (with-slots (offset value) insn
@@ -2079,6 +2090,7 @@ Used to consult block-local substitutions in addition to global ones.")
                                                      (slot-value |condition| '|objref|)
                                                      :stream *error-output*))
                                                   (setf |condition-cache| |condition|)
+                                                  ,@(%handler-entry-flag handler-block)
                                                   (go ,(intern (format nil "branch-target-~A" (address handler-block)))))))
                               ,@fall-through-go))
                           `((HANDLER-CASE
@@ -2105,6 +2117,7 @@ Used to consult block-local substitutions in addition to global ones.")
                                                    (slot-value |condition| '|objref|)
                                                    :stream *error-output*))
                                                 (setf |condition-cache| |condition|)
+                                                ,@(%handler-entry-flag handler-block)
                                                 (go ,(intern (format nil "branch-target-~A" (address handler-block)))))))
                             ,@fall-through-go))))))
           lisp-code)))))

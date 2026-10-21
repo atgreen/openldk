@@ -558,7 +558,10 @@ resolve shadowed fields to their declaring class's slot.")))
   ((objref)))
 
 (defclass/std ir-condition-exception (ir-node)
-  ())
+  ((normal-value
+    :doc "At a handler that normal code also reaches (Kawa's try-finally),
+the stack variable holding the value normal code left there."))
+  (:documentation "The exception a HANDLER-CASE clause caught."))
 
 (defclass/std ir-tableswitch (ir-node)
   ((index)
