@@ -53,3 +53,4 @@ data/
 /sbcl-jscheme
 /sbcl-clojure
 /sbcl-kawa
+/sbcl-abcl
