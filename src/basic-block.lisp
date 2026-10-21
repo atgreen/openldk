@@ -284,15 +284,13 @@ Combined with global substitutions during codegen for this block only.")
       ;;
       ;; OpenLDK flattens all exception-table handlers for a start-block into a
       ;; single HANDLER-CASE, whose clauses are tried top-to-bottom.  Order them
-      ;; by covered-range END descending, then by exception-table index
-      ;; ascending.  Range-end descending keeps an enclosing try's handler ahead
-      ;; of an inner one, which preserves nested try-finally behavior (an outer
-      ;; catch still fires when an inner finally re-throws -- the flat model
-      ;; can't chain finallies, but this order matches what worked before).
-      ;; Index-ascending within the same range restores JVM catch precedence for
-      ;; ordinary multi-catch (e.g. catch(NullPointerException) before
-      ;; catch(Throwable), catch(RuntimeException) before catch(Exception)).
-      ;; See ldk-e5u.4.
+      ;; by exception-table index, which is the JVM's catch precedence: an
+      ;; inner try's entries come before an enclosing try's, and a multi-catch
+      ;; lists catch(NullPointerException) before catch(Throwable).  Ordering
+      ;; by range end instead (see ldk-e5u.4) let an outer catch run before an
+      ;; inner finally or an inner catch of the same type.  A handler block
+      ;; inside an outer range gets its own HANDLER-CASE (below), so an inner
+      ;; finally's re-throw still reaches the outer catch.
       (when-let ((exception-table (exception-table *context*)))
         (let ((tuples-by-block (make-hash-table :test #'eq)))
           (loop for i from 0 below (length exception-table)
@@ -319,20 +317,20 @@ Combined with global substitutions during codegen for this block only.")
                          when (and inner-handler
                                    (< (start-pc ete) inner-handler-pc (end-pc ete))
                                    (/= inner-handler-pc (handler-pc ete))
-                                   (not (find i (gethash inner-handler tuples-by-block)
-                                              :key #'second)))
-                           do (push (list (end-pc ete) i (catch-type ete) handler)
+                                   (not (find-if (lambda (tp)
+                                                   (member (second tp)
+                                                           (list i (+ i (length exception-table)))))
+                                                 (gethash inner-handler tuples-by-block))))
+                           ;; After the block's own entries, which belong to
+                           ;; trys nested inside this range.
+                           do (push (list (end-pc ete) (+ i (length exception-table))
+                                          (catch-type ete) handler)
                                     (gethash inner-handler tuples-by-block))))
           (maphash
            (lambda (start-block tuples)
              (setf (try-catch start-block)
                    (mapcar (lambda (tp) (cons (third tp) (fourth tp)))
-                           (stable-sort
-                            tuples
-                            (lambda (a b)
-                              (or (> (first a) (first b))
-                                  (and (= (first a) (first b))
-                                       (< (second a) (second b)))))))))
+                           (sort tuples #'< :key #'second))))
            tuples-by-block)))
 
       ;; Compute dominance sets for all blocks.
