@@ -16,6 +16,19 @@ both ways, with no serialization and no process boundary.
 
 Groovy, Scala and Kotlin are next, on the same core.
 
+## Finding the jars
+
+Each language's `startup` takes its classes, by default, from the first of:
+
+1. the `CLASSPATH` environment variable, if it already has them;
+2. the copies `make <language>` (or `make sbcl-<language>`) leaves in `lib/`;
+3. pinned, checksummed downloads into OpenLDK's cache,
+   `$XDG_CACHE_HOME/openldk/` (`~/.cache/openldk/`), or `$LDK_CACHE_DIR`.
+   JScheme ships as source, so its classes are compiled there with the JDK's
+   compiler.  Set `LDK_OFFLINE=1` to never download.
+
+`default-classpath` in each language's package returns what that finds.
+
 ## SBCL images with a language started
 
 Starting a language can take a while: Clojure loads `clojure.core` for about
@@ -70,7 +83,7 @@ and evaluated directly, not printed and re-read.  Symbols are lowercased, so
 
 | Function | |
 |---|---|
-| `startup &key classpath` | Start JScheme (by default from `lib/jscheme/classes/`). Calling it again does nothing. |
+| `startup &key classpath` | Start JScheme (by default from `default-classpath`, see [Finding the jars](#finding-the-jars)). Calling it again does nothing. |
 | `eval form` | Evaluate an s-expression or a source string; return Lisp data. |
 | `eval-string source` | Evaluate every form in a string; return the last value. |
 | `load file` | Load a Scheme source file. |
@@ -139,7 +152,7 @@ the code as a string.
 
 | Function | |
 |---|---|
-| `startup &key classpath` | Start Clojure (by default from the jars `make clojure` downloads) in the `user` namespace. |
+| `startup &key classpath` | Start Clojure (by default from `default-classpath`, see [Finding the jars](#finding-the-jars)) in the `user` namespace. |
 | `eval form` | Evaluate an s-expression or a source string; return Lisp data. |
 | `eval-string source` | Evaluate every form in a string; return the last value. |
 | `load file`, `require namespace` | Load a source file; load a namespace. |
@@ -203,7 +216,7 @@ reader, so write such code as a string.
 
 | Function | |
 |---|---|
-| `startup &key classpath` | Start Kawa (by default from the jar `make kawa` downloads). |
+| `startup &key classpath` | Start Kawa (by default from `default-classpath`, see [Finding the jars](#finding-the-jars)). |
 | `eval form` | Evaluate an s-expression or a source string; return Lisp data. |
 | `eval-string source` | Evaluate every form in a string; return the last value. |
 | `load file` | Load a Scheme source file. |
@@ -265,7 +278,7 @@ package (CL-USER unless the code changes it).
 
 | Function | |
 |---|---|
-| `startup &key classpath` | Start ABCL (by default from the jar `make abcl` downloads). |
+| `startup &key classpath` | Start ABCL (by default from `default-classpath`, see [Finding the jars](#finding-the-jars)). |
 | `eval form` | Evaluate an s-expression or a source string; return the primary value as SBCL data. |
 | `eval-string source` | Read and evaluate the forms in a string; return the last value. |
 | `load file` | Load an ABCL source or fasl file. |
