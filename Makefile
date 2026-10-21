@@ -97,6 +97,10 @@ $(JSCHEME_MAIN): $(JSCHEME_SRC_JAR)
 	cd lib/jscheme/src && unzip -q ../jscheme-src.jar
 	$(JAVAC) -nowarn -d lib/jscheme/classes lib/jscheme/src/jscheme/*.java
 
+# Tests for openldk/jscheme, using JScheme from Lisp (see docs/INTEROP.md).
+check-jscheme: $(JSCHEME_MAIN) | check-jdk
+	sbcl --dynamic-space-size 32768 --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:test-system \"openldk/jscheme\"))"
+
 # A warm image: JScheme's Java code is compiled at build time (see docs/IMAGES.md).
 jscheme: src/*.lisp src/native/*.lisp *.asd Makefile lib/jscheme/build-image.lisp $(JSCHEME_MAIN) lib/jscheme/r4rstest.scm | check-jdk
 	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))" --load lib/jscheme/build-image.lisp
