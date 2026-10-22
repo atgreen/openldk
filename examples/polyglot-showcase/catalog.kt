@@ -1,31 +1,56 @@
-// The bookshop's catalog, in Kotlin: compiled by ASDF (compile-op) against
-// commons-text, a Maven dependency, and called from showcase.lisp.
+// Wonderland Books' catalog and pricing engine.
+//
+// ASDF compiles this file with kotlinc (a :kotlin-file component, at
+// compile-op) against commons-text, a :maven-jar component, and puts the
+// classes on the classpath.  showcase.lisp calls the top-level functions
+// as static methods of wonderland.CatalogKt.
 
+package wonderland
+
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.runBlocking
 import org.apache.commons.text.WordUtils
-import java.util.function.Function
+import java.util.function.ToDoubleBiFunction
 
-data class Book(val title: String, val author: String, val year: Int, val price: Double)
+data class Book(
+    val isbn: String,
+    val title: String,
+    val author: String,
+    val category: String,
+    val price: Double,
+    val stock: Int,
+)
 
-fun catalog(): List<Book> = listOf(
-    Book("alice's adventures in wonderland", "Lewis Carroll", 1865, 7.50),
-    Book("through the looking-glass", "Lewis Carroll", 1871, 8.25),
-    Book("the hunting of the snark", "Lewis Carroll", 1876, 5.00),
-    Book("structure and interpretation of computer programs", "Abelson & Sussman", 1985, 45.00),
-    Book("goedel, escher, bach", "Douglas Hofstadter", 1979, 22.00)
+data class OrderLine(val isbn: String, val quantity: Int)
+
+private val books = listOf(
+    Book("9780262510875", "structure and interpretation of computer programs", "Harold Abelson", "Computing", 45.00, 12),
+    Book("9780262560993", "the little schemer", "Daniel P. Friedman", "Computing", 38.00, 4),
+    Book("9780262561006", "the seasoned schemer", "Daniel P. Friedman", "Computing", 36.00, 3),
+    Book("9780465026562", "goedel, escher, bach", "Douglas Hofstadter", "Science", 22.00, 6),
+    Book("9780141439761", "alice's adventures in wonderland", "Lewis Carroll", "Fiction", 7.50, 30),
+    Book("9780141195346", "through the looking-glass", "Lewis Carroll", "Fiction", 8.25, 9),
+    Book("9780140434903", "the hunting of the snark", "Lewis Carroll", "Fiction", 5.00, 0),
 ).map { it.copy(title = WordUtils.capitalizeFully(it.title)) }
 
-// Takes a java.util.function.Function: the showcase passes a Lisp object.
-fun discounted(book: Book, pricing: Function<Any, Any>): Any = pricing.apply(book.price)
+fun catalog(): List<Book> = books
 
-// Coroutines: every book priced concurrently.
-fun totalWithTax(books: List<Book>, rate: Double): Double = kotlinx.coroutines.runBlocking {
-    books.map { book -> kotlinx.coroutines.async { book.price * (1 + rate) } }.sumOf { it.await() }
+fun findBook(isbn: String): Book? = books.find { it.isbn == isbn }
+
+/** "ISBN QUANTITY"; String.toInt throws NumberFormatException on a bad quantity. */
+fun parseOrderLine(line: String): OrderLine {
+    val fields = line.trim().split(Regex("\\s+"))
+    require(fields.size == 2) { "expected an ISBN and a quantity: '$line'" }
+    return OrderLine(fields[0], fields[1].toInt())
 }
 
-// Runs a Lisp function; a Lisp error in it arrives as a Java exception.
-fun guarded(action: () -> Any?): String =
-    try {
-        "it returned ${action()}"
-    } catch (e: ArithmeticException) {
-        "Kotlin caught the Lisp error as an ArithmeticException"
+/**
+ * The price of each line, under the store's pricing policy -- which the
+ * caller supplies, here a Lisp object implementing ToDoubleBiFunction --
+ * computed concurrently, one coroutine per line.
+ */
+fun priceLines(lines: List<OrderLine>, policy: ToDoubleBiFunction<Book, Int>): List<Double> =
+    runBlocking {
+        lines.map { line -> async { policy.applyAsDouble(findBook(line.isbn)!!, line.quantity) } }.awaitAll()
     }
