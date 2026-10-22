@@ -1984,13 +1984,7 @@ same-named defmethod."
 
 (defmethod |setMemory(Ljava/lang/Object;JJB)V| ((unsafe |sun/misc/Unsafe|) obj ptr size byte)
   (assert (null obj))
-  (let ((sap (sb-sys:int-sap ptr)))
-    ;; Loop through the memory range and set each byte to the specified value
-    (dotimes (i size)
-      ;; Calculate the offset for the current byte
-      (let ((offset-sap (sb-sys:sap+ sap i)))
-        ;; Set the byte at the current offset
-        (setf (sb-sys:sap-ref-8 offset-sap 0) byte)))))
+  (%unsafe-fill-memory ptr size byte))
 
 (defun |java/lang/Shutdown.beforeHalt()V| ()
   nil)

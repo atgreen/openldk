@@ -772,17 +772,21 @@ block restored after an image restart (:restored . size) is never freed."
         (setf (gethash new-ptr *unsafe-memory-table*) (cons new-mem new-size))
         new-ptr)))
 
+(defun %unsafe-fill-memory (address size byte)
+  "Fill SIZE bytes of native memory at ADDRESS with BYTE.  BYTE is a Java
+byte, and so signed; memset takes it unsigned, hence the mask."
+  (sb-alien:alien-funcall
+   (sb-alien:extern-alien "memset"
+                          (function (* t) (* t) sb-alien:int sb-alien:unsigned-long))
+   (sb-sys:int-sap address)
+   (logand byte #xFF)
+   size)
+  nil)
+
 (defmethod |setMemory0(Ljava/lang/Object;JJB)V| ((unsafe |jdk/internal/misc/Unsafe|) obj offset bytes value)
   (if (null obj)
-      ;; Direct memory — use memset for bulk operations
-      (progn
-        (sb-alien:alien-funcall
-         (sb-alien:extern-alien "memset"
-                                (function (* t) (* t) sb-alien:int sb-alien:unsigned-long))
-         (sb-sys:int-sap offset)
-         (logand value #xFF)
-         bytes)
-        nil)
+      ;; Direct memory — one memset
+      (%unsafe-fill-memory offset bytes value)
       ;; Array memory
       (loop for i below bytes
             do (setf (jaref obj (+ offset i)) (logand value #xFF)))))
