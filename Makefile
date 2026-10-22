@@ -24,6 +24,18 @@ JSCHEME_URL = https://norvig.com/jscheme
 JSCHEME_SRC_JAR = lib/jscheme/jscheme-src.jar
 JSCHEME_MAIN = lib/jscheme/classes/jscheme/Scheme.class
 
+SCALA_VERSION = 2.13.16
+SCALA_JARS = lib/scala/scala-library-$(SCALA_VERSION).jar lib/scala/scala-reflect-$(SCALA_VERSION).jar lib/scala/scala-compiler-$(SCALA_VERSION).jar
+
+KOTLIN_VERSION = 2.2.20
+KOTLIN_JARS = lib/kotlin/kotlin-stdlib-$(KOTLIN_VERSION).jar lib/kotlin/kotlin-compiler-embeddable-$(KOTLIN_VERSION).jar \
+  lib/kotlin/kotlin-reflect-$(KOTLIN_VERSION).jar lib/kotlin/kotlin-script-runtime-$(KOTLIN_VERSION).jar \
+  lib/kotlin/kotlin-daemon-embeddable-$(KOTLIN_VERSION).jar lib/kotlin/kotlinx-coroutines-core-jvm-1.8.0.jar \
+  lib/kotlin/trove4j-1.0.20200330.jar lib/kotlin/annotations-13.0.jar
+
+GROOVY_VERSION = 4.0.27
+GROOVY_JAR = lib/groovy/groovy-$(GROOVY_VERSION).jar
+
 ABCL_VERSION = 1.9.2
 ABCL_JAR = lib/abcl/abcl.jar
 ABCL_URL = https://abcl.org/releases/$(ABCL_VERSION)/abcl-bin-$(ABCL_VERSION).tar.gz
@@ -82,6 +94,36 @@ lib/clojure/core.specs.alpha-0.4.74.jar:
 clojure: src/*.lisp src/native/*.lisp *.asd Makefile lib/clojure/build-image.lisp $(CLOJURE_JARS) | check-jdk
 	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))" --load lib/clojure/build-image.lisp
 
+lib/scala/scala-%-$(SCALA_VERSION).jar:
+	mkdir -p lib/scala
+	curl -sSfL -o $@.tmp $(MAVEN_URL)/org/scala-lang/scala-$*/$(SCALA_VERSION)/scala-$*-$(SCALA_VERSION).jar
+	mv $@.tmp $@
+
+lib/kotlin/kotlin-%-$(KOTLIN_VERSION).jar:
+	mkdir -p lib/kotlin
+	curl -sSfL -o $@.tmp $(MAVEN_URL)/org/jetbrains/kotlin/kotlin-$*/$(KOTLIN_VERSION)/kotlin-$*-$(KOTLIN_VERSION).jar
+	mv $@.tmp $@
+
+lib/kotlin/kotlinx-coroutines-core-jvm-1.8.0.jar:
+	mkdir -p lib/kotlin
+	curl -sSfL -o $@.tmp $(MAVEN_URL)/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm/1.8.0/kotlinx-coroutines-core-jvm-1.8.0.jar
+	mv $@.tmp $@
+
+lib/kotlin/trove4j-1.0.20200330.jar:
+	mkdir -p lib/kotlin
+	curl -sSfL -o $@.tmp $(MAVEN_URL)/org/jetbrains/intellij/deps/trove4j/1.0.20200330/trove4j-1.0.20200330.jar
+	mv $@.tmp $@
+
+lib/kotlin/annotations-13.0.jar:
+	mkdir -p lib/kotlin
+	curl -sSfL -o $@.tmp $(MAVEN_URL)/org/jetbrains/annotations/13.0/annotations-13.0.jar
+	mv $@.tmp $@
+
+$(GROOVY_JAR):
+	mkdir -p lib/groovy
+	curl -sSfL -o $@.tmp $(MAVEN_URL)/org/apache/groovy/groovy/$(GROOVY_VERSION)/groovy-$(GROOVY_VERSION).jar
+	mv $@.tmp $@
+
 $(JSCHEME_SRC_JAR):
 	curl -sSfL -o $@.tmp $(JSCHEME_URL)/jscheme.jar
 	mv $@.tmp $@
@@ -109,6 +151,18 @@ check-clojure: sbcl-clojure
 check-kawa: sbcl-kawa
 	./sbcl-kawa --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:test-system \"openldk/kawa\"))"
 
+# Tests for openldk/scala, run in sbcl-scala, where Scala is started.
+check-scala: sbcl-scala
+	./sbcl-scala --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:test-system \"openldk/scala\"))"
+
+# Tests for openldk/kotlin, run in sbcl-kotlin, where Kotlin is started.
+check-kotlin: sbcl-kotlin
+	./sbcl-kotlin --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:test-system \"openldk/kotlin\"))"
+
+# Tests for openldk/groovy, run in sbcl-groovy, where Groovy is started.
+check-groovy: sbcl-groovy
+	./sbcl-groovy --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:test-system \"openldk/groovy\"))"
+
 # Tests for openldk/abcl, run in sbcl-abcl, where ABCL is started.  The
 # image's systems are left as they are: reloading OpenLDK into it fails.
 check-abcl: sbcl-abcl
@@ -126,6 +180,15 @@ sbcl-abcl: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(ABCL_JAR
 
 sbcl-clojure: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(CLOJURE_JARS) | check-jdk
 	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/clojure\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-clojure\" :init (lambda () (clojure:startup) (clojure:eval-string \"(defn f [n] (if (< n 2) 1 (*' n (f (dec n))))) (f 20) (mapv inc (range 5)) (into {} [[:a 1]]) (str 1 :k)\")))"
+
+sbcl-scala: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(SCALA_JARS) | check-jdk
+	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/scala\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-scala\" :init (lambda () (scala:startup) (scala:eval \"def f(n: Int): BigInt = if (n < 2) 1 else n * f(n - 1); f(20); List(1, 2, 3).map(_ * 2).sum; Vector(1, 2); Map(1 -> 2); Some((1, 2))\")))"
+
+sbcl-kotlin: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(KOTLIN_JARS) | check-jdk
+	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/kotlin\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-kotlin\" :init (lambda () (kotlin:startup) (kotlin:eval \"listOf(1, 2, 3).map { it * 2 }.sum()\") (kotlin:eval \"mapOf(1 to \\\"a\\\").entries.joinToString()\")))"
+
+sbcl-groovy: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(GROOVY_JAR) | check-jdk
+	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/groovy\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-groovy\" :init (lambda () (groovy:startup) (groovy:eval \"def f(n) { n < 2 ? 1G : n * f(n - 1) }; f(20); [3, 1, 2].sort().collect { it * 2 }; [a: 1].collectEntries { k, v -> [k, v + 1] }\")))"
 
 # A warm image: JScheme's Java code is compiled at build time (see docs/IMAGES.md).
 jscheme: src/*.lisp src/native/*.lisp *.asd Makefile lib/jscheme/build-image.lisp $(JSCHEME_MAIN) lib/jscheme/r4rstest.scm | check-jdk

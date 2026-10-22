@@ -92,10 +92,10 @@ ours, and a redirect to a file arrives as the file's Lisp stream."
 
 (defun %signal-io-exception (format-control &rest args)
   (let ((exc (%make-java-instance "java/io/IOException")))
-    (|<init>(Ljava/lang/String;)| exc (jstring (apply #'format nil format-control args)))
+    (|<init>(Ljava/lang/String;)V| exc (jstring (apply #'format nil format-control args)))
     (error (%lisp-condition exc))))
 
-(defmethod |forkAndExec(I[B[B[BI[BI[B[IZ)|
+(defmethod |forkAndExec(I[B[B[BI[BI[B[IZ)I|
     (this mode helperpath prog arg-block argc env-block envc dir fds redirect-error-stream)
   "Start the program PROG with the arguments in ARG-BLOCK, the environment in
 ENV-BLOCK (NIL to inherit ours) and the working directory DIR, and return
@@ -133,13 +133,13 @@ its pid.  FDS holds the requests for stdin, stdout and stderr (see
     (setf (gethash (sb-ext:process-pid process) *child-processes*) process)
     (sb-ext:process-pid process)))
 
-(defun |java/lang/ProcessHandleImpl.initNative()| ()
+(defun |java/lang/ProcessHandleImpl.initNative()V| ()
   nil)
 
-(defun |java/lang/ProcessHandleImpl.getCurrentPid0()| ()
+(defun |java/lang/ProcessHandleImpl.getCurrentPid0()J| ()
   (sb-unix:unix-getpid))
 
-(defun |java/lang/ProcessHandleImpl.waitForProcessExit0(JZ)| (pid reap)
+(defun |java/lang/ProcessHandleImpl.waitForProcessExit0(JZ)I| (pid reap)
   "Wait for the child PID to exit and return its exit status, or 128 plus
 the signal number if a signal killed it, as the JDK does."
   (let ((process (gethash pid *child-processes*)))
@@ -153,7 +153,7 @@ the signal number if a signal killed it, as the JDK does."
               (+ 128 (sb-ext:process-exit-code process))
               (sb-ext:process-exit-code process))))))
 
-(defun |java/lang/ProcessHandleImpl.isAlive0(J)| (pid)
+(defun |java/lang/ProcessHandleImpl.isAlive0(J)J| (pid)
   "0 (alive, start time unknown) if PID is running, -1 if not."
   (let ((process (gethash pid *child-processes*)))
     (cond
@@ -161,7 +161,7 @@ the signal number if a signal killed it, as the JDK does."
       ((eql pid (sb-unix:unix-getpid)) 0)
       (t (if (sb-unix:unix-kill pid 0) 0 -1)))))
 
-(defun |java/lang/ProcessHandleImpl.destroy0(JJZ)| (pid start-time force)
+(defun |java/lang/ProcessHandleImpl.destroy0(JJZ)Z| (pid start-time force)
   "Send PID SIGKILL if FORCE, else SIGTERM; 1 if the signal was sent."
   (declare (ignore start-time))
   (let ((signal (if (and force (not (eql force 0))) sb-unix:sigkill sb-unix:sigterm)))

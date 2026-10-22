@@ -225,30 +225,43 @@ as strings."
                  (t (incf index)))))
     (nreverse param-list))) ; Reverse the list before returning it, since we used push
 
+(defvar *descriptor-loader* nil
+  "The java.lang.ClassLoader the class types in descriptors are resolved
+through: that of the class whose members reflection describes, which can
+be a user loader's (the Scala REPL's).  NIL for the system loaders.")
+
+(defun %class-java-loader (java-class)
+  "The java.lang.ClassLoader JAVA-CLASS records, or NIL."
+  (and (slot-exists-p java-class '|classLoader|)
+       (slot-boundp java-class '|classLoader|)
+       (slot-value java-class '|classLoader|)))
+
+(defun %descriptor-class (name)
+  "The java.lang.Class for the class or array type NAME in a descriptor."
+  (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;| (jstring name) nil *descriptor-loader* nil))
+
 (defun %bin-type-name-to-class (bin-type-name)
   (let ((ch (char bin-type-name 0)))
     (cond
-      ((char= ch #\I) (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "int") nil nil nil))
-      ((char= ch #\J) (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "long") nil nil nil))
-      ((char= ch #\S) (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "short") nil nil nil))
-      ((char= ch #\B) (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "byte") nil nil nil))
-      ((char= ch #\C) (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "char") nil nil nil))
-      ((char= ch #\D) (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "double") nil nil nil))
-      ((char= ch #\F) (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "float") nil nil nil))
-      ((char= ch #\Z) (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "boolean") nil nil nil))
-      ((char= ch #\V) (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "void") nil nil nil))
+      ((char= ch #\I) (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;| (jstring "int") nil nil nil))
+      ((char= ch #\J) (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;| (jstring "long") nil nil nil))
+      ((char= ch #\S) (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;| (jstring "short") nil nil nil))
+      ((char= ch #\B) (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;| (jstring "byte") nil nil nil))
+      ((char= ch #\C) (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;| (jstring "char") nil nil nil))
+      ((char= ch #\D) (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;| (jstring "double") nil nil nil))
+      ((char= ch #\F) (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;| (jstring "float") nil nil nil))
+      ((char= ch #\Z) (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;| (jstring "boolean") nil nil nil))
+      ((char= ch #\V) (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;| (jstring "void") nil nil nil))
 
       ;; For object types
       ((char= ch #\L)
        (progn
          (let* ((obj-end (position #\; bin-type-name))
-                (res (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring (subseq bin-type-name 1 obj-end)) nil nil nil)))
+                (res (%descriptor-class (subseq bin-type-name 1 obj-end))))
            res)))
 
       ((char= ch #\[)
-       (let ((res (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
-                   (jstring bin-type-name) nil nil nil)))
-         res)))))
+       (java-class (%get-array-ldk-class-from-name (substitute #\/ #\. bin-type-name)))))))
 
 (defun %get-return-type (descriptor)
   (let* ((return-type-descriptor
@@ -268,42 +281,42 @@ as strings."
                (cond
                  ;; For simple types
                  ((char= ch #\I)
-                  (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
+                  (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;|
                          (jstring "int") nil nil nil)
                         param-list)
                   (incf index))
                  ((char= ch #\J)
-                  (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
+                  (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;|
                          (jstring "long") nil nil nil)
                         param-list)
                   (incf index))
                  ((char= ch #\S)
-                  (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
+                  (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;|
                          (jstring "short") nil nil nil)
                         param-list)
                   (incf index))
                  ((char= ch #\B)
-                  (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
+                  (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;|
                          (jstring "byte") nil nil nil)
                         param-list)
                   (incf index))
                  ((char= ch #\C)
-                  (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
+                  (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;|
                          (jstring "char") nil nil nil)
                         param-list)
                   (incf index))
                  ((char= ch #\D)
-                  (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
+                  (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;|
                          (jstring "double") nil nil nil)
                         param-list)
                   (incf index))
                  ((char= ch #\F)
-                  (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
+                  (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;|
                          (jstring "float") nil nil nil)
                         param-list)
                   (incf index))
                  ((char= ch #\Z)
-                  (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
+                  (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;|
                          (jstring "boolean") nil nil nil)
                         param-list)
                   (incf index))
@@ -311,9 +324,7 @@ as strings."
                  ;; For object types
                  ((char= ch #\L)
                   (let ((obj-end (position #\; descriptor :start index)))
-                    (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
-                           (jstring (subseq descriptor (1+ index) obj-end))
-                           nil nil nil)
+                    (push (%descriptor-class (subseq descriptor (1+ index) obj-end))
                           param-list)
                     (setf index (1+ obj-end))))
 
@@ -338,8 +349,7 @@ as strings."
                                (setf index (1+ semi)))))
                           ;; Unknown - skip one character
                           (t (incf index)))))
-                    (push (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
-                           (jstring (substitute #\. #\/ (subseq descriptor start index))) nil nil nil)
+                    (push (%descriptor-class (substitute #\. #\/ (subseq descriptor start index)))
                           param-list)))
 
                  (t (incf index)))))

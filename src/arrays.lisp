@@ -49,7 +49,7 @@
   ;; Validate size for negativity (JVM spec: throw NegativeArraySizeException)
   (when (< size 0)
     (let ((exc (%make-java-instance "java/lang/NegativeArraySizeException")))
-      (|<init>()| exc)
+      (|<init>()V| exc)
       (error (%lisp-condition exc))))
   (if initial-contents
       (let* ((contents-length (length initial-contents))
@@ -92,7 +92,7 @@ descriptor strings."
     (when (or (< index 0) (>= index len))
       ;; Throw Java ArrayIndexOutOfBoundsException
       (let ((exc (%make-java-instance "java/lang/ArrayIndexOutOfBoundsException")))
-        (|<init>(Ljava/lang/String;)| exc
+        (|<init>(Ljava/lang/String;)V| exc
          (jstring (format nil "~A" index)))
         (error (%lisp-condition exc))))
     (aref data index)))
@@ -107,7 +107,7 @@ descriptor strings."
     ;; Bounds check
     (when (or (< index 0) (>= index len))
       (let ((exc (%make-java-instance "java/lang/ArrayIndexOutOfBoundsException")))
-        (|<init>(Ljava/lang/String;)| exc
+        (|<init>(Ljava/lang/String;)V| exc
          (jstring (format nil "~A" index)))
         (error (%lisp-condition exc))))
     (setf (aref data index) new-value)))
@@ -172,7 +172,7 @@ not assignable to ARRAY's component type."
   ;; Deferred due to bootstrap complexity with exception classes
   (length (java-array-data array)))
 
-(defun |java/lang/reflect/Array.getLength(Ljava/lang/Object;)| (obj)
+(defun |java/lang/reflect/Array.getLength(Ljava/lang/Object;)I| (obj)
   "java.lang.reflect.Array.getLength implementation."
   ;; Null check (JVM spec: throw NullPointerException)
   (when (null obj)
@@ -181,13 +181,18 @@ not assignable to ARRAY's component type."
   ;; Deferred due to bootstrap complexity with exception classes
   (length (java-array-data obj)))
 
-(defun |java/lang/reflect/Array.get(Ljava/lang/Object;I)| (array index)
+(defun |java/lang/reflect/Array.get(Ljava/lang/Object;I)Ljava/lang/Object;| (array index)
   "java.lang.reflect.Array.get implementation."
   (jaref array index))
 
-(defun |java/lang/reflect/Array.set(Ljava/lang/Object;ILjava/lang/Object;)| (array index value)
+(defun |java/lang/reflect/Array.set(Ljava/lang/Object;ILjava/lang/Object;)V| (array index value)
   "java.lang.reflect.Array.set implementation."
   (setf (jaref array index) value))
+
+;; Arrays inherit Object.equals: identity (the Kotlin compiler compares
+;; arrays so).
+(defmethod |equals(Ljava/lang/Object;)Z| ((array java-array) other)
+  (if (eq array other) 1 0))
 
 (defmethod |length()| ((array java-array))
   (length (java-array-data array)))

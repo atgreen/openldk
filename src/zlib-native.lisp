@@ -84,26 +84,26 @@
                              (sb-alien:alien-sap memory) length)
       (sb-alien:free-alien memory))))
 
-(defun |java/util/zip/CRC32.update(II)| (checksum value)
+(defun |java/util/zip/CRC32.update(II)I| (checksum value)
   (%zlib-checksum-byte "crc32" checksum value))
 
-(defun |java/util/zip/CRC32.updateBytes0(I[BII)|
+(defun |java/util/zip/CRC32.updateBytes0(I[BII)I|
     (checksum array offset length)
   (%zlib-checksum-array "crc32" checksum array offset length))
 
-(defun |java/util/zip/CRC32.updateByteBuffer0(IJII)|
+(defun |java/util/zip/CRC32.updateByteBuffer0(IJII)I|
     (checksum address offset length)
   (%zlib-checksum-sap "crc32" checksum
                       (sb-sys:sap+ (sb-sys:int-sap address) offset) length))
 
-(defun |java/util/zip/Adler32.update(II)| (checksum value)
+(defun |java/util/zip/Adler32.update(II)I| (checksum value)
   (%zlib-checksum-byte "adler32" checksum value))
 
-(defun |java/util/zip/Adler32.updateBytes(I[BII)|
+(defun |java/util/zip/Adler32.updateBytes(I[BII)I|
     (checksum array offset length)
   (%zlib-checksum-array "adler32" checksum array offset length))
 
-(defun |java/util/zip/Adler32.updateByteBuffer(IJII)|
+(defun |java/util/zip/Adler32.updateByteBuffer(IJII)I|
     (checksum address offset length)
   (%zlib-checksum-sap "adler32" checksum
                       (sb-sys:sap+ (sb-sys:int-sap address) offset) length))
@@ -175,7 +175,7 @@ dictionary (wrong adler32 or bad stream state)."
   (error (%lisp-condition
           (%make-throwable '|java/lang/IllegalArgumentException|))))
 
-(defun |java/util/zip/Inflater.init(Z)| (nowrap)
+(defun |java/util/zip/Inflater.init(Z)J| (nowrap)
   (%load-zlib)
   (let ((stream (sb-alien:make-alien openldk-z-stream)))
     (%zero-zlib-stream stream)
@@ -204,7 +204,7 @@ dictionary (wrong adler32 or bad stream state)."
           (-3 (%throw-data-format-exception inflater input-used output-used))
           (otherwise (internal-error "inflate failed with zlib status ~D" status)))))))
 
-(defmethod |inflateBytesBytes(J[BII[BII)|
+(defmethod |inflateBytesBytes(J[BII[BII)J|
     ((inflater t) address input input-offset input-length
      output output-offset output-length)
   (let ((input-memory (%zlib-array-to-alien input input-offset input-length))
@@ -220,7 +220,7 @@ dictionary (wrong adler32 or bad stream state)."
       (sb-alien:free-alien output-memory)
       (sb-alien:free-alien input-memory))))
 
-(defmethod |inflateBytesBuffer(J[BIIJI)|
+(defmethod |inflateBytesBuffer(J[BIIJI)J|
     ((inflater t) address input input-offset input-length
      output-address output-length)
   (let ((input-memory (%zlib-array-to-alien input input-offset input-length)))
@@ -230,7 +230,7 @@ dictionary (wrong adler32 or bad stream state)."
                         (sb-sys:int-sap output-address) output-length)
       (sb-alien:free-alien input-memory))))
 
-(defmethod |inflateBufferBytes(JJI[BII)|
+(defmethod |inflateBufferBytes(JJI[BII)J|
     ((inflater t) address input-address input-length
      output output-offset output-length)
   (let ((output-memory (sb-alien:make-alien sb-alien:unsigned-char
@@ -244,13 +244,13 @@ dictionary (wrong adler32 or bad stream state)."
            result)
       (sb-alien:free-alien output-memory))))
 
-(defmethod |inflateBufferBuffer(JJIJI)|
+(defmethod |inflateBufferBuffer(JJIJI)J|
     ((inflater t) address input-address input-length output-address output-length)
   (%inflate-saps inflater address
                  (sb-sys:int-sap input-address) input-length
                  (sb-sys:int-sap output-address) output-length))
 
-(defun |java/util/zip/Inflater.setDictionary(J[BII)| (address dictionary offset length)
+(defun |java/util/zip/Inflater.setDictionary(J[BII)V| (address dictionary offset length)
   (let ((memory (%zlib-array-to-alien dictionary offset length)))
     (unwind-protect
          (let ((status
@@ -263,7 +263,7 @@ dictionary (wrong adler32 or bad stream state)."
       (sb-alien:free-alien memory)))
   nil)
 
-(defun |java/util/zip/Inflater.setDictionaryBuffer(JJI)| (address buffer-address length)
+(defun |java/util/zip/Inflater.setDictionaryBuffer(JJI)V| (address buffer-address length)
   (let ((status
           (%zlib-call "inflateSetDictionary" sb-alien:int
                        ((* openldk-z-stream) (%zlib-stream address))
@@ -275,17 +275,17 @@ dictionary (wrong adler32 or bad stream state)."
       (%throw-zlib-illegal-argument "inflateSetDictionary" status)))
   nil)
 
-(defun |java/util/zip/Inflater.getAdler(J)| (address)
+(defun |java/util/zip/Inflater.getAdler(J)I| (address)
   (unsigned-to-signed-integer
    (sb-alien:slot (sb-alien:deref (%zlib-stream address)) 'adler)))
 
-(defun |java/util/zip/Inflater.reset(J)| (address)
+(defun |java/util/zip/Inflater.reset(J)V| (address)
   (unless (zerop (%zlib-call "inflateReset" sb-alien:int
                              ((* openldk-z-stream) (%zlib-stream address))))
     (internal-error "inflateReset failed"))
   nil)
 
-(defun |java/util/zip/Inflater.end(J)| (address)
+(defun |java/util/zip/Inflater.end(J)V| (address)
   (let ((stream (%zlib-stream address)))
     (unless (zerop (%zlib-call "inflateEnd" sb-alien:int
                                ((* openldk-z-stream) stream)))
@@ -293,7 +293,7 @@ dictionary (wrong adler32 or bad stream state)."
     (%free-zlib-stream address))
   nil)
 
-(defun |java/util/zip/Deflater.init(IIZ)| (level strategy nowrap)
+(defun |java/util/zip/Deflater.init(IIZ)J| (level strategy nowrap)
   (%load-zlib)
   (let ((stream (sb-alien:make-alien openldk-z-stream)))
     (%zero-zlib-stream stream)
@@ -332,7 +332,7 @@ dictionary (wrong adler32 or bad stream state)."
       (%zlib-result stream input-length output-length (= status 1)
                     (and setting-parameters (/= status 0))))))
 
-(defmethod |deflateBytesBytes(J[BII[BIIII)|
+(defmethod |deflateBytesBytes(J[BII[BIIII)J|
     ((deflater t) address input input-offset input-length
      output output-offset output-length flush parameters)
   (declare (ignore deflater))
@@ -350,7 +350,7 @@ dictionary (wrong adler32 or bad stream state)."
       (sb-alien:free-alien output-memory)
       (sb-alien:free-alien input-memory))))
 
-(defmethod |deflateBytesBuffer(J[BIIJIII)|
+(defmethod |deflateBytesBuffer(J[BIIJIII)J|
     ((deflater t) address input input-offset input-length
      output-address output-length flush parameters)
   (declare (ignore deflater))
@@ -362,7 +362,7 @@ dictionary (wrong adler32 or bad stream state)."
                         flush parameters)
       (sb-alien:free-alien input-memory))))
 
-(defmethod |deflateBufferBytes(JJI[BIIII)|
+(defmethod |deflateBufferBytes(JJI[BIIII)J|
     ((deflater t) address input-address input-length
      output output-offset output-length flush parameters)
   (declare (ignore deflater))
@@ -378,7 +378,7 @@ dictionary (wrong adler32 or bad stream state)."
            result)
       (sb-alien:free-alien output-memory))))
 
-(defmethod |deflateBufferBuffer(JJIJIII)|
+(defmethod |deflateBufferBuffer(JJIJIII)J|
     ((deflater t) address input-address input-length
      output-address output-length flush parameters)
   (declare (ignore deflater))
@@ -387,7 +387,7 @@ dictionary (wrong adler32 or bad stream state)."
                  (sb-sys:int-sap output-address) output-length
                  flush parameters))
 
-(defun |java/util/zip/Deflater.setDictionary(J[BII)| (address dictionary offset length)
+(defun |java/util/zip/Deflater.setDictionary(J[BII)V| (address dictionary offset length)
   (let ((memory (%zlib-array-to-alien dictionary offset length)))
     (unwind-protect
          (let ((status
@@ -400,7 +400,7 @@ dictionary (wrong adler32 or bad stream state)."
       (sb-alien:free-alien memory)))
   nil)
 
-(defun |java/util/zip/Deflater.setDictionaryBuffer(JJI)| (address buffer-address length)
+(defun |java/util/zip/Deflater.setDictionaryBuffer(JJI)V| (address buffer-address length)
   (let ((status
           (%zlib-call "deflateSetDictionary" sb-alien:int
                        ((* openldk-z-stream) (%zlib-stream address))
@@ -412,17 +412,17 @@ dictionary (wrong adler32 or bad stream state)."
       (%throw-zlib-illegal-argument "deflateSetDictionary" status)))
   nil)
 
-(defun |java/util/zip/Deflater.getAdler(J)| (address)
+(defun |java/util/zip/Deflater.getAdler(J)I| (address)
   (unsigned-to-signed-integer
    (sb-alien:slot (sb-alien:deref (%zlib-stream address)) 'adler)))
 
-(defun |java/util/zip/Deflater.reset(J)| (address)
+(defun |java/util/zip/Deflater.reset(J)V| (address)
   (unless (zerop (%zlib-call "deflateReset" sb-alien:int
                              ((* openldk-z-stream) (%zlib-stream address))))
     (internal-error "deflateReset failed"))
   nil)
 
-(defun |java/util/zip/Deflater.end(J)| (address)
+(defun |java/util/zip/Deflater.end(J)V| (address)
   (let ((stream (%zlib-stream address)))
     (unless (zerop (%zlib-call "deflateEnd" sb-alien:int
                                ((* openldk-z-stream) stream)))

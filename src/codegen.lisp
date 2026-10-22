@@ -157,7 +157,7 @@ implements IR node INSN, generating operand code recursively."))
    NPE that escapes into a Clojure compile (see ldk-c7c).")
 (defparameter *npe-counter* 0)
 
-(defun %make-throwable (throwable-class)
+(defun %make-throwable (throwable-class &optional message)
   (when (and *trace-npe*
              (eq throwable-class '|java/lang/NullPointerException|))
     ;; Print only each frame's function designator (first element), never its
@@ -176,7 +176,9 @@ implements IR node INSN, generating operand code recursively."))
   (unless (find-class throwable-class nil)
     (classload (symbol-name throwable-class)))
   (let ((throwable (make-instance throwable-class)))
-    (|<init>()| throwable)
+    (if message
+        (|<init>(Ljava/lang/String;)V| throwable (jstring message))
+        (|<init>()V| throwable))
     throwable))
 
 (defmethod codegen ((insn ir-aastore) context)
@@ -251,7 +253,7 @@ implements IR node INSN, generating operand code recursively."))
                                   (value1 ,(code (codegen (value1 insn) context))))
                               (unsigned-to-signed-integer (logand (truncate value1 value2) #xFFFFFFFF)))
                           (division-by-zero ()
-                            (error (%lisp-condition (%make-throwable '|java/lang/ArithmeticException|)))))
+                            (error (%lisp-condition (%make-throwable '|java/lang/ArithmeticException| "/ by zero")))))
                  :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-ldiv) context)
@@ -263,7 +265,7 @@ implements IR node INSN, generating operand code recursively."))
                                   (value1 ,(code (codegen (value1 insn) context))))
                               (unsigned-to-signed-long (logand (truncate value1 value2) #xFFFFFFFFFFFFFFFF)))
                           (division-by-zero ()
-                            (error (%lisp-condition (%make-throwable '|java/lang/ArithmeticException|)))))
+                            (error (%lisp-condition (%make-throwable '|java/lang/ArithmeticException| "/ by zero")))))
                  :expression-type :LONG))
 
 (defun %codegen-binop (insn operator jtype context)
@@ -372,7 +374,7 @@ result always stays in range (bitwise ops, floats, doubles)."
     (make-instance '<expression>
                    :insn insn
                    :code `(let ((lookup (%make-java-instance "java/lang/invoke/MethodHandles$Lookup")))
-                            (|<init>(Ljava/lang/Class;)| lookup ,class)
+                            (|<init>(Ljava/lang/Class;)V| lookup ,class)
                             (unimplemented "IR-CALL-DYNAMIC codegen")))))
 
 (defun %class-method-name-table (ldk-class)
@@ -440,6 +442,19 @@ default method -- not every superinterface."
                 for result = (%find-declaring-class parent method-name loader)
                 when result return result)))))
 
+(defun %linkto-varargs-symbol (full-name method-sym)
+  "METHOD-SYM, or for a MethodHandle.linkTo<Kind> intrinsic with a
+signature OpenLDK defines no fixed-arity variant for (primitive arguments,
+as in DirectMethodHandle$Holder.invokeStatic's), its varargs variant: all
+take the method's arguments followed by the MemberName."
+  (let ((prefix "java/lang/invoke/MethodHandle.linkTo"))
+    (if (and (starts-with? prefix full-name)
+             (not (fboundp method-sym)))
+        (intern (format nil "~A(Ljava/lang/invoke/MemberName;)"
+                        (subseq full-name 0 (position #\( full-name)))
+                :openldk)
+        method-sym)))
+
 (defmethod codegen ((insn ir-call-static-method) context)
   (with-slots (class method-name args return-type) insn
     (make-instance '<expression>
@@ -451,7 +466,8 @@ default method -- not every superinterface."
                                 (pkg (class-package declaring-class loader))
                                 (full-name (format nil "~A.~A" declaring-class method-name))
                                 ;; Use static-method-symbol to check :openldk first (for native methods)
-                                (method-sym (static-method-symbol full-name pkg))
+                                (method-sym (%linkto-varargs-symbol
+                                             full-name (static-method-symbol full-name pkg)))
                                 (nargs (length args))
                                 (call (cond
                                         ((eq nargs 0)
@@ -596,9 +612,12 @@ class is a self-reference to the class currently being compiled."
     ;; is referenced but not yet loaded (e.g. java/lang/Enum from
     ;; clojure/lang/RT.<clinit>) resolves to NIL and (java-class NIL) aborts
     ;; the JIT compile.
-    (when (and (plusp (length classname)) (not (eql (char classname 0) #\[)))
-      (%resolve-class-in-context classname))
     (let ((ldk-class (or (%get-ldk-class-by-bin-name classname t loader)
+                         ;; Resolved through the loader, which can delegate to
+                         ;; another user loader that defined it (one Groovy
+                         ;; script's class, referenced from the next).
+                         (and (plusp (length classname)) (not (eql (char classname 0) #\[))
+                              (%resolve-class-in-context classname))
                          ;; A hidden/anonymous class references itself by its
                          ;; original name, but it is registered under a
                          ;; uniquified name; resolve that to the class being
@@ -627,7 +646,7 @@ class is a self-reference to the class currently being compiled."
                                               (list 'value1 (code (codegen (value1 insn) context))))
                                    (list 'rem 'value1 'value2))
                              (list 'division-by-zero ()
-                                   (list 'error (list '%lisp-condition (list '%make-throwable (list 'quote '|java/lang/ArithmeticException|))))))
+                                   (list 'error (list '%lisp-condition (list '%make-throwable (list 'quote '|java/lang/ArithmeticException|) "/ by zero")))))
                  :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-lrem) context)
@@ -638,7 +657,7 @@ class is a self-reference to the class currently being compiled."
                                               (list 'value1 (code (codegen (value1 insn) context))))
                                    (list 'rem 'value1 'value2))
                              (list 'division-by-zero ()
-                                   (list 'error (list '%lisp-condition (list '%make-throwable (list 'quote '|java/lang/ArithmeticException|))))))
+                                   (list 'error (list '%lisp-condition (list '%make-throwable (list 'quote '|java/lang/ArithmeticException|) "/ by zero")))))
                  :expression-type :LONG))
 
 (defmethod codegen ((insn ir-fdiv) context)
@@ -1093,7 +1112,7 @@ component types must match exactly (short[] is not an int[])."
          (and obj-comp target-comp
               ;; target-comp.isAssignableFrom(obj-comp): obj's component is a
               ;; subtype of (or equal to) the target's component.
-              (eql 1 (|isAssignableFrom(Ljava/lang/Class;)| target-comp obj-comp))))))
+              (eql 1 (|isAssignableFrom(Ljava/lang/Class;)Z| target-comp obj-comp))))))
 
 (defun %instanceof-array (objref typename)
   "instanceof against an array target type TYPENAME."
@@ -1304,6 +1323,15 @@ component types must match exactly (short[] is not an int[])."
                                    cases
                                    (list `(otherwise ,default-target)))))))
 
+(defun %call-site-gf (method-name nargs)
+  "The generic function a virtual call to METHOD-NAME (a full name, or an
+OpenLDK-internal %NAME) with NARGS arguments calls: a Java method's is
+created if need be, so the call finds a function to forward from."
+  (let ((symbol (intern (format nil "~A" method-name) :openldk)))
+    (if (char= #\% (char (symbol-name symbol) 0))
+        symbol
+        (%ensure-java-gf symbol nargs))))
+
 (defmethod codegen ((insn ir-call-virtual-method) context)
   (with-slots (method-name args) insn
     ;; Virtual method dispatch uses :openldk package for generic function names
@@ -1323,54 +1351,82 @@ component types must match exactly (short[] is not an int[])."
                                         ((eq nargs 0)
                                          (internal-error "virtual call ~A has no receiver argument" method-name))
                                         ((eq nargs 1)
-                                         (list (intern (format nil "~A" method-name) :openldk) null-checked-receiver))
+                                         (list (%call-site-gf method-name nargs) null-checked-receiver))
                                         (t
-                                         `(funcall (function ,(intern (format nil "~A" method-name) :openldk))
+                                         `(funcall (function ,(%call-site-gf method-name nargs))
                                                    ,null-checked-receiver
                                                    ,@(mapcar (lambda (a) (code (codegen a context))) (cdr args)))))))
                            call))))
 
 (defparameter *invokedynamic-cache* (make-hash-table :test #'equal))
 
-(defun %resolve-invokedynamic (method-name bootstrap-method-name address fname &rest args)
-  "Resolve an invokedynamic call site by invoking its bootstrap method.
-BOOTSTRAP-METHOD-NAME is the full \"class/name.method(descriptor)\" string of the
-bootstrap method (e.g. java/lang/runtime/SwitchBootstraps.typeSwitch(...)). The
-bootstrap class is always a boot/library class, so we load it and resolve the
-static function in its own defining package rather than the caller's."
+(defun %call-bootstrap-method (bootstrap-method-name caller name args)
+  "Call the bootstrap method BOOTSTRAP-METHOD-NAME (the full
+\"class/name.method(descriptor)\" string) with a lookup on the class CALLER
+(a binary name), the Java string NAME, and ARGS (the call site's type, then
+the static arguments).  The bootstrap class is always a boot/library class
+or the caller's, so load it and resolve the static function in its own
+defining package rather than the caller's."
+  (let* ((paren (position #\( bootstrap-method-name))
+         (dot (position #\. bootstrap-method-name :end paren :from-end t))
+         (bootstrap-class (subseq bootstrap-method-name 0 dot)))
+    (%resolve-class-in-context bootstrap-class)
+    (let* ((pkg (class-package bootstrap-class))
+           (fn-sym (static-method-symbol (lispize-method-name bootstrap-method-name) pkg))
+           (param-types (parse-parameter-types bootstrap-method-name))
+           (nparams (length param-types))
+           (full-args (append (list (%make-trusted-lookup (%get-java-class-by-bin-name caller t)) name)
+                              args))
+           ;; Bootstrap methods are frequently varargs (last parameter an
+           ;; Object[]), e.g. SwitchBootstraps.typeSwitch and
+           ;; ObjectMethods.bootstrap. Collect the trailing arguments into a
+           ;; single Object[] so the fixed-arity Lisp function receives them
+           ;; the way the JVM would after varargs packing.
+           (final-args
+             (if (and (plusp nparams)
+                      (let ((last (car (last param-types))))
+                        (and (stringp last) (>= (length last) 2)
+                             (string= "[]" (subseq last (- (length last) 2)))))
+                      (>= (length full-args) nparams))
+                 (let ((fixed (1- nparams)))
+                   (append (subseq full-args 0 fixed)
+                           (list (make-java-array
+                                  :component-class (%get-java-class-by-bin-name "java/lang/Object")
+                                  :initial-contents (coerce (nthcdr fixed full-args) 'vector)))))
+                 full-args)))
+      (apply fn-sym final-args))))
+
+(defun %resolve-invokedynamic (method-name bootstrap-method-name site-key caller fname &rest args)
+  "Resolve an invokedynamic call site by invoking its bootstrap method, once:
+SITE-KEY identifies the call site; CALLER is the binary name of its class."
   (declare (ignore method-name))
-  (let* ((key (list bootstrap-method-name address))
-         (cached (gethash key *invokedynamic-cache*)))
-    (or cached
-        (let* ((paren (position #\( bootstrap-method-name))
-               (dot (position #\. bootstrap-method-name :end paren :from-end t))
-               (bootstrap-class (subseq bootstrap-method-name 0 dot)))
-          (%resolve-class-in-context bootstrap-class)
-          (let* ((pkg (class-package bootstrap-class))
-                 (fn-sym (static-method-symbol (lispize-method-name bootstrap-method-name) pkg))
-                 (param-types (parse-parameter-types bootstrap-method-name))
-                 (nparams (length param-types))
-                 (full-args (append (list (|java/lang/invoke/MethodHandles.lookup()|) fname) args))
-                 ;; Bootstrap methods are frequently varargs (last parameter an
-                 ;; Object[]), e.g. SwitchBootstraps.typeSwitch and
-                 ;; ObjectMethods.bootstrap. Collect the trailing arguments into a
-                 ;; single Object[] so the fixed-arity Lisp function receives them
-                 ;; the way the JVM would after varargs packing.
-                 (final-args
-                   (if (and (plusp nparams)
-                            (let ((last (car (last param-types))))
-                              (and (stringp last) (>= (length last) 2)
-                                   (string= "[]" (subseq last (- (length last) 2)))))
-                            (>= (length full-args) nparams))
-                       (let ((fixed (1- nparams)))
-                         (append (subseq full-args 0 fixed)
-                                 (list (make-java-array
-                                        :component-class (%get-java-class-by-bin-name "java/lang/Object")
-                                        :initial-contents (coerce (nthcdr fixed full-args) 'vector)))))
-                       full-args))
-                 (resolved (apply fn-sym final-args)))
-            (setf (gethash key *invokedynamic-cache*) resolved)
-            resolved)))))
+  (or (gethash site-key *invokedynamic-cache*)
+      (setf (gethash site-key *invokedynamic-cache*)
+            (%call-bootstrap-method bootstrap-method-name caller fname args))))
+
+(defvar *constant-dynamic-cache* (make-hash-table :test #'eq :synchronized t)
+  "ldc site key -> (value), once its CONSTANT_Dynamic is resolved.")
+
+(defun %resolve-constant-dynamic (site-key bootstrap-method-name caller name descriptor &rest args)
+  "The value of a CONSTANT_Dynamic: its bootstrap method's result, called
+once per ldc site with the constant's type, unboxed if primitive."
+  (car (or (gethash site-key *constant-dynamic-cache*)
+           (setf (gethash site-key *constant-dynamic-cache*)
+                 (let ((value (%call-bootstrap-method
+                               bootstrap-method-name caller (jstring name)
+                               (cons (%bin-type-name-to-class descriptor) args))))
+                   (list (if (find (char descriptor 0) "ZBCSIJFD")
+                             (%maybe-unbox value)
+                             value)))))))
+
+(defmethod codegen ((insn ir-constant-dynamic) context)
+  (with-slots (bootstrap-method-name name descriptor args caller) insn
+    (make-instance '<expression>
+                   :insn insn
+                   :code `(%resolve-constant-dynamic ',(gensym "CONDY-SITE") ,bootstrap-method-name
+                                                     ,caller ,name ,descriptor
+                                                     ,@(mapcar (lambda (a) (code (codegen a context))) args))
+                   :expression-type (get-stack-type-from-descriptor descriptor))))
 
 (defun %extract-string-concat-recipe (args)
   "Extract the recipe string from StringConcatFactory bootstrap args.
@@ -1451,7 +1507,7 @@ DYNAMIC-ARG-CODES) used to render boolean/char args the Java way."
     ((floatp val) (format nil "~F" val))
     ((characterp val) (string val))
     ((typep val '|java/lang/Object|)
-     (let ((str (|toString()| val)))
+     (let ((str (|toString()Ljava/lang/String;| val)))
        (if str (lstring str) "null")))
     (t (format nil "~A" val))))
 
@@ -1460,7 +1516,7 @@ DYNAMIC-ARG-CODES) used to render boolean/char args the Java way."
 Class (instanceof), a boxed integral constant, or a String constant."
   (cond
     ((typep label '|java/lang/Class|)
-     (= 1 (|isInstance(Ljava/lang/Object;)| label target)))
+     (= 1 (|isInstance(Ljava/lang/Object;)Z| label target)))
     ((integerp label)
      (and (typep target '(or |java/lang/Integer| |java/lang/Short|
                           |java/lang/Byte| |java/lang/Character|))
@@ -1470,7 +1526,7 @@ Class (instanceof), a boxed integral constant, or a String constant."
      (and (typep target '|java/lang/String|)
           (string= (lstring target) (lstring label))))
     (t (and target (typep target '|java/lang/Object|)
-            (= 1 (|equals(Ljava/lang/Object;)| target label))))))
+            (= 1 (|equals(Ljava/lang/Object;)Z| target label))))))
 
 (defun %type-switch (target restart labels)
   "Native implementation of java.lang.runtime.SwitchBootstraps.typeSwitch's target
@@ -1557,7 +1613,7 @@ boolean prints true/false and char prints the character rather than an int."
 
 (defun %record-field-hash (v)
   (cond ((null v) 0)
-        ((typep v '|java/lang/Object|) (or (|hashCode()| v) 0))
+        ((typep v '|java/lang/Object|) (or (|hashCode()I| v) 0))
         ((integerp v) v)
         ((characterp v) (char-code v))
         (t (sxhash v))))
@@ -1574,12 +1630,12 @@ boolean prints true/false and char prints the character rather than an int."
 (defun %record-field-equal (a b)
   (cond ((and (null a) (null b)) t)
         ((or (null a) (null b)) nil)
-        ((typep a '|java/lang/Object|) (= 1 (|equals(Ljava/lang/Object;)| a b)))
+        ((typep a '|java/lang/Object|) (= 1 (|equals(Ljava/lang/Object;)Z| a b)))
         (t (eql a b))))
 
 (defun %record-equals (record other class names-jstring)
   "Native implementation of a record's ObjectMethods-generated equals()."
-  (if (and other (= 1 (|isInstance(Ljava/lang/Object;)| class other)))
+  (if (and other (= 1 (|isInstance(Ljava/lang/Object;)Z| class other)))
       (if (every (lambda (name)
                    (%record-field-equal (%record-component-value record name)
                                         (%record-component-value other name)))
@@ -1656,8 +1712,11 @@ boolean prints true/false and char prints the character rather than an int."
                                                                                                    (length type-chars)))))
                                                             collect (%string-concat-arg-form c tc)))))
                               :expression-type :REFERENCE))))
-        ;; Fast path for LambdaMetafactory
-        ((search "LambdaMetafactory.metafactory" bootstrap-method-name)
+        ;; Fast path for LambdaMetafactory.  altMetafactory (serializable
+        ;; lambdas, such as Comparator.comparing's) takes the same first three
+        ;; static arguments, then flags, marker interfaces and bridges.
+        ((or (search "LambdaMetafactory.metafactory" bootstrap-method-name)
+             (search "LambdaMetafactory.altMetafactory" bootstrap-method-name))
          (make-instance '<expression>
                         :insn insn
                         :code `(openldk::%lambda-metafactory
@@ -1665,23 +1724,29 @@ boolean prints true/false and char prints the character rather than an int."
                                 (list ,@(mapcar (lambda (a) (code (codegen a context))) dynamic-args))
                                 ,method-name
                                 ,(code (codegen (second args) context))
-                                ,interface-type-name)))
+                                ,interface-type-name
+                                ,@(when (search "altMetafactory" bootstrap-method-name)
+                                    `((list ,@(mapcar (lambda (a) (code (codegen a context)))
+                                                      (nthcdr 4 args))))))))
         ;; Fallback: generic invokedynamic handling
         (t
          (make-instance '<expression>
                         :insn insn
                         :code
+                        ;; Each call site resolves once: its own key, and a
+                        ;; lookup on the class it is in, as the bootstrap
+                        ;; method expects (Groovy dispatches on it).  The
+                        ;; target has the call site's type: invoke it exactly.
                         `(let ((callsite (%resolve-invokedynamic ,method-name
                                                                  ,bootstrap-method-name
-                                                                 ,address
+                                                                 ',(gensym "INDY-SITE")
+                                                                 ,(slot-value (slot-value context 'class) 'name)
                                                                  ,(jstring method-name)
                                                                  ,@(remove nil (mapcar (lambda (a)
                                                                                         (when a (code (codegen a context))))
                                                                                       args)))))
-                           (let ((target (|getTarget()| callsite)))
-                             (let ((args-array (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Object")
-                                                                :initial-contents (list ,@(mapcar (lambda (a) (code (codegen a context))) dynamic-args)))))
-                               (|invokeWithArguments([Ljava/lang/Object;)| target args-array))))))))))
+                           (%mh-invoke (|getTarget()| callsite)
+                                       (list ,@(mapcar (lambda (a) (code (codegen a context))) dynamic-args))))))))))
 
 (defmethod codegen ((insn ir-clinit) context)
   (with-slots (class) insn
@@ -1739,12 +1804,9 @@ boolean prints true/false and char prints the character rather than an int."
              (pkg (class-package classname)))
         (make-instance '<expression>
                        :insn insn
-                       :code `(let* ((obj (make-instance ',(intern classname pkg)))
-                                     (klass ,(java-class class)))
-                                ;; Ensure clazz slot is populated for instanceof/reflection
-                                (when (and klass (slot-exists-p obj '|clazz|))
-                                  (setf (slot-value obj '|clazz|) klass))
-                                obj)
+                       ;; A new object's fields are all default: a Java field
+                       ;; named clazz too (Groovy's ClassNode has one).
+                       :code `(make-instance ',(intern classname pkg))
                        :expression-type :REFERENCE)))))
 
 (defmethod codegen ((insn ir-new-array) context)
@@ -1791,7 +1853,7 @@ type."
         ;; Check for negative array size
         (when (< size 0)
           (let ((exc (%make-java-instance "java/lang/NegativeArraySizeException")))
-            (|<init>()| exc)
+            (|<init>()V| exc)
             (error (%lisp-condition exc))))
         (let ((component-class (%bin-type-name-to-class component-name)))
           (if rest-dims

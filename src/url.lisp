@@ -99,7 +99,7 @@
 ;; This is needed because the AppClassLoader's URLClassPath is initialized
 ;; at build time with URLs that don't match the runtime classpath.
 ;; Using :around method to ensure this is always called, even after JIT compilation.
-(defmethod |findResource(Ljava/lang/String;)| :around ((loader |java/net/URLClassLoader|) name)
+(defmethod |findResource(Ljava/lang/String;)Ljava/net/URL;| :around ((loader |java/net/URLClassLoader|) name)
   "Find a resource by NAME using our native classpath implementation."
   (let ((resource-name (lstring name)))
     (or (when-let (url-string (get-resource-url-on-classpath resource-name))
@@ -109,7 +109,7 @@
 ;; Override URLClassLoader.findClass to use OpenLDK's native class loading.
 ;; This is needed because URLClassLoader.findClass uses URLClassPath.getResource()
 ;; internally, which has the same build-time URL issue as findResource.
-(defmethod |findClass(Ljava/lang/String;)| :around ((loader |java/net/URLClassLoader|) name)
+(defmethod |findClass(Ljava/lang/String;)Ljava/lang/Class;| :around ((loader |java/net/URLClassLoader|) name)
   "Find and define a class by NAME using OpenLDK's native classpath with this loader."
   (let* ((class-name (lstring name))
          (bin-name (substitute #\/ #\. class-name)))
@@ -127,7 +127,7 @@
 (jar:, file:, jrt:).  Returns the stream, NIL for a servable protocol whose
 target does not exist, or :FALLTHROUGH for other protocols."
   (let ((url-string (or (gethash url *native-url-strings*)
-                        (lstring (|toString()| url)))))
+                        (lstring (|toString()Ljava/lang/String;| url)))))
     (cond
       ;; Handle jar: URLs
       ((starts-with? "jar:" url-string)
@@ -157,14 +157,15 @@ target does not exist, or :FALLTHROUGH for other protocols."
 ;; still required: standard method combination signals NO-PRIMARY-METHOD if
 ;; only an :around is applicable, which is exactly the situation before
 ;; java.net.URL has been JIT-compiled.
-(defmethod |openStream()| :around ((url |java/net/URL|))
+(defmethod |openStream()Ljava/io/InputStream;| :around ((url |java/net/URL|))
   "Open an InputStream for the URL."
   (let ((stream (%open-url-stream-1 url)))
-    (if (eq stream :fallthrough)
-        (call-next-method)
-        stream)))
+    (case stream
+      (:fallthrough (call-next-method))
+      ((nil) (%throw-file-not-found url))
+      (t stream))))
 
-(defmethod |openStream()| ((url |java/net/URL|))
+(defmethod |openStream()Ljava/io/InputStream;| ((url |java/net/URL|))
   "Fallback primary for URLs of protocols we don't serve, dispatched before
 java.net.URL's bytecode is compiled.  The compiled Java method replaces
 this; the :around above still intercepts our native protocols."
@@ -173,27 +174,27 @@ this; the :around above still intercepts our native protocols."
         nil
         stream)))
 
-(defmethod |toString()| :around ((url |java/net/URL|))
+(defmethod |toString()Ljava/lang/String;| :around ((url |java/net/URL|))
   "Return the original spelling of an OpenLDK-constructed resource URL."
   (if-let ((url-string (gethash url *native-url-strings*)))
     (jstring url-string)
     (call-next-method)))
 
-(defmethod |getProtocol()| :around ((url |java/net/URL|))
+(defmethod |getProtocol()Ljava/lang/String;| :around ((url |java/net/URL|))
   "Protocol (scheme) of an OpenLDK-constructed resource URL: the text before
 the first ':' (jar, file, jrt)."
   (if-let ((url-string (gethash url *native-url-strings*)))
     (jstring (subseq url-string 0 (position #\: url-string)))
     (call-next-method)))
 
-(defmethod |getProtocol()| ((url |java/net/URL|))
+(defmethod |getProtocol()Ljava/lang/String;| ((url |java/net/URL|))
   "Fallback primary (before java.net.URL's bytecode is compiled): read the
 protocol field, or parse it out of the URL's string form."
   (if (and (slot-exists-p url '|protocol|)
            (slot-boundp url '|protocol|)
            (slot-value url '|protocol|))
       (slot-value url '|protocol|)
-      (let ((s (lstring (|toString()| url))))
+      (let ((s (lstring (|toString()Ljava/lang/String;| url))))
         (jstring (subseq s 0 (position #\: s))))))
 
 ;;; URL.openConnection() for our synthetic jar:/file:/jrt: resource URLs.
@@ -229,7 +230,7 @@ protocol field, or parse it out of the URL's string form."
   "Synthetic URLConnection -> its java.net.URL.")
 
 (defun %url-string-of (url)
-  (or (gethash url *native-url-strings*) (lstring (|toString()| url))))
+  (or (gethash url *native-url-strings*) (lstring (|toString()Ljava/lang/String;| url))))
 
 (defun %open-url-connection-1 (url)
   "A synthetic URLConnection for URLs whose protocol we serve, else :FALLTHROUGH."
@@ -245,11 +246,11 @@ protocol field, or parse it out of the URL's string form."
          conn))
       (t :fallthrough))))
 
-(defmethod |openConnection()| :around ((url |java/net/URL|))
+(defmethod |openConnection()Ljava/net/URLConnection;| :around ((url |java/net/URL|))
   (let ((conn (%open-url-connection-1 url)))
     (if (eq conn :fallthrough) (call-next-method) conn)))
 
-(defmethod |openConnection()| ((url |java/net/URL|))
+(defmethod |openConnection()Ljava/net/URLConnection;| ((url |java/net/URL|))
   (let ((conn (%open-url-connection-1 url)))
     (if (eq conn :fallthrough) nil conn)))
 
@@ -259,15 +260,72 @@ protocol field, or parse it out of the URL's string form."
 ;; :around so the compiled java.net.URLConnection.getInputStream() (which
 ;; throws UnknownServiceException by default) doesn't clobber us; we serve our
 ;; synthetic connections and defer to that default for any other connection.
-(defmethod |getInputStream()| :around ((conn |java/net/URLConnection|))
+(defmethod |getInputStream()Ljava/io/InputStream;| :around ((conn |java/net/URLConnection|))
   (if-let ((url (gethash conn *connection-urls*)))
     (let ((s (%open-url-stream-1 url)))
-      (if (eq s :fallthrough) (call-next-method) s))
+      (case s
+        (:fallthrough (call-next-method))
+        ((nil) (%throw-file-not-found url))
+        (t s)))
     (call-next-method)))
 
-(defmethod |getLastModified()| ((conn |java/net/URLConnection|))
+(defun %throw-file-not-found (url)
+  "Throw java.io.FileNotFoundException for URL, whose target doesn't exist,
+as a JVM's connection does: URLClassPath takes a null stream for a class
+that is there (the Scala REPL's file://_VIRTUAL_/ classpath entry)."
+  (let ((exception (%make-java-instance "java/io/FileNotFoundException")))
+    (|<init>(Ljava/lang/String;)V| exception (jstring (%url-string-of url)))
+    (error (%lisp-condition exception))))
+
+(defmethod |getInputStream()Ljava/io/InputStream;| ((conn |java/net/URLConnection|))
+  "Fallback primary, before java.net.URLConnection is loaded: standard method
+combination signals NO-PRIMARY-METHOD if only the :around above applies."
+  (when-let ((url (gethash conn *connection-urls*)))
+    (let ((s (%open-url-stream-1 url)))
+      (unless (eq s :fallthrough) s))))
+
+(defmethod |getLastModified()J| ((conn |java/net/URLConnection|))
   (declare (ignore conn))
   0)
+
+;; The rest of what callers configure or ask a connection before reading it
+;; (Groovy's class-file reader turns caching off).  The synthetic connection
+;; is an instance of the stub class above until java.net.URLConnection is
+;; loaded, whose methods then replace these.
+(defmethod |setUseCaches(Z)V| ((conn |java/net/URLConnection|) use-caches)
+  (declare (ignore conn use-caches))
+  nil)
+
+(defmethod |getUseCaches()Z| ((conn |java/net/URLConnection|))
+  (declare (ignore conn))
+  0)
+
+(defmethod |setDefaultUseCaches(Z)V| ((conn |java/net/URLConnection|) use-caches)
+  (declare (ignore conn use-caches))
+  nil)
+
+(defmethod |connect()V| ((conn |java/net/URLConnection|))
+  (declare (ignore conn))
+  nil)
+
+(defmethod |setConnectTimeout(I)V| ((conn |java/net/URLConnection|) timeout)
+  (declare (ignore conn timeout))
+  nil)
+
+(defmethod |setReadTimeout(I)V| ((conn |java/net/URLConnection|) timeout)
+  (declare (ignore conn timeout))
+  nil)
+
+(defmethod |getURL()Ljava/net/URL;| ((conn |java/net/URLConnection|))
+  (gethash conn *connection-urls*))
+
+(defmethod |getContentLength()I| ((conn |java/net/URLConnection|))
+  (declare (ignore conn))
+  -1)
+
+(defmethod |getContentLengthLong()J| ((conn |java/net/URLConnection|))
+  (declare (ignore conn))
+  -1)
 
 ;; The JDK ZipFile/JarFile/ZipEntry stubs carry no CLOS slots (OpenLDK reads
 ;; jars through its own Lisp zip library, not these classes), so we attach the
@@ -278,7 +336,7 @@ protocol field, or parse it out of the URL's string form."
 (defvar *zipentry-times* (make-hash-table :test #'eq :synchronized t)
   "java.util.zip.ZipEntry -> its last-modified time (millis).")
 
-(defmethod |getJarFile()| ((conn |java/net/JarURLConnection|))
+(defmethod |getJarFile()Ljava/util/jar/JarFile;| ((conn |java/net/JarURLConnection|))
   (when-let ((url (gethash conn *connection-urls*)))
     (multiple-value-bind (jar-path entry-path) (%parse-jar-url (%url-string-of url))
       (declare (ignore entry-path))
@@ -287,7 +345,7 @@ protocol field, or parse it out of the URL's string form."
           (setf (gethash jf *jarfile-zips*) (zip:open-zipfile jar-path))
           jf)))))
 
-(defmethod |getEntry(Ljava/lang/String;)| ((this |java/util/jar/JarFile|) name)
+(defmethod |getEntry(Ljava/lang/String;)Ljava/util/zip/ZipEntry;| ((this |java/util/jar/JarFile|) name)
   (if-let ((zf (gethash this *jarfile-zips*)))
     (when (zip:get-zipfile-entry (lstring name) zf)
       (let ((entry (%make-java-instance "java/util/zip/ZipEntry")))
@@ -296,6 +354,6 @@ protocol field, or parse it out of the URL's string form."
         entry))
     (call-next-method)))
 
-(defmethod |getTime()| ((this |java/util/zip/ZipEntry|))
+(defmethod |getTime()J| ((this |java/util/zip/ZipEntry|))
   (multiple-value-bind (time present) (gethash this *zipentry-times*)
     (if present time -1)))

@@ -305,3 +305,31 @@ PREDICATE, its NIL result is #f rather than '()."
       (java-call "define(Ljava/lang/Object;Ljava/lang/Object;)"
                  (%global-environment) (%scheme-symbol name) value))
     name))
+
+;;; #@jscheme{ ... }
+;;;
+;;; After (openldk.interop:enable-source-syntax), #@jscheme{ ... } holds
+;;; Scheme source, as Scheme writes it (case kept, #t and #f, Scheme's own
+;;; reader), and evaluates it where it appears; $name and $(form) splice in
+;;; Lisp values:
+;;;
+;;;   (let ((xs '(1 2 3))) #@jscheme{ (map (lambda (x) (* x x)) $xs) })   => (1 4 9)
+;;;
+;;; Each block becomes a Scheme procedure of the spliced values, evaluated
+;;; once and then called; definitions in a block are local to it.
+
+(defvar *sites* (make-hash-table :test #'equal)
+  "Source -> the procedure the block's source became.")
+
+(defun %eval-site (source names values)
+  (%ensure-started)
+  (apply #'funcall
+         (or (gethash source *sites*)
+             (setf (gethash source *sites*)
+                   (eval-string (format nil "(lambda (~{~A~^ ~})~%~A~%)" names source))))
+         values))
+
+(define-source-syntax '("jscheme")
+  (lambda (source names forms)
+    `(%eval-site ,source ',names (list ,@forms)))
+  :reader #'openldk.interop::%read-lisp-family-source-and-names)

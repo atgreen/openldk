@@ -101,7 +101,7 @@
                                    (%byte-array-store a i 8 be (float-features:double-float-bits (coerce v 'double-float)))
                                    nil)))))
 
-(defmethod |java/util/TimeZone.getSystemTimeZoneID(Ljava/lang/String;)| (arg)
+(defmethod |java/util/TimeZone.getSystemTimeZoneID(Ljava/lang/String;)Ljava/lang/String;| (arg)
   "Return the zoneinfo ID of the system default timezone (e.g.
 \"America/Toronto\"): $TZ if set, else the /etc/localtime symlink target.
 The previous implementation returned an abbreviation like \"EDT\", which
@@ -120,7 +120,7 @@ TimeZone.getTimeZone does not recognize, silently defaulting to GMT."
 (defmethod |length()| ((str string))
   (length (lstring str)))
 
-(defmethod |java/util/TimeZone.getSystemGMTOffsetID()| ()
+(defmethod |java/util/TimeZone.getSystemGMTOffsetID()Ljava/lang/String;| ()
   (jstring (local-time:format-timestring nil (local-time:now) :format '(:gmt-offset))))
 
 (defvar *field-offset-table* (make-hash-table :test #'equal))
@@ -138,7 +138,7 @@ TimeZone.getTimeZone does not recognize, silently defaulting to GMT."
     (setf (gethash offset *field-offset-table*) field)
     offset))
 
-(defmethod |objectFieldOffset(Ljava/lang/reflect/Field;)| ((unsafe |sun/misc/Unsafe|) field)
+(defmethod |objectFieldOffset(Ljava/lang/reflect/Field;)J| ((unsafe |sun/misc/Unsafe|) field)
   (declare (ignore unsafe))
   (%register-field-offset field))
 
@@ -147,24 +147,24 @@ TimeZone.getTimeZone does not recognize, silently defaulting to GMT."
            (ignore name))
   (unimplemented "java/lang/Class$Atomic.objectFieldOffset"))
 
-(defmethod |staticFieldBase(Ljava/lang/reflect/Field;)| ((unsafe |sun/misc/Unsafe|) field)
+(defmethod |staticFieldBase(Ljava/lang/reflect/Field;)Ljava/lang/Object;| ((unsafe |sun/misc/Unsafe|) field)
   (declare (ignore unsafe)
            (ignore field))
   nil)
 
-(defmethod |staticFieldOffset(Ljava/lang/reflect/Field;)| ((unsafe |sun/misc/Unsafe|) field)
+(defmethod |staticFieldOffset(Ljava/lang/reflect/Field;)J| ((unsafe |sun/misc/Unsafe|) field)
   (declare (ignore unsafe))
   (%register-field-offset field))
 
-(defmethod |staticFieldOffset0(Ljava/lang/reflect/Field;)| ((unsafe |jdk/internal/misc/Unsafe|) field)
+(defmethod |staticFieldOffset0(Ljava/lang/reflect/Field;)J| ((unsafe |jdk/internal/misc/Unsafe|) field)
   (declare (ignore unsafe))
   (%register-field-offset field))
 
-(defmethod |staticFieldBase0(Ljava/lang/reflect/Field;)| ((unsafe |jdk/internal/misc/Unsafe|) field)
+(defmethod |staticFieldBase0(Ljava/lang/reflect/Field;)Ljava/lang/Object;| ((unsafe |jdk/internal/misc/Unsafe|) field)
   (declare (ignore unsafe field))
   nil)
 
-(defmethod |objectFieldOffset0(Ljava/lang/reflect/Field;)| ((unsafe |jdk/internal/misc/Unsafe|) field)
+(defmethod |objectFieldOffset0(Ljava/lang/reflect/Field;)J| ((unsafe |jdk/internal/misc/Unsafe|) field)
   (declare (ignore unsafe))
   (%register-field-offset field))
 
@@ -177,7 +177,7 @@ TimeZone.getTimeZone does not recognize, silently defaulting to GMT."
   (print-unreadable-object (class out :type t)
     (format out "~A" (slot-value class '|name|))))
 
-(defmethod |java/lang/Thread.registerNatives()| ()
+(defmethod |java/lang/Thread.registerNatives()V| ()
   ;; JNI binding registration -- a no-op here, like the other registerNatives.
   nil)
 

@@ -47,6 +47,7 @@
     #:if-let
     #:starts-with-subseq
     #:eswitch
+    #:switch
     #:read-file-into-byte-vector)
   (:import-from #:serapeum
     #:take

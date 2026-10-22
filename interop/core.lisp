@@ -68,6 +68,8 @@
            #:define-java-subclass
            #:make-java-subclass-instance
            #:call-from-java
+           #:define-source-syntax
+           #:enable-source-syntax
            #:dump-lisp-image))
 
 (in-package #:openldk.interop)
@@ -159,20 +161,37 @@ keep it in OpenLDK's cache; and where to download it from."
                                                (openldk::ldk-loader class)))
          (init (if (char= (char constructor 0) #\()
                    (concatenate 'string "<init>" constructor)
-                   constructor)))
+                   constructor))
+         ;; Constructors return void: method names carry return types.
+         (init (if (char= (char init (1- (length init))) #\)) (concatenate 'string init "V") init)))
     (apply (symbol-function (intern init :openldk)) object args)
     object))
 
 (defun java-call (method object &rest args)
-  "Call the instance method METHOD, e.g. \"toString()\", on OBJECT."
-  (apply (symbol-function (intern method :openldk)) object args))
+  "Call the instance method METHOD, e.g. \"toString()\" (the return type
+may be given too), on OBJECT."
+  (apply (symbol-function
+          (intern (if (typep object 'standard-object)
+                      ;; A DEFINE-JAVA-SUBCLASS instance resolves through its Java superclass.
+                      (or (loop for class in (closer-mop:class-precedence-list (class-of object))
+                                for name = (class-name class)
+                                for full = (and (symbolp name)
+                                                (or (eq class (class-of object)) (find #\/ (symbol-name name)))
+                                                (openldk::%resolve-method-name (symbol-name name) method))
+                                when (and full (string/= full method))
+                                  return full)
+                          method)
+                      method)
+                  :openldk))
+         object args))
 
 (defun java-static (class-name method &rest args)
   "Call the static method METHOD of CLASS-NAME, e.g. (java-static
 \"java.lang.Double\" \"valueOf(D)\" 1d0)."
   (let* ((class (java-load class-name))
          (symbol (openldk::static-method-symbol
-                  (format nil "~A.~A" (openldk::name class) method)
+                  (format nil "~A.~A" (openldk::name class)
+                          (openldk::%resolve-method-name (openldk::name class) method))
                   (openldk::ldk-class-package class))))
     (apply (symbol-function symbol) args)))
 
@@ -299,9 +318,11 @@ class JAVA-SUPERCLASS, with SLOTS, and METHODS, each (\"method(descriptor)\"
                              (openldk::ldk-class-package java-class))))
          (eval `(defclass ,',name (,super) ,',slots))
          ,@(loop for (method lambda-list . body) in methods
-                 collect `(eval '(defmethod ,(intern method :openldk)
-                                     ((,(first lambda-list) ,name) ,@(rest lambda-list))
-                                   ,@body)))
+                 collect `(eval `(defmethod ,(intern (openldk::%resolve-method-name
+                                                      (openldk::name java-class) ,method)
+                                                     :openldk)
+                                     ((,',(first lambda-list) ,',name) ,@',(rest lambda-list))
+                                   ,@',body)))
          ',name))))
 
 (defun make-java-subclass-instance (class &rest initargs)
@@ -331,3 +352,184 @@ minutes to start (Clojure) is then ready in under a second."
   (openldk::%reset-runtime-for-save)
   (sb-ext:save-lisp-and-die path :executable t :save-runtime-options t))
 
+
+;;; Source syntax for languages Lisp's reader can't read
+;;;
+;;; #@scala{ ... } and #@kotlin{ ... } (or #@sc{ ... }, #@kt{ ... }) hold
+;;; Scala or Kotlin source, as those languages write it, and evaluate it
+;;; where it appears; #@clojure{ ... } (#@clj{ ... }) holds Clojure.  $name, $(form)
+;;; and $#'function splice in Lisp values (and $,x in a backquoted macro
+;;; template), outside the language's strings and comments.  Each language
+;;; system registers itself with DEFINE-SOURCE-SYNTAX;
+;;; (ENABLE-SOURCE-SYNTAX) installs #@ in a readtable.
+
+(defvar *source-syntaxes* '()
+  "Alist of language name (downcased) -> (expander . reader).")
+
+(defun define-source-syntax (names expander &key reader)
+  "Make #@NAME{ ... } expand with EXPANDER, for NAME (a string) or each of
+NAMES (a language and its abbreviations).  EXPANDER is a function of the
+source (each splice replaced by a parameter name), the parameter names,
+and the Lisp forms whose values they take.  READER, a function of a stream
+after the { returning those three, reads the source; by default it reads
+C-family source (Scala, Kotlin)."
+  (dolist (name (if (listp names) names (list names)) names)
+    (let ((entry (assoc name *source-syntaxes* :test #'string-equal))
+          (value (cons expander (or reader #'%read-braced-source-and-names))))
+      (if entry
+          (setf (cdr entry) value)
+          (push (cons (string-downcase name) value) *source-syntaxes*)))))
+
+(defun %splice-name-char-p (char)
+  (or (alphanumericp char) (find char "-*_?!")))
+
+(defun %read-braced-source (stream &key (string-quotes '(#\")))
+  "Read C-family source (Scala, Kotlin, Groovy) from STREAM up to the } that
+closes the { already read.  STRING-QUOTES are the characters that delimit
+strings (and, tripled, raw strings); a ' that isn't one starts a character
+literal.  Return the source with each $ splice replaced by a parameter name
+(lispArg1, ...), and the list of Lisp forms spliced in."
+  (let ((depth 0)
+        (forms '()))
+    (labels ((next () (read-char stream t nil t))
+             (peek () (peek-char nil stream nil nil t))
+             (copy-string (quote out)
+               ;; QUOTE has been written: copy a string, or a raw string
+               ;; tripled QUOTEs delimit, through its end.
+               (if (eql (peek) quote)
+                   (progn
+                     (write-char (next) out)
+                     (when (eql (peek) quote) ; tripled: a raw string
+                       (write-char (next) out)
+                       (loop with quotes = 0
+                             for c = (next)
+                             do (write-char c out)
+                                (setf quotes (if (char= c quote) (1+ quotes) 0))
+                             until (>= quotes 3))))
+                   (loop for c = (next)
+                         do (write-char c out)
+                            (cond ((char= c #\\) (write-char (next) out))
+                                  ((char= c quote) (return)))))))
+      (values
+       (with-output-to-string (out)
+         (loop for char = (next)
+               do (cond
+                    ((member char '(#\{ #\( #\[)) (incf depth) (write-char char out))
+                    ((member char '(#\) #\])) (decf depth) (write-char char out))
+                    ((char= char #\})
+                     (if (zerop depth)
+                         (loop-finish)
+                         (progn (decf depth) (write-char char out))))
+                    ((member char string-quotes)
+                     (write-char char out)
+                     (copy-string char out))
+                    ((char= char #\') ; a character literal
+                     (write-char char out)
+                     (let ((c (next)))
+                       (write-char c out)
+                       (when (char= c #\\) (write-char (next) out)))
+                     (when (eql (peek) #\') (write-char (next) out)))
+                    ((char= char #\/) ; a comment, or division
+                     (case (peek)
+                       (#\/ (loop for c = (read-char stream nil #\Newline t)
+                                  until (char= c #\Newline))
+                            (write-char #\Newline out))
+                       (#\* (next)
+                            (loop with star = nil
+                                  for c = (next)
+                                  until (and star (char= c #\/))
+                                  do (setf star (char= c #\*)))
+                            (write-char #\Space out))
+                       (t (write-char char out))))
+                    ((char= char #\$) ; a Lisp value
+                     (let ((form (if (member (peek) '(#\( #\, #\#))
+                                     (read stream t nil t)
+                                     (read-from-string
+                                      (with-output-to-string (token)
+                                        (loop for c = (peek)
+                                              while (and c (%splice-name-char-p c))
+                                              do (write-char (next) token)))))))
+                       (push form forms)
+                       (format out "lispArg~D" (length forms))))
+                    (t (write-char char out)))))
+       (nreverse forms)))))
+
+(defun %lisp-token-end-p (char)
+  (or (member char '(#\( #\) #\[ #\] #\{ #\} #\" #\; #\,))
+      (member char '(#\Space #\Tab #\Newline #\Return #\Page))))
+
+(defun %read-lisp-family-source (stream close name-for)
+  "Read Clojure or Scheme source from STREAM up to the CLOSE (], } or )) that
+closes it.  Return the source, with the Ith $ splice replaced by (funcall
+NAME-FOR I), the list of those names, and the list of the Lisp forms whose
+values they take."
+  (let ((depth 0)
+        (splices '()))
+    (values
+     (with-output-to-string (out)
+       (loop for char = (read-char stream t nil t)
+             do (case char
+                  ((#\( #\[ #\{) (incf depth) (write-char char out))
+                  ((#\) #\] #\}) (if (and (zerop depth) (char= char close))
+                                     (loop-finish)
+                                     (progn (decf depth) (write-char char out))))
+                  (#\" ; a string: copy to its closing quote
+                   (write-char char out)
+                   (loop for c = (read-char stream t nil t)
+                         do (write-char c out)
+                            (case c
+                              (#\\ (write-char (read-char stream t nil t) out))
+                              (#\" (return)))))
+                  (#\\ ; a character literal: \( isn't an open paren
+                   (write-char char out)
+                   (write-char (read-char stream t nil t) out))
+                  (#\; ; a comment, to the end of the line
+                   (loop for c = (read-char stream nil #\Newline t)
+                         until (char= c #\Newline))
+                   (write-char #\Newline out))
+                  (#\$ ; a Lisp value
+                   ;; $(form), or $,x in a backquoted macro template, is
+                   ;; read as Lisp; $name up to a delimiter.
+                   (let ((form (if (member (peek-char nil stream t nil t) '(#\( #\,))
+                                   (read stream t nil t)
+                                   (read-from-string
+                                    (with-output-to-string (token)
+                                      (loop for c = (peek-char nil stream nil nil t)
+                                            while (and c (not (%lisp-token-end-p c)))
+                                            do (write-char (read-char stream) token))))))
+                         (name (funcall name-for (1+ (length splices)))))
+                     (push (cons name form) splices)
+                     (write-string name out)))
+                  (t (write-char char out)))))
+     (mapcar #'car (reverse splices))
+     (mapcar #'cdr (reverse splices)))))
+
+(defun %read-lisp-family-source-and-names (stream)
+  "The source of #@LANGUAGE{ ... } for a Lisp-family language, with
+splices named lispArg1, ..."
+  (%read-lisp-family-source stream #\} (lambda (i) (format nil "lispArg~D" i))))
+
+(defun %read-braced-source-and-names (stream &rest options)
+  (multiple-value-bind (source forms) (apply #'%read-braced-source stream options)
+    (values source
+            (loop for i from 1 to (length forms) collect (format nil "lispArg~D" i))
+            forms)))
+
+(defun %read-source-syntax (stream subchar arg)
+  (declare (ignore subchar arg))
+  (let ((name (with-output-to-string (out)
+                (loop for c = (read-char stream t nil t)
+                      until (char= c #\{)
+                      unless (member c '(#\Space #\Tab #\Newline))
+                        do (write-char c out)))))
+    (let ((syntax (cdr (assoc name *source-syntaxes* :test #'string-equal))))
+      (unless syntax
+        (error "#@~A{ ... }: no such language; load its system (~{~A~^, ~} are known)"
+               name (mapcar #'car *source-syntaxes*)))
+      (multiple-value-call (car syntax) (funcall (cdr syntax) stream)))))
+
+(defun enable-source-syntax (&optional (readtable *readtable*))
+  "Make #@LANGUAGE{ ... } read LANGUAGE's source in READTABLE (by default,
+the current one); see above."
+  (set-dispatch-macro-character #\# #\@ #'%read-source-syntax readtable)
+  readtable)

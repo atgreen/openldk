@@ -94,23 +94,23 @@
          ;; Only method-kind handles have a MethodType; a field descriptor (e.g. "I")
          ;; is not a valid method descriptor, so skip it for field kinds (1-4).
          (type (unless (member ref-kind '(1 2 3 4))
-                 (|java/lang/invoke/MethodType.fromMethodDescriptorString(Ljava/lang/String;Ljava/lang/ClassLoader;)|
+                 (|java/lang/invoke/MethodType.fromMethodDescriptorString(Ljava/lang/String;Ljava/lang/ClassLoader;)Ljava/lang/invoke/MethodType;|
                   (jstring (emit-type (aref cp nat-index) cp)) nil)))
          ;; Select the appropriate Lookup method based on reference kind
          ;; See JVM spec: REF_getField=1, REF_getStatic=2, REF_putField=3, REF_putStatic=4,
          ;;               REF_invokeVirtual=5, REF_invokeStatic=6, REF_invokeSpecial=7,
          ;;               REF_newInvokeSpecial=8, REF_invokeInterface=9
          (lookup-method (case ref-kind
-                          (1 '|java/lang/invoke/MethodHandles$Lookup.findGetter(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;)|)
-                          (2 '|java/lang/invoke/MethodHandles$Lookup.findStaticGetter(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;)|)
-                          (3 '|java/lang/invoke/MethodHandles$Lookup.findSetter(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;)|)
-                          (4 '|java/lang/invoke/MethodHandles$Lookup.findStaticSetter(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;)|)
-                          (5 '|java/lang/invoke/MethodHandles$Lookup.findVirtual(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)|)
-                          (6 '|java/lang/invoke/MethodHandles$Lookup.findStatic(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)|)
-                          (7 '|java/lang/invoke/MethodHandles$Lookup.findSpecial(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/Class;)|)
-                          (8 '|java/lang/invoke/MethodHandles$Lookup.findConstructor(Ljava/lang/Class;Ljava/lang/invoke/MethodType;)|)
+                          (1 '|java/lang/invoke/MethodHandles$Lookup.findGetter(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;)Ljava/lang/invoke/MethodHandle;|)
+                          (2 '|java/lang/invoke/MethodHandles$Lookup.findStaticGetter(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;)Ljava/lang/invoke/MethodHandle;|)
+                          (3 '|java/lang/invoke/MethodHandles$Lookup.findSetter(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;)Ljava/lang/invoke/MethodHandle;|)
+                          (4 '|java/lang/invoke/MethodHandles$Lookup.findStaticSetter(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;)Ljava/lang/invoke/MethodHandle;|)
+                          (5 '|java/lang/invoke/MethodHandles$Lookup.findVirtual(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/MethodHandle;|)
+                          (6 '|java/lang/invoke/MethodHandles$Lookup.findStatic(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/MethodHandle;|)
+                          (7 '|java/lang/invoke/MethodHandles$Lookup.findSpecial(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/Class;)Ljava/lang/invoke/MethodHandle;|)
+                          (8 '|java/lang/invoke/MethodHandles$Lookup.findConstructor(Ljava/lang/Class;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/MethodHandle;|)
                           ;; interface methods use findVirtual
-                          (9 '|java/lang/invoke/MethodHandles$Lookup.findVirtual(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)|)
+                          (9 '|java/lang/invoke/MethodHandles$Lookup.findVirtual(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/MethodHandle;|)
                           (t (internal-error "Unknown MethodHandle reference kind: ~A" ref-kind)))))
     (make-instance 'ir-method-handle
                    :reference-index (reference-index cmh)
@@ -121,16 +121,16 @@
                              ;; field descriptor (e.g. "I" or "Ljava/lang/String;");
                              ;; turn it directly into the field-type Class.
                              (let ((field-type (%bin-type-name-to-class (emit-type (aref cp nat-index) cp))))
-                               `(let ((lookup (|java/lang/invoke/MethodHandles.lookup()|)))
+                               `(let ((lookup (|java/lang/invoke/MethodHandles.lookup()Ljava/lang/invoke/MethodHandles$Lookup;|)))
                                   (,lookup-method lookup ,refc ,name ,field-type))))
                             ;; findSpecial needs an extra parameter (caller class)
-                            (7 `(let ((lookup (|java/lang/invoke/MethodHandles.lookup()|)))
+                            (7 `(let ((lookup (|java/lang/invoke/MethodHandles.lookup()Ljava/lang/invoke/MethodHandles$Lookup;|)))
                                   (,lookup-method lookup ,refc ,name ,type ,refc)))
                             ;; findConstructor doesn't take a name parameter
-                            (8 `(let ((lookup (|java/lang/invoke/MethodHandles.lookup()|)))
+                            (8 `(let ((lookup (|java/lang/invoke/MethodHandles.lookup()Ljava/lang/invoke/MethodHandles$Lookup;|)))
                                   (,lookup-method lookup ,refc ,type)))
                             ;; Standard method lookups (invokeVirtual, invokeStatic, invokeInterface)
-                            ((5 6 9) `(let ((lookup (|java/lang/invoke/MethodHandles.lookup()|)))
+                            ((5 6 9) `(let ((lookup (|java/lang/invoke/MethodHandles.lookup()Ljava/lang/invoke/MethodHandles$Lookup;|)))
                                         (,lookup-method lookup ,refc ,name ,type)))
                             (t (internal-error "Unhandled MethodHandle reference kind: ~A" ref-kind))))))
 
@@ -142,7 +142,7 @@
 (defmethod emit ((cmt constant-method-type) cp)
   (assert (classload "java/lang/invoke/MethodType"))
   (let ((descriptor (emit (aref cp (descriptor-index cmt)) cp)))
-    (let ((mt (|java/lang/invoke/MethodType.methodType(Ljava/lang/Class;[Ljava/lang/Class;)|
+    (let ((mt (|java/lang/invoke/MethodType.methodType(Ljava/lang/Class;[Ljava/lang/Class;)Ljava/lang/invoke/MethodType;|
                (%get-return-type descriptor)
                (make-java-array
                 :component-class (%get-java-class-by-bin-name "java/lang/Class")
@@ -292,6 +292,15 @@
     inner-name-index
     inner-class-access-flags)))
 
+(defvar *no-attributes* (make-hash-table :test #'equal)
+  "The attributes of a class without a class file: none.")
+
+(defmethod attributes :around ((class <class>))
+  "A primitive or array type's class has no attributes table; reading one
+of its attributes finds none rather than failing."
+  (or (and (slot-boundp class 'attributes) (call-next-method))
+      *no-attributes*))
+
 (defmethod print-object ((class <class>) out)
   (print-unreadable-object (class out :type t)
     (format out "~A" (slot-value class 'name))))
@@ -403,7 +412,7 @@ stream."
       (let* ((name-index (read-u2))
              (name (slot-value (aref constant-pool name-index) 'value))
              (attributes-length (read-u4)))
-        (eswitch (name :test 'string=)
+        (switch (name :test 'string=)
           ("BootstrapMethods"
            (let ((num-bootstrap-methods (read-u2)))
              (setf (gethash "BootstrapMethods" attributes)
@@ -492,7 +501,8 @@ stream."
           ("SourceDebugExtension"
            (read-buffer attributes-length))
           ("Signature"
-           (read-buffer attributes-length))
+           (setf (gethash "Signature" attributes)
+                 (slot-value (aref constant-pool (read-u2)) 'value)))
           ("NestHost"
            (setf (gethash "NestHost" attributes) (read-u2)))
           ("NestMembers"
@@ -512,6 +522,10 @@ stream."
           ("RuntimeVisibleTypeAnnotations"
            (read-buffer attributes-length))
           ("RuntimeInvisibleTypeAnnotations"
+           (read-buffer attributes-length))
+          ;; The JVM ignores attributes it doesn't know, such as Scala's
+          ;; ScalaSig and ScalaInlineInfo.
+          (t
            (read-buffer attributes-length)))))
     attributes))
 
@@ -632,7 +646,7 @@ lone surrogates and other BMP characters map to one character each."
               (when (> major-version 69)
                 ;; Java-visible: the JVM throws UnsupportedClassVersionError.
                 (let ((exc (%make-java-instance "java/lang/UnsupportedClassVersionError")))
-                  (|<init>(Ljava/lang/String;)| exc
+                  (|<init>(Ljava/lang/String;)V| exc
                    (jstring (format nil "Unsupported class file version ~A.~A (max supported: 69.0)"
                                     major-version minor-version)))
                   (error (%lisp-condition exc))))

@@ -91,3 +91,33 @@
          (progn (clojure:load file)
                 (is (= 99 (clojure:eval 'loaded-value))))
       (delete-file file))))
+
+;;; #[ ... ] Clojure syntax, in a readtable of this file's own
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (setf *readtable* (clojure:enable-syntax (copy-readtable))))
+
+(test clojure-syntax
+  (is (equal '(0 4 16 36 64) #[ (->> (range 10) (filter even?) (map #(* % %))) ]))
+  (is (equalp #(1 2 3) #[ (conj [1 2] 3) ]))
+  (let ((xs '(3 1 2)))
+    (is (equal '(3 2 1) #[ (sort > $xs) ])))
+  (is (equal '(2 3 4) #[ (map $#'1+ [1 2 3]) ]))
+  (is (string= "3 ]" #[ (str $(+ 1 2) \space "]") ; a ] in a comment
+                       ]))
+  (is (= 2 (gethash :b #[ {:a 1 :b 2} ]))))
+
+(defmacro clj-max (form) `#[ (apply max $,form) ])
+
+(test clojure-syntax-in-macros
+  (is (= 9 (clj-max (list 3 9 4))))
+  (let ((n 5))
+    (is (= 25 (clj-max (list n (* n n)))))))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (setf *readtable* (openldk.interop:enable-source-syntax *readtable*)))
+
+(test clojure-source-syntax
+  (is (equal '(2 4) #@clj{ (map #(* 2 %) [1 2]) }))
+  (let ((xs '(1 2)))
+    (is (= 2 (gethash :b #@clojure{ (zipmap [:a :b] $xs) ; } in a comment
+                         })))))
