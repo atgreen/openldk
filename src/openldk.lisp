@@ -280,6 +280,12 @@ the forward pass)."
            (style-warning (lambda (c)
                             (declare (ignore c))
                             (invoke-restart 'muffle-warning)))
+           ;; Compiling a method replaces its stub.  When that happens while
+           ;; COMPILE-FILE runs (a Lisp file whose compile-time code runs
+           ;; Java), SBCL counts both DEFUNs as the file's and warns.
+           (sb-int:duplicate-definition (lambda (c)
+                                             (declare (ignore c))
+                                             (invoke-restart 'muffle-warning)))
            )
         (eval code)))) ; lint:suppress eval-usage
 
