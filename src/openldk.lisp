@@ -948,6 +948,77 @@ use (see %FOLD-STATEMENTS for CATEGORIES)."
                  (cons 'tagbody (%fold-statements (cdr form) counts categories))
                  form)))))
 
+;;; Cleanups of the generated method body that need no flow analysis.
+
+(defun %go-targets (form &optional (targets (make-hash-table :test #'eq)))
+  "Hash set of the tags FORM's GO forms jump to."
+  (cond ((atom form))
+        ((eq (car form) 'quote))
+        ((and (eq (car form) 'go) (consp (cdr form)))
+         (setf (gethash (second form) targets) t))
+        (t (loop for tail on form
+                 do (%go-targets (car tail) targets)
+                 while (consp (cdr tail)))))
+  targets)
+
+(defun %class-init-check-class (statement)
+  "The class STATEMENT, a (UNLESS (INITIALIZED-P class) (%clinit-X)) check,
+initializes, or NIL."
+  (and (consp statement)
+       (eq (first statement) 'unless)
+       (= (length statement) 3)
+       (consp (second statement))
+       (eq (first (second statement)) 'initialized-p)
+       (second (second statement))))
+
+(defun %clean-statements (statements targets)
+  "Tagbody STATEMENTS without the tags nothing jumps to, and without class
+init checks repeating one made earlier in the same straight-line run."
+  (let ((checked '())
+        (out '()))
+    (dolist (statement statements (nreverse out))
+      (cond
+        ((atom statement)
+         (when (gethash statement targets)
+           ;; Control can arrive here from elsewhere.
+           (setf checked '())
+           (push statement out)))
+        ((let ((class (%class-init-check-class statement)))
+           (and class (member class checked :test #'eq))))
+        (t
+         (let ((class (%class-init-check-class statement)))
+           (when class (push class checked)))
+         (push statement out))))))
+
+(defun %clean-method-body (form targets this-p)
+  "FORM, a method body, with unused tags and repeated class init checks
+removed, and when THIS-P, (%RECEIVER local-0) as plain local-0: in an
+instance method that never assigns local-0 it is THIS, which dispatch
+already made a non-null Java object."
+  (cond ((atom form) form)
+        ((eq (car form) 'quote) form)
+        ((and this-p
+              (eq (car form) '%receiver)
+              (eq (second form) (intern "local-0" :openldk)))
+         (second form))
+        (t (let ((form (loop for tail on form
+                             collect (%clean-method-body (car tail) targets this-p) into items
+                             unless (listp (cdr tail))
+                               do (return (nconc items (cdr tail)))
+                             finally (return items))))
+             (if (eq (car form) 'tagbody)
+                 (cons 'tagbody (%clean-statements (cdr form) targets))
+                 form)))))
+
+(defun %assigns-p (form variable)
+  "True when FORM contains (SETF VARIABLE ...)."
+  (cond ((atom form) nil)
+        ((eq (car form) 'quote) nil)
+        ((and (eq (car form) 'setf) (eq (second form) variable)) t)
+        (t (loop for tail on form
+                 thereis (%assigns-p (car tail) variable)
+                 while (consp (cdr tail))))))
+
 (defun %build-method-definition (class method blocks-after-dce parameter-hints max-locals)
   "Build the complete DEFUN/DEFMETHOD form for METHOD from its optimized
 BLOCKS-AFTER-DCE: generate each block's code, then wrap it with debug
@@ -964,6 +1035,11 @@ entry/exit as required."
                                                 collect code)))))
             (unless (compact-p *context*)
               (%variable-categories (variable-sources *context*)))))
+         (lisp-code
+           (%clean-method-body lisp-code
+                               (%go-targets lisp-code)
+                               (and (not (static-p method))
+                                    (not (%assigns-p lisp-code (intern "local-0" :openldk))))))
          (traced-lisp-code (if *debug-trace* `((unwind-protect
                                                     ,(car lisp-code)
                                                  (incf *call-nesting-level* -1)))
