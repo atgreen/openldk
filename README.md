@@ -106,50 +106,62 @@ public class demo
 
 ```
 (progn
- (defclass openldk::|demo| (openldk::|java/lang/Object|)
-    ((openldk::|x| :initform 0 :allocation :class)
-     (openldk::|y| :initform 0 :allocation :class)))
- (defparameter openldk::|+static-demo+| (make-instance 'openldk::|demo|))
- (defmethod openldk::|<init>()| ((openldk::|this| openldk::|demo|))
-   (openldk::%compile-method "demo" 1)
-   (openldk::|<init>()| openldk::|this|))
- (defun openldk::|demo.add(II)| (openldk::|arg1| openldk::|arg2|)
-   (openldk::%compile-method "demo" 2)
-   (openldk::|demo.add(II)| openldk::|arg1| openldk::|arg2|))
- (defun openldk::|demo.main([Ljava/lang/String;)| (openldk::|arg1|)
-   (openldk::%compile-method "demo" 3)
-   (openldk::|demo.main([Ljava/lang/String;)| openldk::|arg1|)))))
+ (defclass openldk.app::|demo| (openldk::|java/lang/Object|)
+   ((openldk::|x| :initform 0 :allocation :class)
+    (openldk::|y| :initform 0 :allocation :class)))
+ (defparameter openldk.app::|+static-demo+|
+   (make-instance 'openldk.app::|demo|))
+ (progn
+  (openldk::%ensure-java-gf 'openldk::|<init>()V| 1)
+  (defmethod openldk::|<init>()V| ((openldk::|this| openldk.app::|demo|))
+    (openldk::%compile-method #<openldk::<class> demo> 1)
+    (openldk::invoke-special 'openldk::|<init>()V| 'openldk.app::|demo|
+                             (list openldk::|this|))))
+ (defun openldk.app::|demo.add(II)I| (openldk::|arg1| openldk::|arg2|)
+   (openldk::%compile-method #<openldk::<class> demo> 2)
+   (openldk.app::|demo.add(II)I| openldk::|arg1| openldk::|arg2|))
+ (defun openldk.app::|demo.main([Ljava/lang/String;)V| (openldk::|arg1|)
+   (openldk::%compile-method #<openldk::<class> demo> 3)
+   (openldk.app::|demo.main([Ljava/lang/String;)V| openldk::|arg1|)))
 ```
+
+Java fields become slots, with static fields allocated on the class
+and reached through the `+static-demo+` instance.  Methods are named by
+their full signature, so overloads stay distinct.  Instance methods are
+methods of a generic function shared by every class that defines that
+signature; static methods are plain functions.
 
 Note that the methods are all stubs that invoke the compiler and then
-themselves.  This is how we support incremental JIT compilation.
+call the method again, now compiled.  This is how we support
+incremental JIT compilation.
 
-When the `add` method is called, the compiler will read `add`'s
-bytecode and generates something like the following:
+When the `add` method is called, the compiler reads `add`'s bytecode
+and generates the following:
 
 ```
-(defun openldk::|demo.add(II)| (openldk::|arg0| openldk::|arg1|)
-  (let ((openldk::|s{3}|)
-        (openldk::|s{2}|)
-        (openldk::|s{1}|)
-        (openldk::|local-0| openldk::|arg0|)
+(defun openldk.app::|demo.add(II)I| (openldk::|arg0| openldk::|arg1|)
+  "bridge=NIL"
+  (let ((openldk::|local-0| openldk::|arg0|)
         (openldk::|local-1| openldk::|arg1|))
-    (block nil
-      (tagbody
-       |branch-target-0|
-        (setf openldk::|s{1}| openldk::|local-0|)
-        (setf openldk::|s{2}| openldk::|local-1|)
-        (setf openldk::|s{3}|
-          (let* ((openldk::value2 openldk::|s{2}|)
-                 (openldk::value1 openldk::|s{1}|)
-                 (openldk::result
-                   (logand (+ openldk::value1 openldk::value2)
-                           4294967295)))
-            (if (> openldk::result 2147483647)
-                (- openldk::result 4294967296)
-                openldk::result)))
-        (return-from openldk::|demo.add(II)| openldk::|s{3}|)))))
+    (openldk::with-java-conditions (:arrays nil)
+      (block nil
+        (tagbody
+         |branch-target-0|
+          (return-from openldk.app::|demo.add(II)I|
+            (let ((openldk::value2 openldk::|local-1|)
+                  (openldk::value1 openldk::|local-0|))
+              (sb-c::mask-signed-field 32
+                                       (+ openldk::value1
+                                          openldk::value2)))))))))
 ```
+
+Java's operand stack and local variable slots become Lisp variables,
+and copy propagation removes the ones that only shuffle values around.
+`mask-signed-field` gives Java's 32-bit wrap-around semantics, and with
+typed operands SBCL compiles it to a single machine add.
+`with-java-conditions` turns Lisp errors that mean null dereferences or
+bad array indexes into Java's `NullPointerException` and
+`ArrayIndexOutOfBoundsException`.
 
 ## Hacking
 
