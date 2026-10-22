@@ -12,7 +12,8 @@ set expected_output ""
 proc openldk_load { classfile } {
 
     global testargs
-    set timeout 40
+    # Most of a run is JIT compilation; leave room for a loaded machine.
+    set timeout 60
     verbose "load $classfile"
     # Isolate the classpath to this suite's own directory.  gcj tests use
     # unqualified class names whose .class files are compiled into ./gcj, so the
@@ -110,8 +111,11 @@ proc openldk-dg-test { prog do_what extra_tool_flags } {
     verbose "do_what $do_what" 2
     verbose "extra_tool_flags $extra_tool_flags" 2
 
-    # Run the javac command
-    local_exec "rm -f *.class" "" "" $timeout
+    # Remove earlier tests' classes.  javac writes them next to their
+    # sources in gcj/, which is on the classpath, so a leftover class (pr179's
+    # C, say) shadows one a later test defines itself.  (local_exec runs
+    # commands without a shell, so an "rm -f *.class" never expands its glob.)
+    foreach f [glob -nocomplain *.class gcj/*.class] { file delete $f }
     set JAVA_HOME [getenv "JAVA_HOME"]
     set status [local_exec "[openldk_javac] $prog" "" "" $timeout]
 

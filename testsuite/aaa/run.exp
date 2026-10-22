@@ -11,7 +11,8 @@ set testname ""
 proc openldk_load { classfile } {
     global testargs
 
-    set timeout 30
+    # Most of a run is JIT compilation; leave room for a loaded machine.
+    set timeout 60
     verbose "load $classfile"
     # Isolate to this suite's own directory; do not accumulate onto the
     # inherited path (see gcj/gcj.exp for the cross-suite class-shadowing this
