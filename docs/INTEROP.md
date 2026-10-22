@@ -189,6 +189,14 @@ variables and Lisp functions work too:
 #[ (map $#'1+ [1 2 3]) ]                                ; => (2 3 4)
 ```
 
+In a backquoted macro template, `$,x` splices in the value of the macro
+argument `x`:
+
+```lisp
+(defmacro clj-max (form) `#[ (apply max $,form) ])
+(clj-max (list 3 9 4))                                 ; => 9
+```
+
 `enable-syntax` changes the current readtable, or the one it is given:
 `(setf *readtable* (clojure:enable-syntax (copy-readtable)))` keeps the
 change to one file.

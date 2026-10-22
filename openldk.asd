@@ -189,6 +189,23 @@
              (unless (uiop:symbol-call :fiveam '#:run! :openldk-scala-tests)
                (error "openldk/scala tests failed"))))
 
+(asdf:defsystem "openldk/kotlin"
+  :description "Use Kotlin from Common Lisp"
+  :author "Anthony Green <green@moxielogic.com>"
+  :license "GPL3+Classpath Exception"
+  :depends-on ("openldk/interop" "sb-introspect")
+  :components ((:file "interop/kotlin"))
+  :in-order-to ((test-op (test-op "openldk/kotlin/tests"))))
+
+(asdf:defsystem "openldk/kotlin/tests"
+  :description "Tests for openldk/kotlin; need `make sbcl-kotlin`"
+  :depends-on ("openldk/kotlin" "fiveam")
+  :pathname "test"
+  :components ((:file "kotlin"))
+  :perform (test-op (o c)
+             (unless (uiop:symbol-call :fiveam '#:run! :openldk-kotlin-tests)
+               (error "openldk/kotlin tests failed"))))
+
 (asdf:defsystem "openldk/kawa"
   :description "Use Kawa Scheme from Common Lisp"
   :author "Anthony Green <green@moxielogic.com>"

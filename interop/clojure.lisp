@@ -380,6 +380,9 @@ FOREIGN-ERROR, or of its first cause that has one, as Lisp data."
 ;;;
 ;;;   (let ((xs '(3 1 2))) #[ (sort > $xs) ])                => (3 2 1)
 ;;;   #[ (map $#'1+ [1 2 3]) ]                                => (2 3 4)
+;;;
+;;; In a backquoted macro template, $,x splices in the macro argument's
+;;; value: (defmacro clj-max (form) `#[ (apply max $,form) ])
 
 (defvar *lisp-value-counter* 0)
 
@@ -417,7 +420,9 @@ alist of those names and the Lisp forms whose values they hold."
                          until (char= c #\Newline))
                    (write-char #\Newline out))
                   (#\$ ; a Lisp value
-                   (let ((form (if (eql (peek-char nil stream t nil t) #\()
+                   ;; $(form), or $,x in a backquoted macro template, is
+                   ;; read as Lisp; $name up to a Clojure delimiter.
+                   (let ((form (if (member (peek-char nil stream t nil t) '(#\( #\,))
                                    (read stream t nil t)
                                    (read-from-string
                                     (with-output-to-string (token)

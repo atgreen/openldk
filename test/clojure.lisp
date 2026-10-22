@@ -105,3 +105,10 @@
   (is (string= "3 ]" #[ (str $(+ 1 2) \space "]") ; a ] in a comment
                        ]))
   (is (= 2 (gethash :b #[ {:a 1 :b 2} ]))))
+
+(defmacro clj-max (form) `#[ (apply max $,form) ])
+
+(test clojure-syntax-in-macros
+  (is (= 9 (clj-max (list 3 9 4))))
+  (let ((n 5))
+    (is (= 25 (clj-max (list n (* n n)))))))
