@@ -156,7 +156,7 @@ regret, and the party goes on without them."
   ;; A Lisp function, called as a Scala function.
   (scala:define "pour" (lambda (cups) (format nil "~R cup~:P" cups)))
   (say "demands ~A"
-       (scala:eval "(1 to 3).map(n => pour(n)).mkString(\", \", \", then \", \" of tea\")"))
+       (scala:eval "(1 to 3).map(n => pour(n)).mkString(\", then \") + \" of tea\""))
   ;; Her temper, caught as a Lisp condition.
   (handler-case (scala:eval "throw new IllegalStateException(\"Off with your head!\")")
     (openldk.interop:foreign-error (e)

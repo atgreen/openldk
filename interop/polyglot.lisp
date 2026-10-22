@@ -52,6 +52,7 @@
   (:nicknames #:polyglot)
   (:export #:*languages*
            #:startup
+           #:warm-up
            #:enable-syntax
            #:languages))
 
@@ -79,6 +80,26 @@ to start is reported and skipped; return those that started."
                    (when verbose (format t "~&; ~(~A~) did not start: ~A~%" language e))
                    nil)))
           collect language))
+
+(defparameter *warm-up*
+  '((:clojure "EVAL-STRING" "(mapv inc (range 5)) (into {} [[:a 1]])")
+    (:kawa "EVAL-STRING" "(map (lambda (x) (* x x)) (list 1 2 3))")
+    (:jscheme "EVAL-STRING" "(map (lambda (x) (* x x)) (list 1 2 3))")
+    (:scala "EVAL" "List(1, 2, 3).map(_ * 2).sum")
+    (:kotlin "EVAL" "listOf(1, 2, 3).map { it * 2 }.sum()")
+    (:groovy "EVAL" "[3, 1, 2].sort().collect { it * 2 }")
+    (:abcl "EVAL-STRING" "(mapcar (function 1+) (list 1 2 3))"))
+  "For each language, a function of its package and code that exercises
+its common paths, so an image saved after WARM-UP has them compiled.")
+
+(defun warm-up (&optional (languages (languages)))
+  "Run a little code in each of LANGUAGES (started ones), so it is compiled
+before an image is saved.  A failure is reported, not signalled."
+  (dolist (language languages languages)
+    (destructuring-bind (function code) (cdr (assoc language *warm-up*))
+      (handler-case (uiop:symbol-call (cdr (assoc language *languages*)) function code)
+        (error (e)
+          (format t "~&; warming up ~(~A~) failed: ~A~%" language e))))))
 
 (defun enable-syntax (&optional (readtable *readtable*))
   "Turn on #@LANGUAGE{ ... } for every language, and Clojure's #[ ... ], in

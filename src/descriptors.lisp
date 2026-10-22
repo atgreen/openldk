@@ -236,6 +236,15 @@ be a user loader's (the Scala REPL's).  NIL for the system loaders.")
        (slot-boundp java-class '|classLoader|)
        (slot-value java-class '|classLoader|)))
 
+(defun %context-java-loader ()
+  "The java.lang.ClassLoader of the class being compiled, which resolves
+the classes its descriptors name (a call site's MethodType): one Scala REPL
+line's code naming an earlier line's class.  NIL outside a compilation."
+  (let ((class (and *context* (slot-value *context* 'class))))
+    (and class
+         (java-class class)
+         (%class-java-loader (java-class class)))))
+
 (defun %descriptor-class (name)
   "The java.lang.Class for the class or array type NAME in a descriptor."
   (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;| (jstring name) nil *descriptor-loader* nil))
