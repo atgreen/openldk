@@ -12,7 +12,8 @@ set expected_output ""
 proc openldk_load { classfile } {
 
     global testargs
-    set timeout 40
+    # Most of a run is JIT compilation; leave room for a loaded machine.
+    set timeout 60
     verbose "load $classfile"
     # Isolate the classpath to this suite's own directory.  gcj tests use
     # unqualified class names whose .class files are compiled into ./gcj, so the

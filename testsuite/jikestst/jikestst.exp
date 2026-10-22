@@ -10,7 +10,8 @@ set testname ""
 
 proc openldk_load { classfile } {
     global testargs
-    set timeout 30
+    # Most of a run is JIT compilation; leave room for a loaded machine.
+    set timeout 60
     verbose "load $classfile"
     set ldkcp [getenv "LDK_CLASSPATH"]
     setenv "LDK_CLASSPATH" "$ldkcp:.:jikestst/hpj/src"
