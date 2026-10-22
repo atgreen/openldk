@@ -172,6 +172,38 @@ file, nothing."
   (is (= 1 (openldk::%as-int t)))
   (is (= -1 (openldk::%as-int #xFFFFFFFF))))
 
+(test stack-variables-fold-into-their-single-use
+  (let ((s1 (intern "s{1}" :openldk))
+        (s2 (intern "s{2}" :openldk))
+        (s3 (intern "s{3}" :openldk))
+        (local (intern "local-1" :openldk)))
+    (flet ((fold (&rest statements)
+             (rest (second (openldk::%fold-stack-variables
+                            (list 'progn (cons 'tagbody statements)) nil)))))
+      ;; A value read once, first, by the next statement moves into it.
+      (is (equal `((setf ,local (f (g))))
+                 (fold `(setf ,s1 (g)) `(setf ,local (f ,s1)))))
+      ;; Chains fold too.
+      (is (equal `((h (f (g))))
+                 (fold `(setf ,s1 (g)) `(setf ,s2 (f ,s1)) `(h ,s2))))
+      ;; A call evaluated before the read keeps the value where it was:
+      ;; (g) must still run before (k).
+      (is (equal `((setf ,s1 (g)) (f (k) ,s1))
+                 (fold `(setf ,s1 (g)) `(f (k) ,s1))))
+      ;; Both values move when they are read in the order they were made...
+      (is (equal `((h (+ (a) (b))))
+                 (fold `(setf ,s1 (a)) `(setf ,s2 (b)) `(h (+ ,s1 ,s2)))))
+      ;; ...but only (b) when reading s2 first would run (b) before (a).
+      (is (equal `((setf ,s1 (a)) (h (+ (b) ,s1)))
+                 (fold `(setf ,s1 (a)) `(setf ,s2 (b)) `(h (+ ,s2 ,s1)))))
+      ;; Not across a tag, into a conditional branch, or when read twice.
+      (is (equal `((setf ,s1 (g)) tag (f ,s1))
+                 (fold `(setf ,s1 (g)) 'tag `(f ,s1))))
+      (is (equal `((setf ,s1 (g)) (when (p) (f ,s1)))
+                 (fold `(setf ,s1 (g)) `(when (p) (f ,s1)))))
+      (is (equal `((setf ,s3 (g)) (f ,s3 ,s3))
+                 (fold `(setf ,s3 (g)) `(f ,s3 ,s3)))))))
+
 (test vm-nano-time-adjustment
   ;; VM.getNanoTimeAdjustment(offset): nanoseconds from OFFSET (epoch
   ;; seconds) to now, or -1 when OFFSET is 2^32 seconds or more away.  It

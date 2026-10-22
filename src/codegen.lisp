@@ -194,21 +194,21 @@ implements IR node INSN, generating operand code recursively."))
   (make-instance '<expression>
                  :insn insn
                  :code (unsigned-to-signed-integer (slot-value insn 'value))
-                 :expression-type (slot-value insn 'type)))
+                 :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-double-literal) context)
   (declare (ignore context))
   (make-instance '<expression>
                  :insn insn
                  :code (coerce (slot-value insn 'value) 'double-float)
-                 :expression-type (slot-value insn 'type)))
+                 :expression-type :DOUBLE))
 
 (defmethod codegen ((insn ir-long-literal) context)
   (declare (ignore context))
   (make-instance '<expression>
                  :insn insn
                  :code (unsigned-to-signed-long (slot-value insn 'value))
-                 :expression-type (slot-value insn 'type)))
+                 :expression-type :LONG))
 
 (defmethod codegen ((insn ir-string-literal) context)
   (declare (ignore context))
@@ -513,10 +513,10 @@ keyword, (:COPY . VARIABLE), or NIL for a value of unknown type."
      (t (internal-error "~S assigned to a ~D-bit integer variable" value bits)))))
 
 (defun %as-int (value)
-  (if (typep value '(signed-byte 32)) value (%as-primitive-slow value 32)))
+  (if (typep value '(signed-byte 32)) value (the (signed-byte 32) (%as-primitive-slow value 32))))
 
 (defun %as-long (value)
-  (if (typep value '(signed-byte 64)) value (%as-primitive-slow value 64)))
+  (if (typep value '(signed-byte 64)) value (the (signed-byte 64) (%as-primitive-slow value 64))))
 
 (defun %as-float-slow (value)
   (float value 1f0))
@@ -528,10 +528,10 @@ keyword, (:COPY . VARIABLE), or NIL for a value of unknown type."
 ;;; type FLOAT rejects (Lisp's SQRT of a negative double is complex) and
 ;;; print a compile-time warning into the program's output.
 (defun %as-float (value)
-  (if (typep value 'single-float) value (%as-float-slow value)))
+  (if (typep value 'single-float) value (the single-float (%as-float-slow value))))
 
 (defun %as-double (value)
-  (if (typep value 'double-float) value (%as-double-slow value)))
+  (if (typep value 'double-float) value (the double-float (%as-double-slow value))))
 
 (defmethod codegen ((insn ir-call-dynamic) context)
   (with-slots (class) insn
@@ -2284,3 +2284,4 @@ Used to consult block-local substitutions in addition to global ones.")
                                                 (go ,(intern (format nil "branch-target-~A" (address handler-block)))))))
                             ,@fall-through-go))))))
           lisp-code)))))
+
