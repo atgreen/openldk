@@ -13,6 +13,8 @@ both ways, with no serialization and no process boundary.
 | `openldk/clojure` | [Clojure](https://clojure.org/) 1.12.4 | `openldk.clojure`, nickname `clojure` |
 | `openldk/kawa` | [Kawa](https://www.gnu.org/software/kawa/) Scheme 3.1.1 | `openldk.kawa`, nickname `kawa` |
 | `openldk/scala` | [Scala](https://www.scala-lang.org/) 2.13.16 | `openldk.scala`, nickname `scala` |
+| `openldk/kotlin` | [Kotlin](https://kotlinlang.org/) 2.2.20 | `openldk.kotlin`, nickname `kotlin` |
+| `openldk/groovy` | [Groovy](https://groovy-lang.org/) 4.0.27 | `openldk.groovy`, nickname `groovy` |
 
 ABCL is next, on the same core.
 
@@ -311,6 +313,110 @@ definitions persist from one `eval` to the next, as in the REPL.
 Scala errors, compile errors included, are signalled as `foreign-error`.
 
 Tests: `make check-scala` runs them in `sbcl-scala`.
+
+## Kotlin
+
+`make sbcl-kotlin` downloads the Kotlin compiler's jars and builds an SBCL
+with the compiler started and warm.
+
+```lisp
+(asdf:load-system "openldk/kotlin")
+(kotlin:startup)                                   ; already done in sbcl-kotlin
+
+(kotlin:eval "listOf(1, 2, 3).map { it * 2 }")     ; => (2 4 6)
+(let ((class (kotlin:compile "fun fact(n: Int): Long = if (n < 2) 1 else n * fact(n - 1)")))
+  (kotlin:call class "fact" 20))                   ; => 2432902008176640000
+(kotlin:call (kotlin:compile "fun twice(f: (Int) -> Int, x: Int) = f(f(x))")
+             "twice" (lambda (x) (* x 3)) 2)       ; => 18
+```
+
+`compile` compiles a source string as a file of its own, with the in-process
+Kotlin compiler, into a directory on the classpath, and returns the class
+holding its top-level functions; `call` calls one, converting arguments by
+its parameter types.  `eval` compiles and runs an expression.  Compiler
+errors are signalled as `foreign-error`, with the compiler's messages.
+
+| Function | |
+|---|---|
+| `startup &key classpath` | Start the compiler (by default from the jars `make sbcl-kotlin` downloads). |
+| `compile source &key name` | Compile a file; return its top-level class's name. |
+| `call class function &rest args` | Call a top-level function. |
+| `eval expression` | Compile and evaluate an expression. |
+| `funcall function &rest args` | Call a Kotlin function object. |
+| `to-lisp object`, `from-lisp value` | Convert values. |
+
+Tests: `make check-kotlin` runs them in `sbcl-kotlin`.
+
+## Groovy
+
+`make sbcl-groovy` downloads Groovy's jar and builds an SBCL with Groovy
+started.
+
+```lisp
+(asdf:load-system "openldk/groovy")
+(groovy:startup)                                   ; already done in sbcl-groovy
+
+(groovy:eval "[3, 1, 2].sort().collect { it * 10 }")    ; => (10 20 30)
+(groovy:eval "1.5 + 1")                                 ; => 5/2, exactly
+(groovy:funcall (groovy:eval-raw "{ a, b -> a * b }") 6 7)   ; => 42
+
+;; Lisp functions as Groovy closures
+(groovy:define "square" (lambda (x) (* x x)))
+(groovy:eval "(1..4).collect { square(it) }.sum()")     ; => 30
+```
+
+Code runs in one `GroovyShell`; variables a script assigns without `def`,
+and those `define` binds, live in its binding.  Groovy's `BigDecimal`
+literals (`1.5`) become exact rationals.  A Lisp function becomes an
+instance of a small closure class Groovy compiles statically at startup,
+whose `doCall` calls the Lisp function.
+
+| Function | |
+|---|---|
+| `startup &key classpath` | Start Groovy (by default from the jar `make sbcl-groovy` downloads). |
+| `eval source`, `eval-raw source` | Evaluate Groovy; return Lisp data, or the value unconverted. |
+| `funcall closure &rest args` | Call a closure, given as an object or by the name of a binding. |
+| `define name value` | Bind a variable; a Lisp function becomes a closure. |
+| `lookup name` | A binding's value, unconverted. |
+| `to-lisp object`, `from-lisp value` | Convert values. |
+
+Tests: `make check-groovy` runs them in `sbcl-groovy`.
+
+## Source syntax: `#@scala{ }`, `#@kotlin{ }`, `#@clj{ }`
+
+After `(openldk.interop:enable-source-syntax)`, `#@LANGUAGE{ ... }` holds
+source in that language, written as the language writes it, and evaluates
+it where it appears.  `$name`, `$(form)` and `$#'function` splice in Lisp
+values (and `$,x` in a backquoted macro template); they are passed as
+objects, never printed into the source.
+
+| Syntax | Language | System |
+|---|---|---|
+| `#@scala{ }`, `#@sc{ }` | Scala | `openldk/scala` |
+| `#@kotlin{ }`, `#@kt{ }` | Kotlin | `openldk/kotlin` |
+| `#@clojure{ }`, `#@clj{ }` | Clojure (also `#[ ]`) | `openldk/clojure` |
+| `#@kawa{ }` | Kawa Scheme | `openldk/kawa` |
+| `#@jscheme{ }` | JScheme | `openldk/jscheme` |
+| `#@groovy{ }`, `#@gv{ }` | Groovy | `openldk/groovy` |
+
+```lisp
+(setf *readtable* (openldk.interop:enable-source-syntax (copy-readtable)))
+
+(let ((xs '(5 3 8)))
+  #@scala{ $xs.map { case n: Int => n * 2 }.sum })     ; => 32
+(let ((n 4))
+  #@kt{ (1..$n).map { it * it } })                      ; => (1 4 9 16)
+#@clj{ (zipmap [:a :b] [1 2]) }                         ; => a hash table
+(defmacro kt-square (x) `#@kt{ $,x * $,x })
+```
+
+In Scala and Kotlin, each splice is a parameter typed by its Lisp value
+(`Int`, `Long`, `Double`, `String`, `List`, `Map`, a function type), so it
+needs no cast; a block is compiled once for each set of parameter types and
+then called directly.  Splices work outside the language's strings and
+comments, so `s"$x"` and `"${x}"` stay the language's own.  A Kawa or
+JScheme block becomes a Scheme procedure of the spliced values, evaluated
+once and then called; definitions in it are local to it.
 
 ## The shared core: `openldk/interop`
 

@@ -62,3 +62,15 @@ fun applyAll(f: (Any?) -> Any?, xs: List<Any?>) = xs.map(f)")))
 (test errors
   (signals openldk.interop:foreign-error (kotlin:compile "fun broken( = 1"))
   (signals openldk.interop:foreign-error (kotlin:eval "error(\"boom\")")))
+
+;;; #@kotlin{ ... } source syntax, in a readtable of this file's own
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (setf *readtable* (openldk.interop:enable-source-syntax (copy-readtable))))
+
+(test kotlin-syntax
+  (let ((n 4))
+    (is (equal '(1 4 9 16) #@kotlin{ (1..$n).map { it * it } })))
+  (is (string= "a+b" #@kt{ $(list "a" "b").joinToString("+") }))
+  (dotimes (i 3)
+    (is (= (* i i) #@kt{ $i * $i }) "compiled once, called again"))
+  (is (= 18 #@kt{ val f = $(lambda (x) (* x 3)); f(f(2)) as Int })))

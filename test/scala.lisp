@@ -59,3 +59,16 @@
 (test errors
   (signals openldk.interop:foreign-error (scala:eval "1 +"))
   (signals openldk.interop:foreign-error (scala:eval "throw new RuntimeException(\"boom\")")))
+
+;;; #@scala{ ... } source syntax, in a readtable of this file's own
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (setf *readtable* (openldk.interop:enable-source-syntax (copy-readtable))))
+
+(test scala-syntax
+  (let ((xs '(5 3 8)))
+    (is (= 32 #@scala{ $xs.map { case n: Int => n * 2 }.sum })))
+  (is (equal '(1 2 3 4 5) #@sc{ (1 to $(+ 2 3)).toList }))
+  (is (string= "6 } x" #@sc{ val n = 6; s"$n } x" }) "a } in a string")
+  (dotimes (i 3)
+    (is (= (* i i) #@sc{ $i * $i }) "compiled once, called again"))
+  (is (equal '(2 3 4) #@sc{ List(1, 2, 3).map(n => $#'1+(n)) })))

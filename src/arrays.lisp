@@ -189,5 +189,10 @@ not assignable to ARRAY's component type."
   "java.lang.reflect.Array.set implementation."
   (setf (jaref array index) value))
 
+;; Arrays inherit Object.equals: identity (the Kotlin compiler compares
+;; arrays so).
+(defmethod |equals(Ljava/lang/Object;)Z| ((array java-array) other)
+  (if (eq array other) 1 0))
+
 (defmethod |length()| ((array java-array))
   (length (java-array-data array)))

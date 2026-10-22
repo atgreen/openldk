@@ -206,6 +206,23 @@
              (unless (uiop:symbol-call :fiveam '#:run! :openldk-kotlin-tests)
                (error "openldk/kotlin tests failed"))))
 
+(asdf:defsystem "openldk/groovy"
+  :description "Use Groovy from Common Lisp"
+  :author "Anthony Green <green@moxielogic.com>"
+  :license "GPL3+Classpath Exception"
+  :depends-on ("openldk/interop")
+  :components ((:file "interop/groovy"))
+  :in-order-to ((test-op (test-op "openldk/groovy/tests"))))
+
+(asdf:defsystem "openldk/groovy/tests"
+  :description "Tests for openldk/groovy; need `make sbcl-groovy`"
+  :depends-on ("openldk/groovy" "fiveam")
+  :pathname "test"
+  :components ((:file "groovy"))
+  :perform (test-op (o c)
+             (unless (uiop:symbol-call :fiveam '#:run! :openldk-groovy-tests)
+               (error "openldk/groovy tests failed"))))
+
 (asdf:defsystem "openldk/kawa"
   :description "Use Kawa Scheme from Common Lisp"
   :author "Anthony Green <green@moxielogic.com>"

@@ -112,3 +112,12 @@
   (is (= 9 (clj-max (list 3 9 4))))
   (let ((n 5))
     (is (= 25 (clj-max (list n (* n n)))))))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (setf *readtable* (openldk.interop:enable-source-syntax *readtable*)))
+
+(test clojure-source-syntax
+  (is (equal '(2 4) #@clj{ (map #(* 2 %) [1 2]) }))
+  (let ((xs '(1 2)))
+    (is (= 2 (gethash :b #@clojure{ (zipmap [:a :b] $xs) ; } in a comment
+                         })))))

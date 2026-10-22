@@ -80,3 +80,16 @@
     (simple-error (e) (is (string= "from Lisp" (princ-to-string e)))))
   (kawa:define "lisp-type-error" (lambda (x) (+ x 1)))
   (signals type-error (kawa:eval '(lisp-type-error "one"))))
+
+;;; #@kawa{ ... } source syntax, in a readtable of this file's own
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (setf *readtable* (openldk.interop:enable-source-syntax (copy-readtable))))
+
+(test kawa-syntax
+  (let ((xs '(1 2 3)))
+    (is (equal '(1 4 9) #@kawa{ (map (lambda (x) (* x x)) $xs) })))
+  (is (string= "a } b" #@kawa{ (string-append "a" " } " "b") ; a } in a comment
+                       }))
+  (dotimes (i 3)
+    (is (= (* i 10) #@kawa{ (* $i 10) }) "evaluated once, called again"))
+  (is (equal '(2 3) #@kawa{ (map $#'1+ '(1 2)) })))

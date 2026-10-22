@@ -221,7 +221,7 @@
            ;; its declaring class's constant pool.
            (labels ((get-fields (lclass)
                       (when lclass
-                        (progn (loop for field across (fields lclass)
+                        (progn (loop for field across (or (fields lclass) #())
                                       ;; When public-only is 1 (true), skip non-public fields
                                       when (or (zerop public-only)
                                                (not (zerop (logand #x1 (access-flags field)))))

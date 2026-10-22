@@ -357,3 +357,54 @@ FROM-LISP; return the result as Lisp data."
                     (format nil "invoke(~{~A~})Ljava/lang/Object;"
                             (make-list (length args) :initial-element "Ljava/lang/Object;"))
                     function (mapcar #'from-lisp args)))))
+
+;;; #@kotlin{ ... }
+;;;
+;;; After (openldk.interop:enable-source-syntax), #@kotlin{ ... } holds
+;;; Kotlin source -- statements ending in an expression -- and evaluates it
+;;; where it appears; $name and $(form) splice in Lisp values, as parameters
+;;; typed by their values (Int, Long, Double, String, List<Any?>, ...):
+;;;
+;;;   (let ((n 4)) #@kotlin{ (1..$n).map { it * it } })     => (1 4 9 16)
+;;;   #@kotlin{ $(list "a" "b").joinToString("+") }          => "a+b"
+;;;
+;;; Each block becomes a Kotlin function, compiled once for each set of
+;;; parameter types it is called with.
+
+(defvar *sites* (make-hash-table :test #'equal)
+  "(source . parameter types) -> the class of the compiled block.")
+
+(defun %kotlin-type (value)
+  "The Kotlin type of a parameter VALUE is passed as."
+  (cond
+    ((or (eq value t) (eq value :false)) "Boolean")
+    ((null value) "Any?")
+    ((typep value '(signed-byte 32)) "Int")
+    ((typep value '(signed-byte 64)) "Long")
+    ((integerp value) "java.math.BigInteger")
+    ((typep value 'single-float) "Float")
+    ((realp value) "Double")
+    ((stringp value) "String")
+    ((characterp value) "Char")
+    ((or (consp value) (vectorp value)) "List<Any?>")
+    ((hash-table-p value) "Map<Any?, Any?>")
+    ((functionp value)
+     (format nil "(~{~A~^, ~}) -> Any?" (make-list (%arity value) :initial-element "Any?")))
+    ((symbolp value) "String")
+    (t "Any?")))
+
+(defun %eval-site (source names values)
+  (%ensure-started)
+  (let* ((types (mapcar #'%kotlin-type values))
+         (key (cons source types))
+         (class (or (gethash key *sites*)
+                    (setf (gethash key *sites*)
+                          (compile (format nil "fun lispSite(~{~A~^, ~}): Any? = run {~%~A~%}~%"
+                                           (mapcar (lambda (n type) (format nil "~A: ~A" n type))
+                                                   names types)
+                                           source))))))
+    (apply #'call class "lispSite" values)))
+
+(define-source-syntax '("kotlin" "kt")
+  (lambda (source names forms)
+    `(%eval-site ,source ',names (list ,@forms))))

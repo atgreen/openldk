@@ -314,3 +314,31 @@ NIL result is #f rather than '()."
       (java-call "define(Lgnu/mapping/Symbol;Ljava/lang/Object;Ljava/lang/Object;)"
                  *environment* (%symbol scheme-name) nil value))
     name))
+
+;;; #@kawa{ ... }
+;;;
+;;; After (openldk.interop:enable-source-syntax), #@kawa{ ... } holds
+;;; Scheme source, as Scheme writes it (case kept, #t and #f, Scheme's own
+;;; reader), and evaluates it where it appears; $name and $(form) splice in
+;;; Lisp values:
+;;;
+;;;   (let ((xs '(1 2 3))) #@kawa{ (map (lambda (x) (* x x)) $xs) })   => (1 4 9)
+;;;
+;;; Each block becomes a Scheme procedure of the spliced values, evaluated
+;;; once and then called; definitions in a block are local to it.
+
+(defvar *sites* (make-hash-table :test #'equal)
+  "Source -> the procedure the block's source became.")
+
+(defun %eval-site (source names values)
+  (%ensure-started)
+  (apply #'funcall
+         (or (gethash source *sites*)
+             (setf (gethash source *sites*)
+                   (eval-string (format nil "(lambda (~{~A~^ ~})~%~A~%)" names source))))
+         values))
+
+(define-source-syntax '("kawa")
+  (lambda (source names forms)
+    `(%eval-site ,source ',names (list ,@forms)))
+  :reader #'openldk.interop::%read-lisp-family-source-and-names)

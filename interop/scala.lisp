@@ -350,3 +350,64 @@ by default the number its lambda list requires."
       (%engine-eval (format nil "val ~A = LispBridge.values.remove(\"~A\").asInstanceOf[~A]"
                             name key type)))
     name))
+
+;;; #@scala{ ... }
+;;;
+;;; After (openldk.interop:enable-source-syntax), #@scala{ ... } holds Scala
+;;; source and evaluates it where it appears; $name and $(form) splice in
+;;; Lisp values, as parameters typed by their values (Int, Long, Double,
+;;; String, List[Any], ...), so they need no casts:
+;;;
+;;;   (let ((xs '(5 3 8))) #@scala{ $xs.map { case n: Int => n * 2 }.sum })  => 32
+;;;   #@scala{ (1 to $(+ 2 3)).toList }                                 => (1 2 3 4 5)
+;;;
+;;; Each block becomes a Scala method, compiled once for each set of
+;;; parameter types it is called with.
+
+(defvar *sites* (make-hash-table :test #'equal)
+  "(source . parameter types) -> the compiled block, a Scala function.")
+
+(defvar *site-counter* 0)
+
+(defun %scala-type (value)
+  "The Scala type FROM-LISP gives VALUE."
+  (cond
+    ((or (eq value t) (eq value :false)) "Boolean")
+    ((typep value '(signed-byte 32)) "Int")
+    ((typep value '(signed-byte 64)) "Long")
+    ((integerp value) "BigInt")
+    ((typep value 'single-float) "Float")
+    ((realp value) "Double")
+    ((stringp value) "String")
+    ((characterp value) "Char")
+    ((listp value) "List[Any]")
+    ((vectorp value) "Vector[Any]")
+    ((hash-table-p value) "Map[Any, Any]")
+    ((functionp value)
+     (format nil "(~{~A~^, ~}) => Any" (make-list (%arity value) :initial-element "Any")))
+    ((symbolp value) "String")
+    (t "Any")))
+
+(defun %eval-site (source names values)
+  (%ensure-started)
+  (let* ((types (mapcar #'%scala-type values))
+         (key (cons source types))
+         (function
+           (or (gethash key *sites*)
+               (setf (gethash key *sites*)
+                     (let ((name (format nil "lispSite~D" (incf *site-counter*))))
+                       (with-foreign-errors ("Scala")
+                         (%engine-eval (format nil "def ~A(~{~A~^, ~}): Any = {~%~A~%}" name
+                                               (mapcar (lambda (n type) (format nil "~A: ~A" n type))
+                                                       names types)
+                                               source))
+                         (%engine-eval (format nil "~A _" name))))))))
+    (to-lisp
+     (with-foreign-errors ("Scala")
+       (apply #'java-call
+              (format nil "apply(~{~A~})" (make-list (length values) :initial-element "Ljava/lang/Object;"))
+              function (mapcar #'from-lisp values))))))
+
+(define-source-syntax '("scala" "sc")
+  (lambda (source names forms)
+    `(%eval-site ,source ',names (list ,@forms))))

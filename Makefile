@@ -33,6 +33,9 @@ KOTLIN_JARS = lib/kotlin/kotlin-stdlib-$(KOTLIN_VERSION).jar lib/kotlin/kotlin-c
   lib/kotlin/kotlin-daemon-embeddable-$(KOTLIN_VERSION).jar lib/kotlin/kotlinx-coroutines-core-jvm-1.8.0.jar \
   lib/kotlin/trove4j-1.0.20200330.jar lib/kotlin/annotations-13.0.jar
 
+GROOVY_VERSION = 4.0.27
+GROOVY_JAR = lib/groovy/groovy-$(GROOVY_VERSION).jar
+
 ABCL_VERSION = 1.9.2
 ABCL_JAR = lib/abcl/abcl.jar
 ABCL_URL = https://abcl.org/releases/$(ABCL_VERSION)/abcl-bin-$(ABCL_VERSION).tar.gz
@@ -116,6 +119,11 @@ lib/kotlin/annotations-13.0.jar:
 	curl -sSfL -o $@.tmp $(MAVEN_URL)/org/jetbrains/annotations/13.0/annotations-13.0.jar
 	mv $@.tmp $@
 
+$(GROOVY_JAR):
+	mkdir -p lib/groovy
+	curl -sSfL -o $@.tmp $(MAVEN_URL)/org/apache/groovy/groovy/$(GROOVY_VERSION)/groovy-$(GROOVY_VERSION).jar
+	mv $@.tmp $@
+
 $(JSCHEME_SRC_JAR):
 	curl -sSfL -o $@.tmp $(JSCHEME_URL)/jscheme.jar
 	mv $@.tmp $@
@@ -151,6 +159,10 @@ check-scala: sbcl-scala
 check-kotlin: sbcl-kotlin
 	./sbcl-kotlin --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:test-system \"openldk/kotlin\"))"
 
+# Tests for openldk/groovy, run in sbcl-groovy, where Groovy is started.
+check-groovy: sbcl-groovy
+	./sbcl-groovy --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:test-system \"openldk/groovy\"))"
+
 # SBCLs with a language started, for using it from Lisp (see docs/INTEROP.md).
 sbcl-jscheme: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(JSCHEME_MAIN) | check-jdk
 	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/jscheme\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-jscheme\" :init (lambda () (jscheme:startup) (jscheme:eval-string \"(define (f n) (if (< n 2) 1 (* n (f (- n 1))))) (f 10) (map (lambda (x) (* x x)) (list 1 2 3))\")))"
@@ -166,6 +178,9 @@ sbcl-scala: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(SCALA_J
 
 sbcl-kotlin: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(KOTLIN_JARS) | check-jdk
 	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/kotlin\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-kotlin\" :init (lambda () (kotlin:startup) (kotlin:eval \"listOf(1, 2, 3).map { it * 2 }.sum()\") (kotlin:eval \"mapOf(1 to \\\"a\\\").entries.joinToString()\")))"
+
+sbcl-groovy: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(GROOVY_JAR) | check-jdk
+	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/groovy\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-groovy\" :init (lambda () (groovy:startup) (groovy:eval \"def f(n) { n < 2 ? 1G : n * f(n - 1) }; f(20); [3, 1, 2].sort().collect { it * 2 }; [a: 1].collectEntries { k, v -> [k, v + 1] }\")))"
 
 # A warm image: JScheme's Java code is compiled at build time (see docs/IMAGES.md).
 jscheme: src/*.lisp src/native/*.lisp *.asd Makefile lib/jscheme/build-image.lisp $(JSCHEME_MAIN) lib/jscheme/r4rstest.scm | check-jdk

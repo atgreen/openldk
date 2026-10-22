@@ -612,9 +612,12 @@ class is a self-reference to the class currently being compiled."
     ;; is referenced but not yet loaded (e.g. java/lang/Enum from
     ;; clojure/lang/RT.<clinit>) resolves to NIL and (java-class NIL) aborts
     ;; the JIT compile.
-    (when (and (plusp (length classname)) (not (eql (char classname 0) #\[)))
-      (%resolve-class-in-context classname))
     (let ((ldk-class (or (%get-ldk-class-by-bin-name classname t loader)
+                         ;; Resolved through the loader, which can delegate to
+                         ;; another user loader that defined it (one Groovy
+                         ;; script's class, referenced from the next).
+                         (and (plusp (length classname)) (not (eql (char classname 0) #\[))
+                              (%resolve-class-in-context classname))
                          ;; A hidden/anonymous class references itself by its
                          ;; original name, but it is registered under a
                          ;; uniquified name; resolve that to the class being

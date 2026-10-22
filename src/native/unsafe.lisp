@@ -1276,7 +1276,7 @@ a same-named class from another loader."
             :component-class (%get-java-class-by-fq-name "java.lang.reflect.Constructor")
             :initial-contents
             (coerce (append (when lclass
-                              (loop for method across (methods lclass)
+                              (loop for method across (or (methods lclass) #())
                                     when (and (starts-with? "<init>" (name method))
                                              (or (zerop public-only)
                                                  (not (zerop (logand #x1 (access-flags method))))))
@@ -1362,7 +1362,7 @@ Method/Constructor so reflection reports them (e.g. Method.toString()'s
            (make-java-array
             :component-class (%get-java-class-by-fq-name "java.lang.reflect.Method")
             :initial-contents (coerce (append (when lclass
-                                                (loop for method across (methods lclass)
+                                                (loop for method across (or (methods lclass) #())
                                                       when (and (not (starts-with? "<init>" (name method)))
                                                                 (or (zerop public-only)
                                                                     (not (zerop (logand #x1 (access-flags method))))))
