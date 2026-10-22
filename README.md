@@ -2,7 +2,7 @@
 ## A JIT Compiler and Runtime for Java in Common Lisp
 
 <p align="center" width="100%">
-    <img width="33%" src="https://github.com/user-attachments/assets/eb723bd3-f676-44d0-97ce-9bbfb11f2cd0">
+    <img width="33%" alt="A grinning three-eyed green alien waving a pennant reading LISP, beside Java's mascot Duke" src="docs/images/openldk-logo.png">
 </p>
 
 OpenLDK is a Just-In-Time (JIT) compiler and runtime environment for
