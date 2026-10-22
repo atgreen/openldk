@@ -308,12 +308,27 @@ with ARGS, converted with FROM-LISP; return the result as Lisp data."
 (defvar *sites* (make-hash-table :test #'equal)
   "Source -> the closure the block's source became.")
 
+(defun %split-imports (source)
+  "SOURCE's leading import lines (and the blank lines among them), and the
+rest of it."
+  (let ((start 0))
+    (loop for end = (or (position #\Newline source :start start) (length source))
+          for line = (string-trim '(#\Space #\Tab #\Return) (subseq source start end))
+          while (and (< start (length source))
+                     (or (string= line "")
+                         (and (> (length line) 7) (string= "import " line :end2 7))))
+          do (setf start (min (length source) (1+ end))))
+    (values (subseq source 0 start) (subseq source start))))
+
 (defun %eval-site (source names values)
   (%ensure-started)
   (apply #'funcall
          (or (gethash source *sites*)
              (setf (gethash source *sites*)
-                   (eval-raw (format nil "{ ~{~A~^, ~} -> ~%~A~%}" names source))))
+                   ;; A block's imports go before the closure, where Groovy
+                   ;; allows them.
+                   (multiple-value-bind (imports body) (%split-imports source)
+                     (eval-raw (format nil "~A~%{ ~{~A~^, ~} -> ~%~A~%}" imports names body)))))
          values))
 
 (define-source-syntax '("groovy" "gv")

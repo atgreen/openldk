@@ -1741,7 +1741,7 @@ Java byte arrays hold SIGNED bytes; read-byte yields 0..255."
     (when *debug-trace*
       (format t "~&DEBUG: canonicalize0 called with: ~S~%" path-str))
     (handler-case
-        (let ((result (jstring (namestring (truename path-str)))))
+        (let ((result (jstring (or (%realpath path-str) (error "~A doesn't exist" path-str)))))
           (when *debug-trace*
             (format t "~&DEBUG: canonicalize0 truename succeeded: ~S -> ~S~%"
                     path-str (lstring result)))
@@ -1755,7 +1755,11 @@ Java byte arrays hold SIGNED bytes; read-byte yields 0..255."
                (absolute-path (if (uiop:absolute-pathname-p pathname)
                                   pathname
                                   (merge-pathnames pathname (uiop:getcwd))))
-               (result (jstring (uiop:native-namestring absolute-path))))
+               (native (uiop:native-namestring absolute-path))
+               ;; As realpath(3) would, without a directory's trailing slash.
+               (result (jstring (if (and (> (length native) 1) (char= #\/ (char native (1- (length native)))))
+                                    (subseq native 0 (1- (length native)))
+                                    native))))
           (when *debug-trace*
             (format t "~&DEBUG: canonicalize0 fallback: ~S -> ~S~%"
                     path-str (lstring result)))

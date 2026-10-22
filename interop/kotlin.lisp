@@ -334,6 +334,7 @@ compiler's messages when it doesn't compile."
                                "java.lang.String"
                                (mapcar #'jstring
                                        (list "-no-stdlib" "-no-reflect" "-nowarn"
+                                             "-module-name" name
                                              ;; Earlier blocks' classes, and the classes and jars
                                              ;; ASDF components contributed (a :kotlin-file's, a
                                              ;; :maven-jar's), so a block can use them.
@@ -477,10 +478,15 @@ Kotlin is running now, else compiled the first time it runs."
 
 ;;; (:kotlin-file "name") ASDF components: compiled with the Kotlin compiler
 
-(defun compile-kotlin-files (sources output-directory &key (classpath ""))
+(defun compile-kotlin-files (sources output-directory
+                             &key (classpath "") (module-name (pathname-name (first sources))))
   "Compile the Kotlin SOURCES (pathnames) into OUTPUT-DIRECTORY against
-CLASSPATH (a colon-separated string) and the standard library; signal
-FOREIGN-ERROR with the compiler's messages if they don't compile."
+CLASSPATH (a colon-separated string) and the standard library, as the
+module MODULE-NAME; signal FOREIGN-ERROR with the compiler's messages if
+they don't compile.  Kotlin finds a module's top-level functions through
+its META-INF/MODULE-NAME.kotlin_module and ignores a module on the
+classpath named like the one it's compiling, so each compilation gets its
+own name."
   (%ensure-started)
   (let* ((messages (java-new "java.io.ByteArrayOutputStream" "()"))
          (code (with-foreign-errors ("Kotlin")
@@ -491,6 +497,7 @@ FOREIGN-ERROR with the compiler's messages if they don't compile."
                              "java.lang.String"
                              (mapcar #'jstring
                                      (append (list "-no-stdlib" "-no-reflect" "-nowarn"
+                                                   "-module-name" module-name
                                                    "-cp" (format nil "~A:~A:~A" *stdlib* (namestring *output-directory*) classpath)
                                                    "-d" (namestring output-directory))
                                              (mapcar #'namestring sources))))))))

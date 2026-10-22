@@ -644,11 +644,40 @@ the errno value on failure; the Java caller throws the UnixException."
           (setf (slot-value ux '|errno|) (sb-posix:syscall-errno e)))
         (error (%lisp-condition ux))))))
 
+(defun %realpath-octets (path-sap)
+  "realpath(3) of the C string at PATH-SAP: its octets, or the errno."
+  (let ((real (sb-alien:alien-funcall
+               (sb-alien:extern-alien "realpath" (function sb-sys:system-area-pointer
+                                                           sb-sys:system-area-pointer
+                                                           sb-sys:system-area-pointer))
+               path-sap (sb-sys:int-sap 0))))
+    (if (zerop (sb-sys:sap-int real))
+        (values nil (sb-alien:get-errno))
+        (unwind-protect
+             (let ((length (loop for i from 0 until (zerop (sb-sys:sap-ref-8 real i)) finally (return i))))
+               (let ((octets (make-array length :element-type '(unsigned-byte 8))))
+                 (dotimes (i length octets)
+                   (setf (aref octets i) (sb-sys:sap-ref-8 real i)))))
+          (sb-alien:alien-funcall
+           (sb-alien:extern-alien "free" (function sb-alien:void sb-sys:system-area-pointer))
+           real)))))
+
+(defun %realpath (path)
+  "realpath(3) of the string PATH, or NIL if it doesn't resolve.  Unlike
+TRUENAME, a directory has no trailing slash and no character is a wildcard."
+  (let ((octets (sb-ext:string-to-octets path :external-format :utf-8 :null-terminate t)))
+    (sb-sys:with-pinned-objects (octets)
+      (let ((real (%realpath-octets (sb-sys:vector-sap octets))))
+        (and real (sb-ext:octets-to-string real :external-format :utf-8))))))
+
 (defun |sun/nio/fs/UnixNativeDispatcher.realpath0(J)[B| (address)
   "realpath(3) — resolve canonical path. Returns byte array."
-  (let* ((path (%read-c-string-from-sap address))
-         (real (namestring (truename (pathname path))))
-         (bytes (flexi-streams:string-to-octets real :external-format :utf-8)))
+  (multiple-value-bind (bytes errno) (%realpath-octets (sb-sys:int-sap address))
+    (unless bytes
+      (let ((ux (%make-java-instance "sun/nio/fs/UnixException")))
+        (when (slot-exists-p ux '|errno|)
+          (setf (slot-value ux '|errno|) errno))
+        (error (%lisp-condition ux))))
     (make-java-array
      :component-class (%get-java-class-by-bin-name "byte")
      :initial-contents bytes)))

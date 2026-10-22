@@ -493,6 +493,17 @@ its Java methods are compiled into the image.  A language that takes
 minutes to start (Clojure) is then ready in under a second."
   (when init (cl:funcall init))
   (pushnew '%restart-runtime sb-ext:*init-hooks*)
+  ;; OpenLDK's systems are part of the image now.  Reloading one into it --
+  ;; as a system that :DEFSYSTEM-DEPENDS-ON a language would, once any
+  ;; source is newer than its fasl (after a git pull) -- fails, its Java
+  ;; classes being loaded: ASDF leaves an immutable system as it is.
+  (dolist (name (asdf:already-loaded-systems))
+    (when (or (string= name "openldk") (eql 0 (search "openldk/" name)))
+      (asdf:register-immutable-system name)))
+  ;; The languages' compiled Java methods fill most of immobile space, where
+  ;; SBCL loads a fasl's code by default and has no fallback when it's full:
+  ;; load users' fasls into dynamic space.
+  (setf sb-c:*compile-file-to-memory-space* :dynamic)
   (openldk::%reset-runtime-for-save)
   (sb-ext:save-lisp-and-die path :executable t :save-runtime-options t))
 
@@ -1048,9 +1059,9 @@ directory OUTPUT-DIRECTORY, against the classes earlier components
 compiled; signal an error if it doesn't compile."))
 
 (defmethod asdf:output-files ((op asdf:compile-op) (component compiled-foreign-file))
-  (list (uiop:ensure-directory-pathname
-         (uiop:merge-pathnames* (format nil "~A-classes/" (asdf:component-name component))
-                                (asdf:component-pathname component)))))
+  ;; A directory beside the source file, catalog.kt's catalog-classes/.
+  (list (uiop:merge-pathnames* (format nil "~A-classes/" (asdf:component-name component))
+                               (uiop:pathname-directory-pathname (asdf:component-pathname component)))))
 
 (defmethod asdf:perform ((op asdf:compile-op) (component compiled-foreign-file))
   (let ((output (first (asdf:output-files op component))))
