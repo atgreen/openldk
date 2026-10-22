@@ -98,6 +98,12 @@ file, nothing."
     (is (= 0 coder))
     (is (equalp '(112 108 97 105 110) (coerce bytes 'list)))))
 
+(test method-let-drops-unused-variables
+  ;; Unmentioned variables without an initial value are dropped; bound
+  ;; parameters and mentioned variables stay.
+  (is (equal '(let ((p arg0) (b)) (setf b p))
+             (openldk::%method-let '((p arg0) (a) (b) (c)) '((setf b p))))))
+
 (test vm-nano-time-adjustment
   ;; VM.getNanoTimeAdjustment(offset): nanoseconds from OFFSET (epoch
   ;; seconds) to now, or -1 when OFFSET is 2^32 seconds or more away.  It

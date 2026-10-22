@@ -214,11 +214,11 @@ get the same unified var-numbers."
                    (not (slot-value insn 'dead-p)))  ; Don't re-process dead instructions
           (let* ((stack-var (slot-value insn 'lvalue))
                  (rvalue (slot-value insn 'rvalue))
-                 ;; Only safe to remove if rvalue has no side effects
-                 ;; IMPORTANT: Don't eliminate assignments from local vars, as propagation
-                 ;; may have already substituted uses of the stack var, making it appear unused.
-                 (safe-rvalue? (or (typep rvalue 'ir-literal)
-                                  (typep rvalue '<stack-variable>))))
+                 ;; Only safe to remove if rvalue has no side effects.  A copy
+                 ;; of a local qualifies: when propagation has substituted the
+                 ;; local for every read, the store is dead.
+                 (safe-rvalue? (typep rvalue '(or ir-literal <stack-variable>
+                                                  ir-local-variable ir-long-local-variable))))
             (when (and safe-rvalue?
                       (not (gethash (sv-key stack-var) read-keys)))
               (when *debug-codegen*
