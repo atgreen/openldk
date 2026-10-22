@@ -9,22 +9,22 @@ are mapped to CLOS (Common Lisp Object System) classes, enabling seamless
 integration between Java and Common Lisp.
 
 **Key Points:**
-- JDK 21 class files are supported
+- JDK 25 class files are supported
 - SBCL only (Linux tested)
 - Incremental JIT compilation: methods compiled lazily on first call
-- Reads JDK classes directly from JMOD files in `$JAVA_HOME/jmods/`
+- Reads JDK classes directly from `$JAVA_HOME/jmods/` or `$JAVA_HOME/lib/modules`
 - Performance not competitive with modern JVMs - designed for embedding Java libraries in Lisp applications
 
 ## Environment Setup
 
 **Required Environment Variables:**
-- `JAVA_HOME`: Must point to JDK 21 (e.g., `/home/linuxbrew/.linuxbrew/opt/openjdk@21/libexec`)
+- `JAVA_HOME`: Should point to JDK 25 (e.g., `/usr/lib/jvm/java-25-openjdk`)
 - `LDK_CLASSPATH`: Additional classpath elements (optional)
 - `LDK_DEBUG`: Debug flags (optional, see Debugging section)
 
 **Build Requirements:**
 - SBCL (Steel Bank Common Lisp)
-- JDK 21
+- JDK 25
 - ocicl package manager - run `ocicl install` before building
 
 ## Architecture
@@ -119,13 +119,13 @@ characters into commit strings, but properly formatted text.
    - Identify which files need modification
 
 2. **While making changes:**
-   - Lint after each significant change using `~/git/ocicl/ocicl lint openldk.asd`
-   - Run `make` to verify compilation (requires `JAVA_HOME=/home/linuxbrew/.linuxbrew/opt/openjdk@17/libexec`)
+   - Lint after each significant change using `ocicl lint openldk.asd`
+   - Run `make` to verify compilation (with `JAVA_HOME` set to a JDK 25)
    - Test relevant functionality
 
 3. **Before committing:**
-   - Final lint check with `~/git/ocicl/ocicl lint openldk.asd`
-   - Verify `JAVA_HOME=/home/linuxbrew/.linuxbrew/opt/openjdk@17/libexec make` succeeds
+   - Final lint check with `ocicl lint openldk.asd`
+   - Verify `make` succeeds
    - Ensure all tests still pass (if applicable)
    - Write a descriptive multi-line commit message
 
@@ -169,10 +169,10 @@ Core libraries (managed by ocicl):
 
 ## Hacking
 
-See HACKING.md for important notes on this project.
+See docs/HACKING.md for important notes on this project.
 
 ## To Do
 
-See TODO.md for things we need to do.
+Open work is tracked in beads: run `bd ready`.
 
 

@@ -146,16 +146,17 @@ Lisp code uses appropriate comparison/conversion functions. Common issues:
 - Missing `unsigned-to-signed-integer`/`unsigned-to-signed-long` conversions
 - Incorrect type coercion between FLOAT and DOUBLE
 
-## JDK 17 Porting Notes
+## Modern JDK Notes
 
-OpenLDK targets JDK 17 (JDK 8 support has been dropped). JDK 17 introduced
-several changes that affect native method implementations and class loading.
+OpenLDK targets JDK 25 (JDK 8 support has been dropped). The move past JDK 8
+changed several native method implementations and how classes are loaded.
 
-### JDK 17 Class Files
+### JDK Class Files
 
-JDK 17+ classes come from jigsaw modules (`java.base`, etc.) rather than a flat
+JDK 9+ classes come from jigsaw modules (`java.base`, etc.) rather than a flat
 `rt.jar`. OpenLDK reads class files directly from JMOD files in
-`$JAVA_HOME/jmods/`. All module classes are available. Code must still handle
+`$JAVA_HOME/jmods/`, or from `$JAVA_HOME/lib/modules` when the JDK has no
+JMODs. All module classes are available. Code must still handle
 missing classes gracefully:
 
 - `classload` may return nil for unavailable classes
@@ -163,20 +164,20 @@ missing classes gracefully:
 - `%instanceof-check` returns 0 when the target CLOS class doesn't exist
 - `checkcast` codegen skips the type check when `find-class` returns nil
 
-### Native Method Signature Changes (JDK 8 → 17)
+### Native Method Signature Changes (JDK 8 → 25)
 
-Several native methods changed signatures between JDK 8 and 17:
+Several native methods changed signatures after JDK 8:
 
 - **`defineClass1`**: Changed from instance method on `ClassLoader` to a static
   method with an explicit `ClassLoader` parameter.
-- **`initStackTraceElements`**: New static native in JDK 17 for populating
+- **`initStackTraceElements`**: New static native in JDK 9+ for populating
   stack trace element arrays from throwable backtrace data.
 - **`Reference.refersTo0`**: New in JDK 16+. Used by `ThreadLocalMap.getEntry()`
   for `WeakReference` key matching. Must perform identity comparison (`eq`).
 
 ### sun.misc.Unsafe → jdk.internal.misc.Unsafe
 
-In JDK 17, `sun.misc.Unsafe` is a bytecoded wrapper that delegates to
+Since JDK 9, `sun.misc.Unsafe` is a bytecoded wrapper that delegates to
 `jdk.internal.misc.Unsafe`. Raw memory operations (`allocateMemory0`,
 `freeMemory0`, `putLong0`, `getByte0`, `copyMemory0`) are native methods
 on `jdk/internal/misc/Unsafe`, not `sun/misc/Unsafe`.
@@ -207,27 +208,13 @@ back to the loader's package. This is how native method overrides work.
 
 ## Reference Sources
 
-- **JDK 17 Source**: Use OpenJDK 17 source to understand correct Java semantics
+- **JDK 25 Source**: Use OpenJDK 25 source to understand correct Java semantics
 - **Java VM Spec**: Essential for bytecode instruction behavior
 - **Java Language Spec**: For language-level semantics
 
 ## Common Pitfall Patterns
 
-### 1. Unequal Stack Lengths in merge-stacks
-
-The `merge-stacks` function (src/bc-to-ir.lisp:1943) assumes both stacks have
-equal length. If control flow paths produce different stack depths, the merge
-silently truncates to the shorter stack, losing information.
-
-**Solution**: Add assertion or padding logic to handle unequal lengths.
-
-### 2. Missing Stack State Recording
-
-The bytecode interpretation loop skips stack recording for GOTO instructions
-(line 225). Ensure this is intentional and doesn't break stack merging at
-jump targets.
-
-### 3. Side-Effect Detection
+### Side-Effect Detection
 
 The `side-effect-p` function determines if an IR node can be eliminated.
 Be conservative - marking something without side effects when it has them
@@ -265,8 +252,8 @@ LDK_DEBUG=L ./kawa
 ## Build System Notes
 
 - **SBCL only**: Uses SBCL-specific features (sb-ext, sb-debug)
-- **Java 21**: Class file parser supports JDK 21 class files
-- **JAVA_HOME required**: Must point to JDK 21 (e.g., `/home/linuxbrew/.linuxbrew/opt/openjdk@21/libexec`). JDK classes are read directly from `$JAVA_HOME/jmods/*.jmod` files.
+- **JDK 25**: Class file parser supports JDK 25 class files
+- **JAVA_HOME**: Should point to a JDK 25 (e.g., `/usr/lib/jvm/java-25-openjdk`). If it doesn't, `openldk` searches the usual install locations and, failing that, downloads one (see README.md).
 - **ocicl**: Package manager - run `ocicl install` before building
 - **Build targets**: `make` builds openldk and javacl; `make kawa` and `make abcl` build warm Kawa and ABCL images; `make check` runs the test suite
 
@@ -294,9 +281,10 @@ Files are loaded in specific order (see openldk.asd):
 ## Performance Considerations
 
 - **Incremental JIT**: Methods compiled on first call, not class load
-- **No optimization**: Code prioritizes correctness over speed
+- **Correctness first**: The JIT types locals, arrays and arithmetic where it
+  can prove the types, but correctness always wins over speed
 - **Method caching**: Compiled methods replace stubs permanently
 - **No inlining**: Each Java method is a separate Lisp function
 
-OpenLDK is not designed for high performance - it's for embedding Java
+OpenLDK is not designed to compete with HotSpot - it's for embedding Java
 libraries in Lisp applications when you need "that one Java library."
