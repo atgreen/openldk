@@ -81,3 +81,12 @@
   (abcl:define '*w* 0)
   (signals simple-error (abcl:eval '(let ((*w* 1)) (lisp-fail))))
   (is (= 0 (abcl:eval '*w*)) "ABCL's bindings unwound"))
+
+(test foreign-functions-are-lisp-functions
+  (let ((f (abcl:eval-string "(lambda (x) (* x x))")))
+    (is (typep f 'openldk.interop:foreign-function))
+    (is (= 49 (funcall f 7)))
+    (is (equal '(1 4 9) (mapcar f '(1 2 3))))
+    (is (equal '(3 2 1) (sort (list 1 2 3) #'> :key f)))
+    (abcl:define "LISPY" f)
+    (is (equal '(1 4 9) (abcl:eval-string "(mapcar lispy (list 1 2 3))")) "passed back, it is the original function")))

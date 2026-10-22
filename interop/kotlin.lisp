@@ -187,9 +187,14 @@ DEFAULT-CLASSPATH finds).  Calling it again does nothing."
             *source-directory* (merge-pathnames "src/" base))
       (ensure-directories-exist *output-directory*)
       (ensure-directories-exist *source-directory*))
-    ;; Compiled code links against the standard library.
-    (setf *stdlib* (or (find-if (lambda (entry) (search "kotlin-stdlib" entry)) classpath)
-                       (first classpath)))
+    ;; Compiled code links against the standard library, and can use
+    ;; coroutines (kotlinx.coroutines: runBlocking, async, ...).
+    (setf *stdlib* (format nil "~{~A~^:~}"
+                           (or (remove-if-not (lambda (entry)
+                                                (or (search "kotlin-stdlib" entry)
+                                                    (search "kotlinx-coroutines" entry)))
+                                              classpath)
+                               (list (first classpath)))))
     (start-runtime :classpath (append classpath (list (namestring *output-directory*))))
     (setf *classes*
           (loop for (key . name) in '((:boolean . "java.lang.Boolean")
@@ -202,7 +207,8 @@ DEFAULT-CLASSPATH finds).  Calling it again does nothing."
                                       (:unit . "kotlin.Unit")
                                       (:pair . "kotlin.Pair")
                                       (:map . "java.util.Map")
-                                      (:collection . "java.util.Collection"))
+                                      (:collection . "java.util.Collection")
+                                      (:function . "kotlin.Function"))
                 collect (cons key (java-class-symbol name))))
     (%install-lisp-functions)
     (setf *started* t))
@@ -271,6 +277,7 @@ OpenLDK passes them, references through FROM-LISP."
                   (java-call "put(Ljava/lang/Object;Ljava/lang/Object;)" map (from-lisp k) (from-lisp v)))
                 value)
        map))
+    ((typep value 'foreign-function) (foreign-function-object value))
     ((functionp value) (%kotlin-function value))
     (t value)))
 
@@ -303,6 +310,7 @@ OpenLDK passes them, references through FROM-LISP."
              while (eql 1 (java-call "hasNext()" iterator))
              collect (to-lisp (java-call "next()" iterator))))
       ((typep object 'openldk::java-array) (map 'vector #'to-lisp (java-array-list object)))
+      ((is :function) (make-foreign-function object "Kotlin" #'funcall))
       (t object))))
 
 ;;; Compiling
@@ -377,7 +385,7 @@ FROM-LISP; return the result as Lisp data."
              (apply #'java-call
                     (format nil "invoke(~{~A~})Ljava/lang/Object;"
                             (make-list (length args) :initial-element "Ljava/lang/Object;"))
-                    function (mapcar #'from-lisp args)))))
+                    (foreign-object function) (mapcar #'from-lisp args)))))
 
 ;;; #@kotlin{ ... }
 ;;;
@@ -409,6 +417,7 @@ FROM-LISP; return the result as Lisp data."
     ((characterp value) "Char")
     ((or (consp value) (vectorp value)) "List<Any?>")
     ((hash-table-p value) "Map<Any?, Any?>")
+    ((typep value 'foreign-function) "Any?")
     ((functionp value)
      (format nil "(~{~A~^, ~}) -> Any?" (make-list (%arity value) :initial-element "Any?")))
     ((symbolp value) "String")
@@ -426,6 +435,68 @@ FROM-LISP; return the result as Lisp data."
                                            source))))))
     (apply #'call class "lispSite" values)))
 
+(defparameter *static-kotlin-types*
+  '(((signed-byte 32) . "Int") ((signed-byte 64) . "Long") (fixnum . "Long") (integer . "java.math.BigInteger")
+    (double-float . "Double") (single-float . "Float") (string . "String") (character . "Char")
+    (boolean . "Boolean") (list . "List<Any?>") (hash-table . "Map<Any?, Any?>")))
+
+(defun %kotlin-site-source (types names source)
+  (format nil "fun lispSite(~{~A~^, ~}): Any? = run {~%~A~%}~%"
+          (mapcar (lambda (n type) (format nil "~A: ~A" n type)) names types)
+          source))
+
+(defmacro %kotlin-site (source names &rest forms)
+  "A #@kotlin{ } block: precompiled if its splices' types are static and
+Kotlin is running now, else compiled the first time it runs."
+  (let ((types (mapcar (lambda (form) (openldk.interop::%static-splice-type form *static-kotlin-types*)) forms)))
+    (if (and *started* (every #'identity types))
+        (let* ((name (openldk.interop::%site-name "LispSite" source types))
+               (directory (uiop:ensure-directory-pathname
+                           (merge-pathnames (format nil "~A/" name) *source-directory*)))
+               (file (merge-pathnames (format nil "~A.kt" name) *source-directory*)))
+          (with-open-file (out file :direction :output :if-exists :supersede)
+            (write-string (%kotlin-site-source types names source) out))
+          (uiop:delete-directory-tree directory :validate t :if-does-not-exist :ignore)
+          (ensure-directories-exist directory)
+          (compile-kotlin-files (list file) directory)
+          `(%precompiled-site ,(format nil "~AKt" name) ',(openldk.interop::%class-files-in directory)
+                              (list ,@forms)))
+        `(%eval-site ,source ',names (list ,@forms)))))
+
+(defun %precompiled-site (class classes values)
+  (openldk.interop::%define-precompiled-classes classes)
+  (apply #'call class "lispSite" values))
+
 (define-source-syntax '("kotlin" "kt")
   (lambda (source names forms)
-    `(%eval-site ,source ',names (list ,@forms))))
+    `(%kotlin-site ,source ,names ,@forms)))
+
+;;; (:kotlin-file "name") ASDF components: compiled with the Kotlin compiler
+
+(defun compile-kotlin-files (sources output-directory &key (classpath ""))
+  "Compile the Kotlin SOURCES (pathnames) into OUTPUT-DIRECTORY against
+CLASSPATH (a colon-separated string) and the standard library; signal
+FOREIGN-ERROR with the compiler's messages if they don't compile."
+  (%ensure-started)
+  (let* ((messages (java-new "java.io.ByteArrayOutputStream" "()"))
+         (code (with-foreign-errors ("Kotlin")
+                 (java-call "exec(Ljava/io/PrintStream;[Ljava/lang/String;)"
+                            (java-new "org.jetbrains.kotlin.cli.jvm.K2JVMCompiler" "()")
+                            (java-new "java.io.PrintStream" "(Ljava/io/OutputStream;)" messages)
+                            (make-java-array-of
+                             "java.lang.String"
+                             (mapcar #'jstring
+                                     (append (list "-no-stdlib" "-no-reflect" "-nowarn"
+                                                   "-cp" (format nil "~A:~A:~A" *stdlib* (namestring *output-directory*) classpath)
+                                                   "-d" (namestring output-directory))
+                                             (mapcar #'namestring sources))))))))
+    (unless (string= "OK" (lstring (java-call "name()" code)))
+      (error 'foreign-error :language "Kotlin"
+                            :message (string-trim '(#\Newline #\Space)
+                                                  (lstring (java-call "toString()" messages)))))
+    output-directory))
+
+(openldk.interop::define-foreign-file-type kotlin-file openldk.interop::compiled-foreign-file "kt"
+  (openldk.interop:compile-foreign-file (component source output)
+    (declare (ignore component))
+    (compile-kotlin-files (list source) output :classpath (openldk.interop::%compiled-classpath))))

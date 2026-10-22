@@ -555,3 +555,142 @@ startup.  `make-java-subclass-instance` creates an instance and runs the
 Java superclass's constructor, which initializes its Java fields.
 `call-from-java` carries a Lisp error out through the Java code that called
 the method, so that `with-foreign-errors` can re-signal it.
+
+### Foreign functions are Lisp functions
+
+A language's function object -- a Clojure fn, a Scala or Kotlin function, a
+Groovy closure, a Kawa or JScheme procedure, an ABCL function -- comes to
+Lisp as a `foreign-function`, a funcallable instance, so the ordinary
+operators call it:
+
+```lisp
+(let ((square (scala:eval "(x: Int) => x * x")))
+  (funcall square 7)                    ; => 49
+  (mapcar square '(1 2 3))              ; => (1 4 9)
+  (sort (list 1 2 3) #'> :key square))  ; => (3 2 1)
+```
+
+Passed back to a language -- to `from-lisp`, `define`, or a `$` splice --
+it is the original object again.  `foreign-function-object` returns it.
+
+### Errors: typed conditions and restarts
+
+A Java exception escaping a foreign call is signalled as a `foreign-error`
+of the subclass its Java class maps to, which is also an instance of the
+standard condition type that fits, so handlers can name either:
+
+| Java | Lisp |
+|---|---|
+| `ArithmeticException` | `foreign-arithmetic-error`, an `arithmetic-error` |
+| `ClassCastException` | `foreign-class-cast-error`, a `type-error` |
+| `NumberFormatException` | `foreign-number-format-error`, a `parse-error` (and `foreign-illegal-argument-error`) |
+| `FileNotFoundException` | `foreign-file-not-found-error`, a `file-error` (and `foreign-io-error`) |
+| `StackOverflowError`, `OutOfMemoryError` | `foreign-stack-overflow`, `foreign-out-of-memory`, `storage-condition`s |
+| `IndexOutOfBoundsException`, `NullPointerException`, `IllegalStateException`, `UnsupportedOperationException` | `foreign-index-error`, `foreign-null-pointer-error`, ... |
+
+`foreign-error-java-class` names the throwable's class.  The restarts
+`use-value` (return a value instead of the call's) and `retry` (make the
+call again) are offered; a handler that retries should count its tries:
+
+```lisp
+(handler-bind ((foreign-number-format-error (lambda (e) (use-value 0))))
+  (groovy:eval "Integer.parseInt('x')"))        ; => 0
+```
+
+The other way, a Lisp error in a Lisp function a language called is thrown
+into it as the Java exception its type maps to -- a `division-by-zero` as
+an `ArithmeticException`, a `type-error` as a `ClassCastException` -- so
+the language's code can catch it by type; it comes back out of the foreign
+call as the original Lisp condition, even from another thread.
+
+### Collections without copying
+
+`java-sequence` presents a `java.util.List` -- which Clojure's vectors and
+lists, Kotlin's and Groovy's lists, and Java's are -- as a Lisp sequence:
+`elt`, `length`, `map`, `reduce`, `find`, `subseq` and the rest work on it,
+converting only the elements they touch.  `do-java-iterator` and
+`java-take` walk any `Iterable` lazily, so an infinite one can be taken
+from.  The other way, `lisp-list-view` and `lisp-map-view` present a Lisp
+sequence or hash table to Java as a `java.util.List` or `java.util.Map`
+backed by it.
+
+```lisp
+(let ((v (java-sequence (groovy:eval-raw "(0..<1000000).toList()") :convert #'groovy:to-lisp)))
+  (elt v 999999))                       ; => 999999, converting one element
+```
+
+### Foreign source files in ASDF systems
+
+A system can hold source files in any of the languages, as components, once
+it `:defsystem-depends-on` the language's system (or `openldk/polyglot`):
+
+```lisp
+(asdf:defsystem "my-app"
+  :defsystem-depends-on ("openldk/polyglot")
+  :serial t
+  :components ((:maven-jar "commons-text" :coordinates "org.apache.commons:commons-text:1.12.0")
+               (:scala-file "stats")      ; compiled by scalac
+               (:kotlin-file "shapes")    ; compiled by kotlinc, against Stats and commons-text
+               (:groovy-file "greet")     ; compiled by groovyc
+               (:clojure-file "words")    ; loaded by Clojure
+               (:kawa-file "fact") (:jscheme-file "jfib") (:abcl-file "tower")
+               (:file "main")))
+```
+
+Kotlin, Scala and Groovy files compile at `compile-op` into directories of
+class files beside the system's fasls, against the classes of the
+components before them, and go on the classpath at `load-op`; the others
+are loaded by their language at `load-op`.  `define-foreign-file-type`
+adds a language.
+
+`(:maven-jar "name" :coordinates "group:artifact:version" :sha256 "...")`
+puts a Java library from Maven Central on the classpath -- for every
+language in the image -- downloading it to OpenLDK's cache the first time
+and checking it against `:sha256`, or else the SHA-1 the repository
+publishes.  Dependencies of a jar are not followed: list each one.
+`add-maven-jar` does the same from Lisp.  `test/polyglot-demo/` is a
+complete example (`make check-polyglot`).
+
+### Precompiled blocks
+
+A `#@kotlin{ }` or `#@scala{ }` block whose splices have static types --
+none, literals, or `(the type form)` -- is compiled when the Lisp code
+around it is, if the language is running then (as in `sbcl-kotlin` or
+`sbcl-polyglot`), and its class files go into the fasl:
+
+```lisp
+(defun double-it (n)
+  (declare (type (signed-byte 32) n))
+  #@kt{ $(the (signed-byte 32) n) * 2 })    ; compiled with this file
+```
+
+Loading the fasl defines the classes from those bytes, so the compiler
+isn't needed at run time, and a compile error is reported by
+`compile-file`.  `(signed-byte 32)` is an `Int`, `(signed-byte 64)` and
+`fixnum` a `Long`, `double-float` a `Double`, `string` a `String`, `list`
+a `List`.  Other blocks compile the first time they run.
+
+### Java classes defined in Lisp
+
+`define-java-class` defines a real Java class whose methods are Lisp code:
+
+```lisp
+(define-java-class greeter (:implements ("java.util.function.Function"))
+    ((greeting :initform "hello") (count :initform 0))
+  ("apply(Ljava/lang/Object;)Ljava/lang/Object;" (self name)
+    (incf count)
+    (jstring (format nil "~A, ~A (~D)" greeting (lstring name) count))))
+
+(make-java-object 'greeter :greeting "hi")
+```
+
+The class is generated as a class file and defined through the application
+class loader, so `getClass`, reflection and `Class.forName` see an ordinary
+Java class (`lisp.my_package.greeter`): Java code, and languages that call
+methods by reflection, can call it like any other object.  Slots are fields
+(the method bodies refer to them by name); each method is the full JVM name
+of a method the class declares or implements; `:extends` names a superclass
+with a public no-argument constructor.  A Lisp error in a method is thrown
+into Java and comes back out of `with-foreign-errors` as the original
+condition, even from another thread.  `make check-interop` runs the core's
+tests.

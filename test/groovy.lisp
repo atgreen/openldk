@@ -58,6 +58,15 @@
   (signals error (groovy:eval "square('x')")
     "a Lisp error in a Lisp function Groovy called"))
 
+(test foreign-functions-are-lisp-functions
+  (let ((f (groovy:eval "{ x -> x * x }")))
+    (is (typep f 'openldk.interop:foreign-function))
+    (is (= 49 (funcall f 7)))
+    (is (equal '(1 4 9) (mapcar f '(1 2 3))))
+    (is (equal '(3 2 1) (sort (list 1 2 3) #'> :key f)))
+    (groovy:define "lispy" f)
+    (is (equal '(1 4 9) (groovy:eval "[1, 2, 3].collect(lispy)")) "passed back, it is the original function")))
+
 ;;; #@groovy{ ... } source syntax, in a readtable of this file's own
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (setf *readtable* (openldk.interop:enable-source-syntax (copy-readtable))))

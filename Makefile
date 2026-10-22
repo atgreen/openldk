@@ -139,6 +139,10 @@ $(JSCHEME_MAIN): $(JSCHEME_SRC_JAR)
 	cd lib/jscheme/src && unzip -q ../jscheme-src.jar
 	$(JAVAC) -nowarn -d lib/jscheme/classes lib/jscheme/src/jscheme/*.java
 
+# Tests for openldk/interop, the shared core (Java classes defined in Lisp, ...).
+check-interop: | check-jdk
+	sbcl --dynamic-space-size 32768 --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:test-system \"openldk/interop\"))"
+
 # Tests for openldk/jscheme, using JScheme from Lisp (see docs/INTEROP.md).
 check-jscheme: $(JSCHEME_MAIN) | check-jdk
 	sbcl --dynamic-space-size 32768 --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:test-system \"openldk/jscheme\"))"
@@ -169,6 +173,11 @@ check-kotlin: sbcl-kotlin
 # Tests for openldk/groovy, run in sbcl-groovy, where Groovy is started.
 check-groovy: sbcl-groovy
 	$(call check-in-image,groovy)
+
+# Tests for openldk/polyglot, run in sbcl-polyglot: every language at once,
+# and a system of foreign source files as ASDF components (test/polyglot-demo).
+check-polyglot: sbcl-polyglot
+	$(call check-in-image,polyglot)
 
 # Tests for openldk/abcl, run in sbcl-abcl, where ABCL is started.
 check-abcl: sbcl-abcl

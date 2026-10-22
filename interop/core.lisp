@@ -65,11 +65,47 @@
            #:foreign-error-message
            #:foreign-error-object
            #:with-foreign-errors
+           #:make-foreign-error
+           #:foreign-error-java-class
+           #:retry
+           #:foreign-arithmetic-error
+           #:foreign-index-error
+           #:foreign-null-pointer-error
+           #:foreign-class-cast-error
+           #:foreign-number-format-error
+           #:foreign-illegal-argument-error
+           #:foreign-illegal-state-error
+           #:foreign-unsupported-operation-error
+           #:foreign-io-error
+           #:foreign-file-not-found-error
+           #:foreign-stack-overflow
+           #:foreign-out-of-memory
            #:define-java-subclass
            #:make-java-subclass-instance
            #:call-from-java
            #:define-source-syntax
            #:enable-source-syntax
+           #:foreign-function
+           #:foreign-function-object
+           #:foreign-function-language
+           #:make-foreign-function
+           #:foreign-object
+           #:java-sequence
+           #:java-sequence-object
+           #:do-java-iterator
+           #:java-take
+           #:lisp-list-view
+           #:lisp-map-view
+           #:java-fields
+           #:add-to-classpath
+           #:maven-jar
+           #:add-maven-jar
+           #:compile-foreign-file
+           #:load-foreign-file
+           #:define-foreign-file-type
+           #:define-java-class
+           #:make-java-object
+           #:java-class-of-lisp-class
            #:dump-lisp-image))
 
 (in-package #:openldk.interop)
@@ -257,6 +293,24 @@ holding the elements of the sequence CONTENTS."
                      (foreign-error-language condition)
                      (foreign-error-message condition)))))
 
+(macrolet ((define-foreign-errors (&rest specs)
+             `(progn
+                ,@(loop for (name . supers) in specs
+                        collect `(define-condition ,name (,@supers) ())))))
+  (define-foreign-errors
+    (foreign-arithmetic-error foreign-error arithmetic-error)
+    (foreign-index-error foreign-error)
+    (foreign-null-pointer-error foreign-error)
+    (foreign-class-cast-error foreign-error type-error)
+    (foreign-illegal-argument-error foreign-error)
+    (foreign-number-format-error foreign-illegal-argument-error parse-error)
+    (foreign-illegal-state-error foreign-error)
+    (foreign-unsupported-operation-error foreign-error)
+    (foreign-io-error foreign-error)
+    (foreign-file-not-found-error foreign-io-error file-error)
+    (foreign-stack-overflow foreign-error storage-condition)
+    (foreign-out-of-memory foreign-error storage-condition)))
+
 (defun %throwable-message (throwable)
   "THROWABLE's message, followed by those of its causes: a wrapper's own
 message (Clojure's \"Syntax error compiling ...\") often says less than
@@ -272,28 +326,117 @@ its cause's."
       (format nil "~A~{ (caused by: ~A)~}" (first messages)
               (remove-duplicates (rest messages) :test #'string= :from-end t)))))
 
+(defun %carried-lisp-condition (throwable)
+  "The Lisp condition THROWABLE, or an exception it was wrapped in on the
+way out (a CompletionException from another thread), carries."
+  (loop for cause = throwable then (ignore-errors (java-call "getCause()" cause))
+        for depth below 10
+        while cause
+        thereis (gethash cause *lisp-errors-in-java*)))
+
+(defparameter *foreign-error-classes*
+  '(("java.lang.ArithmeticException" foreign-arithmetic-error)
+    ("java.lang.IndexOutOfBoundsException" foreign-index-error)
+    ("java.lang.NullPointerException" foreign-null-pointer-error)
+    ("java.lang.ClassCastException" foreign-class-cast-error)
+    ("java.lang.NumberFormatException" foreign-number-format-error)
+    ("java.lang.IllegalArgumentException" foreign-illegal-argument-error)
+    ("java.lang.IllegalStateException" foreign-illegal-state-error)
+    ("java.lang.UnsupportedOperationException" foreign-unsupported-operation-error)
+    ("java.io.FileNotFoundException" foreign-file-not-found-error)
+    ("java.io.IOException" foreign-io-error)
+    ("java.lang.StackOverflowError" foreign-stack-overflow)
+    ("java.lang.OutOfMemoryError" foreign-out-of-memory))
+  "Java exception class -> the FOREIGN-ERROR subclass a throwable of it (or
+a subclass) is signalled as; the first that matches, so a subclass comes
+before its superclass.")
+
+(defun %foreign-error-class (throwable)
+  (or (loop for (java-class condition-class) in *foreign-error-classes*
+            when (ignore-errors (java-instance-p throwable java-class))
+              return condition-class)
+      'foreign-error))
+
+(defun make-foreign-error (language throwable)
+  "The FOREIGN-ERROR (of the subclass THROWABLE's Java class maps to) for
+the Java THROWABLE in LANGUAGE."
+  (let ((class (%foreign-error-class throwable)))
+    (apply #'make-condition class
+           :language language :message (%throwable-message throwable) :object throwable
+           ;; The standard condition types it is also an instance of.
+           (case class
+             (foreign-class-cast-error (list :datum throwable :expected-type t))
+             (foreign-file-not-found-error (list :pathname nil))
+             (foreign-arithmetic-error (list :operation nil :operands nil))))))
+
+(defun foreign-error-java-class (condition)
+  "The name of the Java class of the throwable behind CONDITION, a
+FOREIGN-ERROR (\"java.lang.ArithmeticException\"), or NIL."
+  (let ((object (foreign-error-object condition)))
+    (and object (typep object 'standard-object)
+         (ignore-errors (lstring (java-call "getName()" (java-call "getClass()" object)))))))
+
+(defun %signal-foreign-error (condition)
+  "Signal CONDITION with the USE-VALUE restart, whose value the foreign
+call then returns; WITH-FOREIGN-ERRORS adds RETRY."
+  (restart-case (error condition)
+    (use-value (value)
+      :report "Return a value instead of the foreign call's."
+      :interactive (lambda () (list (cl:eval (read *query-io*))))
+      value)))
+
 (defmacro with-foreign-errors ((language) &body body)
   "Run BODY, turning a Java exception that escapes it into a FOREIGN-ERROR
-for LANGUAGE (a string), or into the Lisp condition it carries if it came
-from CALL-FROM-JAVA."
-  `(handler-case (progn ,@body)
-     (openldk::|condition-java/lang/Throwable| (condition)
-       (let* ((throwable (slot-value condition 'openldk::|objref|))
-              (lisp-condition (gethash throwable *lisp-errors-in-java*)))
-         (if lisp-condition
-             (error lisp-condition)
-             (error 'foreign-error :language ,language
-                                   :message (%throwable-message throwable)
-                                   :object throwable))))))
+for LANGUAGE (a string) -- of the subclass its Java class maps to, such as
+FOREIGN-ARITHMETIC-ERROR, also an ARITHMETIC-ERROR -- or into the Lisp
+condition it carries if it came from CALL-FROM-JAVA.  The restarts
+USE-VALUE (return a value instead) and RETRY (run BODY again) are offered."
+  (let ((retry (gensym "RETRY")) (block (gensym "WITH-FOREIGN-ERRORS")))
+    `(block ,block
+       (tagbody
+          ,retry
+          (return-from ,block
+            (restart-case
+                (handler-case (progn ,@body)
+                  (openldk::|condition-java/lang/Throwable| (condition)
+                    (let* ((throwable (slot-value condition 'openldk::|objref|))
+                           (lisp-condition (%carried-lisp-condition throwable)))
+                      (%signal-foreign-error
+                       (or lisp-condition (make-foreign-error ,language throwable))))))
+              (retry ()
+                :report "Make the foreign call again."
+                (go ,retry))))))))
+
+(defparameter *lisp-error-java-classes*
+  '((division-by-zero "java.lang.ArithmeticException")
+    (arithmetic-error "java.lang.ArithmeticException")
+    (type-error "java.lang.ClassCastException")
+    (parse-error "java.lang.NumberFormatException")
+    (file-error "java.io.UncheckedIOException")
+    (storage-condition "java.lang.OutOfMemoryError"))
+  "Lisp condition type -> the Java exception class a Lisp error of it is
+thrown into Java as; others are java.lang.RuntimeException.")
+
+(defun %java-exception-for (condition)
+  "The Java exception CONDITION, a Lisp error, is thrown into Java as."
+  (let ((class (or (loop for (type java-class) in *lisp-error-java-classes*
+                         when (typep condition type) return java-class)
+                   "java.lang.RuntimeException"))
+        (message (jstring (princ-to-string condition))))
+    (if (string= class "java.io.UncheckedIOException")
+        (java-new class "(Ljava/lang/String;Ljava/io/IOException;)" message
+                  (java-new "java.io.IOException" "(Ljava/lang/String;)" message))
+        (java-new class "(Ljava/lang/String;)" message))))
 
 (defun call-from-java (function &rest args)
   "Call FUNCTION with ARGS on behalf of Java code (a callback).  A Lisp
-error is thrown into the Java code as a java.lang.RuntimeException carrying
-it, which WITH-FOREIGN-ERRORS turns back into the Lisp condition."
+error is thrown into the Java code as the Java exception its type maps to
+-- a DIVISION-BY-ZERO as an ArithmeticException, a TYPE-ERROR as a
+ClassCastException, others as a RuntimeException -- carrying it, which
+WITH-FOREIGN-ERRORS turns back into the Lisp condition."
   (handler-case (apply function args)
     (error (condition)
-      (let ((exception (java-new "java.lang.RuntimeException" "(Ljava/lang/String;)"
-                                 (jstring (princ-to-string condition)))))
+      (let ((exception (%java-exception-for condition)))
         (setf (gethash exception *lisp-errors-in-java*) condition)
         (error (openldk::%lisp-condition exception))))))
 
@@ -534,3 +677,557 @@ splices named lispArg1, ..."
 the current one); see above."
   (set-dispatch-macro-character #\# #\@ #'%read-source-syntax readtable)
   readtable)
+
+;;; Java classes defined in Lisp
+;;;
+;;; DEFINE-JAVA-CLASS defines a Java class whose methods are Lisp code:
+;;;
+;;;   (define-java-class greeter (:extends "java.lang.Object"
+;;;                               :implements ("java.util.function.Function"))
+;;;     ((greeting :initform "hello"))
+;;;     ("apply(Ljava/lang/Object;)Ljava/lang/Object;" (self name)
+;;;       (jstring (format nil "~A, ~A" (slot-value self 'greeting) (lstring name)))))
+;;;
+;;;   (make-java-object 'greeter :greeting "hi")
+;;;
+;;; It is a real Java class, defined from a class file generated here: Lisp
+;;; slots are fields of type Object, each method is a native method that
+;;; the Lisp body implements (OpenLDK calls a native instance method
+;;; through the generic function of its name), and a constructor calls the
+;;; superclass's no-argument one.  So getClass, reflection, Class.forName
+;;; and languages that call methods by reflection (Groovy, Clojure, Kotlin's
+;;; reflection) see an ordinary Java object.
+
+(defun %u2 (n) (list (ldb (byte 8 8) n) (ldb (byte 8 0) n)))
+(defun %u4 (n) (append (%u2 (ldb (byte 16 16) n)) (%u2 (ldb (byte 16 0) n))))
+
+(defun %modified-utf8 (string)
+  "STRING in the class file's modified UTF-8, as a list of octets."
+  (loop for char across string
+        for code = (char-code char)
+        append (cond ((and (<= 1 code) (<= code #x7F)) (list code))
+                     ((<= code #x7FF) (list (logior #xC0 (ash code -6)) (logior #x80 (logand code #x3F))))
+                     ((<= code #xFFFF) (list (logior #xE0 (ash code -12))
+                                             (logior #x80 (logand (ash code -6) #x3F))
+                                             (logior #x80 (logand code #x3F))))
+                     (t ;; a supplementary character, as its UTF-16 surrogate pair
+                      (let* ((v (- code #x10000))
+                             (high (logior #xD800 (ash v -10)))
+                             (low (logior #xDC00 (logand v #x3FF))))
+                        (append (%modified-utf8 (string (code-char high)))
+                                (%modified-utf8 (string (code-char low)))))))))
+
+(defun %class-file (name super interfaces fields methods)
+  "The octets of a class file for the class NAME (binary form) extending
+SUPER, implementing INTERFACES, with FIELDS (names, of type Object) and
+METHODS ((name . descriptor), native), and a no-argument constructor."
+  (let ((pool '()) (count 0) (index (make-hash-table :test #'equal)))
+    (labels ((entry (key octets)
+               (or (gethash key index)
+                   (progn (setf pool (append pool (list octets)))
+                          (setf (gethash key index) (incf count)))))
+             (utf8 (s) (let ((b (%modified-utf8 s))) (entry (list :utf8 s) (append '(1) (%u2 (length b)) b))))
+             (class (n) (let ((u (utf8 n))) (entry (list :class n) (cons 7 (%u2 u)))))
+             (name-and-type (n d) (let ((a (utf8 n)) (b (utf8 d)))
+                                    (entry (list :nat n d) (append '(12) (%u2 a) (%u2 b)))))
+             (methodref (c n d) (let ((a (class c)) (b (name-and-type n d)))
+                                  (entry (list :methodref c n d) (append '(10) (%u2 a) (%u2 b))))))
+      (let* ((this (class name))
+             (super-index (class super))
+             (interface-indices (mapcar #'class interfaces))
+             (code-name (utf8 "Code"))
+             (init-name (utf8 "<init>"))
+             (init-type (utf8 "()V"))
+             (super-init (methodref super "<init>" "()V"))
+             (field-octets (loop for f in fields
+                                 append (append (%u2 #x0001) (%u2 (utf8 f)) (%u2 (utf8 "Ljava/lang/Object;")) (%u2 0))))
+             (init-code (append '(#x2A #xB7) (%u2 super-init) '(#xB1))) ; aload_0, invokespecial, return
+             (init-octets (append (%u2 #x0001) (%u2 init-name) (%u2 init-type) (%u2 1)
+                                  (%u2 code-name) (%u4 (+ 12 (length init-code)))
+                                  (%u2 1) (%u2 1) (%u4 (length init-code)) init-code (%u2 0) (%u2 0)))
+             (method-octets (loop for (n . d) in methods
+                                  append (append (%u2 #x0101) (%u2 (utf8 n)) (%u2 (utf8 d)) (%u2 0)))))
+        (coerce (append '(#xCA #xFE #xBA #xBE) (%u2 0) (%u2 52)
+                        (%u2 (1+ count)) (apply #'append pool)
+                        (%u2 #x0021) (%u2 this) (%u2 super-index)
+                        (%u2 (length interface-indices)) (mapcan #'%u2 interface-indices)
+                        (%u2 (length fields)) field-octets
+                        (%u2 (1+ (length methods))) init-octets method-octets
+                        (%u2 0))
+                '(vector (unsigned-byte 8)))))))
+
+(defun %java-class-name (symbol)
+  "The binary name of the Java class DEFINE-JAVA-CLASS makes for SYMBOL:
+lisp/<package>/<name>, lowercased, other characters than letters and
+digits becoming _ (OPENLDK.INTEROP::GREETER: lisp/openldk_interop/greeter)."
+  (flet ((munge (s)
+           (map 'string (lambda (c) (if (alphanumericp c) (char-downcase c) #\_)) s)))
+    (format nil "lisp/~A/~A" (munge (package-name (symbol-package symbol))) (munge (symbol-name symbol)))))
+
+(defvar *java-classes* (make-hash-table :test #'eq)
+  "Lisp symbol -> the <class> DEFINE-JAVA-CLASS made for it.")
+
+(defun %define-java-class (symbol super interfaces slots methods)
+  "Define the Java class for SYMBOL from a generated class file, through
+the application class loader, and return its <class>."
+  (let* ((name (%java-class-name symbol))
+         (bytes (%class-file name (%binary-name super) (mapcar #'%binary-name interfaces)
+                             (mapcar #'%java-field-name slots) methods))
+         (class (openldk::%classload-from-stream
+                 name (flexi-streams:make-in-memory-input-stream bytes)
+                 openldk::*boot-class-loader* openldk::*app-ldk-class-loader*)))
+    (unless class
+      (error "Couldn't define the Java class ~A" name))
+    (setf (gethash symbol *java-classes*) class)))
+
+(defun java-class-of-lisp-class (symbol)
+  "The <class> of the Java class DEFINE-JAVA-CLASS defined for SYMBOL."
+  (or (gethash symbol *java-classes*)
+      (error "~S names no class defined with DEFINE-JAVA-CLASS" symbol)))
+
+(defun %method-parts (method)
+  "METHOD, \"name(descriptor)return\", as (name . descriptor)."
+  (let ((open (position #\( method)))
+    (cons (subseq method 0 open) (subseq method open))))
+
+(defmacro define-java-class (name (&key (extends "java.lang.Object") implements) slots &body methods)
+  "Define NAME as a Java class extending EXTENDS (which needs a public
+no-argument constructor) and implementing IMPLEMENTS, with SLOTS -- each a
+symbol or (symbol &key initform) -- and METHODS, each
+(\"name(arguments)return\" (self arg...) body...), the full JVM name of a
+method the class declares or implements.  Starts the runtime if needed;
+make instances with MAKE-JAVA-OBJECT."
+  (let ((slot-names (mapcar (lambda (s) (if (consp s) (first s) s)) slots)))
+    `(progn
+       (unless (runtime-started-p) (start-runtime))
+       (%define-java-class ',name ,extends ',implements
+                           ',(mapcar #'symbol-name slot-names)
+                           ',(mapcar (lambda (m) (%method-parts (first m))) methods))
+       (setf (get ',name 'java-slot-initforms)
+             (list ,@(loop for s in slots
+                           collect (if (consp s)
+                                       `(cons ',(first s) (lambda () ,(getf (rest s) :initform)))
+                                       `(cons ',s (lambda () nil))))))
+       (%install-java-methods
+        ',name
+        (list ,@(loop for (method lambda-list . body) in methods
+                      for declarations = (loop while (and (consp (first body)) (eq (first (first body)) 'declare))
+                                               collect (pop body))
+                      collect `(list ,method ,(length lambda-list)
+                                     (lambda ,lambda-list
+                                       (declare (ignorable ,(first lambda-list)))
+                                       ,@declarations
+                                       (symbol-macrolet ,(loop for s in slot-names
+                                                               collect `(,s (%java-slot ,(first lambda-list) ',s)))
+                                         (call-from-java (lambda () ,@body))))))))
+       ',name)))
+
+(defun %install-java-methods (name methods)
+  "Make each of METHODS, (jvm-name arity function), the method of NAME's
+Java class: a method on the generic function of JVM-NAME for the class's
+CLOS class, calling FUNCTION."
+  (let* ((class (java-class-of-lisp-class name))
+         (class-symbol (intern (openldk::name class) (openldk::ldk-class-package class))))
+    (loop for (jvm-name arity function) in methods
+          for gf = (intern jvm-name :openldk)
+          for params = (loop for i from 1 below arity collect (intern (format nil "ARG~D" i) :openldk))
+          do (openldk::%ensure-java-gf gf arity)
+             (cl:eval `(defmethod ,gf ((this ,class-symbol) ,@params)
+                         (funcall ,function this ,@params))))))
+
+(defun %java-field-name (slot-name)
+  "The Java field holding the Lisp slot SLOT-NAME: prefixed, so it
+doesn't shadow a superclass field."
+  (concatenate 'string "lisp$" slot-name))
+
+(defun %java-slot-symbol (slot)
+  (intern (openldk::mangle-field-name (%java-field-name (symbol-name slot))) :openldk))
+
+(defun %java-slot (object slot)
+  (slot-value object (%java-slot-symbol slot)))
+
+(defun (setf %java-slot) (value object slot)
+  (setf (slot-value object (%java-slot-symbol slot)) value))
+
+(defun make-java-object (name &rest initargs)
+  "A new instance of the Java class NAME defined with DEFINE-JAVA-CLASS,
+its constructor run and its slots set from INITARGS (:slot value ...) or
+their initforms."
+  (let* ((class (java-class-of-lisp-class name))
+         (object (openldk::%make-java-instance (openldk::name class) (openldk::ldk-loader class))))
+    (java-call "<init>()V" object)
+    (loop for (slot . initform) in (get name 'java-slot-initforms)
+          do (setf (%java-slot object slot)
+                   (getf initargs (intern (symbol-name slot) :keyword) (funcall initform))))
+    object))
+
+;;; Foreign functions as Lisp functions
+;;;
+;;; A language's function object -- a Clojure fn, a Scala or Kotlin
+;;; function, a Groovy closure, a Scheme procedure, an ABCL function -- comes
+;;; to Lisp as a FOREIGN-FUNCTION: a funcallable instance, so FUNCALL, APPLY,
+;;; MAPCAR and SORT call it like any Lisp function, converting arguments and
+;;; result as its language's FUNCALL does.  Passed back to a language, it is
+;;; the original object again.
+
+(defclass foreign-function ()
+  ((object :initarg :object :reader foreign-function-object
+           :documentation "The language's function object.")
+   (language :initarg :language :reader foreign-function-language))
+  (:metaclass closer-mop:funcallable-standard-class))
+
+(defmethod print-object ((function foreign-function) stream)
+  (print-unreadable-object (function stream :type t :identity t)
+    (princ (foreign-function-language function) stream)))
+
+(defun make-foreign-function (object language caller)
+  "A FOREIGN-FUNCTION for the function OBJECT of LANGUAGE (a string),
+calling (CALLER OBJECT arg...) when called."
+  (let ((function (make-instance 'foreign-function :object object :language language)))
+    (closer-mop:set-funcallable-instance-function
+     function (lambda (&rest args) (apply caller object args)))
+    function))
+
+(defun foreign-object (value)
+  "VALUE's foreign object if it is a FOREIGN-FUNCTION, else VALUE."
+  (if (typep value 'foreign-function) (foreign-function-object value) value))
+
+;;; Collections, without copying
+;;;
+;;; JAVA-SEQUENCE presents a java.util.List -- which Clojure's vectors and
+;;; lists, Kotlin's and Groovy's lists, and Java's own are -- as a Lisp
+;;; sequence (SBCL's extensible sequences): ELT, LENGTH, MAP, REDUCE, FIND,
+;;; SUBSEQ and the rest work on it, converting only the elements they touch
+;;; with CONVERT.  DO-JAVA-ITERATOR and JAVA-TAKE walk any java.lang.Iterable
+;;; lazily, so an infinite one (a lazy Clojure seq) can be taken from.
+;;;
+;;; The other way, LISP-LIST-VIEW and LISP-MAP-VIEW present a Lisp sequence
+;;; or hash table to Java as a java.util.List or java.util.Map backed by it.
+
+(defclass java-sequence (sequence standard-object)
+  ((object :initarg :object :reader java-sequence-object
+           :documentation "The java.util.List.")
+   (convert :initarg :convert :initform #'identity :reader java-sequence-convert
+            :documentation "Converts an element to Lisp.")
+   (unconvert :initarg :unconvert :initform #'identity :reader java-sequence-unconvert
+              :documentation "Converts a Lisp value to an element, for (SETF ELT)."))
+  (:documentation "A java.util.List as a Lisp sequence, converting elements as they are read."))
+
+(defun java-sequence (list &key (convert #'identity) (unconvert #'identity))
+  "LIST, a java.util.List, as a Lisp sequence whose elements are converted
+with CONVERT (and, stored with (SETF ELT), with UNCONVERT)."
+  (make-instance 'java-sequence :object list :convert convert :unconvert unconvert))
+
+(defmethod print-object ((sequence java-sequence) stream)
+  (print-unreadable-object (sequence stream :type t :identity t)
+    (format stream "of ~D" (length sequence))))
+
+(defmethod sb-sequence:length ((sequence java-sequence))
+  (java-call "size()I" (java-sequence-object sequence)))
+
+(defmethod sb-sequence:elt ((sequence java-sequence) index)
+  (funcall (java-sequence-convert sequence)
+           (java-call "get(I)Ljava/lang/Object;" (java-sequence-object sequence) index)))
+
+(defmethod (setf sb-sequence:elt) (value (sequence java-sequence) index)
+  (java-call "set(ILjava/lang/Object;)Ljava/lang/Object;" (java-sequence-object sequence) index
+             (funcall (java-sequence-unconvert sequence) value))
+  value)
+
+(defmethod sb-sequence:make-sequence-like ((sequence java-sequence) length &rest args)
+  ;; Results of SUBSEQ, MAP and the like are Lisp vectors.
+  (apply #'make-array length args))
+
+(defmethod sb-sequence:adjust-sequence ((sequence java-sequence) length &rest args)
+  (declare (ignore args))
+  (error "A JAVA-SEQUENCE has the length of its list (~D), not ~D." (length sequence) length))
+
+(defmacro do-java-iterator ((var iterable &optional (convert '#'identity)) &body body)
+  "Run BODY with VAR bound to each element of the java.lang.Iterable (or
+java.util.Iterator) ITERABLE in turn, converted with CONVERT; as lazy as
+ITERABLE, so RETURN can stop an infinite one."
+  (let ((iterator (gensym "ITERATOR")) (object (gensym)) (fn (gensym)))
+    `(let* ((,object ,iterable)
+            (,fn ,convert)
+            (,iterator (if (java-instance-p ,object "java.util.Iterator")
+                           ,object
+                           (java-call "iterator()Ljava/util/Iterator;" ,object))))
+       (loop while (eql 1 (java-call "hasNext()Z" ,iterator))
+             do (let ((,var (funcall ,fn (java-call "next()Ljava/lang/Object;" ,iterator))))
+                  ,@body)))))
+
+(defun java-take (n iterable &optional (convert #'identity))
+  "The first N elements of the java.lang.Iterable ITERABLE, converted with
+CONVERT, as a list; reads no further, so ITERABLE can be infinite."
+  (let ((elements '()) (count 0))
+    (when (plusp n)
+      (do-java-iterator (element iterable convert)
+        (push element elements)
+        (when (>= (incf count) n) (return))))
+    (nreverse elements)))
+
+;; Lisp collections as Java ones, through DEFINE-JAVA-CLASS: subclasses of
+;; java.util.AbstractList and AbstractMap whose methods read the Lisp data.
+
+(defvar *view-classes-defined* nil)
+
+(defun %ensure-view-classes ()
+  (unless *view-classes-defined*
+    (cl:eval
+     '(progn
+        (define-java-class lisp-list-view-class (:extends "java.util.AbstractList") (data convert)
+          ("get(I)Ljava/lang/Object;" (self index)
+            (funcall convert (elt data index)))
+          ("size()I" (self) (length data)))
+        (define-java-class lisp-map-view-class (:extends "java.util.AbstractMap") (data convert unconvert)
+          ("get(Ljava/lang/Object;)Ljava/lang/Object;" (self key)
+            (multiple-value-bind (value found) (gethash (funcall unconvert key) data)
+              (and found (funcall convert value))))
+          ("containsKey(Ljava/lang/Object;)Z" (self key)
+            (if (nth-value 1 (gethash (funcall unconvert key) data)) 1 0))
+          ("size()I" (self) (hash-table-count data))
+          ("entrySet()Ljava/util/Set;" (self)
+            ;; A snapshot of the entries; GET and CONTAINS-KEY read the table.
+            (let ((set (java-new "java.util.LinkedHashSet" "()")))
+              (maphash (lambda (k v)
+                         (java-call "add(Ljava/lang/Object;)Z" set
+                                    (java-new "java.util.AbstractMap$SimpleImmutableEntry"
+                                              "(Ljava/lang/Object;Ljava/lang/Object;)"
+                                              (funcall convert k) (funcall convert v))))
+                       data)
+              set)))))
+    (setf *view-classes-defined* t)))
+
+(defun lisp-list-view (sequence &key (convert #'identity))
+  "A read-only java.util.List backed by the Lisp SEQUENCE, its elements
+converted to Java with CONVERT as they are read."
+  (%ensure-view-classes)
+  (make-java-object 'lisp-list-view-class :data sequence :convert convert))
+
+(defun lisp-map-view (table &key (convert #'identity) (unconvert #'identity))
+  "A read-only java.util.Map backed by the Lisp hash TABLE: keys and values
+converted to Java with CONVERT, keys looked up converted back with
+UNCONVERT."
+  (%ensure-view-classes)
+  (make-java-object 'lisp-map-view-class :data table :convert convert :unconvert unconvert))
+
+;;; Foreign source files as ASDF components
+;;;
+;;; Each language system defines a component class for its source files --
+;;; (:kotlin-file "geometry"), (:scala-file "parser"), (:groovy-file ...),
+;;; (:clojure-file ...), (:kawa-file ...), (:jscheme-file ...),
+;;; (:abcl-file ...) in a system that :defsystem-depends-on the language's
+;;; system.  Compiled languages compile at COMPILE-OP into a directory of
+;;; class files beside the system's fasls, put on the classpath at LOAD-OP;
+;;; the others load the source at LOAD-OP.
+
+(defvar *compiled-class-directories* '()
+  "Directories of class files ASDF components compiled, on the classpath,
+in the order loaded: each later component compiles against them.")
+
+(defun add-to-classpath (&rest entries)
+  "Add ENTRIES (jars or directories of class files) to the running
+classpath, starting the runtime if needed."
+  (start-runtime :classpath (mapcar (lambda (e) (namestring e)) entries)))
+
+(defun %compiled-classpath ()
+  (format nil "~{~A~^:~}" (reverse *compiled-class-directories*)))
+
+(defclass foreign-source-file (asdf:source-file) ()
+  (:documentation "A foreign language's source file.  Subclasses that
+compile name their output directory in OUTPUT-FILES."))
+
+(defclass compiled-foreign-file (foreign-source-file) ()
+  (:documentation "A foreign source file compiled to a directory of class
+files by COMPILE-FOREIGN-FILE, which subclasses implement."))
+
+(defgeneric compile-foreign-file (component source output-directory)
+  (:documentation "Compile the foreign SOURCE file of COMPONENT into the
+directory OUTPUT-DIRECTORY, against the classes earlier components
+compiled; signal an error if it doesn't compile."))
+
+(defmethod asdf:output-files ((op asdf:compile-op) (component compiled-foreign-file))
+  (list (uiop:ensure-directory-pathname
+         (uiop:merge-pathnames* (format nil "~A-classes/" (asdf:component-name component))
+                                (asdf:component-pathname component)))))
+
+(defmethod asdf:perform ((op asdf:compile-op) (component compiled-foreign-file))
+  (let ((output (first (asdf:output-files op component))))
+    (uiop:delete-directory-tree output :validate t :if-does-not-exist :ignore)
+    (ensure-directories-exist output)
+    (compile-foreign-file component (asdf:component-pathname component) output)))
+
+(defmethod asdf:perform ((op asdf:load-op) (component compiled-foreign-file))
+  (let ((output (namestring (first (asdf:output-files (asdf:make-operation 'asdf:compile-op) component)))))
+    (pushnew output *compiled-class-directories* :test #'string=)
+    (add-to-classpath output)))
+
+(defclass loaded-foreign-file (foreign-source-file) ()
+  (:documentation "A foreign source file its language loads, at LOAD-OP,
+with LOAD-FOREIGN-FILE."))
+
+(defgeneric load-foreign-file (component source)
+  (:documentation "Load the foreign SOURCE file of COMPONENT."))
+
+(defmethod asdf:perform ((op asdf:compile-op) (component loaded-foreign-file))
+  nil)
+
+(defmethod asdf:perform ((op asdf:load-op) (component loaded-foreign-file))
+  (load-foreign-file component (asdf:component-pathname component)))
+
+(defmacro define-foreign-file-type (name superclass extension method)
+  "Define NAME (interned in ASDF, so (:NAME \"file\") names it in a
+DEFSYSTEM) as a component class of SUPERCLASS for files of EXTENSION, and
+METHOD, (method-name (component source &optional output) body...), as its
+COMPILE-FOREIGN-FILE or LOAD-FOREIGN-FILE method."
+  (let ((class (intern (symbol-name name) :asdf)))
+    (destructuring-bind (method-name lambda-list &body body) method
+      `(progn
+         (defclass ,class (,superclass) ()
+           (:default-initargs :type ,extension))
+         (defmethod ,method-name ((,(first lambda-list) ,class) ,@(rest lambda-list))
+           ,@body)))))
+
+;;; Maven dependencies
+;;;
+;;; MAVEN-JAR finds a jar by its Maven coordinates in OpenLDK's cache,
+;;; downloading it from Maven Central (or REPOSITORY) the first time and
+;;; checking its SHA256, if given, or else the SHA-1 the repository
+;;; publishes beside it.  ADD-MAVEN-JAR puts it on the classpath, and the
+;;; ASDF component (:maven-jar "name" :coordinates "group:artifact:version"
+;;; :sha256 "...") does at LOAD-OP, so a system can depend on any Java
+;;; library -- usable from every language in the image.  Dependencies of a
+;;; jar are not followed: list each one.
+
+(defparameter *maven-repository* "https://repo1.maven.org/maven2")
+
+(defun %maven-parts (coordinates)
+  "COORDINATES, \"group:artifact:version\", as (values group artifact version)."
+  (let ((parts (uiop:split-string coordinates :separator ":")))
+    (unless (= 3 (length parts))
+      (error "Maven coordinates are group:artifact:version, not ~S" coordinates))
+    (values-list parts)))
+
+(defun %verify-maven-sha1 (file url)
+  "Check FILE against the SHA-1 the repository publishes at URL.sha1."
+  (let* ((sha1-file (uiop:tmpize-pathname (merge-pathnames "maven.sha1" (uiop:temporary-directory))))
+         (expected (progn (openldk::fetch-url (concatenate 'string url ".sha1") sha1-file)
+                          (prog1 (string-downcase (string-trim '(#\Space #\Newline #\Return)
+                                                               (subseq (uiop:read-file-string sha1-file) 0 40)))
+                            (delete-file sha1-file))))
+         (output (openldk::%run-tool (list "sha1sum" (uiop:native-namestring file))))
+         (actual (string-downcase (subseq output 0 (position #\Space output)))))
+    (unless (string= expected actual)
+      (delete-file file)
+      (error "Checksum mismatch for ~A: the repository's SHA-1 is ~A, the download's ~A"
+             url expected actual))))
+
+(defun maven-jar (coordinates &key sha256 (repository *maven-repository*))
+  "The local file of the jar with the Maven COORDINATES, downloaded to
+OpenLDK's cache the first time and checked against SHA256 or the
+repository's SHA-1."
+  (multiple-value-bind (group artifact version) (%maven-parts coordinates)
+    (let* ((name (format nil "~A-~A.jar" artifact version))
+           (path (format nil "maven/~A/~A/~A/~A" (substitute #\/ #\. group) artifact version name))
+           (url (format nil "~A/~A/~A/~A/~A" repository (substitute #\/ #\. group) artifact version name))
+           (file (merge-pathnames path (openldk::ldk-cache-dir))))
+      (unless (uiop:file-exists-p file)
+        (openldk::fetch-url url file :sha256 sha256)
+        (unless sha256
+          (%verify-maven-sha1 file url)))
+      file)))
+
+(defun add-maven-jar (coordinates &key sha256 (repository *maven-repository*))
+  "Put the jar with the Maven COORDINATES (see MAVEN-JAR) on the classpath;
+return its file."
+  (let ((jar (maven-jar coordinates :sha256 sha256 :repository repository)))
+    ;; Foreign source components compile against it too.
+    (pushnew (namestring jar) *compiled-class-directories* :test #'string=)
+    (add-to-classpath jar)
+    jar))
+
+(defclass asdf::maven-jar (asdf:component)
+  ((coordinates :initarg :coordinates :reader maven-jar-coordinates)
+   (sha256 :initarg :sha256 :initform nil :reader maven-jar-sha256)
+   (repository :initarg :repository :initform *maven-repository* :reader maven-jar-repository))
+  (:documentation "A Java library from a Maven repository, put on the classpath at LOAD-OP."))
+
+(defmethod asdf:component-pathname ((component asdf::maven-jar)) nil)
+(defmethod asdf:input-files ((op asdf:compile-op) (component asdf::maven-jar)) nil)
+(defmethod asdf:output-files ((op asdf:compile-op) (component asdf::maven-jar)) (values nil t))
+(defmethod asdf:perform ((op asdf:compile-op) (component asdf::maven-jar)) nil)
+(defmethod asdf:perform ((op asdf:load-op) (component asdf::maven-jar))
+  (add-maven-jar (maven-jar-coordinates component)
+                 :sha256 (maven-jar-sha256 component)
+                 :repository (maven-jar-repository component)))
+
+;;; Precompiled source blocks
+;;;
+;;; A #@kotlin{ } or #@scala{ } block whose splices have static types --
+;;; none, literals, or (THE type form) -- is compiled when the Lisp code
+;;; around it is (macroexpansion during COMPILE-FILE), if the language is
+;;; running then, and its class files go into the fasl: at load time they
+;;; are defined from those bytes, so the compiler isn't needed at run time
+;;; and a compile error is reported at COMPILE-FILE.  Other blocks compile
+;;; the first time they run.
+
+(defun %static-splice-type (form types)
+  "The type, from TYPES -- an alist of Lisp type specifier to the
+language's type -- that FORM, a splice, has statically: a literal's, or
+that of the type in (THE type FORM); or NIL."
+  (flet ((lookup (type) (cdr (assoc type types :test #'equal))))
+    (cond ((and (consp form) (eq (first form) 'the)) (lookup (second form)))
+          ((typep form '(signed-byte 32)) (lookup '(signed-byte 32)))
+          ((integerp form) (lookup '(signed-byte 64)))
+          ((floatp form) (lookup 'double-float))
+          ((stringp form) (lookup 'string))
+          ((characterp form) (lookup 'character))
+          (t nil))))
+
+(defun %class-files-in (directory)
+  "Each class file under DIRECTORY, as (binary-name . octets)."
+  (let ((root (namestring (truename directory))))
+    (loop for file in (directory (merge-pathnames "**/*.class" directory))
+          collect (cons (let ((relative (subseq (namestring file) (length root))))
+                          (subseq relative 0 (- (length relative) 6)))
+                        (with-open-file (in file :element-type '(unsigned-byte 8))
+                          (let ((octets (make-array (file-length in) :element-type '(unsigned-byte 8))))
+                            (read-sequence octets in)
+                            octets))))))
+
+(defvar *precompiled-classes-defined* (make-hash-table :test #'equal)
+  "Names of the classes precompiled blocks defined, against defining twice.")
+
+(defun %define-precompiled-classes (classes)
+  "Define CLASSES, (binary-name . octets), through the application class
+loader, once."
+  (dolist (class classes)
+    (destructuring-bind (name . octets) class
+      (unless (gethash name *precompiled-classes-defined*)
+        (unless (runtime-started-p) (start-runtime))
+        (openldk::%classload-from-stream name (flexi-streams:make-in-memory-input-stream octets)
+                                         openldk::*boot-class-loader* openldk::*app-ldk-class-loader*)
+        (setf (gethash name *precompiled-classes-defined*) t)))))
+
+(defun %site-name (prefix source types)
+  "A class name for the block of SOURCE with parameter TYPES, the same
+each time: compiling it again defines no new class."
+  (format nil "~A~8,'0X" prefix (logand (sxhash (format nil "~A~S" source types)) #xFFFFFFFF)))
+
+;;; Records
+
+(defun java-fields (object &key (convert #'identity))
+  "The instance fields of the Java OBJECT -- a Kotlin data class's, a Scala
+case class's, a Java record's -- as an alist of (name . value), values
+converted with CONVERT, superclasses' fields after the class's own."
+  (let ((class (openldk::%get-ldk-class-by-bin-name
+                (symbol-name (class-name (class-of object))) t)))
+    (loop while class
+          append (loop for field across (or (openldk::fields class) #())
+                       when (zerop (logand #x8 (slot-value field 'openldk::access-flags)))
+                         collect (let ((name (slot-value field 'openldk::name)))
+                                   (cons name (funcall convert
+                                                       (slot-value object (intern (openldk::mangle-field-name name)
+                                                                                  :openldk))))))
+          do (setf class (and (openldk::super class)
+                              (openldk::%get-ldk-class-by-bin-name (openldk::super class) t))))))

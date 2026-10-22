@@ -178,7 +178,8 @@ it again does nothing."
                                       (:map . "clojure.lang.IPersistentMap")
                                       (:set . "clojure.lang.IPersistentSet")
                                       (:sequential . "clojure.lang.Sequential")
-                                      (:seq . "clojure.lang.ISeq"))
+                                      (:seq . "clojure.lang.ISeq")
+                                      (:fn . "clojure.lang.Fn"))
                 collect (cons key (java-class-symbol name))))
     (install-lisp-fn)
     ;; Loading clojure.java.api.Clojure initializes the runtime (RT),
@@ -263,6 +264,7 @@ it again does nothing."
      (java-static "clojure.lang.PersistentHashMap" "create([Ljava/lang/Object;)"
                   (%object-array (loop for k being the hash-keys of value using (hash-value v)
                                        collect (from-lisp k) collect (from-lisp v)))))
+    ((typep value 'foreign-function) (foreign-function-object value))
     ((functionp value)
      (make-java-subclass-instance 'lisp-fn :function value))
     (t value)))
@@ -298,6 +300,7 @@ it again does nothing."
                  (to-lisp (java-call "val()" entry))))))
       ((is :vector) (map 'vector #'to-lisp (%seq-list object)))
       ((or (is :set) (is :sequential) (is :seq)) (mapcar #'to-lisp (%seq-list object)))
+      ((is :fn) (make-foreign-function object "Clojure" #'funcall))
       (t object))))
 
 ;;; Evaluating
@@ -350,7 +353,7 @@ namespace) names, unconverted, so it can be passed to FUNCALL."
   "Call the Clojure function FN (a function or var, or the name of one) with
 ARGS, converted with FROM-LISP; return the result as Lisp data."
   (%ensure-started)
-  (let ((fn (if (or (stringp fn) (symbolp fn)) (lookup fn) fn)))
+  (let ((fn (if (or (stringp fn) (symbolp fn)) (lookup fn) (foreign-object fn))))
     (to-lisp (apply #'%invoke fn (mapcar #'from-lisp args)))))
 
 (defun define (name value)
@@ -403,11 +406,18 @@ var, and an alist of those names and the Lisp forms whose values they hold."
                       (format nil "lisp-value-~D" (incf *lisp-value-counter*))))
     (values source (mapcar #'cons names forms))))
 
+(defvar *sites* (make-hash-table :test #'equal)
+  "Source -> the Clojure function the #[ ] block's source became.")
+
 (defun %eval-with-lisp-values (source names values)
-  "Bind each of NAMES to its Lisp value of VALUES in the user namespace,
-then evaluate the Clojure SOURCE, which refers to them."
-  (mapc #'define names values)
-  (eval-string source))
+  "Evaluate the Clojure SOURCE of a #[ ] block, in which NAMES stand for
+the Lisp VALUES: compiled once into a function of NAMES, then called, so
+the block is re-entrant (recursion, threads)."
+  (apply #'funcall
+         (or (gethash source *sites*)
+             (setf (gethash source *sites*)
+                   (eval-string (format nil "(fn [~{~A~^ ~}]~%~A~%)" names source))))
+         values))
 
 (defun %read-clojure-syntax (stream subchar arg)
   (declare (ignore subchar arg))
@@ -426,3 +436,10 @@ then evaluate the Clojure SOURCE, which refers to them."
 one), evaluating it where it appears; see above."
   (set-dispatch-macro-character #\# #\[ #'%read-clojure-syntax readtable)
   readtable)
+
+;;; (:clojure-file "name") ASDF components: loaded by Clojure at LOAD-OP
+
+(openldk.interop::define-foreign-file-type clojure-file openldk.interop::loaded-foreign-file "clj"
+  (openldk.interop::load-foreign-file (component source)
+    (declare (ignore component))
+    (load source)))

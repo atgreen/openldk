@@ -213,6 +213,7 @@ symbol or a string).  A Lisp symbol in upper case is lowercased."
      (java-new "jscheme.Pair" "(Ljava/lang/Object;Ljava/lang/Object;)"
                (from-lisp (car value)) (from-lisp (cdr value))))
     ((vectorp value) (make-java-array-of "java.lang.Object" (map 'vector #'from-lisp value)))
+    ((typep value 'foreign-function) (foreign-function-object value))
     ((functionp value) (%lisp-procedure value nil))
     (t value)))
 
@@ -239,7 +240,8 @@ symbol or a string).  A Lisp symbol in upper case is lowercased."
                 (equal (array-element-type elements) '(unsigned-byte 16)))
            (map 'string #'code-char elements)
            (map 'vector #'to-lisp elements))))
-    (t object)))
+    ((typep object (java-class-symbol "jscheme.Procedure")) (make-foreign-function object "JScheme" #'funcall))
+      (t object)))
 
 ;;; Evaluating
 
@@ -289,7 +291,7 @@ procedure can be passed to FUNCALL."
 ARGS, converted with FROM-LISP; return the result as Lisp data."
   (let ((procedure (if (or (stringp procedure) (symbolp procedure))
                        (lookup procedure)
-                       procedure)))
+                       (foreign-object procedure))))
     (to-lisp (with-foreign-errors ("JScheme")
                (java-call "apply(Ljscheme/Scheme;Ljava/lang/Object;)"
                           procedure *interpreter* (from-lisp args))))))
@@ -298,7 +300,7 @@ ARGS, converted with FROM-LISP; return the result as Lisp data."
   "Bind NAME (a string or symbol) in Scheme's global environment to VALUE,
 converted with FROM-LISP.  A function becomes a Scheme procedure; with
 PREDICATE, its NIL result is #f rather than '()."
-  (let ((value (if (functionp value)
+  (let ((value (if (and (functionp value) (not (typep value 'foreign-function)))
                    (%lisp-procedure value (if (stringp name) name (string-downcase name))
                                     :predicate predicate)
                    (from-lisp value))))
@@ -334,3 +336,10 @@ PREDICATE, its NIL result is #f rather than '()."
   (lambda (source names forms)
     `(%eval-site ,source ',names (list ,@forms)))
   :reader #'openldk.interop::%read-lisp-family-source-and-names)
+
+;;; (:jscheme-file "name") ASDF components: loaded by Jscheme at LOAD-OP
+
+(openldk.interop::define-foreign-file-type jscheme-file openldk.interop::loaded-foreign-file "scm"
+  (openldk.interop::load-foreign-file (component source)
+    (declare (ignore component))
+    (load source)))

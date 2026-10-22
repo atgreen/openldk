@@ -78,6 +78,15 @@
                 (is (= 99 (jscheme:eval 'loaded-value))))
       (delete-file file))))
 
+(test foreign-functions-are-lisp-functions
+  (let ((f (jscheme:eval-string "(lambda (x) (* x x))")))
+    (is (typep f 'openldk.interop:foreign-function))
+    (is (= 49 (funcall f 7)))
+    (is (equal '(1 4 9) (mapcar f '(1 2 3))))
+    (is (equal '(3 2 1) (sort (list 1 2 3) #'> :key f)))
+    (jscheme:define "lispy" f)
+    (is (equal '(1 4 9) (jscheme:eval '(map lispy '(1 2 3)))) "passed back, it is the original function")))
+
 ;;; #@jscheme{ ... } source syntax, in a readtable of this file's own
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (setf *readtable* (openldk.interop:enable-source-syntax (copy-readtable))))

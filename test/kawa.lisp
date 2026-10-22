@@ -81,6 +81,15 @@
   (kawa:define "lisp-type-error" (lambda (x) (+ x 1)))
   (signals type-error (kawa:eval '(lisp-type-error "one"))))
 
+(test foreign-functions-are-lisp-functions
+  (let ((f (kawa:eval-string "(lambda (x) (* x x))")))
+    (is (typep f 'openldk.interop:foreign-function))
+    (is (= 49 (funcall f 7)))
+    (is (equal '(1 4 9) (mapcar f '(1 2 3))))
+    (is (equal '(3 2 1) (sort (list 1 2 3) #'> :key f)))
+    (kawa:define "lispy" f)
+    (is (equal '(1 4 9) (kawa:eval '(map lispy '(1 2 3)))) "passed back, it is the original function")))
+
 ;;; #@kawa{ ... } source syntax, in a readtable of this file's own
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (setf *readtable* (openldk.interop:enable-source-syntax (copy-readtable))))

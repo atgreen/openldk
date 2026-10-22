@@ -219,6 +219,7 @@ sbcl-groovy` downloads).  Calling it again does nothing."
                   (java-call "put(Ljava/lang/Object;Ljava/lang/Object;)" map (from-lisp k) (from-lisp v)))
                 value)
        map))
+    ((typep value 'foreign-function) (foreign-function-object value))
     ((functionp value) (%groovy-closure value))
     (t value)))
 
@@ -252,6 +253,7 @@ sbcl-groovy` downloads).  Calling it again does nothing."
              while (eql 1 (java-call "hasNext()" iterator))
              collect (to-lisp (java-call "next()" iterator))))
       ((typep object 'openldk::java-array) (map 'vector #'to-lisp (java-array-list object)))
+      ((is :closure) (make-foreign-function object "Groovy" #'funcall))
       (t object))))
 
 ;;; Evaluating
@@ -287,7 +289,7 @@ FROM-LISP; a Lisp function becomes a Groovy closure."
   "Call the Groovy CLOSURE (a closure, or the name of a binding holding one)
 with ARGS, converted with FROM-LISP; return the result as Lisp data."
   (%ensure-started)
-  (let ((closure (if (stringp closure) (lookup closure) closure)))
+  (let ((closure (if (stringp closure) (lookup closure) (foreign-object closure))))
     (to-lisp (with-foreign-errors ("Groovy")
                (java-call "call([Ljava/lang/Object;)" closure
                           (make-java-array-of "java.lang.Object" (mapcar #'from-lisp args)))))))
@@ -320,3 +322,26 @@ with ARGS, converted with FROM-LISP; return the result as Lisp data."
   ;; Groovy's '...' are strings, not characters.
   :reader (lambda (stream)
             (openldk.interop::%read-braced-source-and-names stream :string-quotes '(#\" #\'))))
+
+;;; (:groovy-file "name") ASDF components: compiled with groovyc
+
+(defun compile-groovy-files (sources output-directory &key (classpath ""))
+  "Compile the Groovy SOURCES (pathnames) into OUTPUT-DIRECTORY against
+CLASSPATH (a colon-separated string); signal FOREIGN-ERROR if they don't
+compile."
+  (%ensure-started)
+  (with-foreign-errors ("Groovy")
+    (java-static "org.codehaus.groovy.tools.FileSystemCompiler" "commandLineCompile([Ljava/lang/String;Z)V"
+                 (make-java-array-of
+                  "java.lang.String"
+                  (mapcar #'jstring
+                          (append (list "-cp" (format nil "~{~A~^:~}" (append (default-classpath) (list classpath)))
+                                        "-d" (namestring output-directory))
+                                  (mapcar #'namestring sources))))
+                 0))
+  output-directory)
+
+(openldk.interop::define-foreign-file-type groovy-file openldk.interop::compiled-foreign-file "groovy"
+  (openldk.interop:compile-foreign-file (component source output)
+    (declare (ignore component))
+    (compile-groovy-files (list source) output :classpath (openldk.interop::%compiled-classpath))))

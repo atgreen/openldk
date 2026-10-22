@@ -137,7 +137,17 @@
   :author "Anthony Green <green@moxielogic.com>"
   :license "GPL3+Classpath Exception"
   :depends-on ("openldk")
-  :components ((:file "interop/core")))
+  :components ((:file "interop/core"))
+  :in-order-to ((test-op (test-op "openldk/interop/tests"))))
+
+(asdf:defsystem "openldk/interop/tests"
+  :description "Tests for openldk/interop"
+  :depends-on ("openldk/interop" "fiveam")
+  :pathname "test"
+  :components ((:file "interop"))
+  :perform (test-op (o c)
+             (unless (uiop:symbol-call :fiveam '#:run! :openldk-interop-tests)
+               (error "openldk/interop tests failed"))))
 
 (asdf:defsystem "openldk/jscheme"
   :description "Use Peter Norvig's JScheme from Common Lisp"
@@ -230,7 +240,17 @@
   :license "GPL3+Classpath Exception"
   :depends-on ("openldk/clojure" "openldk/kawa" "openldk/jscheme" "openldk/scala"
                "openldk/kotlin" "openldk/groovy" "openldk/abcl")
-  :components ((:file "interop/polyglot")))
+  :components ((:file "interop/polyglot"))
+  :in-order-to ((test-op (test-op "openldk/polyglot/tests"))))
+
+(asdf:defsystem "openldk/polyglot/tests"
+  :description "Tests for openldk/polyglot; need `make sbcl-polyglot`"
+  :depends-on ("openldk/polyglot" "fiveam")
+  :pathname "test"
+  :components ((:file "polyglot"))
+  :perform (test-op (o c)
+             (unless (uiop:symbol-call :fiveam '#:run! :openldk-polyglot-tests)
+               (error "openldk/polyglot tests failed"))))
 
 (asdf:defsystem "openldk/kawa"
   :description "Use Kawa Scheme from Common Lisp"

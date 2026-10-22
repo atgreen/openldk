@@ -143,7 +143,14 @@ entry ZE."
 
 (defmethod |getEntry(Ljava/lang/String;)Ljava/util/zip/ZipEntry;| ((this |java/util/zip/ZipFile|) name)
   (when-let (ze (zip:get-zipfile-entry (lstring name) (%zipfile-zip this)))
-    (%make-zip-entry name ze)))
+    (let ((entry (%make-zip-entry name ze)))
+      ;; A JarFile's entries are JarEntries: JarFile.getJarEntry casts
+      ;; (Groovy's compiler, finding its global transforms in jars).
+      (if (typep this '|java/util/jar/JarFile|)
+          (let ((jar-entry (%make-java-instance "java/util/jar/JarEntry")))
+            (|<init>(Ljava/util/zip/ZipEntry;)V| jar-entry entry)
+            jar-entry)
+          entry))))
 
 (defmethod |entries()Ljava/util/Enumeration;| ((this |java/util/zip/ZipFile|))
   "An Enumeration of the entries (Scala's compiler lists jars this way)."
