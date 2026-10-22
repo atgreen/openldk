@@ -41,9 +41,15 @@
 
 (in-package :openldk)
 
-;; This is a hack to make sure getCallerClass works.
-;; It would be good if we didn't have to do this.
+;; Methods compiled by older OpenLDKs stored THIS here on every call so
+;; getCallerClass could find it in backtraces.  Caller classes now come
+;; from the |%jimpl:Class.method| frame name, so nothing writes it; the
+;; variable remains for previously generated AOT code that still does.
 (defvar *force-this-to-be-used* nil)
+
+(defvar *compact-method-length* 2000
+  "Methods with more bytecode than this get compact code (see the
+COMPACT-P slot of <context>).")
 
 (defvar *methods-being-compiled* (make-hash-table :test #'equal :synchronized t)
   "Hash table tracking methods currently being compiled. Value is either T (compiling) or :DONE (compiled).")
@@ -692,21 +698,129 @@ waste since compiled Java methods never use it."
            (defmethod ,fn-sym ((,this-sym ,class-spec) ,@args)
              (,impl-sym ,this-sym ,@args))))))
 
-(defun %method-let (bindings body)
-  "The LET binding a compiled method's variables around BODY.  BINDINGS
-covers every local slot, stack variable and exception-handler variable
-the method might use; those with no initial value that BODY never
-mentions are dropped."
+;;; Declaring method variables' types (see the note on typed variables in
+;;; codegen.lisp).
+
+(defun %variable-categories (sources)
+  "Map each variable in SOURCES (a hash table of variable -> its value
+sources, see %NOTE-VARIABLE-SOURCE) to the one category all its values
+have, omitting variables with mixed or unknown values.  Copies resolve
+optimistically, so a loop that copies a variable around stays typed."
+  (let ((categories (make-hash-table :test #'eq))
+        (rejected (make-hash-table :test #'eq)))
+    (flet ((reject (variable)
+             (remhash variable categories)
+             (setf (gethash variable rejected) t)))
+      (loop for variable being the hash-keys of sources using (hash-value list)
+            for direct = (remove-if #'consp list)
+            do (cond
+                 ((or (member nil list)
+                      (notevery (lambda (c) (eq c (first direct))) direct))
+                  (reject variable))
+                 (direct (setf (gethash variable categories) (first direct)))))
+      ;; Settle copies: a copy needs its source typed alike.  Each pass only
+      ;; rejects variables or types untyped ones, so this terminates.
+      (loop
+        (let ((changed nil))
+          (loop for variable being the hash-keys of sources using (hash-value list)
+                unless (gethash variable rejected)
+                  do (dolist (source list)
+                       (when (consp source)
+                         (let ((from (cdr source)))
+                           (cond
+                             ((or (gethash from rejected)
+                                  (not (nth-value 1 (gethash from sources))))
+                              (reject variable) (setf changed t) (return))
+                             ((gethash from categories)
+                              (let ((mine (gethash variable categories)))
+                                (cond
+                                  ((null mine)
+                                   (setf (gethash variable categories) (gethash from categories)
+                                         changed t))
+                                  ((not (eq mine (gethash from categories)))
+                                   (reject variable) (setf changed t) (return))))))))))
+          (unless changed (return))))
+      ;; Copies from a variable that never got typed (a cycle of copies
+      ;; holding no value) can't be trusted either.
+      (loop while (loop for variable being the hash-keys of categories
+                        when (some (lambda (source)
+                                     (and (consp source)
+                                          (not (gethash (cdr source) categories))))
+                                   (gethash variable sources))
+                          do (reject variable)
+                          and return t))
+      categories)))
+
+(defun %type-normalizer (lisp-type)
+  (cond ((equal lisp-type '(signed-byte 32)) '%as-int)
+        ((equal lisp-type '(signed-byte 64)) '%as-long)
+        ((eq lisp-type 'single-float) '%as-float)
+        (t '%as-double)))
+
+(defun %normalize-typed-assignments (form types)
+  "Rewrite each (SETF VAR VALUE) in FORM whose VAR has a declared type in
+the alist TYPES so VALUE passes through that type's normalizer."
+  (cond
+    ((atom form) form)
+    ((eq (car form) 'quote) form)
+    ((and (eq (car form) 'setf)
+          (consp (cdr form)) (consp (cddr form)) (null (cdddr form))
+          (symbolp (second form))
+          (assoc (second form) types))
+     `(setf ,(second form)
+            (,(%type-normalizer (cdr (assoc (second form) types)))
+             ,(%normalize-typed-assignments (third form) types))))
+    (t (cons (%normalize-typed-assignments (car form) types)
+             (%normalize-typed-assignments (cdr form) types)))))
+
+(defun %typed-let (bindings body)
+  "The LET binding a method's BINDINGS around BODY, declaring the type of
+every variable whose values all have one primitive category."
+  (when (compact-p *context*)
+    (return-from %typed-let `(let ,bindings ,@body)))
+  (let ((sources (variable-sources *context*)))
+    ;; THIS and the parameters' locals start out holding values of unknown
+    ;; type: callers pass whatever Java fields hold.
+    (loop for (symbol init) in bindings
+          when init do (%note-variable-source symbol nil *context*))
+    (let* ((categories (%variable-categories sources))
+           (types (loop for (symbol) in bindings
+                        for category = (gethash symbol categories)
+                        when category
+                          collect (cons symbol (ecase category
+                                                 (:int '(signed-byte 32))
+                                                 (:long '(signed-byte 64))
+                                                 (:float 'single-float)
+                                                 (:double 'double-float))))))
+      (if (null types)
+          `(let ,bindings ,@body)
+          `(let ,(loop for (symbol init) in bindings
+                       for type = (cdr (assoc symbol types))
+                       collect (cond
+                                 ((null type) (if init (list symbol init) (list symbol)))
+                                 (t (list symbol (if (consp type) 0 (coerce 0 type))))))
+             (declare ,@(loop for (symbol . type) in types
+                              collect `(type ,type ,symbol)))
+             ,@(%normalize-typed-assignments body types))))))
+
+(defun %prune-unused-bindings (bindings body)
+  "BINDINGS less those with no initial value that BODY never mentions."
   (let ((used (make-hash-table :test #'eq)))
     (labels ((walk (form)
                (cond ((symbolp form) (setf (gethash form used) t))
                      ((consp form) (walk (car form)) (walk (cdr form))))))
       (walk body))
-    `(let ,(remove-if (lambda (binding)
-                        (and (null (rest binding))
-                             (not (gethash (first binding) used))))
-                      bindings)
-       ,@body)))
+    (remove-if (lambda (binding)
+                 (and (null (rest binding))
+                      (not (gethash (first binding) used))))
+               bindings)))
+
+(defun %method-let (bindings body)
+  "The LET binding a compiled method's variables around BODY.  BINDINGS
+covers every local slot, stack variable and exception-handler variable
+the method might use; those with no initial value that BODY never
+mentions are dropped, and %TYPED-LET declares the types of the rest."
+  (%typed-let (%prune-unused-bindings bindings body) body))
 
 (defun %build-method-definition (class method blocks-after-dce parameter-hints max-locals)
   "Build the complete DEFUN/DEFMETHOD form for METHOD from its optimized
@@ -782,8 +896,6 @@ entry/exit as required."
                                       (cons 'list args)
                                       ())
                                   (if (not (static-p method)) (intern "this" :openldk) ""))))
-                    (when (not (static-p method))
-                      (list (list 'setf '*force-this-to-be-used* (intern "this" :openldk))))
                     (let ((i 0)
                           (pc -1))
                       (list (format nil "bridge=~A" (bridge-p method))
@@ -969,7 +1081,9 @@ classes with the same name."
                                                     :next-insn-list (make-array (length code) :initial-element nil)
                                                     :stack-state-table (make-hash-table)
                                                     :pc 0
-                                                    :is-clinit-p (string= "<clinit>" (slot-value method 'name)))))
+                                                    :is-clinit-p (string= "<clinit>" (slot-value method 'name))
+                                                    :compact-p (or (string= "<clinit>" (slot-value method 'name))
+                                                                   (> length *compact-method-length*)))))
                      (setf (svcount *context*) 0)
                      (when *debug-bytecode*
                        (format t "~&; COMPILING ~A~%" method-key))
