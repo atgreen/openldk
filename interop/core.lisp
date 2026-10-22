@@ -486,6 +486,19 @@ properties such as user.dir, the VM start time) in a restarted image."
     (openldk::%main-runtime-setup (format nil "~{~A~^:~}" (reverse *classpath-entries*))
                                   nil nil)))
 
+(defvar *image-systems* nil
+  "In an image DUMP-LISP-IMAGE saved, a hash set of the names of the
+OpenLDK systems it holds.")
+
+(defmethod asdf:perform :around ((operation asdf:operation) (component asdf:component))
+  ;; ASDF plans actions on an immutable system when its fasls are newer than
+  ;; the image's record of loading them -- after any other build shares the
+  ;; fasl cache -- and recompiling or reloading OpenLDK into the image fails.
+  ;; The image's systems are complete: do nothing to them.
+  (unless (and *image-systems*
+               (gethash (asdf:component-name (asdf:component-system component)) *image-systems*))
+    (call-next-method)))
+
 (defun dump-lisp-image (path &key init)
   "Save an SBCL executable at PATH whose top level is the Lisp REPL, after
 calling INIT, which typically starts a language and evaluates some code so
@@ -497,9 +510,11 @@ minutes to start (Clojure) is then ready in under a second."
   ;; as a system that :DEFSYSTEM-DEPENDS-ON a language would, once any
   ;; source is newer than its fasl (after a git pull) -- fails, its Java
   ;; classes being loaded: ASDF leaves an immutable system as it is.
+  (setf *image-systems* (make-hash-table :test #'equal))
   (dolist (name (asdf:already-loaded-systems))
     (when (or (string= name "openldk") (eql 0 (search "openldk/" name)))
-      (asdf:register-immutable-system name)))
+      (asdf:register-immutable-system name)
+      (setf (gethash name *image-systems*) t)))
   ;; The languages' compiled Java methods fill most of immobile space, where
   ;; SBCL loads a fasl's code by default and has no fallback when it's full:
   ;; load users' fasls into dynamic space.
