@@ -204,6 +204,25 @@ file, nothing."
       (is (equal `((setf ,s3 (g)) (f ,s3 ,s3))
                  (fold `(setf ,s3 (g)) `(f ,s3 ,s3)))))))
 
+(test method-body-cleanup
+  (let* ((this (intern "local-0" :openldk))
+         (check '(unless (openldk::initialized-p c) (clinit-c)))
+         (body `(tagbody
+                   used unused
+                   ,check (f) ,check
+                   (g (openldk::%receiver ,this))
+                   (go used)
+                   used2 ,check))
+         (targets (openldk::%go-targets `(progn ,body (go used2)))))
+    ;; Unused tags go; a repeated check in a straight run goes, but one
+    ;; after a jump target stays; THIS needs no receiver check.
+    (is (equal `(tagbody used ,check (f) (g ,this) (go used) used2 ,check)
+               (openldk::%clean-method-body body targets t)))
+    ;; Without THIS-P (a static method, or local-0 reassigned) the
+    ;; receiver check stays.
+    (is (equal `(g (openldk::%receiver ,this))
+               (fifth (openldk::%clean-method-body body targets nil))))))
+
 (test vm-nano-time-adjustment
   ;; VM.getNanoTimeAdjustment(offset): nanoseconds from OFFSET (epoch
   ;; seconds) to now, or -1 when OFFSET is 2^32 seconds or more away.  It
