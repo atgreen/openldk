@@ -48,6 +48,18 @@
   (scala:eval "val inc = (n: Int) => n + 1")
   (is (= 11 (scala:funcall "inc" 10))))
 
+(test classes-across-evaluations
+  ;; A case class from one evaluation, used in a lambda in the next: the
+  ;; lambda's invokedynamic names the class, which only the REPL's loader
+  ;; defines.
+  (scala:eval "sealed trait Suit
+               case class Heart(rank: Int) extends Suit
+               case class Spade(rank: Int) extends Suit")
+  (is (equal '("H2" "S3" "H5")
+             (scala:eval "List(2, 3, 5).zipWithIndex.map {
+                            case (r, i) => if (i % 2 == 0) Heart(r) else Spade(r)
+                          }.map { case Heart(r) => s\"H$r\"; case Spade(r) => s\"S$r\" }"))))
+
 (test call-lisp-from-scala
   (scala:define "square" (lambda (x) (* x x)))
   (is (equal '(1 4 9 16) (scala:eval "(1 to 4).map(square).toList")))

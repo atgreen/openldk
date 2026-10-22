@@ -488,9 +488,10 @@ values they take."
                          until (char= c #\Newline))
                    (write-char #\Newline out))
                   (#\$ ; a Lisp value
-                   ;; $(form), or $,x in a backquoted macro template, is
-                   ;; read as Lisp; $name up to a delimiter.
-                   (let ((form (if (member (peek-char nil stream t nil t) '(#\( #\,))
+                   ;; $(form), $#'f or $#@lang{ ... }, or $,x in a
+                   ;; backquoted macro template, is read as Lisp; $name
+                   ;; up to a delimiter.
+                   (let ((form (if (member (peek-char nil stream t nil t) '(#\( #\, #\#))
                                    (read stream t nil t)
                                    (read-from-string
                                     (with-output-to-string (token)
