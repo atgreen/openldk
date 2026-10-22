@@ -53,11 +53,15 @@ implements IR node INSN, generating operand code recursively."))
 
 (defun %java-slot-value (object slot-name)
   "Read a dynamically defined Java field without baking in an SBCL global slot accessor."
-  (slot-value object slot-name))
+  (slot-value (%non-null object) slot-name))
 
 (defun (setf %java-slot-value) (value object slot-name)
   "Write a dynamically defined Java field without baking in an SBCL global slot accessor."
-  (setf (slot-value object slot-name) value))
+  (setf (slot-value (%non-null object) slot-name) value))
+
+(defun %non-null (object)
+  "OBJECT, or a NullPointerException if it is null."
+  (or object (%throw '|java/lang/NullPointerException|)))
 
 ;;; Field accesses cache, per access site, the layout of the last object
 ;;; seen and where that layout keeps the slot: a fixnum index into the
@@ -93,11 +97,11 @@ implements IR node INSN, generating operand code recursively."))
                   (cons layout (sb-mop:slot-definition-location slotd)))))))))
 
 (defun %cached-slot-value-miss (object slot-name cache)
-  (prog1 (slot-value object slot-name)
+  (prog1 (slot-value (%non-null object) slot-name)
     (%slot-cache-fill object slot-name cache)))
 
 (defun %set-cached-slot-value-miss (value object slot-name cache)
-  (prog1 (setf (slot-value object slot-name) value)
+  (prog1 (setf (slot-value (%non-null object) slot-name) value)
     (%slot-cache-fill object slot-name cache)))
 
 (defun %cached-slot-value (object slot-name cache)
@@ -243,6 +247,36 @@ implements IR node INSN, generating operand code recursively."))
         (|<init>()V| throwable))
     throwable))
 
+(defun %throw (throwable-class &optional message)
+  "Throw a new THROWABLE-CLASS, initialized with MESSAGE if given.  Generated
+code calls this rather than inlining the construction at every site."
+  (error (%lisp-condition (%make-throwable throwable-class message))))
+
+;;; WITH-JAVA-CONDITIONS' handlers.
+
+(defun %array-index-error->java (e)
+  (%throw-array-index-error (type-error-datum e)))
+
+(defun %memory-fault->java (e)
+  (declare (ignore e))
+  (%throw '|java/lang/NullPointerException|))
+
+(defun %type-error->java (e)
+  ;; LDK_DEBUG=e: the Lisp error a NullPointerException stands for.
+  (when *debug-exceptions*
+    (format *error-output* "~&Lisp ~A becomes NullPointerException: ~A~%" (type-of e) e)
+    (sb-debug:print-backtrace :count 25 :stream *error-output*))
+  (%throw '|java/lang/NullPointerException|))
+
+(defun %undefined-function->java (e)
+  ;; A call to a Java method with no definition -- in practice a native
+  ;; method OpenLDK doesn't implement -- is UnsatisfiedLinkError, as on a
+  ;; JVM, so Java code can catch it instead of the Lisp error unwinding
+  ;; past every Java handler.
+  (let ((name (cell-error-name e)))
+    (when (%java-method-name-p name)
+      (error (%lisp-condition (%make-unsatisfied-link-error name))))))
+
 (defmethod codegen ((insn ir-aastore) context)
   (with-slots (arrayref index value) insn
     (make-instance '<expression>
@@ -309,7 +343,7 @@ the generic (SETF JAREF), which normalizes the value itself."
                  :code `(let ((value2 ,(code (codegen (value2 insn) context)))
                               (value1 ,(code (codegen (value1 insn) context))))
                           (if (eql value2 0)
-                              (error (%lisp-condition (%make-throwable '|java/lang/ArithmeticException| "/ by zero")))
+                              (%throw '|java/lang/ArithmeticException| "/ by zero")
                               (sb-c::mask-signed-field 32 (truncate value1 value2))))
                  :expression-type :INTEGER))
 
@@ -320,7 +354,7 @@ the generic (SETF JAREF), which normalizes the value itself."
                  :code `(let ((value2 ,(code (codegen (value2 insn) context)))
                               (value1 ,(code (codegen (value1 insn) context))))
                           (if (eql value2 0)
-                              (error (%lisp-condition (%make-throwable '|java/lang/ArithmeticException| "/ by zero")))
+                              (%throw '|java/lang/ArithmeticException| "/ by zero")
                               (sb-c::mask-signed-field 64 (truncate value1 value2))))
                  :expression-type :LONG))
 
@@ -664,13 +698,13 @@ take the method's arguments followed by the MemberName."
                              `(let ((objref ,(code (codegen (objref insn) context))))
                                 (when objref
                                   (unless (%array-assignable-to-p objref ,classname)
-                                    (error (%lisp-condition (%make-throwable '|java/lang/ClassCastException|))))))
+                                    (%throw '|java/lang/ClassCastException|))))
                              `(let ((objref ,(code (codegen (objref insn) context))))
                                 (when objref
                                   (unless (or (not (find-class (quote ,(intern (slot-value insn 'classname) (class-package classname))) nil))
                                               (typep objref (quote ,(intern (slot-value insn 'classname) (class-package classname))))
                                               (%native-type-castable-p objref ,classname))
-                                    (error (%lisp-condition (%make-throwable '|java/lang/ClassCastException|))))))))
+                                    (%throw '|java/lang/ClassCastException|))))))
                    :expression-type nil)))
 
 (defun %self-referential-hidden-class-p (compiled-name classname)
@@ -733,7 +767,7 @@ class is a self-reference to the class currently being compiled."
                                               (list 'value1 (code (codegen (value1 insn) context))))
                                    (list 'rem 'value1 'value2))
                              (list 'division-by-zero ()
-                                   (list 'error (list '%lisp-condition (list '%make-throwable (list 'quote '|java/lang/ArithmeticException|) "/ by zero")))))
+                                   (list '%throw (list 'quote '|java/lang/ArithmeticException|) "/ by zero")))
                  :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-lrem) context)
@@ -744,7 +778,7 @@ class is a self-reference to the class currently being compiled."
                                               (list 'value1 (code (codegen (value1 insn) context))))
                                    (list 'rem 'value1 'value2))
                              (list 'division-by-zero ()
-                                   (list 'error (list '%lisp-condition (list '%make-throwable (list 'quote '|java/lang/ArithmeticException|) "/ by zero")))))
+                                   (list '%throw (list 'quote '|java/lang/ArithmeticException|) "/ by zero")))
                  :expression-type :LONG))
 
 (defmethod codegen ((insn ir-fdiv) context)
@@ -1163,6 +1197,14 @@ handler that normal code also reaches that it was entered for an exception."
                    :code (list 'when (list 'not (list 'null (code (codegen value context))))
                                (list 'go (intern (format nil "branch-target-~A" offset)))))))
 
+(defun %receiver (obj)
+  "OBJ as the receiver of a virtual call: boxed if it is a native Lisp
+value, and a NullPointerException if it is null."
+  (typecase obj
+    (null (%throw '|java/lang/NullPointerException|))
+    ((or number character) (%box-if-native obj))
+    (t obj)))
+
 (defun %box-if-native (obj)
   "Auto-box native Lisp values to Java wrapper objects for virtual method dispatch.
    Native integers become java/lang/Long, floats become java/lang/Float, etc."
@@ -1404,13 +1446,7 @@ created if need be, so the call finds a function to forward from."
                    :insn insn
                    :code (let* ((nargs (length args))
                                 (receiver-code (code (codegen (car args) context)))
-                                (receiver-sym (gensym "recv"))
-                                (null-checked-receiver
-                                  `(let ((,receiver-sym (%box-if-native ,receiver-code)))
-                                     (when (null ,receiver-sym)
-                                       (error (%lisp-condition
-                                               (%make-throwable '|java/lang/NullPointerException|))))
-                                     ,receiver-sym))
+                                (null-checked-receiver `(%receiver ,receiver-code))
                                 (call (cond
                                         ((eq nargs 0)
                                          (internal-error "virtual call ~A has no receiver argument" method-name))
@@ -1859,8 +1895,7 @@ boolean prints true/false and char prints the character rather than an int."
         (return-from codegen
           (make-instance '<expression>
                          :insn insn
-                         :code `(error (%lisp-condition
-                                        (%make-throwable '|java/lang/NoClassDefFoundError|)))
+                         :code `(%throw '|java/lang/NoClassDefFoundError|)
                          :expression-type :REFERENCE)))
       ;; Ensure class is loaded before package lookup
       (let* ((classname (slot-value class 'name))
@@ -1957,8 +1992,7 @@ type."
       (return-from codegen
         (make-instance '<expression>
                        :insn insn
-                       :code `(error (%lisp-condition
-                                      (%make-throwable '|java/lang/NoClassDefFoundError|)))
+                       :code `(%throw '|java/lang/NoClassDefFoundError|)
                        :expression-type :REFERENCE)))
     (let* ((class-name (slot-value class 'name))
            ;; Ensure class is loaded before package lookup
@@ -2019,12 +2053,9 @@ compact code a plain call."
   (with-slots (objref member-name ref-class) insn
     (make-instance '<expression>
                    :insn insn
+                   ;; The accessor throws NullPointerException for a null OBJREF.
                    :code `(,@(%slot-accessor context)
-                           (let ((objref ,(code (codegen objref context))))
-                             (when (null objref)
-                               (error (%lisp-condition
-                                       (%make-throwable '|java/lang/NullPointerException|))))
-                             objref)
+                           ,(code (codegen objref context))
                            ;; Field names stay in :openldk for CLOS slot inheritance
                            (quote ,(%resolve-field-slot ref-class member-name))
                            ,@(%slot-cache-argument context)))))

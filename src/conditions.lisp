@@ -101,33 +101,15 @@ methods by their signature, as in |java/lang/Thread.start0()V| or |foo(I)V|."
 (defmacro with-java-conditions ((&key arrays) &body body)
   "Run BODY with internal Lisp conditions converted to Java throwables.
 When ARRAYS is true, also convert array index errors.  Establish this inside
-every scope a Java catch clause protects, not merely around a method body."
+every scope a Java catch clause protects, not merely around a method body.
+Each handler is a one-line lambda calling a global function (in
+codegen.lisp), so each use gives SBCL little to compile.  Naming the
+functions directly, as #'%TYPE-ERROR->JAVA, made method entry measurably
+slower."
   `(handler-bind
        (,@(when arrays
-            '((sb-int:invalid-array-index-error
-               (lambda (e)
-                 (%throw-array-index-error (type-error-datum e))))))
-        (sb-sys:memory-fault-error
-         (lambda (e)
-           (declare (ignore e))
-           (error (%lisp-condition
-                   (%make-throwable '|java/lang/NullPointerException|)))))
-        (type-error
-         (lambda (e)
-           ;; LDK_DEBUG=e: the Lisp error a NullPointerException stands for.
-           (when *debug-exceptions*
-             (format *error-output* "~&Lisp ~A becomes NullPointerException: ~A~%" (type-of e) e)
-             (sb-debug:print-backtrace :count 25 :stream *error-output*))
-           (error (%lisp-condition
-                   (%make-throwable '|java/lang/NullPointerException|)))))
-        ;; A call to a Java method with no definition -- in practice a native
-        ;; method OpenLDK doesn't implement -- is UnsatisfiedLinkError, as on
-        ;; a JVM, so Java code can catch it instead of the Lisp error
-        ;; unwinding past every Java handler.
-        (undefined-function
-         (lambda (e)
-           (let ((name (cell-error-name e)))
-             (when (%java-method-name-p name)
-               (error (%lisp-condition
-                       (%make-unsatisfied-link-error name))))))))
+            '((sb-int:invalid-array-index-error (lambda (e) (%array-index-error->java e)))))
+        (sb-sys:memory-fault-error (lambda (e) (%memory-fault->java e)))
+        (type-error (lambda (e) (%type-error->java e)))
+        (undefined-function (lambda (e) (%undefined-function->java e))))
      ,@body))
