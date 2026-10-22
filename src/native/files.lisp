@@ -53,47 +53,47 @@
   (declare (ignore class))
   nil)
 
-(defun |java/lang/Shutdown.halt0(I)| (status)
+(defun |java/lang/Shutdown.halt0(I)V| (status)
   (unless *ignore-quit*
     (uiop:quit status t)))
 
-(defmethod |getRawAnnotations()| ((class |java/lang/Class|))
+(defmethod |getRawAnnotations()[B| ((class |java/lang/Class|))
   (let ((lclass (get-ldk-class-for-java-class class)))
     (when (and lclass (attributes lclass))
       (gethash "RuntimeVisibleAnnotations" (attributes lclass)))))
 
-(defun |java/awt/image/ColorModel.initIDs()| ()
+(defun |java/awt/image/ColorModel.initIDs()V| ()
   nil)
 
-(defun |java/awt/Toolkit.initIDs()| ()
+(defun |java/awt/Toolkit.initIDs()V| ()
   "No-op HotSpot field-ID cache initialization for the Lisp object model."
   nil)
 
 (defun |java/net/InetAddressImplFactory.isIPv6Supported()| ()
   0)
 
-(defun |java/awt/image/IndexColorModel.initIDs()| ()
+(defun |java/awt/image/IndexColorModel.initIDs()V| ()
   nil)
 
-(defun |java/awt/image/Raster.initIDs()| ()
+(defun |java/awt/image/Raster.initIDs()V| ()
   nil)
 
-(defun |java/awt/image/SampleModel.initIDs()| ()
+(defun |java/awt/image/SampleModel.initIDs()V| ()
   nil)
 
-(defun |sun/awt/image/ByteComponentRaster.initIDs()| ()
+(defun |sun/awt/image/ByteComponentRaster.initIDs()V| ()
   nil)
 
-(defun |sun/awt/image/BytePackedRaster.initIDs()| ()
+(defun |sun/awt/image/BytePackedRaster.initIDs()V| ()
   nil)
 
-(defun |sun/awt/image/IntegerComponentRaster.initIDs()| ()
+(defun |sun/awt/image/IntegerComponentRaster.initIDs()V| ()
   nil)
 
 (defun |java/util/zip/Deflater.initIDs()| ()
   nil)
 
-(defun |java/util/zip/Inflater.initIDs()| ()
+(defun |java/util/zip/Inflater.initIDs()V| ()
   nil)
 
 (defun |java/security/SystemConfigurator.getSystemFIPSEnabled()| ()
@@ -102,16 +102,16 @@
 (defun |java/lang/Package.getSystemPackage0(Ljava/lang/String;)| (name)
   (gethash (lstring name) *packages*))
 
-(defun |java/lang/Thread.holdsLock(Ljava/lang/Object;)| (objref)
+(defun |java/lang/Thread.holdsLock(Ljava/lang/Object;)Z| (objref)
   (let ((monitor (%get-monitor objref))
         (current-thread (current-thread-identity)))
     (if (eq (owner monitor) current-thread)
         1 0)))
 
-(defun |sun/nio/ch/IOUtil.iovMax()| ()
+(defun |sun/nio/ch/IOUtil.iovMax()I| ()
   0)
 
-(defun |sun/nio/ch/IOUtil.writevMax()| ()
+(defun |sun/nio/ch/IOUtil.writevMax()J| ()
   "Maximum number of bytes writev(2) can transfer in one call.  We gather
 in Lisp, so any generous cap works; Linux IOV_MAX * page-ish value."
   (* 1024 4096))
@@ -119,50 +119,50 @@ in Lisp, so any generous cap works; Linux IOV_MAX * page-ish value."
 (defun |sun/nio/ch/FileChannelImpl.initIDs()| ()
   nil)
 
-(defun |sun/nio/ch/NativeThread.init()| ()
+(defun |sun/nio/ch/NativeThread.init()V| ()
   nil)
 
-(defun |sun/nio/ch/NativeThread.current()| ()
+(defun |sun/nio/ch/NativeThread.current()J| ()
   -1)
 
-(defun |sun/nio/ch/NativeThread.current0()| ()
+(defun |sun/nio/ch/NativeThread.current0()J| ()
   "JDK 21+ native behind NativeThread.current().  Self-contained: the Java
 current() wrapper calls current0(), so delegating back would recurse once
 the wrapper is JIT-compiled over the Lisp current() stub."
   -1)
 
-(defun |sun/nio/ch/NativeThread.signal(J)| (thread-id)
+(defun |sun/nio/ch/NativeThread.signal(J)V| (thread-id)
   "Signal a native thread blocked in an I/O operation. No-op in single-threaded OpenLDK."
   (declare (ignore thread-id))
   nil)
 
-(defun |sun/nio/ch/NativeThread.signal0(J)| (thread-id)
+(defun |sun/nio/ch/NativeThread.signal0(J)V| (thread-id)
   "JDK 21+ native behind NativeThread.signal(J).  Self-contained no-op (see
 current0 for why it must not delegate to the wrapper name)."
   (declare (ignore thread-id))
   nil)
 
-(defun |sun/nio/ch/NativeThread.supportPendingSignals0()| ()
+(defun |sun/nio/ch/NativeThread.supportPendingSignals0()Z| ()
   "Whether pending-signal delivery to blocked I/O threads is supported: no."
   0)
 
-(defun |java/nio/Bits.pageSize()| ()
+(defun |java/nio/Bits.pageSize()I| ()
   4096)
 
-(defmethod |pageSize()| ((unsafe |sun/misc/Unsafe|))
+(defmethod |pageSize()I| ((unsafe |sun/misc/Unsafe|))
   4096)
 
-(defmethod |storeFence()| ((unsafe |sun/misc/Unsafe|))
+(defmethod |storeFence()V| ((unsafe |sun/misc/Unsafe|))
   "Ensures that stores before the fence will not be reordered with stores after the fence."
   (declare (ignore unsafe))
   (sb-thread:barrier (:memory)))
 
-(defmethod |loadFence()| ((unsafe |sun/misc/Unsafe|))
+(defmethod |loadFence()V| ((unsafe |sun/misc/Unsafe|))
   "Ensures that loads before the fence will not be reordered with loads after the fence."
   (declare (ignore unsafe))
   (sb-thread:barrier (:memory)))
 
-(defmethod |fullFence()| ((unsafe |sun/misc/Unsafe|))
+(defmethod |fullFence()V| ((unsafe |sun/misc/Unsafe|))
   "Ensures that loads and stores before the fence will not be reordered with those after the fence."
   (declare (ignore unsafe))
   (sb-thread:barrier (:memory)))
@@ -181,7 +181,7 @@ channel (FileInputStream.getChannel) reads that stream's descriptor."
 (defun |sun/nio/ch/FileDispatcherImpl.init()| ()
   nil)
 
-(defun |sun/nio/ch/FileDispatcherImpl.size0(Ljava/io/FileDescriptor;)| (fd)
+(defun |sun/nio/ch/FileDispatcherImpl.size0(Ljava/io/FileDescriptor;)J| (fd)
   "Return the size of the file associated with FD."
   (let ((real-fd (%raw-fd fd)))
     (handler-case
@@ -203,7 +203,7 @@ channel (FileInputStream.getChannel) reads that stream's descriptor."
   (declare (ignore fd))
   nil)
 
-(defun |sun/nio/ch/FileDispatcherImpl.closeIntFD(I)| (fd)
+(defun |sun/nio/ch/FileDispatcherImpl.closeIntFD(I)V| (fd)
   "Close a raw int file descriptor."
   (handler-case (sb-posix:close fd)
     (sb-posix:syscall-error () nil)))
@@ -215,7 +215,7 @@ channel (FileInputStream.getChannel) reads that stream's descriptor."
   ;; Linux default: 2GB
   (ash 1 31))
 
-(defun |sun/nio/ch/FileDispatcherImpl.seek0(Ljava/io/FileDescriptor;J)| (fd offset)
+(defun |sun/nio/ch/FileDispatcherImpl.seek0(Ljava/io/FileDescriptor;J)J| (fd offset)
   "lseek(2) — return current position or seek to OFFSET."
   (let ((real-fd (%raw-fd fd)))
     (handler-case
@@ -226,7 +226,7 @@ channel (FileInputStream.getChannel) reads that stream's descriptor."
       (sb-posix:syscall-error ()
         (error (%lisp-condition (%make-throwable '|java/io/IOException|)))))))
 
-(defun |sun/nio/ch/FileDispatcherImpl.force0(Ljava/io/FileDescriptor;Z)| (fd metadata)
+(defun |sun/nio/ch/FileDispatcherImpl.force0(Ljava/io/FileDescriptor;Z)I| (fd metadata)
   "fsync/fdatasync the file descriptor."
   (declare (ignore metadata))
   (let ((real-fd (%raw-fd fd)))
@@ -235,13 +235,13 @@ channel (FileInputStream.getChannel) reads that stream's descriptor."
       (sb-posix:syscall-error ()
         (error (%lisp-condition (%make-throwable '|java/io/IOException|)))))))
 
-(defun |sun/nio/ch/FileDispatcherImpl.write0(Ljava/io/FileDescriptor;JI)| (fd ptr length)
+(defun |sun/nio/ch/FileDispatcherImpl.write0(Ljava/io/FileDescriptor;JI)I| (fd ptr length)
   "Write LENGTH bytes from native buffer at PTR to file descriptor FD."
   (let ((real-fd (%raw-fd fd))
         (sap (sb-sys:int-sap ptr)))
     (sb-unix:unix-write real-fd sap 0 length)))
 
-(defun |sun/nio/ch/FileDispatcherImpl.truncate0(Ljava/io/FileDescriptor;J)| (fd size)
+(defun |sun/nio/ch/FileDispatcherImpl.truncate0(Ljava/io/FileDescriptor;J)I| (fd size)
   "Truncate the file to SIZE bytes."
   (let ((real-fd (%raw-fd fd)))
     (handler-case
@@ -258,7 +258,7 @@ end of file, and an IOException on failure."
     ((zerop n) -1)
     (t n)))
 
-(defun |sun/nio/ch/FileDispatcherImpl.read0(Ljava/io/FileDescriptor;JI)| (fd ptr length)
+(defun |sun/nio/ch/FileDispatcherImpl.read0(Ljava/io/FileDescriptor;JI)I| (fd ptr length)
   "read(2) — read up to LENGTH bytes from FD into native buffer at PTR."
   (let ((real-fd (%raw-fd fd))
         (sap (sb-sys:int-sap ptr)))
@@ -271,28 +271,28 @@ end of file, and an IOException on failure."
 ;;; Delegate to the existing implementations and add the iovec/positioned
 ;;; variants the old family lacked.
 
-(defun |sun/nio/ch/FileDispatcherImpl.init0()| ()
+(defun |sun/nio/ch/FileDispatcherImpl.init0()V| ()
   nil)
 
 
 
-(defun |sun/nio/ch/UnixFileDispatcherImpl.read0(Ljava/io/FileDescriptor;JI)| (fd ptr length)
-  (|sun/nio/ch/FileDispatcherImpl.read0(Ljava/io/FileDescriptor;JI)| fd ptr length))
+(defun |sun/nio/ch/UnixFileDispatcherImpl.read0(Ljava/io/FileDescriptor;JI)I| (fd ptr length)
+  (|sun/nio/ch/FileDispatcherImpl.read0(Ljava/io/FileDescriptor;JI)I| fd ptr length))
 
-(defun |sun/nio/ch/UnixFileDispatcherImpl.write0(Ljava/io/FileDescriptor;JI)| (fd ptr length)
-  (|sun/nio/ch/FileDispatcherImpl.write0(Ljava/io/FileDescriptor;JI)| fd ptr length))
+(defun |sun/nio/ch/UnixFileDispatcherImpl.write0(Ljava/io/FileDescriptor;JI)I| (fd ptr length)
+  (|sun/nio/ch/FileDispatcherImpl.write0(Ljava/io/FileDescriptor;JI)I| fd ptr length))
 
-(defun |sun/nio/ch/UnixFileDispatcherImpl.seek0(Ljava/io/FileDescriptor;J)| (fd offset)
-  (|sun/nio/ch/FileDispatcherImpl.seek0(Ljava/io/FileDescriptor;J)| fd offset))
+(defun |sun/nio/ch/UnixFileDispatcherImpl.seek0(Ljava/io/FileDescriptor;J)J| (fd offset)
+  (|sun/nio/ch/FileDispatcherImpl.seek0(Ljava/io/FileDescriptor;J)J| fd offset))
 
-(defun |sun/nio/ch/UnixFileDispatcherImpl.size0(Ljava/io/FileDescriptor;)| (fd)
-  (|sun/nio/ch/FileDispatcherImpl.size0(Ljava/io/FileDescriptor;)| fd))
+(defun |sun/nio/ch/UnixFileDispatcherImpl.size0(Ljava/io/FileDescriptor;)J| (fd)
+  (|sun/nio/ch/FileDispatcherImpl.size0(Ljava/io/FileDescriptor;)J| fd))
 
-(defun |sun/nio/ch/UnixFileDispatcherImpl.force0(Ljava/io/FileDescriptor;Z)| (fd metadata)
-  (|sun/nio/ch/FileDispatcherImpl.force0(Ljava/io/FileDescriptor;Z)| fd metadata))
+(defun |sun/nio/ch/UnixFileDispatcherImpl.force0(Ljava/io/FileDescriptor;Z)I| (fd metadata)
+  (|sun/nio/ch/FileDispatcherImpl.force0(Ljava/io/FileDescriptor;Z)I| fd metadata))
 
-(defun |sun/nio/ch/UnixFileDispatcherImpl.truncate0(Ljava/io/FileDescriptor;J)| (fd size)
-  (|sun/nio/ch/FileDispatcherImpl.truncate0(Ljava/io/FileDescriptor;J)| fd size))
+(defun |sun/nio/ch/UnixFileDispatcherImpl.truncate0(Ljava/io/FileDescriptor;J)I| (fd size)
+  (|sun/nio/ch/FileDispatcherImpl.truncate0(Ljava/io/FileDescriptor;J)I| fd size))
 
 (defun |sun/nio/ch/UnixFileDispatcherImpl.close0(Ljava/io/FileDescriptor;)| (fd)
   (|sun/nio/ch/FileDispatcherImpl.close0(Ljava/io/FileDescriptor;)| fd))
@@ -300,26 +300,36 @@ end of file, and an IOException on failure."
 (defun |sun/nio/ch/UnixFileDispatcherImpl.preClose0(Ljava/io/FileDescriptor;)| (fd)
   (|sun/nio/ch/FileDispatcherImpl.preClose0(Ljava/io/FileDescriptor;)| fd))
 
-(defun |sun/nio/ch/UnixFileDispatcherImpl.closeIntFD(I)| (fd)
-  (|sun/nio/ch/FileDispatcherImpl.closeIntFD(I)| fd))
+(defun |sun/nio/ch/UnixFileDispatcherImpl.closeIntFD(I)V| (fd)
+  (|sun/nio/ch/FileDispatcherImpl.closeIntFD(I)V| fd))
 
-(defun |sun/nio/ch/UnixFileDispatcherImpl.map0(Ljava/io/FileDescriptor;IJJZ)| (fd prot position length sync)
+(defvar *file-mappings* (make-hash-table :synchronized t)
+  "Address -> (path position length prot) of each live FileChannel.map.")
+
+(defun |sun/nio/ch/UnixFileDispatcherImpl.map0(Ljava/io/FileDescriptor;IJJZ)J| (fd prot position length sync)
   "mmap(2) LENGTH bytes of FD from POSITION (page-aligned by the caller):
 PROT is 0 (read-only), 1 (read-write) or 2 (private, copy-on-write).
 Native memory in OpenLDK is addressed directly, so the mapping's address
 serves the MappedByteBuffer as is."
   (declare (ignore sync))
-  (sb-sys:sap-int
-   (sb-posix:mmap nil length
-                  (if (zerop prot) sb-posix:prot-read (logior sb-posix:prot-read sb-posix:prot-write))
-                  (if (= prot 2) sb-posix:map-private sb-posix:map-shared)
-                  (%raw-fd fd) position)))
+  (let* ((raw-fd (%raw-fd fd))
+         (address (sb-sys:sap-int
+                   (sb-posix:mmap nil length
+                                  (if (zerop prot) sb-posix:prot-read (logior sb-posix:prot-read sb-posix:prot-write))
+                                  (if (= prot 2) sb-posix:map-private sb-posix:map-shared)
+                                  raw-fd position))))
+    ;; Kept to map the file again at this address in a restarted image.
+    (setf (gethash address *file-mappings*)
+          (list (ignore-errors (sb-posix:readlink (format nil "/proc/self/fd/~D" raw-fd)))
+                position length prot))
+    address))
 
-(defun |sun/nio/ch/UnixFileDispatcherImpl.unmap0(JJ)| (address length)
+(defun |sun/nio/ch/UnixFileDispatcherImpl.unmap0(JJ)I| (address length)
+  (remhash address *file-mappings*)
   (sb-posix:munmap (sb-sys:int-sap address) length)
   0)
 
-(defun |sun/nio/ch/UnixFileDispatcherImpl.pread0(Ljava/io/FileDescriptor;JIJ)| (fd ptr length offset)
+(defun |sun/nio/ch/UnixFileDispatcherImpl.pread0(Ljava/io/FileDescriptor;JIJ)I| (fd ptr length offset)
   "pread(2) — positioned read into native buffer at PTR."
   (let ((real-fd (%raw-fd fd))
         (sap (sb-sys:int-sap ptr)))
@@ -328,7 +338,7 @@ serves the MappedByteBuffer as is."
         0
         (multiple-value-call #'%native-io-result (sb-unix:unix-read real-fd sap length)))))
 
-(defun |sun/nio/ch/UnixFileDispatcherImpl.pwrite0(Ljava/io/FileDescriptor;JIJ)| (fd ptr length offset)
+(defun |sun/nio/ch/UnixFileDispatcherImpl.pwrite0(Ljava/io/FileDescriptor;JIJ)I| (fd ptr length offset)
   "pwrite(2) — positioned write from native buffer at PTR."
   (let ((real-fd (%raw-fd fd))
         (sap (sb-sys:int-sap ptr)))
@@ -341,7 +351,7 @@ serves the MappedByteBuffer as is."
     (values (sb-sys:sap-ref-64 sap 0)
             (sb-sys:sap-ref-64 sap 8))))
 
-(defun |sun/nio/ch/UnixFileDispatcherImpl.readv0(Ljava/io/FileDescriptor;JI)| (fd iovec-address count)
+(defun |sun/nio/ch/UnixFileDispatcherImpl.readv0(Ljava/io/FileDescriptor;JI)J| (fd iovec-address count)
   "readv(2) — scatter read into COUNT iovec buffers."
   (let ((real-fd (%raw-fd fd))
         (total 0))
@@ -356,7 +366,7 @@ serves the MappedByteBuffer as is."
           (when (< n len)
             (return total)))))))
 
-(defun |sun/nio/ch/UnixFileDispatcherImpl.writev0(Ljava/io/FileDescriptor;JI)| (fd iovec-address count)
+(defun |sun/nio/ch/UnixFileDispatcherImpl.writev0(Ljava/io/FileDescriptor;JI)J| (fd iovec-address count)
   "writev(2) — gather write from COUNT iovec buffers."
   (let ((real-fd (%raw-fd fd))
         (total 0))
@@ -371,7 +381,7 @@ serves the MappedByteBuffer as is."
           (when (< n len)
             (return total)))))))
 
-(defun |sun/nio/ch/UnixFileDispatcherImpl.available0(Ljava/io/FileDescriptor;)| (fd)
+(defun |sun/nio/ch/UnixFileDispatcherImpl.available0(Ljava/io/FileDescriptor;)I| (fd)
   "Bytes available to read: size minus current position, or 0."
   (let ((real-fd (%raw-fd fd)))
     (handler-case
@@ -380,7 +390,7 @@ serves the MappedByteBuffer as is."
           (max 0 (- size pos)))
       (sb-posix:syscall-error () 0))))
 
-(defun |sun/nio/ch/UnixFileDispatcherImpl.isOther0(Ljava/io/FileDescriptor;)| (fd)
+(defun |sun/nio/ch/UnixFileDispatcherImpl.isOther0(Ljava/io/FileDescriptor;)Z| (fd)
   "Whether FD refers to something other than a regular file/dir/link."
   (let ((real-fd (%raw-fd fd)))
     (handler-case
@@ -392,17 +402,17 @@ serves the MappedByteBuffer as is."
               1))
       (sb-posix:syscall-error () 0))))
 
-(defun |sun/nio/ch/UnixFileDispatcherImpl.lock0(Ljava/io/FileDescriptor;ZJJZ)| (fd blocking pos size shared)
+(defun |sun/nio/ch/UnixFileDispatcherImpl.lock0(Ljava/io/FileDescriptor;ZJJZ)I| (fd blocking pos size shared)
   "File locking — single-process runtime, report success."
   (declare (ignore fd blocking pos size shared))
   0)
 
-(defun |sun/nio/ch/UnixFileDispatcherImpl.release0(Ljava/io/FileDescriptor;JJ)| (fd pos size)
+(defun |sun/nio/ch/UnixFileDispatcherImpl.release0(Ljava/io/FileDescriptor;JJ)V| (fd pos size)
   "Release a file lock — no-op."
   (declare (ignore fd pos size))
   nil)
 
-(defun |sun/nio/ch/UnixFileDispatcherImpl.allocationGranularity0()| ()
+(defun |sun/nio/ch/UnixFileDispatcherImpl.allocationGranularity0()J| ()
   4096)
 
 ;;; ChannelInputStream.read([BII) native override — bypass heavy NIO path
@@ -424,7 +434,7 @@ serves the MappedByteBuffer as is."
                 ;; through it, as ChannelInputStream does.
                 (return-from %channel-input-stream-read
                   (|read(Ljava/nio/ByteBuffer;)|
-                   ch (|java/nio/ByteBuffer.wrap([BII)| b off len))))
+                   ch (|java/nio/ByteBuffer.wrap([BII)Ljava/nio/ByteBuffer;| b off len))))
               (let* ((mem (sb-alien:make-alien sb-alien:char len))
                      (sap (sb-alien:alien-sap mem))
                      (n (sb-unix:unix-read fd sap len)))
@@ -454,7 +464,7 @@ serves the MappedByteBuffer as is."
                  (fd (when fd-obj (slot-value fd-obj '|fd|))))
             (if (null fd)
                 ;; Another kind of channel: write through it, as Channels does.
-                (let ((bb (|java/nio/ByteBuffer.wrap([BII)| b off len)))
+                (let ((bb (|java/nio/ByteBuffer.wrap([BII)Ljava/nio/ByteBuffer;| b off len)))
                   (loop while (plusp (|remaining()| bb))
                         do (|write(Ljava/nio/ByteBuffer;)| ch bb)))
             (let* ((data (java-array-data b))
@@ -474,7 +484,7 @@ serves the MappedByteBuffer as is."
   nil)
 
 
-(defun |sun/nio/fs/UnixNativeDispatcher.init()| ()
+(defun |sun/nio/fs/UnixNativeDispatcher.init()I| ()
   "Return capabilities bitmask: openat(2) + futimes(4) + futimens(8)."
   ;; Bit 1 (2)  = SUPPORTS_OPENAT
   ;; Bit 2 (4)  = SUPPORTS_FUTIMES
@@ -530,7 +540,7 @@ serves the MappedByteBuffer as is."
     (sb-posix:syscall-error (e)
       (sb-posix:syscall-errno e))))
 
-(defun |sun/nio/fs/UnixNativeDispatcher.stat0(JLsun/nio/fs/UnixFileAttributes;)| (address attrs)
+(defun |sun/nio/fs/UnixNativeDispatcher.stat0(JLsun/nio/fs/UnixFileAttributes;)I| (address attrs)
   "stat(2) — populate UnixFileAttributes.  JDK 25 contract: return 0 on
 success or the errno value on failure; the Java caller throws the
 UnixException itself."
@@ -545,7 +555,7 @@ UnixException itself."
         (declare (ignore e))
         0))))
 
-(defun |sun/nio/fs/UnixNativeDispatcher.lstat0(JLsun/nio/fs/UnixFileAttributes;)| (address attrs)
+(defun |sun/nio/fs/UnixNativeDispatcher.lstat0(JLsun/nio/fs/UnixFileAttributes;)V| (address attrs)
   "lstat(2) — like stat0 but does not follow symlinks."
   (let ((path (%read-c-string-from-sap address)))
     (let ((result (%populate-unix-file-attributes path attrs nil)))
@@ -555,7 +565,7 @@ UnixException itself."
             (setf (slot-value ux '|errno|) result))
           (error (%lisp-condition ux)))))))
 
-(defun |sun/nio/fs/UnixNativeDispatcher.access0(JI)| (address mode)
+(defun |sun/nio/fs/UnixNativeDispatcher.access0(JI)I| (address mode)
   "access(2) — check file access.  JDK 25 contract: return 0 on success or
 the errno value on failure; the Java caller throws the UnixException."
   (handler-case
@@ -565,7 +575,7 @@ the errno value on failure; the Java caller throws the UnixException."
     (sb-posix:syscall-error (e)
       (sb-posix:syscall-errno e))))
 
-(defun |sun/nio/fs/UnixNativeDispatcher.open0(JII)| (address flags mode)
+(defun |sun/nio/fs/UnixNativeDispatcher.open0(JII)I| (address flags mode)
   "open(2) — open file. Returns file descriptor."
   (let ((path (%read-c-string-from-sap address)))
     (handler-case
@@ -576,7 +586,7 @@ the errno value on failure; the Java caller throws the UnixException."
             (setf (slot-value ux '|errno|) (sb-posix:syscall-errno e)))
           (error (%lisp-condition ux)))))))
 
-(defun |sun/nio/fs/UnixNativeDispatcher.close0(I)| (fd)
+(defun |sun/nio/fs/UnixNativeDispatcher.close0(I)V| (fd)
   "close(2) — close file descriptor."
   (handler-case
       (sb-posix:close fd)
@@ -586,7 +596,7 @@ the errno value on failure; the Java caller throws the UnixException."
           (setf (slot-value ux '|errno|) (sb-posix:syscall-errno e)))
         (error (%lisp-condition ux))))))
 
-(defun |sun/nio/fs/UnixNativeDispatcher.read0(IJI)| (fd address len)
+(defun |sun/nio/fs/UnixNativeDispatcher.read0(IJI)I| (fd address len)
   "read(2) — read from file descriptor into native buffer."
   (let ((sap (sb-sys:int-sap address)))
     (handler-case
@@ -602,7 +612,7 @@ the errno value on failure; the Java caller throws the UnixException."
             (setf (slot-value ux '|errno|) (sb-posix:syscall-errno e)))
           (error (%lisp-condition ux)))))))
 
-(defun |sun/nio/fs/UnixNativeDispatcher.fstat0(ILsun/nio/fs/UnixFileAttributes;)| (fd attrs)
+(defun |sun/nio/fs/UnixNativeDispatcher.fstat0(ILsun/nio/fs/UnixFileAttributes;)V| (fd attrs)
   "fstat(2) — stat by file descriptor."
   (handler-case
       (let ((stat (sb-posix:fstat fd)))
@@ -634,7 +644,7 @@ the errno value on failure; the Java caller throws the UnixException."
           (setf (slot-value ux '|errno|) (sb-posix:syscall-errno e)))
         (error (%lisp-condition ux))))))
 
-(defun |sun/nio/fs/UnixNativeDispatcher.realpath0(J)| (address)
+(defun |sun/nio/fs/UnixNativeDispatcher.realpath0(J)[B| (address)
   "realpath(3) — resolve canonical path. Returns byte array."
   (let* ((path (%read-c-string-from-sap address))
          (real (namestring (truename (pathname path))))
@@ -643,12 +653,12 @@ the errno value on failure; the Java caller throws the UnixException."
      :component-class (%get-java-class-by-bin-name "byte")
      :initial-contents bytes)))
 
-(defun |sun/nio/fs/UnixNativeDispatcher.getcwd()| ()
+(defun |sun/nio/fs/UnixNativeDispatcher.getcwd()[B| ()
   (make-java-array
    :component-class (%get-java-class-by-bin-name "byte")
    :initial-contents (flexi-streams:string-to-octets (namestring (uiop:getcwd)) :external-format :utf-8)))
 
-(defun |sun/nio/fs/UnixNativeDispatcher.dup(I)| (fd)
+(defun |sun/nio/fs/UnixNativeDispatcher.dup(I)I| (fd)
   "dup(2) — duplicate file descriptor."
   (handler-case
       (sb-posix:dup fd)
@@ -658,7 +668,7 @@ the errno value on failure; the Java caller throws the UnixException."
           (setf (slot-value ux '|errno|) (sb-posix:syscall-errno e)))
         (error (%lisp-condition ux))))))
 
-(defun |sun/nio/fs/UnixNativeDispatcher.openat0(IJII)| (dfd address flags mode)
+(defun |sun/nio/fs/UnixNativeDispatcher.openat0(IJII)I| (dfd address flags mode)
   "openat(2) — open file relative to directory fd."
   (let* ((path (%read-c-string-from-sap address))
          (result (sb-alien:alien-funcall
@@ -679,7 +689,7 @@ the errno value on failure; the Java caller throws the UnixException."
 (defvar *dir-pointer-table* (make-hash-table)
   "Map from integer DIR* address to SBCL alien for closedir/readdir.")
 
-(defun |sun/nio/fs/UnixNativeDispatcher.fdopendir(I)| (fd)
+(defun |sun/nio/fs/UnixNativeDispatcher.fdopendir(I)J| (fd)
   "fdopendir(3) — open directory stream from fd. Returns DIR* as long."
   (let ((dirp (sb-alien:alien-funcall
                (sb-alien:extern-alien "fdopendir"
@@ -694,19 +704,19 @@ the errno value on failure; the Java caller throws the UnixException."
       (setf (gethash addr *dir-pointer-table*) dirp)
       addr)))
 
-(defun |sun/nio/fs/UnixNativeDispatcher.closedir(J)| (dirp-addr)
+(defun |sun/nio/fs/UnixNativeDispatcher.closedir(J)V| (dirp-addr)
   "closedir(3) — close directory stream."
   (let ((dirp (gethash dirp-addr *dir-pointer-table*)))
     (when dirp
       (remhash dirp-addr *dir-pointer-table*)
       (sb-posix:closedir dirp))))
 
-(defun |sun/nio/fs/UnixNativeDispatcher.readdir0(J)| (dirp-addr)
+(defun |sun/nio/fs/UnixNativeDispatcher.readdir0(J)[B| (dirp-addr)
   "readdir(3) — read directory entry. Returns filename as byte[] or nil.
 This is the JDK 25 native name; the implementation lives here because a
 compiled Java readdir wrapper may overwrite the old readdir(J) symbol."
   (let ((dirp (gethash dirp-addr *dir-pointer-table*)))
-    (unless dirp (return-from |sun/nio/fs/UnixNativeDispatcher.readdir0(J)| nil))
+    (unless dirp (return-from |sun/nio/fs/UnixNativeDispatcher.readdir0(J)[B| nil))
     ;; Use the raw readdir(3) FFI to avoid SBCL's sb-posix:readdir trying to
     ;; naturalize d_name from a null dirent pointer at end-of-directory,
     ;; which causes a CORRUPTION WARNING (memory fault at 0x13 = d_name offset).
@@ -715,7 +725,7 @@ compiled Java readdir wrapper may overwrite the old readdir(J) symbol."
                                          (function (* t) (* t)))
                   dirp)))
       (when (sb-alien:null-alien entry)
-        (return-from |sun/nio/fs/UnixNativeDispatcher.readdir0(J)| nil))
+        (return-from |sun/nio/fs/UnixNativeDispatcher.readdir0(J)[B| nil))
       ;; d_name is at offset 19 in struct dirent on Linux x86-64
       (let* ((name (%read-c-string-from-sap (+ (sb-sys:sap-int (sb-alien:alien-sap entry)) 19)))
              (bytes (flexi-streams:string-to-octets name :external-format :utf-8)))
@@ -723,11 +733,11 @@ compiled Java readdir wrapper may overwrite the old readdir(J) symbol."
          :component-class (%get-java-class-by-bin-name "byte")
          :initial-contents bytes)))))
 
-(defun |sun/nio/fs/UnixNativeDispatcher.readdir(J)| (dirp-addr)
+(defun |sun/nio/fs/UnixNativeDispatcher.readdir(J)[B| (dirp-addr)
   "Pre-JDK-25 name for readdir0."
-  (|sun/nio/fs/UnixNativeDispatcher.readdir0(J)| dirp-addr))
+  (|sun/nio/fs/UnixNativeDispatcher.readdir0(J)[B| dirp-addr))
 
-(defun |sun/nio/fs/UnixNativeDispatcher.write(IJI)| (fd address len)
+(defun |sun/nio/fs/UnixNativeDispatcher.write(IJI)I| (fd address len)
   "write(2) — write to file descriptor from native buffer."
   (let ((sap (sb-sys:int-sap address)))
     (handler-case
@@ -738,7 +748,7 @@ compiled Java readdir wrapper may overwrite the old readdir(J) symbol."
             (setf (slot-value ux '|errno|) (sb-posix:syscall-errno e)))
           (error (%lisp-condition ux)))))))
 
-(defun |sun/nio/fs/UnixNativeDispatcher.strerror(I)| (errno)
+(defun |sun/nio/fs/UnixNativeDispatcher.strerror(I)[B| (errno)
   "strerror(3) — return error description as byte[]."
   (let* ((msg (sb-int:strerror errno))
          (bytes (flexi-streams:string-to-octets msg :external-format :utf-8)))
@@ -746,7 +756,7 @@ compiled Java readdir wrapper may overwrite the old readdir(J) symbol."
      :component-class (%get-java-class-by-bin-name "byte")
      :initial-contents bytes)))
 
-(defun |sun/nio/fs/UnixNativeDispatcher.getpwuid(I)| (uid)
+(defun |sun/nio/fs/UnixNativeDispatcher.getpwuid(I)[B| (uid)
   "getpwuid(3) — return user name as byte[]."
   (handler-case
       (let* ((pw (sb-posix:getpwuid uid))
@@ -761,7 +771,7 @@ compiled Java readdir wrapper may overwrite the old readdir(J) symbol."
           (setf (slot-value ux '|errno|) (sb-posix:syscall-errno e)))
         (error (%lisp-condition ux))))))
 
-(defun |sun/nio/fs/UnixNativeDispatcher.getgrgid(I)| (gid)
+(defun |sun/nio/fs/UnixNativeDispatcher.getgrgid(I)[B| (gid)
   "getgrgid(3) — return group name as byte[]."
   (handler-case
       (let* ((gr (sb-posix:getgrgid gid))
@@ -776,7 +786,7 @@ compiled Java readdir wrapper may overwrite the old readdir(J) symbol."
           (setf (slot-value ux '|errno|) (sb-posix:syscall-errno e)))
         (error (%lisp-condition ux))))))
 
-(defun |sun/nio/fs/UnixNativeDispatcher.fchmod(II)| (fd mode)
+(defun |sun/nio/fs/UnixNativeDispatcher.fchmod(II)V| (fd mode)
   "fchmod(2) — change file mode."
   (handler-case
       (sb-posix:fchmod fd mode)
@@ -786,7 +796,7 @@ compiled Java readdir wrapper may overwrite the old readdir(J) symbol."
           (setf (slot-value ux '|errno|) (sb-posix:syscall-errno e)))
         (error (%lisp-condition ux))))))
 
-(defun |sun/nio/fs/UnixNativeDispatcher.fchown(III)| (fd uid gid)
+(defun |sun/nio/fs/UnixNativeDispatcher.fchown(III)V| (fd uid gid)
   "fchown(2) — change file owner."
   (handler-case
       (sb-posix:fchown fd uid gid)
@@ -803,7 +813,7 @@ compiled Java readdir wrapper may overwrite the old readdir(J) symbol."
       (setf (slot-value ux '|errno|) errno))
     (error (%lisp-condition ux))))
 
-(defun |sun/nio/fs/UnixNativeDispatcher.unlink0(J)| (address)
+(defun |sun/nio/fs/UnixNativeDispatcher.unlink0(J)V| (address)
   "unlink(2) — delete a file."
   (let ((path (%read-c-string-from-sap address)))
     (handler-case
@@ -811,7 +821,7 @@ compiled Java readdir wrapper may overwrite the old readdir(J) symbol."
       (sb-posix:syscall-error (e)
         (%throw-unix-exception (sb-posix:syscall-errno e))))))
 
-(defun |sun/nio/fs/UnixNativeDispatcher.mkdir0(JI)| (address mode)
+(defun |sun/nio/fs/UnixNativeDispatcher.mkdir0(JI)V| (address mode)
   "mkdir(2) — create a directory."
   (let ((path (%read-c-string-from-sap address)))
     (handler-case
@@ -819,7 +829,7 @@ compiled Java readdir wrapper may overwrite the old readdir(J) symbol."
       (sb-posix:syscall-error (e)
         (%throw-unix-exception (sb-posix:syscall-errno e))))))
 
-(defun |sun/nio/fs/UnixNativeDispatcher.rmdir0(J)| (address)
+(defun |sun/nio/fs/UnixNativeDispatcher.rmdir0(J)V| (address)
   "rmdir(2) — remove a directory."
   (let ((path (%read-c-string-from-sap address)))
     (handler-case
@@ -827,7 +837,7 @@ compiled Java readdir wrapper may overwrite the old readdir(J) symbol."
       (sb-posix:syscall-error (e)
         (%throw-unix-exception (sb-posix:syscall-errno e))))))
 
-(defun |sun/nio/fs/UnixNativeDispatcher.rename0(JJ)| (from-address to-address)
+(defun |sun/nio/fs/UnixNativeDispatcher.rename0(JJ)V| (from-address to-address)
   "rename(2) — rename a file."
   (let ((from (%read-c-string-from-sap from-address))
         (to (%read-c-string-from-sap to-address)))
@@ -836,7 +846,7 @@ compiled Java readdir wrapper may overwrite the old readdir(J) symbol."
       (sb-posix:syscall-error (e)
         (%throw-unix-exception (sb-posix:syscall-errno e))))))
 
-(defun |sun/nio/fs/UnixNativeDispatcher.chmod0(JI)| (address mode)
+(defun |sun/nio/fs/UnixNativeDispatcher.chmod0(JI)V| (address mode)
   "chmod(2) — change file permissions."
   (let ((path (%read-c-string-from-sap address)))
     (handler-case
@@ -844,12 +854,12 @@ compiled Java readdir wrapper may overwrite the old readdir(J) symbol."
       (sb-posix:syscall-error (e)
         (%throw-unix-exception (sb-posix:syscall-errno e))))))
 
-(defmethod |getUTF8At0(Ljava/lang/Object;I)| ((this |sun/reflect/ConstantPool|) cp index)
+(defmethod |getUTF8At0(Ljava/lang/Object;I)Ljava/lang/String;| ((this |sun/reflect/ConstantPool|) cp index)
   (let* ((cp (constant-pool (ldk-class cp)))
          (s (format nil "~A" (emit (aref cp index) cp))))
     (jstring s)))
 
-(defmethod |getIntAt0(Ljava/lang/Object;I)| ((this |sun/reflect/ConstantPool|) cp index)
+(defmethod |getIntAt0(Ljava/lang/Object;I)I| ((this |sun/reflect/ConstantPool|) cp index)
   (let* ((cp (constant-pool (ldk-class cp)))
          (i (slot-value (aref cp index) 'value)))
     i))

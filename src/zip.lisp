@@ -96,7 +96,7 @@ SAVE-LISP-AND-DIE, so each one reopens on first use after a restart."
            *zipfile-state*))
 
 
-(defun |java/util/zip/ZipFile.<clinit>()| ()
+(defun |java/util/zip/ZipFile.<clinit>()V| ()
   "Class initializer for ZipFile (no-op stub).")
 
 (defun |<init>| ()
@@ -107,27 +107,27 @@ SAVE-LISP-AND-DIE, so each one reopens on first use after a restart."
   (setf (gethash zip-file *zipfile-state*)
         (cons name (zip:open-zipfile (lstring name)))))
 
-(defmethod |<init>(Ljava/io/File;I)| ((this |java/util/zip/ZipFile|) file mode)
+(defmethod |<init>(Ljava/io/File;I)V| ((this |java/util/zip/ZipFile|) file mode)
   (assert (= mode 1)) ; only support read for now
   (%zipfile-open this (|getPath()| file)))
 
-(defmethod |<init>(Ljava/io/File;)| ((this |java/util/zip/ZipFile|) file)
-  (|<init>(Ljava/io/File;I)| this file 1))
+(defmethod |<init>(Ljava/io/File;)V| ((this |java/util/zip/ZipFile|) file)
+  (|<init>(Ljava/io/File;I)V| this file 1))
 
-(defmethod |<init>(Ljava/lang/String;)| ((this |java/util/zip/ZipFile|) name)
+(defmethod |<init>(Ljava/lang/String;)V| ((this |java/util/zip/ZipFile|) name)
   (%zipfile-open this name))
 
 ;; The Charset overloads (the IntelliJ platform's): entry names are decoded
 ;; by the zip library, so the charset goes unused.
-(defmethod |<init>(Ljava/io/File;Ljava/nio/charset/Charset;)| ((this |java/util/zip/ZipFile|) file charset)
+(defmethod |<init>(Ljava/io/File;Ljava/nio/charset/Charset;)V| ((this |java/util/zip/ZipFile|) file charset)
   (declare (ignore charset))
-  (|<init>(Ljava/io/File;I)| this file 1))
+  (|<init>(Ljava/io/File;I)V| this file 1))
 
-(defmethod |<init>(Ljava/io/File;ILjava/nio/charset/Charset;)| ((this |java/util/zip/ZipFile|) file mode charset)
+(defmethod |<init>(Ljava/io/File;ILjava/nio/charset/Charset;)V| ((this |java/util/zip/ZipFile|) file mode charset)
   (declare (ignore charset))
-  (|<init>(Ljava/io/File;I)| this file mode))
+  (|<init>(Ljava/io/File;I)V| this file mode))
 
-(defmethod |<init>(Ljava/lang/String;Ljava/nio/charset/Charset;)| ((this |java/util/zip/ZipFile|) name charset)
+(defmethod |<init>(Ljava/lang/String;Ljava/nio/charset/Charset;)V| ((this |java/util/zip/ZipFile|) name charset)
   (declare (ignore charset))
   (%zipfile-open this name))
 
@@ -136,25 +136,25 @@ SAVE-LISP-AND-DIE, so each one reopens on first use after a restart."
 entry ZE."
   (classload "java/util/zip/ZipEntry")
   (let ((entry (%make-java-instance "java/util/zip/ZipEntry")))
-    (|<init>(Ljava/lang/String;)| entry name)
+    (|<init>(Ljava/lang/String;)V| entry name)
     (|setSize(J)| entry (zip::zipfile-entry-size ze))
-    (|setCompressedSize(J)| entry (zip::zipfile-entry-compressed-size ze))
+    (|setCompressedSize(J)V| entry (zip::zipfile-entry-compressed-size ze))
     entry))
 
-(defmethod |getEntry(Ljava/lang/String;)| ((this |java/util/zip/ZipFile|) name)
+(defmethod |getEntry(Ljava/lang/String;)Ljava/util/zip/ZipEntry;| ((this |java/util/zip/ZipFile|) name)
   (when-let (ze (zip:get-zipfile-entry (lstring name) (%zipfile-zip this)))
     (%make-zip-entry name ze)))
 
-(defmethod |entries()| ((this |java/util/zip/ZipFile|))
+(defmethod |entries()Ljava/util/Enumeration;| ((this |java/util/zip/ZipFile|))
   "An Enumeration of the entries (Scala's compiler lists jars this way)."
   (classload "java/util/ArrayList")
   (let ((list (%make-java-instance "java/util/ArrayList")))
-    (|<init>()| list)
+    (|<init>()V| list)
     (zip:do-zipfile-entries (name ze (%zipfile-zip this))
       (|add(Ljava/lang/Object;)| list (%make-zip-entry (jstring name) ze)))
-    (|java/util/Collections.enumeration(Ljava/util/Collection;)| list)))
+    (|java/util/Collections.enumeration(Ljava/util/Collection;)Ljava/util/Enumeration;| list)))
 
-(defmethod |size()| ((this |java/util/zip/ZipFile|))
+(defmethod |size()I| ((this |java/util/zip/ZipFile|))
   (let ((count 0))
     (zip:do-zipfile-entries (name ze (%zipfile-zip this))
       (declare (ignore name ze))
@@ -171,11 +171,11 @@ entry ZE."
      :component-class (%get-java-class-by-bin-name "java/lang/String")
      :initial-contents meta-entries)))
 
-(defmethod |<init>(Ljava/io/InputStream;Z)| ((this |java/util/jar/JarInputStream|) is verify)
+(defmethod |<init>(Ljava/io/InputStream;Z)V| ((this |java/util/jar/JarInputStream|) is verify)
   (with-slots (|in|) this
     (setf |in| (zip::open-zipfile-from-stream (make-instance '<java-input-stream> :java-stream is)))))
 
-(defmethod |close()| ((this |java/util/jar/JarInputStream|))
+(defmethod |close()V| ((this |java/util/jar/JarInputStream|))
   (zip:close-zipfile (slot-value this '|in|)))
 
 (defclass/std <zip-input-stream> (|java/io/InputStream|)
@@ -184,7 +184,7 @@ entry ZE."
    (buffer)
    (index)))
 
-(defmethod |getInputStream(Ljava/util/zip/ZipEntry;)| ((this |java/util/zip/ZipFile|) zip-entry)
+(defmethod |getInputStream(Ljava/util/zip/ZipEntry;)Ljava/io/InputStream;| ((this |java/util/zip/ZipFile|) zip-entry)
   (make-instance '<zip-input-stream> :zip-file this :entry zip-entry))
 
 (defmethod |read()| ((this <zip-input-stream>))
@@ -197,7 +197,7 @@ entry ZE."
         (aref buffer (incf index))
         -1)))
 
-(defmethod |getName()| ((this |java/util/zip/ZipFile|))
+(defmethod |getName()Ljava/lang/String;| ((this |java/util/zip/ZipFile|))
   (%zipfile-name this))
 
 (defun %zip-manifest-count (jar-file)
@@ -209,23 +209,23 @@ entry ZE."
         (incf count)))
     count))
 
-(defmethod |getManifestNum(Ljava/util/jar/JarFile;)| ((this |java/util/zip/ZipFile$1|) jar-file)
+(defmethod |getManifestNum(Ljava/util/jar/JarFile;)I| ((this |java/util/zip/ZipFile$1|) jar-file)
   (declare (ignore this))
   (%zip-manifest-count jar-file))
 
-(defmethod |getManifestNum(Ljava/util/jar/JarFile;)| ((this t) jar-file)
+(defmethod |getManifestNum(Ljava/util/jar/JarFile;)I| ((this t) jar-file)
   (declare (ignore this))
   (%zip-manifest-count jar-file))
 
-(defmethod |startsWithLocHeader(Ljava/util/zip/ZipFile;)| ((this |java/util/zip/ZipFile$1|) zip-file)
+(defmethod |startsWithLocHeader(Ljava/util/zip/ZipFile;)Z| ((this |java/util/zip/ZipFile$1|) zip-file)
   (declare (ignore this))
   (not (null (%zipfile-zip zip-file))))
 
-(defmethod |startsWithLocHeader(Ljava/util/zip/ZipFile;)| ((this t) zip-file)
+(defmethod |startsWithLocHeader(Ljava/util/zip/ZipFile;)Z| ((this t) zip-file)
   (declare (ignore this))
   (not (null (%zipfile-zip zip-file))))
 
-(defmethod |close()| ((this |java/util/zip/ZipFile|))
+(defmethod |close()V| ((this |java/util/zip/ZipFile|))
   (when-let ((zip (%zipfile-zip this)))
     (zip:close-zipfile zip)
     (remhash this *zipfile-state*)))
@@ -255,12 +255,12 @@ entry ZE."
                  (setf (jaref byte-array (+ offset pos)) byte)))
       bytes-read)))
 
-(defmethod |getManifest()| ((this |java/util/jar/JarInputStream|))
+(defmethod |getManifest()Ljava/util/jar/Manifest;| ((this |java/util/jar/JarInputStream|))
   (classload "java/util/jar/Manifest")
   (let ((buffer (zip:zipfile-entry-contents (zip:get-zipfile-entry "META-INF/MANIFEST.MF"
                                                                    (slot-value this '|in|))))
         (manifest (%make-java-instance "java/util/jar/Manifest")))
-    (|<init>()| manifest)
+    (|<init>()V| manifest)
     (setf (slot-value this '|man|) manifest)
     (|read(Ljava/io/InputStream;)| manifest (make-instance '<buffer-input-stream> :buf buffer))))
 
@@ -313,10 +313,43 @@ entry ZE."
      #x54DE5729 #x23D967BF #xB3667A2E #xC4614AB8 #x5D681B02 #x2A6F2B94
      #xB40BBE37 #xC30C8EA1 #x5A05DF1B #x2D02EF8D)))
 
-(defun |java/util/zip/CRC32.updateBytes(I[BII)| (crc array offset length)
+(defun |java/util/zip/CRC32.updateBytes(I[BII)I| (crc array offset length)
   "Update CRC32 value CRC with bytes from ARRAY starting at OFFSET for LENGTH bytes."
   (setf crc (logxor crc #xffffffff))
   (dotimes (n length)
     (let ((i (logand #xff (logxor crc (jaref array (+ offset n))))))
       (setf crc (logxor (aref *crc-table* i) (ash crc -8)))))
   (logxor crc #xfffffff))
+
+;; JarFile.checkForSpecialAttributes reads the manifest through the
+;; JavaUtilZipFileAccess bridge ZipFile's class initializer registers, which
+;; OpenLDK's ZipFile (initializer stubbed) never does: it threw a
+;; NullPointerException where URLClassLoader first opens a jar (the Scala
+;; REPL's parent loader).  Scan the manifest here instead.  Multi-release
+;; jars are read as plain ones, as OpenLDK's zip methods do.
+(defmethod |checkForSpecialAttributes()V| :around ((this |java/util/jar/JarFile|))
+  (unless (eql 1 (slot-value this '|hasCheckedSpecialAttributes|))
+    (let* ((zip (%zipfile-zip this))
+           (entry (and zip (zip:get-zipfile-entry "META-INF/MANIFEST.MF" zip)))
+           (text (and entry (flexi-streams:octets-to-string (zip:zipfile-entry-contents entry)
+                                                            :external-format :latin-1))))
+      (setf (slot-value this '|hasClassPathAttribute|)
+            (if (and text (search (format nil "~%Class-Path:") (substitute #\Newline #\Return text)
+                                  :test #'char-equal))
+                1 0))
+      (setf (slot-value this '|hasCheckedSpecialAttributes|) 1))))
+
+;; JarFile.getManifest finds the manifest through the same bridge (see
+;; checkForSpecialAttributes above); read it from the zip here.
+(defmethod |getManifest()Ljava/util/jar/Manifest;| :around ((this |java/util/jar/JarFile|))
+  (let* ((zip (%zipfile-zip this))
+         (entry (and zip (zip:get-zipfile-entry "META-INF/MANIFEST.MF" zip))))
+    (when entry
+      (let ((bytes (map 'vector (lambda (b) (if (> b 127) (- b 256) b))
+                        (zip:zipfile-entry-contents entry)))
+            (stream (%make-java-instance "java/io/ByteArrayInputStream"))
+            (manifest (%make-java-instance "java/util/jar/Manifest")))
+        (|<init>([B)V| stream (make-java-array :component-class (%get-java-class-by-bin-name "byte")
+                                               :initial-contents bytes))
+        (|<init>(Ljava/io/InputStream;)V| manifest stream)
+        manifest))))

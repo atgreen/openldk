@@ -122,7 +122,7 @@ putStatic 4)."
               result
               (%member-invoke member args)))
         (%mh-invoke (or (slot-value function '|resolvedHandle|)
-                        (|resolvedHandle()| function))
+                        (|resolvedHandle()Ljava/lang/invoke/MethodHandle;| function))
                     args))))
 
 (defun %lf-interpret (form args)
@@ -167,7 +167,7 @@ arguments), as LambdaForm.interpretWithArguments does."
 (defun %descriptor-method-type (descriptor)
   (or (gethash descriptor *call-site-method-types*)
       (setf (gethash descriptor *call-site-method-types*)
-            (|java/lang/invoke/MethodType.fromMethodDescriptorString(Ljava/lang/String;Ljava/lang/ClassLoader;)|
+            (|java/lang/invoke/MethodType.fromMethodDescriptorString(Ljava/lang/String;Ljava/lang/ClassLoader;)Ljava/lang/invoke/MethodType;|
              (jstring descriptor) *boot-class-loader*))))
 
 (defun %invoke-generic (mh descriptor &rest args)
@@ -182,11 +182,11 @@ arguments), as LambdaForm.interpretWithArguments does."
 
 ;;; Call sites.
 
-(defun |java/lang/invoke/MethodHandleNatives.setCallSiteTargetNormal(Ljava/lang/invoke/CallSite;Ljava/lang/invoke/MethodHandle;)| (site target)
+(defun |java/lang/invoke/MethodHandleNatives.setCallSiteTargetNormal(Ljava/lang/invoke/CallSite;Ljava/lang/invoke/MethodHandle;)V| (site target)
   (setf (slot-value site '|target|) target)
   nil)
 
-(defun |java/lang/invoke/MethodHandleNatives.setCallSiteTargetVolatile(Ljava/lang/invoke/CallSite;Ljava/lang/invoke/MethodHandle;)| (site target)
+(defun |java/lang/invoke/MethodHandleNatives.setCallSiteTargetVolatile(Ljava/lang/invoke/CallSite;Ljava/lang/invoke/MethodHandle;)V| (site target)
   (setf (slot-value site '|target|) target)
   nil)
 
@@ -199,7 +199,7 @@ Objects (asType boxes, unboxes and collects varargs)."
   (when (null mh)
     (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|))))
   (%mh-invoke (|asType(Ljava/lang/invoke/MethodType;)|
-               mh (|java/lang/invoke/MethodType.genericMethodType(I)| (length arguments)))
+               mh (|java/lang/invoke/MethodType.genericMethodType(I)Ljava/lang/invoke/MethodType;| (length arguments)))
               arguments))
 
 (setf (gethash "java/lang/invoke/MethodHandle.invokeWithArguments([Ljava/lang/Object;)Ljava/lang/Object;"

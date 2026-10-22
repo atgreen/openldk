@@ -119,7 +119,7 @@
     ("java.library.path" . ,(concatenate 'string (uiop:getenv "JAVA_HOME") "/lib/"))
     ("java.io.tmpdir" . ,(namestring (uiop:temporary-directory)))))
 
-(defun |jdk/internal/util/SystemProps$Raw.platformProperties()| ()
+(defun |jdk/internal/util/SystemProps$Raw.platformProperties()[Ljava/lang/String;| ()
   "Return a String[40] of indexed platform properties for JDK 25."
   (let* ((len 40)
          (arr (make-array len :initial-element nil)))
@@ -187,7 +187,7 @@
     (make-java-array :component-class (gethash "java/lang/String" *java-classes-by-bin-name*)
                      :initial-contents arr)))
 
-(defun |jdk/internal/util/SystemProps$Raw.vmProperties()| ()
+(defun |jdk/internal/util/SystemProps$Raw.vmProperties()[Ljava/lang/String;| ()
   "Return String[] of key-value pairs for JDK 25 VM properties."
   (let* ((pairs (append +java-identity-properties+
                         +encoding-properties+
@@ -216,7 +216,7 @@
                           ("path.separator" . ":")
                           ("line.separator" . ,(format nil "~%")))))
     (when (cdr prop)
-      (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)|
+      (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;|
        (ijstring (car prop)) (ijstring (cdr prop)))))
   props)
 
@@ -242,21 +242,21 @@ user.variant
 
 |#
 
-(defun |java/io/FileDescriptor.initIDs()| ()
+(defun |java/io/FileDescriptor.initIDs()V| ()
   "Initialize file descriptor native IDs (no-op)."
   nil)
 
-(defun |java/io/FileDescriptor.getHandle(I)| (fd)
+(defun |java/io/FileDescriptor.getHandle(I)J| (fd)
   "Get OS file handle for fd.  On Unix, return -1 (handles are Windows-only)."
   (declare (ignore fd))
   -1)
 
-(defun |java/io/FileDescriptor.getAppend(I)| (fd)
+(defun |java/io/FileDescriptor.getAppend(I)Z| (fd)
   "Check if fd is in append mode.  Return false for stdin/stdout/stderr."
   (declare (ignore fd))
   0)
 
-(defmethod |valid()| ((this |java/io/FileDescriptor|))
+(defmethod |valid()Z| ((this |java/io/FileDescriptor|))
   "Return true (1) if the file descriptor is valid (has an open stream or known fd)."
   (let ((fd (when (slot-exists-p this '|fd|) (slot-value this '|fd|))))
     (cond
@@ -264,15 +264,15 @@ user.variant
       ((and (integerp fd) (>= fd 0)) 1)
       (t 0))))
 
-(defun |java/io/FileInputStream.initIDs()| ()
+(defun |java/io/FileInputStream.initIDs()V| ()
   "Initialize FileInputStream native IDs (no-op)."
   nil)
 
-(defun |java/io/FileOutputStream.initIDs()| ()
+(defun |java/io/FileOutputStream.initIDs()V| ()
   "Initialize FileOutputStream native IDs (no-op)."
   nil)
 
-(defun |java/io/RandomAccessFile.initIDs()| ()
+(defun |java/io/RandomAccessFile.initIDs()V| ()
   "Initialize RandomAccessFile native IDs (no-op)."
   nil)
 
@@ -282,33 +282,33 @@ user.variant
                (sb-alien:extern-alien "isatty" (function sb-alien:int sb-alien:int))
                0))))
 
-(defun |java/lang/System.console()| ()
+(defun |java/lang/System.console()Ljava/io/Console;| ()
   "Return null - console object not yet supported in OpenLDK."
   nil)
 (setf (gethash "java/lang/System.console()Ljava/io/Console;" *native-overrides*)
-      #'|java/lang/System.console()|)
+      #'|java/lang/System.console()Ljava/io/Console;|)
 
 ;; Override CheckConsole.haveConsole() to always return true.
 ;; In Kawa's processArgs bytecode, haveConsole()==false skips Shell.run()
 ;; entirely and only tries startGuiConsole (which fails without a display).
 ;; Returning true ensures Shell.run() is always called, which correctly
 ;; handles both TTY input (with prompts) and piped input (no prompts).
-(defun |gnu/kawa/io/CheckConsole.haveConsole()| ()
+(defun |gnu/kawa/io/CheckConsole.haveConsole()Z| ()
   1)
 (setf (gethash "gnu/kawa/io/CheckConsole.haveConsole()Z" *native-overrides*)
-      #'|gnu/kawa/io/CheckConsole.haveConsole()|)
+      #'|gnu/kawa/io/CheckConsole.haveConsole()Z|)
 
 ;; Override TtyInPort.make() to directly create a plain TtyInPort.
 ;; The bytecoded version has a codegen bug: the exception handler for the
 ;; JLine reflection path doesn't fall through to the fallback TtyInPort
 ;; creation code (end-of-handler? prevents it). This native override
 ;; bypasses the buggy compiled code entirely.
-(defun |gnu/kawa/io/TtyInPort.make(Ljava/io/InputStream;Lgnu/kawa/io/Path;Lgnu/kawa/io/OutPort;)| (in-stream path out-port)
+(defun |gnu/kawa/io/TtyInPort.make(Ljava/io/InputStream;Lgnu/kawa/io/Path;Lgnu/kawa/io/OutPort;)Lgnu/kawa/io/TtyInPort;| (in-stream path out-port)
   (let ((tty (make-instance (intern "gnu/kawa/io/TtyInPort" (find-package "OPENLDK.APP")))))
-    (|<init>(Ljava/io/InputStream;Lgnu/kawa/io/Path;Lgnu/kawa/io/OutPort;)| tty in-stream path out-port)
+    (|<init>(Ljava/io/InputStream;Lgnu/kawa/io/Path;Lgnu/kawa/io/OutPort;)V| tty in-stream path out-port)
     tty))
 (setf (gethash "gnu/kawa/io/TtyInPort.make(Ljava/io/InputStream;Lgnu/kawa/io/Path;Lgnu/kawa/io/OutPort;)Lgnu/kawa/io/TtyInPort;" *native-overrides*)
-      #'|gnu/kawa/io/TtyInPort.make(Ljava/io/InputStream;Lgnu/kawa/io/Path;Lgnu/kawa/io/OutPort;)|)
+      #'|gnu/kawa/io/TtyInPort.make(Ljava/io/InputStream;Lgnu/kawa/io/Path;Lgnu/kawa/io/OutPort;)Lgnu/kawa/io/TtyInPort;|)
 
 (defun |java/io/Console.encoding()| ()
   "Return the console encoding, or null for default."
@@ -319,21 +319,17 @@ user.variant
   (declare (ignore on))
   t)
 
-(defun |sun/nio/ch/IOUtil.initIDs()| ()
+(defun |sun/nio/ch/IOUtil.initIDs()V| ()
   "Initialize NIO IOUtil native IDs (no-op)."
   nil)
 
-(defmethod |run()| (arg)
-  (declare (ignore arg))
-  (error (%lisp-condition (%make-throwable '|java/lang/UnsupportedOperationException|))))
-
-(defun |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedExceptionAction;)| (action)
-  (let ((result (|run()| action)))
+(defun |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedExceptionAction;)Ljava/lang/Object;| (action)
+  (let ((result (|run()Ljava/lang/Object;| action)))
     result))
 
-(defun |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedExceptionAction;Ljava/security/AccessControlContext;)| (action context)
+(defun |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedExceptionAction;Ljava/security/AccessControlContext;)Ljava/lang/Object;| (action context)
   (declare (ignore context))
-  (let ((result (|run()| action)))
+  (let ((result (|run()Ljava/lang/Object;| action)))
     result))
 
 (defun %array-type-name-assignable-p (this-name other-name)
@@ -362,15 +358,15 @@ target component is assignable from the source component."
             (let ((t-class (%bin-type-name-to-class (substitute #\/ #\. tc)))
                   (o-class (%bin-type-name-to-class (substitute #\/ #\. oc))))
               (and t-class o-class
-                   (eql 1 (|isAssignableFrom(Ljava/lang/Class;)| t-class o-class)))))
+                   (eql 1 (|isAssignableFrom(Ljava/lang/Class;)Z| t-class o-class)))))
            (t nil))))
       ;; Primitive components must match exactly.
       (t (string= tc oc)))))
 
-(defmethod |isAssignableFrom(Ljava/lang/Class;)| ((this |java/lang/Class|) other)
+(defmethod |isAssignableFrom(Ljava/lang/Class;)Z| ((this |java/lang/Class|) other)
   (if (equal this other)
       1
-      (if (or (eq (|isPrimitive()| this) 1) (eq (|isPrimitive()| other) 1))
+      (if (or (eq (|isPrimitive()Z| this) 1) (eq (|isPrimitive()Z| other) 1))
           0
           (let ((this-name (lstring (slot-value this '|name|)))
                 (other-name (lstring (slot-value other '|name|))))
@@ -401,16 +397,16 @@ target component is assignable from the source component."
                      1
                      0))))))))
 
-(defun |java/lang/System.setIn0(Ljava/io/InputStream;)| (in-stream)
+(defun |java/lang/System.setIn0(Ljava/io/InputStream;)V| (in-stream)
   (setf (slot-value |+static-java/lang/System+| '|in|) in-stream))
 
-(defun |java/lang/System.setErr0(Ljava/io/PrintStream;)| (print-stream)
+(defun |java/lang/System.setErr0(Ljava/io/PrintStream;)V| (print-stream)
   (setf (slot-value |+static-java/lang/System+| '|err|) print-stream))
 
-(defun |java/lang/System.setOut0(Ljava/io/PrintStream;)| (print-stream)
+(defun |java/lang/System.setOut0(Ljava/io/PrintStream;)V| (print-stream)
   (setf (slot-value |+static-java/lang/System+| '|out|) print-stream))
 
-(defmethod |getIntVolatile(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) param-object param-long)
+(defmethod |getIntVolatile(Ljava/lang/Object;J)I| ((unsafe |sun/misc/Unsafe|) param-object param-long)
   (cond
     ((typep param-object 'java-array)
      (jaref param-object (%unsafe-array-index param-object param-long)))
@@ -421,7 +417,7 @@ target component is assignable from the source component."
     (t
      (slot-value param-object (%unsafe-slot-key param-long)))))
 
-(defmethod |putIntVolatile(Ljava/lang/Object;JI)| ((unsafe |sun/misc/Unsafe|) obj offset value)
+(defmethod |putIntVolatile(Ljava/lang/Object;JI)V| ((unsafe |sun/misc/Unsafe|) obj offset value)
   "Same as putInt for OpenLDK (no volatile semantics needed in Lisp)."
   (declare (ignore unsafe))
   (cond
@@ -434,7 +430,7 @@ target component is assignable from the source component."
     (t
      (setf (slot-value obj (%unsafe-slot-key offset)) value))))
 
-(defmethod |getCharVolatile(Ljava/lang/Object;J)| ((unsafe |sun/misc/Unsafe|) param-object param-long)
+(defmethod |getCharVolatile(Ljava/lang/Object;J)C| ((unsafe |sun/misc/Unsafe|) param-object param-long)
   (cond
     ((typep param-object 'java-array)
      (jaref param-object (%unsafe-array-index param-object param-long)))
@@ -457,16 +453,21 @@ target component is assignable from the source component."
 with ACC_SUPER (0x20) masked out (it is not a source-level modifier)."
   (cond
     ;; A primitive type: public, final and abstract, as on a JVM.
-    ((eq (|isPrimitive()| class) 1) #x411)
+    ((eq (|isPrimitive()Z| class) 1) #x411)
     ;; An array: its component's access, final and abstract, as on a JVM.
-    ((eq (|isArray()| class) 1)
-     (let ((component (|getComponentType()| class)))
+    ((eq (|isArray()Z| class) 1)
+     (let ((component (|getComponentType()Ljava/lang/Class;| class)))
        (logior (logand (%class-modifiers component) #x7) #x410)))
     (t
-     (let ((lclass (get-ldk-class-for-java-class class)))
-       (if lclass (logandc2 (access-flags lclass) #x20) 0)))))
+     ;; A nested class's come from its InnerClasses entry, which has
+     ;; static, private and protected.
+     (let* ((lclass (get-ldk-class-for-java-class class))
+            (entry (and lclass (%inner-class-entry lclass))))
+       (cond (entry (logandc2 (slot-value entry 'inner-class-access-flags) #x20))
+             (lclass (logandc2 (access-flags lclass) #x20))
+             (t 0))))))
 
-(defmethod |getModifiers()| ((class |java/lang/Class|))
+(defmethod |getModifiers()I| ((class |java/lang/Class|))
   (%class-modifiers class))
 
 ;; JDK 25's Class.getModifiers() reads the `modifiers` field directly rather
@@ -476,7 +477,7 @@ with ACC_SUPER (0x20) masked out (it is not a source-level modifier)."
 ;; non-public -- which breaks clojure.lang.Reflector ("Can't call public method
 ;; of non-public class: String.concat"). An :around survives the JIT-compiled
 ;; field-reading body and always returns the value computed from access flags.
-(defmethod |getModifiers()| :around ((class |java/lang/Class|))
+(defmethod |getModifiers()I| :around ((class |java/lang/Class|))
   (%class-modifiers class))
 
 ;; JDK 25 formats integers via jdk.internal.util.DecimalDigits, whose packed
@@ -505,9 +506,9 @@ class ($-separated) and compiler-added local/anonymous digits; arrays get []
 suffixes.  A nested class's simple name comes from its InnerClasses entry, as
 on a JVM; a class without one (generated, or hand-assembled) keeps the whole
 name after its package, $ and all."
-  (if (eq (|isArray()| class) 1)
+  (if (eq (|isArray()Z| class) 1)
       (concatenate 'string (%java-simple-name (|getComponentType()| class)) "[]")
-      (let* ((lclass (and (eq 0 (|isPrimitive()| class)) (get-ldk-class-for-java-class class)))
+      (let* ((lclass (and (eq 0 (|isPrimitive()Z| class)) (get-ldk-class-for-java-class class)))
              (entry (and lclass (%inner-class-entry lclass))))
         (if entry
             ;; A nested class: the simple name its InnerClasses entry gives
@@ -526,7 +527,7 @@ name after its package, $ and all."
 (setf (gethash "java/lang/Class.getSimpleName()Ljava/lang/String;" *native-overrides*)
       (lambda (class) (jstring (%java-simple-name class))))
 
-(defmethod |getSuperclass()| ((class |java/lang/Class|))
+(defmethod |getSuperclass()Ljava/lang/Class;| ((class |java/lang/Class|))
   (let ((lclass (get-ldk-class-for-java-class class)))
     (when (and lclass (super lclass))
       (or (gethash (super lclass) *java-classes-by-bin-name*)
@@ -542,11 +543,11 @@ name after its package, $ and all."
 ;; is called, triggering a NullPointerException on null.isArray().
 ;; This :around method catches that NPE and returns nil, which is
 ;; the correct result: Object has no superclass.
-(defmethod |getSuperclass()| :around (self)
+(defmethod |getSuperclass()Lgnu/bytecode/ClassType;| :around (self)
   (handler-case (call-next-method)
     (|condition-java/lang/NullPointerException| () nil)))
 
-(defmethod |getInterfaces0()| ((class |java/lang/Class|))
+(defmethod |getInterfaces0()[Ljava/lang/Class;| ((class |java/lang/Class|))
   ;; FIXME: do something different for interfaces?
   (let ((lclass (get-ldk-class-for-java-class class)))
     (make-java-array
@@ -597,14 +598,14 @@ name after its package, $ and all."
     (constructor params)
   (let* ((java-class (slot-value constructor '|clazz|))
          (bin-class-name (substitute #\/ #\. (lstring (slot-value java-class '|name|)))))
-    (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring bin-class-name) nil nil nil)
+    (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;| (jstring bin-class-name) nil nil nil)
     ;; Get class package from loader - class symbols live in loader's package
     (let* ((pkg (%java-class-package java-class))
            (class-sym (intern bin-class-name pkg))
            (obj (make-instance class-sym))
            (descriptor (build-method-descriptor (slot-value constructor '|parameterTypes|))))
       (if (string= "()V" descriptor)
-          (|<init>()| obj)
+          (|<init>()V| obj)
           (progn
             (apply (intern
                     (lispize-method-name
@@ -615,24 +616,24 @@ name after its package, $ and all."
       ; (format t "~&NEWINSTANCE0 ~A = ~A~%" constructor obj)
       obj)))
 
-(defmethod |ensureClassInitialized(Ljava/lang/Class;)| ((unsafe |sun/misc/Unsafe|) class)
+(defmethod |ensureClassInitialized(Ljava/lang/Class;)V| ((unsafe |sun/misc/Unsafe|) class)
   (let ((lclass (get-ldk-class-for-java-class class)))
     (when lclass
       (%clinit lclass))))
 
 ;; JDK 17: Unsafe.ensureClassInitialized0 — native variant
-(defmethod |ensureClassInitialized0(Ljava/lang/Class;)| ((unsafe |jdk/internal/misc/Unsafe|) class)
+(defmethod |ensureClassInitialized0(Ljava/lang/Class;)V| ((unsafe |jdk/internal/misc/Unsafe|) class)
   (let ((lclass (get-ldk-class-for-java-class class)))
     (when lclass
       (%clinit lclass))))
 
-(defmethod |shouldBeInitialized(Ljava/lang/Class;)| ((unsafe |sun/misc/Unsafe|) class)
+(defmethod |shouldBeInitialized(Ljava/lang/Class;)Z| ((unsafe |sun/misc/Unsafe|) class)
   (let ((lclass (get-ldk-class-for-java-class class)))
     (if (and lclass (initialized-p lclass))
         nil
         t)))
 
-(defmethod |shouldBeInitialized0(Ljava/lang/Class;)| ((unsafe |jdk/internal/misc/Unsafe|) class)
+(defmethod |shouldBeInitialized0(Ljava/lang/Class;)Z| ((unsafe |jdk/internal/misc/Unsafe|) class)
   (let ((lclass (get-ldk-class-for-java-class class)))
     (if (and lclass (initialized-p lclass))
         nil
@@ -641,7 +642,7 @@ name after its package, $ and all."
 (defvar *unsafe-memory-table* (make-hash-table))
 
 
-(defun |java/lang/System.mapLibraryName(Ljava/lang/String;)| (library-name)
+(defun |java/lang/System.mapLibraryName(Ljava/lang/String;)Ljava/lang/String;| (library-name)
   (or #+LINUX (jstring (format nil "lib~A.so" (lstring library-name)))
       #+DARWIN (jstring (format nil "lib~A.dylib" (lstring library-name)))
       (unimplemented "System.mapLibraryName on this platform")))
@@ -649,7 +650,7 @@ name after its package, $ and all."
 (defun |java/lang/ClassLoader.findBuiltinLib(Ljava/lang/String;)| (library-name)
   library-name)
 
-(defun |java/lang/ClassLoader.findLoadedClass0(Ljava/lang/String;)| (loader name)
+(defun |java/lang/ClassLoader.findLoadedClass0(Ljava/lang/String;)Ljava/lang/Class;| (loader name)
   "Check if a class has already been loaded by this class loader.
    Returns the java.lang.Class if found, nil otherwise."
   (let* ((class-name (lstring name))
@@ -659,20 +660,29 @@ name after its package, $ and all."
     (when ldk-loader
       (gethash bin-name (slot-value ldk-loader 'java-classes-by-bin-name)))))
 
-(defun |java/lang/ClassLoader.defineClass1(Ljava/lang/ClassLoader;Ljava/lang/String;[BIILjava/security/ProtectionDomain;Ljava/lang/String;)|
+(defun %classfile-name (bytes offset length)
+  "The binary name the class file in BYTES (from OFFSET, LENGTH long)
+declares: defineClass's for a null name, as the JVM takes it (the Scala
+REPL defines its classes so)."
+  (name (read-classfile (make-instance 'byte-array-input-stream
+                                       :array bytes :start offset :end (+ offset length)))))
+
+(defun |java/lang/ClassLoader.defineClass1(Ljava/lang/ClassLoader;Ljava/lang/String;[BIILjava/security/ProtectionDomain;Ljava/lang/String;)Ljava/lang/Class;|
     (loader name bytes offset len pd source)
   "Define a class from byte array data using the specified class loader.
    JDK 17 static native — delegates to %classload-from-stream for full
    class setup (module, inner classes, nest host, throwable conditions, etc.)."
   (declare (ignore pd source))
   (let* ((ldk-loader (get-ldk-loader-for-java-loader loader))
-         (class-name (substitute #\/ #\. (lstring name)))
+         (class-name (if name
+                         (substitute #\/ #\. (lstring name))
+                         (%classfile-name bytes offset len)))
          (stream (make-instance 'byte-array-input-stream
                                 :array bytes :start offset :end (+ offset len)))
          (result (%classload-from-stream class-name stream loader ldk-loader)))
     (unless result
       (let ((exc (%make-java-instance "java/lang/NoClassDefFoundError")))
-        (|<init>(Ljava/lang/String;)| exc name)
+        (|<init>(Ljava/lang/String;)V| exc name)
         (error (%lisp-condition exc))))
     (java-class result)))
 
@@ -681,7 +691,7 @@ name after its package, $ and all."
 MethodHandles.Lookup.defineHiddenClassWithClassData; read back by
 MethodHandles.classData().")
 
-(defun |java/lang/ClassLoader.defineClass0(Ljava/lang/ClassLoader;Ljava/lang/Class;Ljava/lang/String;[BIILjava/security/ProtectionDomain;ZILjava/lang/Object;)|
+(defun |java/lang/ClassLoader.defineClass0(Ljava/lang/ClassLoader;Ljava/lang/Class;Ljava/lang/String;[BIILjava/security/ProtectionDomain;ZILjava/lang/Object;)Ljava/lang/Class;|
     (loader lookup-class name bytes offset len pd initialize flags class-data)
   "JDK 25 native backing MethodHandles.Lookup.defineClass / defineHiddenClass.
    Loads a class from BYTES via %classload-from-stream under its own declared
@@ -700,7 +710,7 @@ MethodHandles.classData().")
          (result (%classload-from-stream class-name stream loader ldk-loader)))
     (unless result
       (let ((exc (%make-java-instance "java/lang/NoClassDefFoundError")))
-        (|<init>(Ljava/lang/String;)| exc (or name (jstring class-name)))
+        (|<init>(Ljava/lang/String;)V| exc (or name (jstring class-name)))
         (error (%lisp-condition exc))))
     (let ((jc (java-class result)))
       (when class-data
@@ -784,7 +794,7 @@ MethodHandles.classData().")
                                (loop for k in (reverse (closer-mop:class-precedence-list lisp-class))
                                      ;; Get each class's package from its symbol's package
                                      for clinit-pkg = (symbol-package (class-name k))
-                                     for clinit-function = (intern (format nil "~a.<clinit>()" (class-name k)) clinit-pkg)
+                                     for clinit-function = (intern (format nil "~a.<clinit>()V" (class-name k)) clinit-pkg)
                                      when (fboundp clinit-function)
                                        collect (let ((ldkclass (%get-ldk-class-by-bin-name (format nil "~A" (class-name k)) t ldk-loader)))
                                                  (when ldkclass
@@ -816,7 +826,7 @@ MethodHandles.classData().")
            (ignore native-h))
   1)
 
-(defmethod |notifyAll()| ((objref |java/lang/Object|))
+(defmethod |notifyAll()V| ((objref |java/lang/Object|))
   (let* ((monitor (%get-monitor objref))
          (mutex (mutex monitor))
          (cv (condition-variable monitor))
@@ -842,7 +852,7 @@ valid() work.  Tolerate a raw stream in fd for robustness."
         (slot-value fd '|fd|)
         fd)))
 
-(defmethod |open0(Ljava/lang/String;I)| ((fis |java/io/RandomAccessFile|) filename mode)
+(defmethod |open0(Ljava/lang/String;I)V| ((fis |java/io/RandomAccessFile|) filename mode)
   (handler-case
       (let ((stream (open (lstring filename)
                           :element-type '(unsigned-byte 8)
@@ -861,35 +871,35 @@ valid() work.  Tolerate a raw stream in fd for robustness."
     ((or sb-ext:file-does-not-exist sb-int:simple-file-error) (e)
       (declare (ignore e))
       (let ((fnf (%make-java-instance "java/io/FileNotFoundException")))
-        (|<init>(Ljava/lang/String;)| fnf filename)
+        (|<init>(Ljava/lang/String;)V| fnf filename)
         (error (%lisp-condition fnf))))))
 
-(defmethod |length0()| ((raf |java/io/RandomAccessFile|))
+(defmethod |length0()J| ((raf |java/io/RandomAccessFile|))
   ;; Flush buffered writes so file-length reflects them.
   (let ((s (%raf-stream raf)))
     (force-output s)
     (file-length s)))
 
-(defmethod |getFilePointer()| ((raf |java/io/RandomAccessFile|))
+(defmethod |getFilePointer()J| ((raf |java/io/RandomAccessFile|))
   (file-position (%raf-stream raf)))
 
-(defmethod |read0()| ((raf |java/io/RandomAccessFile|))
+(defmethod |read0()I| ((raf |java/io/RandomAccessFile|))
   (let ((byte (read-byte (%raf-stream raf) nil nil)))
     (if byte byte -1)))
 
-(defmethod |seek0(J)| ((raf |java/io/RandomAccessFile|) position)
+(defmethod |seek0(J)V| ((raf |java/io/RandomAccessFile|) position)
   (file-position (%raf-stream raf) position))
 
-(defmethod |write0(I)| ((raf |java/io/RandomAccessFile|) byte)
+(defmethod |write0(I)V| ((raf |java/io/RandomAccessFile|) byte)
   (write-byte (logand byte #xFF) (%raf-stream raf))
   nil)
 
-(defmethod |writeBytes0([BII)| ((raf |java/io/RandomAccessFile|) byte-array offset length)
+(defmethod |writeBytes0([BII)V| ((raf |java/io/RandomAccessFile|) byte-array offset length)
   (write-sequence (%convert-to-unsigned-8-bit (java-array-data byte-array))
                   (%raf-stream raf) :start offset :end (+ offset length))
   nil)
 
-(defmethod |readBytes0([BII)| ((raf |java/io/RandomAccessFile|) byte-array offset length)
+(defmethod |readBytes0([BII)I| ((raf |java/io/RandomAccessFile|) byte-array offset length)
   (let ((in-stream (%raf-stream raf))
         (bytes-read 0))
     (loop for i from offset below (+ offset length)
@@ -899,7 +909,7 @@ valid() work.  Tolerate a raw stream in fd for robustness."
              (incf bytes-read))  ; Count bytes read
     bytes-read))
 
-(defmethod |open0(Ljava/lang/String;)| ((fis |java/io/FileInputStream|) filename)
+(defmethod |open0(Ljava/lang/String;)V| ((fis |java/io/FileInputStream|) filename)
   (handler-case
       (let ((stream (open (lstring filename)
                           :element-type '(unsigned-byte 8)
@@ -913,7 +923,7 @@ valid() work.  Tolerate a raw stream in fd for robustness."
     ((or sb-ext:file-does-not-exist sb-int:simple-file-error) (e)
       (declare (ignore e))
       (let ((fnf (%make-java-instance "java/io/FileNotFoundException")))
-        (|<init>(Ljava/lang/String;)| fnf filename)
+        (|<init>(Ljava/lang/String;)V| fnf filename)
         (error (%lisp-condition fnf))))))
 
 ;; File descriptors OpenLDK hands to Java as plain integers -- the pipes to a
@@ -937,7 +947,7 @@ its FileDescriptor's fd (or its own fd slot), resolved by %RESOLVE-FD."
                      (slot-value file-descriptor '|fd|)
                      file-descriptor))))
 
-(defmethod |skip0(J)| ((fis |java/io/FileInputStream|) n)
+(defmethod |skip0(J)J| ((fis |java/io/FileInputStream|) n)
   (let* ((in-stream (%stream-fd fis))
          (bytes-read 0))
     (when (eq n :END)
@@ -948,7 +958,7 @@ its FileDescriptor's fd (or its own fd slot), resolved by %RESOLVE-FD."
           do (incf bytes-read))
     bytes-read))
 
-(defmethod |readBytes([BII)| ((fis |java/io/FileInputStream|) byte-array offset length)
+(defmethod |readBytes([BII)I| ((fis |java/io/FileInputStream|) byte-array offset length)
   (let* ((fd (%stream-fd fis))
          (in-stream (cond ((eql fd 0)
                            ;; Flush stdout before blocking on stdin, like C stdio.
@@ -974,7 +984,7 @@ its FileDescriptor's fd (or its own fd slot), resolved by %RESOLVE-FD."
                    (incf bytes-read)))))
     (if (and (zerop bytes-read) (plusp length)) -1 bytes-read)))
 
-(defmethod |available0()| ((fis |java/io/FileInputStream|))
+(defmethod |available0()I| ((fis |java/io/FileInputStream|))
   (let ((fd (%stream-fd fis)))
     (cond
       ((eql fd 0) 0)
@@ -984,7 +994,7 @@ its FileDescriptor's fd (or its own fd slot), resolved by %RESOLVE-FD."
          (error () (if (listen fd) 1 0))))
       (t 0))))
 
-(defmethod |isInstance(Ljava/lang/Object;)| ((this |java/lang/Class|) objref)
+(defmethod |isInstance(Ljava/lang/Object;)Z| ((this |java/lang/Class|) objref)
   (let* ((class-name (lstring (slot-value this '|name|)))
          (normalized-name (substitute #\/ #\. class-name))
          ;; Get class's loader package for correct type lookup
@@ -1007,7 +1017,7 @@ its FileDescriptor's fd (or its own fd slot), resolved by %RESOLVE-FD."
       ((typep objref class-symbol) 1)
       (t 0))))
 
-(defmethod |closeAll(Ljava/io/Closeable;)| ((stream stream) closeable)
+(defmethod |closeAll(Ljava/io/Closeable;)V| ((stream stream) closeable)
   (close stream))
 
 (defun %convert-to-unsigned-8-bit (signed-array)
@@ -1019,7 +1029,7 @@ its FileDescriptor's fd (or its own fd slot), resolved by %RESOLVE-FD."
             (logand (row-major-aref signed-array i) #xFF)))
     unsigned-array))
 
-(defmethod |writeBytes([BIIZ)| ((fos |java/io/FileOutputStream|) byte-array offset length append?)
+(defmethod |writeBytes([BIIZ)V| ((fos |java/io/FileOutputStream|) byte-array offset length append?)
   (declare (ignore append?))
   (let ((fd (%stream-fd fos)))
     (cond
@@ -1032,7 +1042,7 @@ its FileDescriptor's fd (or its own fd slot), resolved by %RESOLVE-FD."
       (t
        (unimplemented "fd ~A in FileOutputStream.writeBytes" fd)))))
 
-(defmethod |write(IZ)| ((fos |java/io/FileOutputStream|) byte append?)
+(defmethod |write(IZ)V| ((fos |java/io/FileOutputStream|) byte append?)
   (declare (ignore append?))
   (let ((fd (%stream-fd fos))
         (b (logand byte #xFF)))
@@ -1047,14 +1057,14 @@ its FileDescriptor's fd (or its own fd slot), resolved by %RESOLVE-FD."
 ;; In standard Java, FileOutputStream.write() calls the OS write() directly
 ;; (no Lisp-level buffering). In OpenLDK, writes go through SBCL's stream
 ;; buffering, so we need explicit force-output when Java code calls flush().
-(defmethod |flush()| ((fos |java/io/FileOutputStream|))
+(defmethod |flush()V| ((fos |java/io/FileOutputStream|))
   (let ((fd (%stream-fd fos)))
     (cond
       ((eq fd 1) (force-output *standard-output*))
       ((eq fd 2) (force-output *error-output*))
       ((streamp fd) (force-output fd)))))
 
-(defmethod |open0(Ljava/lang/String;Z)| ((fos |java/io/FileOutputStream|) filename append?)
+(defmethod |open0(Ljava/lang/String;Z)V| ((fos |java/io/FileOutputStream|) filename append?)
   (handler-case
       (let* ((stream (open (lstring filename)
                            :element-type '(unsigned-byte 8)
@@ -1070,10 +1080,10 @@ its FileDescriptor's fd (or its own fd slot), resolved by %RESOLVE-FD."
     ((or sb-ext:file-does-not-exist sb-int:simple-file-error) (e)
       (declare (ignore e))
       (let ((fnf (%make-java-instance "java/io/FileNotFoundException")))
-        (|<init>(Ljava/lang/String;)| fnf filename)
+        (|<init>(Ljava/lang/String;)V| fnf filename)
         (error (%lisp-condition fnf))))))
 
-(defmethod |close0()| (this)
+(defmethod |close0()V| (this)
   "Native close for file streams."
   (when (slot-exists-p this '|fd|)
     (let* ((fd-holder (slot-value this '|fd|))
@@ -1087,7 +1097,7 @@ its FileDescriptor's fd (or its own fd slot), resolved by %RESOLVE-FD."
         (remhash fd *fd-streams*))))
   nil)
 
-(defmethod |getEnclosingMethod0()| ((this |java/lang/Class|))
+(defmethod |getEnclosingMethod0()[Ljava/lang/Object;| ((this |java/lang/Class|))
   "Return Object[3] {enclosing Class, method name, method descriptor} from
 the EnclosingMethod attribute, or nil for classes that aren't local or
 anonymous.  Name/descriptor are null when enclosed by an initializer."
@@ -1097,7 +1107,7 @@ anonymous.  Name/descriptor are null when enclosed by an initializer."
         (let* ((cp (constant-pool lclass))
                (outer-ref (aref cp (car em)))
                (outer-name (slot-value (aref cp (index outer-ref)) 'value))
-               (outer-class (%get-java-class-by-bin-name outer-name t)))
+               (outer-class (%java-class-loading outer-name lclass)))
           (when outer-class
             (multiple-value-bind (mname mdesc)
                 (if (zerop (cdr em))
@@ -1111,7 +1121,7 @@ anonymous.  Name/descriptor are null when enclosed by an initializer."
                                          (and mname (jstring mname))
                                          (and mdesc (jstring mdesc)))))))))))
 
-(defmethod |getDeclaringClass0()| ((this |java/lang/Class|))
+(defmethod |getDeclaringClass0()Ljava/lang/Class;| ((this |java/lang/Class|))
   "Return the class that declares THIS as a member, from the InnerClasses
 attribute; nil for top-level, local, and anonymous classes."
   (let ((lclass (get-ldk-class-for-java-class this)))
@@ -1125,7 +1135,18 @@ attribute; nil for top-level, local, and anonymous classes."
               return (let* ((outer-ref (aref (constant-pool lclass) (outer-class-info-index ic)))
                             (outer-name (slot-value (aref (constant-pool lclass) (index outer-ref))
                                                     'value)))
-                       (%get-java-class-by-bin-name outer-name t))))))
+                       (%java-class-loading outer-name lclass))))))
+
+(defun %java-class-loading (bin-name from-lclass)
+  "The java.lang.Class for BIN-NAME, loading the class (through the loader
+of FROM-LCLASS) when it isn't loaded: a nested class can be loaded before
+the class declaring it."
+  (or (%get-java-class-by-bin-name bin-name t
+                                   (and (slot-boundp from-lclass 'ldk-loader)
+                                        (ldk-loader from-lclass)))
+      (%get-java-class-by-bin-name bin-name t)
+      (let ((lclass (ignore-errors (classload bin-name))))
+        (and lclass (java-class lclass)))))
 
 (defun %inner-class-entry (lclass)
   "LCLASS's own entry in its InnerClasses attribute, or NIL."
@@ -1136,11 +1157,11 @@ attribute; nil for top-level, local, and anonymous classes."
                (string= inner-name (name lclass)))
           return ic))
 
-(defmethod |getSimpleBinaryName0()| ((this |java/lang/Class|))
+(defmethod |getSimpleBinaryName0()Ljava/lang/String;| ((this |java/lang/Class|))
   "The simple name THIS's InnerClasses entry gives it; nil for a top-level
 or anonymous class (Class.isAnonymousClass, getSimpleName)."
-  (let* ((lclass (and (eq 0 (|isArray()| this))
-                      (eq 0 (|isPrimitive()| this))
+  (let* ((lclass (and (eq 0 (|isArray()Z| this))
+                      (eq 0 (|isPrimitive()Z| this))
                       (get-ldk-class-for-java-class this)))
          (entry (and lclass (%inner-class-entry lclass))))
     (when entry
@@ -1148,7 +1169,7 @@ or anonymous class (Class.isAnonymousClass, getSimpleName)."
         (unless (zerop index)
           (jstring (slot-value (aref (constant-pool lclass) index) 'value)))))))
 
-(defmethod |getPermittedSubclasses0()| ((this |java/lang/Class|))
+(defmethod |getPermittedSubclasses0()[Ljava/lang/Class;| ((this |java/lang/Class|))
   "JDK 17+ native for sealed classes: return the PermittedSubclasses array,
 or null when the class is not sealed.  OpenLDK does not track the
 PermittedSubclasses attribute, so report every class as non-sealed (null)
@@ -1157,7 +1178,7 @@ expect for ordinary interfaces/classes."
   (declare (ignore this))
   nil)
 
-(defmethod |getBooleanAttributes0(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
+(defmethod |getBooleanAttributes0(Ljava/io/File;)I| ((this |java/io/UnixFileSystem|) file)
   (handler-case
       (let ((attr (org.shirakumo.file-attributes:decode-attributes
                    (org.shirakumo.file-attributes:attributes (lstring (slot-value file '|path|))))))
@@ -1168,7 +1189,7 @@ expect for ordinary interfaces/classes."
       (declare (ignore e))
       0)))
 
-(defmethod |getNameMax0(Ljava/lang/String;)| ((this |java/io/UnixFileSystem|) path)
+(defmethod |getNameMax0(Ljava/lang/String;)J| ((this |java/io/UnixFileSystem|) path)
   "The longest file name allowed in the directory PATH: pathconf's
 _PC_NAME_MAX.  File.createTempFile asks for it."
   (declare (ignore path))
@@ -1180,7 +1201,7 @@ _PC_NAME_MAX.  File.createTempFile asks for it."
 (defun %file-path (file)
   (lstring (slot-value file '|path|)))
 
-(defmethod |createFileExclusively0(Ljava/lang/String;)| ((this |java/io/UnixFileSystem|) path)
+(defmethod |createFileExclusively0(Ljava/lang/String;)Z| ((this |java/io/UnixFileSystem|) path)
   "Create the file PATH unless it exists: 1 if this created it, 0 if it
 already existed."
   (handler-case
@@ -1196,15 +1217,15 @@ already existed."
                   (%make-throwable '|java/io/IOException|
                                    (sb-int:strerror (sb-posix:syscall-errno e)))))))))
 
-(defmethod |createDirectory0(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
+(defmethod |createDirectory0(Ljava/io/File;)Z| ((this |java/io/UnixFileSystem|) file)
   (handler-case (progn (sb-posix:mkdir (%file-path file) #o777) 1)
     (error () 0)))
 
-(defmethod |rename0(Ljava/io/File;Ljava/io/File;)| ((this |java/io/UnixFileSystem|) from to)
+(defmethod |rename0(Ljava/io/File;Ljava/io/File;)Z| ((this |java/io/UnixFileSystem|) from to)
   (handler-case (progn (sb-posix:rename (%file-path from) (%file-path to)) 1)
     (error () 0)))
 
-(defmethod |setLastModifiedTime0(Ljava/io/File;J)| ((this |java/io/UnixFileSystem|) file millis)
+(defmethod |setLastModifiedTime0(Ljava/io/File;J)Z| ((this |java/io/UnixFileSystem|) file millis)
   (handler-case
       (let* ((path (%file-path file))
              (atime (sb-posix:stat-atime (sb-posix:stat path))))
@@ -1212,7 +1233,7 @@ already existed."
         1)
     (error () 0)))
 
-(defmethod |setPermission0(Ljava/io/File;IZZ)| ((this |java/io/UnixFileSystem|) file access enable owner-only)
+(defmethod |setPermission0(Ljava/io/File;IZZ)Z| ((this |java/io/UnixFileSystem|) file access enable owner-only)
   "ACCESS is 4 (read), 2 (write) or 1 (execute): set or clear it for the
 owner, or for everyone unless OWNER-ONLY."
   (handler-case
@@ -1226,7 +1247,7 @@ owner, or for everyone unless OWNER-ONLY."
         1)
     (error () 0)))
 
-(defmethod |setReadOnly0(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
+(defmethod |setReadOnly0(Ljava/io/File;)Z| ((this |java/io/UnixFileSystem|) file)
   (handler-case
       (let* ((path (%file-path file))
              (mode (sb-posix:stat-mode (sb-posix:stat path))))
@@ -1234,24 +1255,24 @@ owner, or for everyone unless OWNER-ONLY."
         1)
     (error () 0)))
 
-(defmethod |getSpace0(Ljava/io/File;I)| ((this |java/io/UnixFileSystem|) file kind)
+(defmethod |getSpace0(Ljava/io/File;I)J| ((this |java/io/UnixFileSystem|) file kind)
   "Total, free or usable space of FILE's file system.  OpenLDK doesn't ask
 the file system: 0, what the JDK answers when it can't tell."
   (declare (ignore file kind))
   0)
 
-(defmethod |getLength0(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
+(defmethod |getLength0(Ljava/io/File;)J| ((this |java/io/UnixFileSystem|) file)
   "Length of FILE in bytes, or 0 if it cannot be read, as the JDK's native does."
   (handler-case
       (with-open-file (stream (lstring (slot-value file '|path|)) :element-type '(unsigned-byte 8))
         (file-length stream))
     (error () 0)))
 
-(defmethod |getLength(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
+(defmethod |getLength(Ljava/io/File;)J| ((this |java/io/UnixFileSystem|) file)
   "Legacy name for getLength0 — older JDKs call this directly."
-  (|getLength0(Ljava/io/File;)| this file))
+  (|getLength0(Ljava/io/File;)J| this file))
 
-(defmethod |delete0(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
+(defmethod |delete0(Ljava/io/File;)Z| ((this |java/io/UnixFileSystem|) file)
   "Delete the file (or empty directory); return 1 on success, 0 on failure."
   (handler-case
       (let ((path (lstring (slot-value file '|path|))))
@@ -1261,7 +1282,7 @@ the file system: 0, what the JDK answers when it can't tell."
         1)
     (error () 0)))
 
-(defmethod |list0(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
+(defmethod |list0(Ljava/io/File;)[Ljava/lang/String;| ((this |java/io/UnixFileSystem|) file)
   (handler-case
       (let* ((path (lstring (slot-value file '|path|)))
              (dir (uiop:directory-files (uiop:ensure-directory-pathname path)))
@@ -1274,25 +1295,25 @@ the file system: 0, what the JDK answers when it can't tell."
       (declare (ignore e))
       nil)))
 
-(defmethod |list(Ljava/io/File;)| ((this |java/io/UnixFileSystem|) file)
+(defmethod |list(Ljava/io/File;)[Ljava/lang/String;| ((this |java/io/UnixFileSystem|) file)
   "Legacy name for list0 — older JDKs call this directly."
-  (|list0(Ljava/io/File;)| this file))
+  (|list0(Ljava/io/File;)[Ljava/lang/String;| this file))
 
-(defun |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedAction;Ljava/security/AccessControlContext;)| (action context)
+(defun |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedAction;Ljava/security/AccessControlContext;)Ljava/lang/Object;| (action context)
   (declare (ignore context))
-  (let ((result (|run()| action)))
+  (let ((result (|run()Ljava/lang/Object;| action)))
     result))
 
-(defun |java/net/InetAddress.init()| ()
+(defun |java/net/InetAddress.init()V| ()
   nil)
 
-(defun |java/io/ObjectStreamClass.initNative()| ()
+(defun |java/io/ObjectStreamClass.initNative()V| ()
   nil)
 
-(defmethod |java/lang/System.gc()| ()
+(defmethod |java/lang/System.gc()V| ()
   (trivial-garbage:gc))
 
-(defun |java/lang/Thread.sleep(J)| (milliseconds)
+(defun |java/lang/Thread.sleep(J)V| (milliseconds)
   "Legacy public native sleep(J) — newer JDKs compile this as bytecode
 delegating to sleep0/sleepNanos0, clobbering this defun; the real
 implementation therefore lives in %java-thread-sleep."
@@ -1311,7 +1332,7 @@ implementation therefore lives in %java-thread-sleep."
       ;; Clear interrupt flag and throw InterruptedException
       (setf (gethash current-java-thread *thread-interrupted*) nil)
       (let ((exc (%make-java-instance "java/lang/InterruptedException")))
-        (|<init>()| exc)
+        (|<init>()V| exc)
         (error (%lisp-condition exc))))
     ;; Sleep — use fiber-sleep when in fiber context
     #+sb-fiber
@@ -1326,7 +1347,7 @@ implementation therefore lives in %java-thread-sleep."
       ;; Clear interrupt flag and throw InterruptedException
       (setf (gethash current-java-thread *thread-interrupted*) nil)
       (let ((exc (%make-java-instance "java/lang/InterruptedException")))
-        (|<init>()| exc)
+        (|<init>()V| exc)
         (error (%lisp-condition exc))))))
 
 (defun %string-to-signed-byte-array (string)
@@ -1340,7 +1361,7 @@ Java byte[] data stores signed bytes, so octets are converted."
                           (lambda (b) (if (> b 127) (- b 256) b))
                           (flexi-streams:string-to-octets string :external-format :utf-8))))
 
-(defun |java/lang/ProcessEnvironment.environ()| ()
+(defun |java/lang/ProcessEnvironment.environ()[[B| ()
   (let ((env (remove-if (lambda (e) (not (find #\= e))) (sb-ext:posix-environ))))
     (let ((jenvs (make-java-array :component-class "[B" :size (* 2 (length env)))))
       (loop for kv in env
@@ -1351,7 +1372,7 @@ Java byte[] data stores signed bytes, so octets are converted."
                  (setf (jaref jenvs (+ i 1)) (%string-to-signed-byte-array (subseq kv (1+ p))))))
       jenvs)))
 
-(defun |java/lang/System.identityHashCode(Ljava/lang/Object;)| (objref)
+(defun |java/lang/System.identityHashCode(Ljava/lang/Object;)I| (objref)
   ;; Return a unique, stable identity hash per object instance.
   ;; SBCL's sxhash returns the same value for all instances of the same
   ;; CLOS class, which breaks identity-based hash tables like Kawa's
@@ -1366,11 +1387,11 @@ Java byte[] data stores signed bytes, so octets are converted."
               (setf (gethash objref *identity-hash-table*) hash)
               hash)))))
 
-(defun |java/lang/Thread.yield()| ()
+(defun |java/lang/Thread.yield()V| ()
   #+sb-fiber
   (when (in-fiber-p)
     (sb-thread:fiber-yield)
-    (return-from |java/lang/Thread.yield()|))
+    (return-from |java/lang/Thread.yield()V|))
   ;; Platform thread: actually yield the OS thread; a no-op busy-spins j.u.c
   ;; spin-then-yield backoff loops.  See Thread.yield0 in native/threads.lisp.
   (sb-thread:thread-yield)
@@ -1384,7 +1405,7 @@ present.  Consumed by Thread.getState()/start()/getThreadGroup()."
       (when (and holder (slot-exists-p holder '|threadStatus|))
         (setf (slot-value holder '|threadStatus|) status)))))
 
-(defmethod |start0()| ((thread |java/lang/Thread|))
+(defmethod |start0()V| ((thread |java/lang/Thread|))
   "Start a new Lisp thread that executes the Thread's run() method."
   ;; JDK 25's Thread.isAlive() is a bytecode method delegating to alive(),
   ;; which returns (eetop != 0).  The JIT compiles those over any Lisp override,
@@ -1415,7 +1436,7 @@ present.  Consumed by Thread.getState()/start()/getThreadGroup()."
                                          "~&Error signalled in ~A: ~A~%" thread e)
                                  (sb-debug:print-backtrace
                                   :stream *error-output* :count 60)))))
-                        (|run()| thread))
+                        (|run()V| thread))
                     (error (e)
                       (format *error-output* "~&Thread ~A terminated with error: ~A~%" thread e)))
                ;; On termination: mark not-alive (eetop=0) and wake any thread
@@ -1427,13 +1448,13 @@ present.  Consumed by Thread.getState()/start()/getThreadGroup()."
                (ignore-errors
                 (monitor-enter thread)
                 (unwind-protect
-                     (|notifyAll()| thread)
+                     (|notifyAll()V| thread)
                   (monitor-exit thread)))))
            :name (format nil "Java-Thread-~A" (slot-value thread '|name|)))))
     ;; Store the Lisp thread in our mapping
     (setf (gethash thread *java-threads*) lisp-thread)))
 
-(defmethod |interrupt0()| ((thread |java/lang/Thread|))
+(defmethod |interrupt0()V| ((thread |java/lang/Thread|))
   "Interrupt the thread by signaling the underlying Lisp thread (or fiber)."
   ;; The interrupted status is maintained in the *thread-interrupted* hash table.
   (setf (gethash thread *thread-interrupted*) t)
@@ -1442,11 +1463,11 @@ present.  Consumed by Thread.getState()/start()/getThreadGroup()."
   (let ((fiber (gethash thread *java-to-fibers*)))
     (when fiber
       (setf (gethash fiber *fiber-park-flags*) t)
-      (return-from |interrupt0()|)))
+      (return-from |interrupt0()V|)))
   ;; A parked thread just returns from park, as LockSupport specifies; it
   ;; checks the interrupted status itself, so don't throw into it.
   (when (%unpark-java-thread thread)
-    (return-from |interrupt0()|))
+    (return-from |interrupt0()V|))
   ;; If the thread has an associated Lisp thread, interrupt it.
   (let ((lisp-thread (gethash thread *java-threads*)))
     (when lisp-thread
@@ -1457,10 +1478,10 @@ present.  Consumed by Thread.getState()/start()/getThreadGroup()."
          ;; Check if interrupted flag is set and throw InterruptedException
          (when (gethash thread *thread-interrupted*)
            (let ((exc (%make-java-instance "java/lang/InterruptedException")))
-             (|<init>()| exc)
+             (|<init>()V| exc)
              (error (%lisp-condition exc)))))))))
 
-(defmethod |notify()| ((objref |java/lang/Object|))
+(defmethod |notify()V| ((objref |java/lang/Object|))
   (let* ((monitor (%get-monitor objref))
          (mutex (mutex monitor))
          (cv (condition-variable monitor))
@@ -1489,7 +1510,7 @@ present.  Consumed by Thread.getState()/start()/getThreadGroup()."
                (let ((arg (jaref args i))
                      (param-type (when param-types (jaref param-types i))))
                  ;; Only unbox if parameter type is primitive (isPrimitive returns 1)
-                 (when (and param-type (eq 1 (|isPrimitive()| param-type)))
+                 (when (and param-type (eq 1 (|isPrimitive()Z| param-type)))
                    (cond
                      ((typep arg '|java/lang/Integer|)
                       (setf (jaref args i) (slot-value arg '|value|)))
@@ -1541,17 +1562,17 @@ present.  Consumed by Thread.getState()/start()/getThreadGroup()."
     (when *debug-trace*
       (incf *call-nesting-level* -1))))
 
-(defun |java/lang/reflect/Array.newArray(Ljava/lang/Class;I)| (class size)
+(defun |java/lang/reflect/Array.newArray(Ljava/lang/Class;I)Ljava/lang/Object;| (class size)
   (make-java-array :size size
                    :component-class class
                    :initial-element nil))
 
-(defmethod |findLoadedClass0(Ljava/lang/String;)| ((loader |java/lang/ClassLoader|) name)
+(defmethod |findLoadedClass0(Ljava/lang/String;)Ljava/lang/Class;| ((loader |java/lang/ClassLoader|) name)
   "Return the class NAME if LOADER already loaded it (its own map only --
 parent delegation is the Java caller's job)."
-  (|java/lang/ClassLoader.findLoadedClass0(Ljava/lang/String;)| loader name))
+  (|java/lang/ClassLoader.findLoadedClass0(Ljava/lang/String;)Ljava/lang/Class;| loader name))
 
-(defmethod |findBootstrapClass(Ljava/lang/String;)| ((loader |java/lang/ClassLoader|) name)
+(defmethod |findBootstrapClass(Ljava/lang/String;)Ljava/lang/Class;| ((loader |java/lang/ClassLoader|) name)
   (handler-case
       (let ((ldk-class (%classload-system (substitute #\/ #\. (lstring name)))))
         (java-class ldk-class))
@@ -1562,7 +1583,7 @@ parent delegation is the Java caller's job)."
 ;; JDK 17: findBootstrapClass is a private static native method.  Only the
 ;; boot and app loaders' classes: a class a user loader defined is not a
 ;; bootstrap class, though the global by-name table holds it too.
-(defun |java/lang/ClassLoader.findBootstrapClass(Ljava/lang/String;)| (name)
+(defun |java/lang/ClassLoader.findBootstrapClass(Ljava/lang/String;)Ljava/lang/Class;| (name)
   (handler-case
       (let ((ldk-class (%classload-system (substitute #\/ #\. (lstring name)))))
         (java-class ldk-class))
@@ -1621,9 +1642,9 @@ PathManager finds the Kotlin compiler's jar this way)."
         (put '|ref| (and ref (jstring ref)))
         (put '|hashCode| -1)
         (when (and (slot-exists-p url '|handler|)
-                   (fboundp '|java/net/URL.getURLStreamHandler(Ljava/lang/String;)|))
+                   (fboundp '|java/net/URL.getURLStreamHandler(Ljava/lang/String;)Ljava/net/URLStreamHandler;|))
           (put '|handler| (ignore-errors
-                           (funcall '|java/net/URL.getURLStreamHandler(Ljava/lang/String;)|
+                           (funcall '|java/net/URL.getURLStreamHandler(Ljava/lang/String;)Ljava/net/URLStreamHandler;|
                                     (jstring protocol)))))))))
 
 (defmethod |getBootstrapResource(Ljava/lang/String;)| ((loader |java/lang/ClassLoader|) name)
@@ -1654,7 +1675,7 @@ PathManager finds the Kotlin compiler's jar this way)."
   (let ((byte (read-byte (slot-value this 'lisp-stream) nil nil)))
     (if byte byte -1)))
 
-(defmethod |read([BII)| ((this <resource-input-stream>) byte-array offset length)
+(defmethod |read([BII)I| ((this <resource-input-stream>) byte-array offset length)
   "Read up to LENGTH bytes into BYTE-ARRAY starting at OFFSET.
 Java byte arrays hold SIGNED bytes; read-byte yields 0..255."
   (let ((stream (slot-value this 'lisp-stream))
@@ -1673,7 +1694,7 @@ Java byte arrays hold SIGNED bytes; read-byte yields 0..255."
     (close stream)
     (setf (slot-value this 'lisp-stream) nil)))
 
-(defun |java/lang/ClassLoader.getSystemResourceAsStream(Ljava/lang/String;)| (name)
+(defun |java/lang/ClassLoader.getSystemResourceAsStream(Ljava/lang/String;)Ljava/io/InputStream;| (name)
   "Get a system resource as an InputStream."
   (let ((resource-name (lstring name)))
     (when-let (stream (open-resource-on-classpath resource-name))
@@ -1704,10 +1725,10 @@ Java byte arrays hold SIGNED bytes; read-byte yields 0..255."
 
 ;; Note: |openStream()| for java/net/URL is defined in url.lisp after the class is loaded
 
-(defun |java/io/UnixFileSystem.initIDs()| ()
+(defun |java/io/UnixFileSystem.initIDs()V| ()
   nil)
 
-(defmethod |canonicalize0(Ljava/lang/String;)| ((ufs |java/io/UnixFileSystem|) filename)
+(defmethod |canonicalize0(Ljava/lang/String;)Ljava/lang/String;| ((ufs |java/io/UnixFileSystem|) filename)
   (declare (ignore ufs))
   (let ((path-str (lstring filename)))
     (when *debug-trace*
@@ -1733,7 +1754,7 @@ Java byte arrays hold SIGNED bytes; read-byte yields 0..255."
                     path-str (lstring result)))
           result)))))
 
-(defmethod |checkAccess0(Ljava/io/File;I)| ((ufs |java/io/UnixFileSystem|) file access-mode)
+(defmethod |checkAccess0(Ljava/io/File;I)Z| ((ufs |java/io/UnixFileSystem|) file access-mode)
   "JDK 25 private native checkAccess0 — must hold the implementation;
 the bytecode checkAccess wrapper delegates here and clobbers any
 same-named defmethod."
@@ -1742,11 +1763,11 @@ same-named defmethod."
   (handler-case (progn (sb-posix:access (lstring (slot-value file '|path|)) access-mode) 1)
     (error () 0)))
 
-(defmethod |checkAccess(Ljava/io/File;I)| ((ufs |java/io/UnixFileSystem|) file access-mode)
+(defmethod |checkAccess(Ljava/io/File;I)Z| ((ufs |java/io/UnixFileSystem|) file access-mode)
   "Legacy public native checkAccess — older JDKs call this directly."
-  (|checkAccess0(Ljava/io/File;I)| ufs file access-mode))
+  (|checkAccess0(Ljava/io/File;I)Z| ufs file access-mode))
 
-(defmethod |getLastModifiedTime0(Ljava/io/File;)| ((ufs |java/io/UnixFileSystem|) file)
+(defmethod |getLastModifiedTime0(Ljava/io/File;)J| ((ufs |java/io/UnixFileSystem|) file)
   "Modification time of FILE in milliseconds, or 0 if it does not exist."
   (declare (ignore ufs))
   ;; MODIFICATION-TIME is a universal time, counted from 1900.
@@ -1757,29 +1778,29 @@ same-named defmethod."
                 1000))
     (error () 0)))
 
-(defmethod |getLastModifiedTime(Ljava/io/File;)| ((ufs |java/io/UnixFileSystem|) file)
+(defmethod |getLastModifiedTime(Ljava/io/File;)J| ((ufs |java/io/UnixFileSystem|) file)
   "Legacy name for getLastModifiedTime0 — older JDKs call this directly."
-  (|getLastModifiedTime0(Ljava/io/File;)| ufs file))
+  (|getLastModifiedTime0(Ljava/io/File;)J| ufs file))
 
 (defun |sun/misc/Perf.registerNatives()| ()
   nil)
 
 ;; JDK 9+ moved Perf to jdk.internal.perf; ClassLoader.loadClass uses it to
 ;; count findClass calls.
-(defun |jdk/internal/perf/Perf.registerNatives()| ()
+(defun |jdk/internal/perf/Perf.registerNatives()V| ()
   nil)
 
-(defmethod |createLong(Ljava/lang/String;IIJ)| (perf name variability units value)
+(defmethod |createLong(Ljava/lang/String;IIJ)Ljava/nio/ByteBuffer;| (perf name variability units value)
   (classload "java/nio/DirectByteBuffer")
   (let* ((dbb (%make-java-instance "java/nio/DirectByteBuffer"))
          (mem (sb-alien:make-alien sb-alien:long 1))
          (ptr (sb-sys:sap-int (sb-alien:alien-sap mem))))
     (setf (gethash ptr *unsafe-memory-table*) (cons mem 8))
     (setf (sb-alien:deref mem 0) value)
-    (|<init>(JJ)| dbb ptr 8)
+    (|<init>(JJ)V| dbb ptr 8)
     dbb))
 
-(defmethod |getBoolean(Ljava/lang/Object;J)|((unsafe |sun/misc/Unsafe|) objref ptr)
+(defmethod |getBoolean(Ljava/lang/Object;J)Z|((unsafe |sun/misc/Unsafe|) objref ptr)
   (declare (ignore unsafe))
   (let* ((field (gethash ptr *field-offset-table*))
          (key (%unsafe-slot-key ptr))
@@ -1805,7 +1826,7 @@ same-named defmethod."
         sum (ash (logand (jaref array (+ offset index)) #xff)
                  (* index 8))))
 
-(defmethod |getByte(Ljava/lang/Object;J)|
+(defmethod |getByte(Ljava/lang/Object;J)B|
     ((unsafe |sun/misc/Unsafe|) objref ptr)
   (declare (ignore unsafe))
   (cond
@@ -1820,7 +1841,7 @@ same-named defmethod."
                          :openldk)))
        (slot-value objref key)))))
 
-(defmethod |getShort(Ljava/lang/Object;J)|
+(defmethod |getShort(Ljava/lang/Object;J)S|
     ((unsafe |sun/misc/Unsafe|) objref ptr)
   (declare (ignore unsafe))
   (cond
@@ -1835,7 +1856,7 @@ same-named defmethod."
                          :openldk)))
        (slot-value objref key)))))
 
-(defmethod |getInt(Ljava/lang/Object;J)|((unsafe |sun/misc/Unsafe|) objref ptr)
+(defmethod |getInt(Ljava/lang/Object;J)I|((unsafe |sun/misc/Unsafe|) objref ptr)
   (declare (ignore unsafe))
   (if (%unsafe-byte-array-p objref)
       (unsigned-to-signed-integer (%unsafe-read-byte-array objref ptr 4))
@@ -1848,7 +1869,7 @@ same-named defmethod."
                 (slot-value (%unsafe-static-storage field) key)
                 (sb-sys:signed-sap-ref-32 (sb-sys:int-sap ptr) 0))))))
 
-(defmethod |putLong(Ljava/lang/Object;JJ)|((unsafe |sun/misc/Unsafe|) objref ptr value)
+(defmethod |putLong(Ljava/lang/Object;JJ)V|((unsafe |sun/misc/Unsafe|) objref ptr value)
   (declare (ignore unsafe))
   (let ((field (gethash ptr *field-offset-table*))
         (key (%unsafe-slot-key ptr)))
@@ -1859,7 +1880,7 @@ same-named defmethod."
             (setf (slot-value (%unsafe-static-storage field) key) value)
             (setf (sb-sys:signed-sap-ref-64 (sb-sys:int-sap ptr) 0) value)))))
 
-(defmethod |putInt(Ljava/lang/Object;JI)|((unsafe |sun/misc/Unsafe|) objref ptr value)
+(defmethod |putInt(Ljava/lang/Object;JI)V|((unsafe |sun/misc/Unsafe|) objref ptr value)
   (declare (ignore unsafe))
   (let ((field (gethash ptr *field-offset-table*))
         (key (%unsafe-slot-key ptr)))
@@ -1870,7 +1891,7 @@ same-named defmethod."
             (setf (slot-value (%unsafe-static-storage field) key) value)
             (setf (sb-sys:signed-sap-ref-32 (sb-sys:int-sap ptr) 0) value)))))
 
-(defmethod |getLong(Ljava/lang/Object;J)|((unsafe |sun/misc/Unsafe|) objref ptr)
+(defmethod |getLong(Ljava/lang/Object;J)J|((unsafe |sun/misc/Unsafe|) objref ptr)
   (declare (ignore unsafe))
   (if (%unsafe-byte-array-p objref)
       (unsigned-to-signed-long (%unsafe-read-byte-array objref ptr 8))
@@ -1891,7 +1912,7 @@ same-named defmethod."
                    (eval (intern (format nil "+static-~A+" bin-name) pkg)) key))
                 (sb-sys:signed-sap-ref-64 (sb-sys:int-sap ptr) 0))))))
 
-(defmethod |getFloat(Ljava/lang/Object;J)|
+(defmethod |getFloat(Ljava/lang/Object;J)F|
     ((unsafe |sun/misc/Unsafe|) objref ptr)
   (declare (ignore unsafe))
   (if objref
@@ -1902,7 +1923,7 @@ same-named defmethod."
         (slot-value objref key))
       (sb-sys:sap-ref-single (sb-sys:int-sap ptr) 0)))
 
-(defmethod |putFloat(Ljava/lang/Object;JF)|
+(defmethod |putFloat(Ljava/lang/Object;JF)V|
     ((unsafe |sun/misc/Unsafe|) objref ptr value)
   (declare (ignore unsafe))
   (if objref
@@ -1914,7 +1935,7 @@ same-named defmethod."
       (setf (sb-sys:sap-ref-single (sb-sys:int-sap ptr) 0)
             (coerce value 'single-float))))
 
-(defmethod |getDouble(Ljava/lang/Object;J)|
+(defmethod |getDouble(Ljava/lang/Object;J)D|
     ((unsafe |sun/misc/Unsafe|) objref ptr)
   (declare (ignore unsafe))
   (if objref
@@ -1925,7 +1946,7 @@ same-named defmethod."
         (slot-value objref key))
       (sb-sys:sap-ref-double (sb-sys:int-sap ptr) 0)))
 
-(defmethod |putDouble(Ljava/lang/Object;JD)|
+(defmethod |putDouble(Ljava/lang/Object;JD)V|
     ((unsafe |sun/misc/Unsafe|) objref ptr value)
   (declare (ignore unsafe))
   (if objref
@@ -1937,7 +1958,7 @@ same-named defmethod."
       (setf (sb-sys:sap-ref-double (sb-sys:int-sap ptr) 0)
             (coerce value 'double-float))))
 
-(defmethod |getLong(J)| ((unsafe |sun/misc/Unsafe|) ptr)
+(defmethod |getLong(J)J| ((unsafe |sun/misc/Unsafe|) ptr)
   (declare (ignore unsafe))
   ;; Convert the integer pointer back to a system address pointer (SAP)
   (let ((sap (sb-sys:int-sap ptr)))
@@ -1954,7 +1975,7 @@ same-named defmethod."
     (sb-alien:with-alien ((mem (* sb-alien:long) sap))
       (sb-alien:deref mem 0))))
 
-(defmethod |setMemory(Ljava/lang/Object;JJB)| ((unsafe |sun/misc/Unsafe|) obj ptr size byte)
+(defmethod |setMemory(Ljava/lang/Object;JJB)V| ((unsafe |sun/misc/Unsafe|) obj ptr size byte)
   (assert (null obj))
   (let ((sap (sb-sys:int-sap ptr)))
     ;; Loop through the memory range and set each byte to the specified value
@@ -1964,6 +1985,6 @@ same-named defmethod."
         ;; Set the byte at the current offset
         (setf (sb-sys:sap-ref-8 offset-sap 0) byte)))))
 
-(defun |java/lang/Shutdown.beforeHalt()| ()
+(defun |java/lang/Shutdown.beforeHalt()V| ()
   nil)
 

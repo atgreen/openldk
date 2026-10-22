@@ -79,6 +79,7 @@
            #:funcall
            #:define
            #:ex-data
+           #:enable-syntax
            #:to-lisp
            #:from-lisp))
 
@@ -365,3 +366,83 @@ FOREIGN-ERROR, or of its first cause that has one, as Lisp data."
         while throwable
         do (let ((data (%invoke *ex-data-fn* throwable)))
              (when data (return (to-lisp data))))))
+
+;;; Clojure syntax in Lisp source
+;;;
+;;; After (clojure:enable-syntax), #[ ... ] holds Clojure source, written
+;;; as Clojure writes it -- vectors, maps, sets, #() functions, @, \c
+;;; characters -- and evaluates it, returning the last value as Lisp data:
+;;;
+;;;   #[ (->> (range 10) (filter even?) (map #(* % %))) ]   => (0 4 16 36 64)
+;;;
+;;; $name and $(form) splice in Lisp values, passed as objects (not
+;;; printed), so lexical variables and Lisp functions work too:
+;;;
+;;;   (let ((xs '(3 1 2))) #[ (sort > $xs) ])                => (3 2 1)
+;;;   #[ (map $#'1+ [1 2 3]) ]                                => (2 3 4)
+
+(defvar *lisp-value-counter* 0)
+
+(defun %symbol-end-p (char)
+  (or (member char '(#\( #\) #\[ #\] #\{ #\} #\" #\; #\,))
+      (member char '(#\Space #\Tab #\Newline #\Return #\Page))))
+
+(defun %read-clojure-source (stream)
+  "Read Clojure source from STREAM up to the ] that closes it.  Return the
+source, with each $ splice replaced by the name of a Clojure var, and an
+alist of those names and the Lisp forms whose values they hold."
+  (let ((depth 0)
+        (splices '()))
+    (values
+     (with-output-to-string (out)
+       (loop for char = (read-char stream t nil t)
+             do (case char
+                  ((#\( #\[ #\{) (incf depth) (write-char char out))
+                  ((#\) #\}) (decf depth) (write-char char out))
+                  (#\] (if (zerop depth)
+                           (loop-finish)
+                           (progn (decf depth) (write-char char out))))
+                  (#\" ; a string: copy to its closing quote
+                   (write-char char out)
+                   (loop for c = (read-char stream t nil t)
+                         do (write-char c out)
+                            (case c
+                              (#\\ (write-char (read-char stream t nil t) out))
+                              (#\" (return)))))
+                  (#\\ ; a character literal: \( isn't an open paren
+                   (write-char char out)
+                   (write-char (read-char stream t nil t) out))
+                  (#\; ; a comment, to the end of the line
+                   (loop for c = (read-char stream nil #\Newline t)
+                         until (char= c #\Newline))
+                   (write-char #\Newline out))
+                  (#\$ ; a Lisp value
+                   (let ((form (if (eql (peek-char nil stream t nil t) #\()
+                                   (read stream t nil t)
+                                   (read-from-string
+                                    (with-output-to-string (token)
+                                      (loop for c = (peek-char nil stream nil nil t)
+                                            while (and c (not (%symbol-end-p c)))
+                                            do (write-char (read-char stream) token))))))
+                         (name (format nil "lisp-value-~D" (incf *lisp-value-counter*))))
+                     (push (cons name form) splices)
+                     (write-string name out)))
+                  (t (write-char char out)))))
+     (nreverse splices))))
+
+(defun %eval-with-lisp-values (source names values)
+  "Bind each of NAMES to its Lisp value of VALUES in the user namespace,
+then evaluate the Clojure SOURCE, which refers to them."
+  (mapc #'define names values)
+  (eval-string source))
+
+(defun %read-clojure-syntax (stream subchar arg)
+  (declare (ignore subchar arg))
+  (multiple-value-bind (source splices) (%read-clojure-source stream)
+    `(%eval-with-lisp-values ,source ',(mapcar #'car splices) (list ,@(mapcar #'cdr splices)))))
+
+(defun enable-syntax (&optional (readtable *readtable*))
+  "Make #[ ... ] read Clojure source in READTABLE (by default, the current
+one), evaluating it where it appears; see above."
+  (set-dispatch-macro-character #\# #\[ #'%read-clojure-syntax readtable)
+  readtable)

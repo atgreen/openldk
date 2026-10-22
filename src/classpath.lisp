@@ -557,6 +557,14 @@ on its first classload."
         for stream = (open-resource cpe resource-name)
         when stream return stream))
 
+(defun get-resource-urls-on-classpath (resource-name)
+  "The URL strings of every resource RESOURCE-NAME on the classpath, in
+classpath order: ClassLoader.getResources, as ServiceLoader reads each
+jar's META-INF/services file."
+  (loop for cpe in *classpath*
+        for url = (get-resource-url cpe resource-name)
+        when url collect url))
+
 (defun get-resource-url-on-classpath (resource-name)
   "Find a resource RESOURCE-NAME on the classpath and return its URL string, or NIL."
   (loop for cpe in *classpath*

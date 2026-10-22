@@ -12,6 +12,7 @@ both ways, with no serialization and no process boundary.
 | `openldk/jscheme` | Peter Norvig's [JScheme](https://norvig.com/jscheme.html) | `openldk.jscheme`, nickname `jscheme` |
 | `openldk/clojure` | [Clojure](https://clojure.org/) 1.12.4 | `openldk.clojure`, nickname `clojure` |
 | `openldk/kawa` | [Kawa](https://www.gnu.org/software/kawa/) Scheme 3.1.1 | `openldk.kawa`, nickname `kawa` |
+| `openldk/scala` | [Scala](https://www.scala-lang.org/) 2.13.16 | `openldk.scala`, nickname `scala` |
 
 ABCL is next, on the same core.
 
@@ -26,6 +27,7 @@ Lisp REPL:
 make sbcl-clojure && ./sbcl-clojure      # Clojure ready at once
 make sbcl-jscheme && ./sbcl-jscheme
 make sbcl-kawa && ./sbcl-kawa
+make sbcl-scala && ./sbcl-scala
 ```
 
 ```lisp
@@ -172,6 +174,25 @@ back as the original condition, and Clojure code can catch it as an
 
 Tests: `make check-clojure` runs them in `sbcl-clojure`.
 
+### Clojure syntax in Lisp source
+
+After `(clojure:enable-syntax)`, `#[ ... ]` holds Clojure source written as
+Clojure writes it (vectors, maps, sets, `#()` functions, `@`, `\c`
+characters) and evaluates it where it appears.  `$name` and `$(form)`
+splice in Lisp values, passed as objects rather than printed, so lexical
+variables and Lisp functions work too:
+
+```lisp
+(clojure:enable-syntax)
+#[ (->> (range 10) (filter even?) (map #(* % %))) ]   ; => (0 4 16 36 64)
+(let ((xs '(3 1 2))) #[ (sort > $xs) ])                ; => (3 2 1)
+#[ (map $#'1+ [1 2 3]) ]                                ; => (2 3 4)
+```
+
+`enable-syntax` changes the current readtable, or the one it is given:
+`(setf *readtable* (clojure:enable-syntax (copy-readtable)))` keeps the
+change to one file.
+
 ## Kawa
 
 `make kawa` downloads Kawa's jar; `make sbcl-kawa` builds an SBCL with Kawa
@@ -229,6 +250,59 @@ Lisp predicate `:predicate t`.  Kawa errors are signalled as
 back as the original condition.
 
 Tests: `make check-kawa` runs them in `sbcl-kawa`.
+
+## Scala
+
+`make sbcl-scala` downloads Scala's jars and builds an SBCL with Scala
+started.  Starting Scala means compiling the Scala compiler's bytecode,
+which takes OpenLDK several minutes, so use the image.
+
+```lisp
+(asdf:load-system "openldk/scala")
+(scala:startup)                                    ; already done in sbcl-scala
+
+(scala:eval "List(1, 2, 3).map(_ * 2)")            ; => (2 4 6)
+(scala:eval "def fact(n: Int): BigInt = if (n < 2) 1 else n * fact(n - 1); fact(25)")
+                                                   ; => 15511210043330985984000000
+(scala:eval "Map(\"a\" -> 1)")                     ; => a hash table
+(scala:funcall (scala:eval-raw "(a: Int, b: Int) => a * b") 6 7)   ; => 42
+
+;; Lisp functions callable from Scala, of their arity's FunctionN type
+(scala:define "square" (lambda (x) (* x x)))
+(scala:eval "(1 to 4).map(square).toList")         ; => (1 4 9 16)
+(scala:define "greeting" "hello" :type "String")
+(scala:eval "greeting.toUpperCase")                ; => "HELLO"
+```
+
+Code is evaluated by the Scala REPL's script engine (JSR 223), so
+definitions persist from one `eval` to the next, as in the REPL.
+
+| Function | |
+|---|---|
+| `startup &key classpath` | Start Scala (by default from the jars `make sbcl-scala` downloads). |
+| `eval source` | Evaluate a string of Scala; return the value as Lisp data. |
+| `eval-raw source` | Evaluate a string of Scala; return the value unconverted. |
+| `funcall function &rest args` | Call a Scala function, given as an object or by the name of a val. |
+| `define name value &key type arity` | Bind a `val`; a Lisp function becomes a Scala function. |
+| `to-lisp object`, `from-lisp value` | Convert values. |
+| `*engine*` | The script engine. |
+
+| Scala | Lisp |
+|---|---|
+| `Int`, `Long`, `BigInt` | integer |
+| `Double`, `Float` | `double-float`, `single-float` |
+| `String`, `Char`, `Boolean` | string, character, `T`/`NIL` (write `:false`) |
+| `List` and other `Seq`s, `Set`s | list (`from-lisp` makes a `List`) |
+| `Vector`, `Array` | vector (`from-lisp` makes a `Vector`) |
+| `Map` | hash table, test `equal` |
+| `Option` | `None` is `NIL`, `Some(x)` is `x` |
+| `Unit` | `NIL` |
+| `TupleN` | list |
+| functions, other objects | left as is |
+
+Scala errors, compile errors included, are signalled as `foreign-error`.
+
+Tests: `make check-scala` runs them in `sbcl-scala`.
 
 ## The shared core: `openldk/interop`
 

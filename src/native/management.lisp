@@ -45,10 +45,10 @@
 
 (in-package :openldk)
 
-(defun |sun/management/VMManagementImpl.getVersion0()| ()
+(defun |sun/management/VMManagementImpl.getVersion0()Ljava/lang/String;| ()
   (jstring "4.0"))
 
-(defun |sun/management/VMManagementImpl.initOptionalSupportFields()| ()
+(defun |sun/management/VMManagementImpl.initOptionalSupportFields()V| ()
   (let ((statics (symbol-value (intern "+static-sun/management/VMManagementImpl+" :openldk))))
     (setf (slot-value statics '|currentThreadCpuTimeSupport|) 1)))
 
@@ -58,30 +58,30 @@
 (defun %thread-cpu-time (id)
   "CPU time in nanoseconds of the thread with ID (0 for the current one), or
 -1 when it isn't known: only the current thread's is."
-  (if (or (zerop id) (eql id (|threadId()| (|java/lang/Thread.currentThread()|))))
+  (if (or (zerop id) (eql id (|threadId()| (|java/lang/Thread.currentThread()Ljava/lang/Thread;|))))
       (%current-thread-cpu-time-nanos)
       -1))
 
-(defun |sun/management/ThreadImpl.getThreadTotalCpuTime0(J)| (id)
+(defun |sun/management/ThreadImpl.getThreadTotalCpuTime0(J)J| (id)
   (%thread-cpu-time id))
 
-(defun |sun/management/ThreadImpl.getThreadUserCpuTime0(J)| (id)
+(defun |sun/management/ThreadImpl.getThreadUserCpuTime0(J)J| (id)
   (%thread-cpu-time id))
 
-(defun |sun/management/ThreadImpl.setThreadCpuTimeEnabled0(Z)| (enable)
+(defun |sun/management/ThreadImpl.setThreadCpuTimeEnabled0(Z)V| (enable)
   (declare (ignore enable))
   nil)
 
-(defun |sun/management/ThreadImpl.setThreadContentionMonitoringEnabled0(Z)| (enable)
+(defun |sun/management/ThreadImpl.setThreadContentionMonitoringEnabled0(Z)V| (enable)
   (declare (ignore enable))
   nil)
 
-(defun |sun/management/ThreadImpl.setThreadAllocatedMemoryEnabled0(Z)| (enable)
+(defun |sun/management/ThreadImpl.setThreadAllocatedMemoryEnabled0(Z)V| (enable)
   (declare (ignore enable))
   nil)
 
-(defun |sun/management/ThreadImpl.getThreads()| ()
-  (|java/lang/Thread.getThreads()|))
+(defun |sun/management/ThreadImpl.getThreads()[Ljava/lang/Thread;| ()
+  (|java/lang/Thread.getThreads()[Ljava/lang/Thread;|))
 
 (defmacro %define-vm-management-natives (&rest specs)
   "Define VMManagementImpl's instance natives: each spec is (NAME VALUE-FORM)."
@@ -92,7 +92,7 @@
                         ,value))))
 
 (defun %live-java-thread-count ()
-  (java-array-length (|java/lang/Thread.getThreads()|)))
+  (java-array-length (|java/lang/Thread.getThreads()[Ljava/lang/Thread;|)))
 
 (%define-vm-management-natives
  ("isThreadContentionMonitoringEnabled()" 0)
@@ -108,7 +108,7 @@
                                        :size 0))
  ("getStartupTime()" (or *vm-start-time-millis* 0))
  ("getUptime0()" (if *vm-start-time-millis*
-                     (- (|java/lang/System.currentTimeMillis()|) *vm-start-time-millis*)
+                     (- (|java/lang/System.currentTimeMillis()J|) *vm-start-time-millis*)
                      0))
  ("getAvailableProcessors()" (%available-processor-count))
  ("getTotalCompileTime()" 0)

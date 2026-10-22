@@ -278,8 +278,37 @@ the forward pass)."
         (eval code)))) ; lint:suppress eval-usage
 
 (defun lispize-method-name (name)
-  "Return a Lisp symbol name derived from Java method NAME."
-  (take (1+ (position #\) name)) name))
+  "The Lisp symbol name for a Java method: NAME, its name and full
+descriptor, return type included, as the JVM identifies a method (javac's
+bridges and other compilers' methods differ only in their return types)."
+  name)
+
+(defun %resolve-method-name (class-name method-name)
+  "METHOD-NAME, a Java method's name and argument descriptor with or without
+its return type, completed with the return type of the method of that name
+and arguments that CLASS-NAME (binary form) declares or inherits; or
+METHOD-NAME itself when it has one already or none is found."
+  (let ((close (position #\) method-name)))
+    (if (or (null close) (< (1+ close) (length method-name)))
+        method-name
+        (labels ((search-class (name seen)
+                   (let ((class (and name (not (member name seen :test #'string=))
+                                     (ignore-errors (classload name)))))
+                     (when class
+                       (or (loop for m across (or (slot-value class 'methods) #())
+                                 for full = (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))
+                                 when (string= method-name (%short-method-name full))
+                                   return full)
+                           (search-class (slot-value class 'super) (cons name seen))
+                           (loop for iface across (or (interfaces class) #())
+                                 thereis (search-class iface (cons name seen))))))))
+          (or (search-class class-name nil) method-name)))))
+
+(defun %short-method-name (name)
+  "NAME without its return type: how OpenLDK's hand-written natives were
+named, and how Lisp code still names some of them."
+  (let ((close (position #\) name)))
+    (if close (subseq name 0 (1+ close)) name)))
 
 (defun %compute-invoke-special-entry (gf owner-class nargs)
   "Compute the invoke-special cache entry for GF dispatching on OWNER-CLASS.
@@ -391,7 +420,9 @@ methods on the same generic function survive."
           (setf (symbol-function fn-symbol) native-fn)
           (let* ((class-sym (intern (slot-value class 'name)
                                     (%class-specializer-package class)))
-                 (n-params (count-parameters (slot-value method 'descriptor)))
+                 (n-params (progn
+                             (%ensure-java-gf fn-symbol (1+ (count-parameters (slot-value method 'descriptor))))
+                             (count-parameters (slot-value method 'descriptor))))
                  (param-names (loop for i from 1 upto n-params
                                     collect (intern (format nil "arg~A" i) :openldk)))
                  (this-sym (intern "this" :openldk)))
@@ -695,7 +726,7 @@ entry/exit as required."
            (if (synchronized-p method)
                (let ((monitor-obj
                        (if (static-p method)
-                           `(openldk::|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
+                           `(openldk::|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;|
                              (openldk::jstring ,(slot-value class 'name)) nil nil nil)
                            (intern "this" :openldk))))
                  `((let ((%sync-monitor-obj% ,monitor-obj))
@@ -1024,7 +1055,7 @@ that made concurrent Math.random()/holder-class first-use throw NPE."
                                       (loader-package (slot-value class 'ldk-loader))
                                       (or (find-package "OPENLDK.SYSTEM")
                                           (make-package "OPENLDK.SYSTEM" :use '(:openldk))))))
-                         (%eval (list (intern (format nil "~A.<clinit>()" (slot-value class 'name)) pkg)))
+                         (%eval (list (intern (format nil "~A.<clinit>()V" (slot-value class 'name)) pkg)))
                          ;; Run post-clinit hook if registered (for VM-injected fields)
                          (let ((hook (gethash (slot-value class 'name) *post-clinit-hooks*)))
                            (when hook (funcall hook class pkg))))
@@ -1047,8 +1078,8 @@ that made concurrent Math.random()/holder-class first-use throw NPE."
                                          (let* ((instance (%make-java-instance "java/lang/ExceptionInInitializerError"))
                                                 (cause (and (typep throwable '|java/lang/Throwable|) throwable)))
                                            (if cause
-                                               (|<init>(Ljava/lang/Throwable;)| instance cause)
-                                               (|<init>()| instance))
+                                               (|<init>(Ljava/lang/Throwable;)V| instance cause)
+                                               (|<init>()V| instance))
                                            ;; Ensure cause/exception slots are populated for stack traces
                                            (when cause
                                              (when (slot-exists-p instance '|cause|)
@@ -1193,41 +1224,6 @@ shadows a superclass field and needs its own storage."
           sym)
         (intern mangled :openldk))))
 
-(defun %bridge-target-descriptor (class method)
-  "The descriptor of the method of the same name the bridge METHOD calls,
-from its code, which is only loads, calls (its target, and boxing or
-unboxing), a checkcast and a return; or NIL."
-  (let* ((code-attr (gethash "Code" (attributes method)))
-         (code (and code-attr (slot-value code-attr 'code)))
-         (cp (constant-pool class)))
-    (when code
-      (loop with pc = 0
-            while (< pc (length code))
-            do (let ((op (aref code pc)))
-                 (cond
-                   ((<= #xb6 op #xb9)    ; invokevirtual/special/static/interface
-                    (let* ((ref (aref cp (+ (* 256 (aref code (1+ pc))) (aref code (+ pc 2)))))
-                           (nat (aref cp (slot-value ref 'method-descriptor-index))))
-                      (when (string= (slot-value (aref cp (slot-value nat 'name-index)) 'value)
-                                     (slot-value method 'name))
-                        (return (slot-value (aref cp (slot-value nat 'type-descriptor-index)) 'value)))
-                      (incf pc (if (= op #xb9) 5 3))))
-                   ((<= #x15 op #x19) (incf pc 2))      ; xload index
-                   ((= op #xc0) (incf pc 3))            ; checkcast
-                   ((or (<= #x1a op #x35) (<= #xac op #xb1)) (incf pc 1)) ; xload_n, returns
-                   (t (return nil))))))))
-
-(defun %same-name-bridge-p (class method)
-  "True when METHOD is a bridge to a method differing only in its return
-type.  OpenLDK names methods without their return types, so the two are
-one generic function: the bridge would call itself."
-  (and (bridge-p method)
-       (let ((target (%bridge-target-descriptor class method))
-             (descriptor (slot-value method 'descriptor)))
-         (and target
-              (string= (subseq target 0 (1+ (position #\) target)))
-                       (subseq descriptor 0 (1+ (position #\) descriptor))))))))
-
 (defun emit-<class> (class ldk-loader)
   "Emit CLOS class and method definitions for a Java class.
    LDK-LOADER is the class loader that will own this class.
@@ -1285,7 +1281,6 @@ one generic function: the bridge would call itself."
                                      (if (or (native-p m)
                                              (native-override-p m)
                                              (null (gethash "Code" (attributes m)))
-                                             (%same-name-bridge-p class m)
                                              (and (bridge-p m)
                                                   (gethash (lispize-method-name
                                                             (format nil "~A~A"
@@ -1325,16 +1320,7 @@ one generic function: the bridge would call itself."
                                                (let ((method-name (intern (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) :openldk))
                                                      (param-count (count-parameters (slot-value m 'descriptor))))
                                                  (list 'progn
-                                                       (list 'unless
-                                                             (list 'and
-                                                                   (list 'fboundp (list 'quote method-name))
-                                                                   (list 'typep (list 'symbol-function (list 'quote method-name)) ''generic-function))
-                                                             (list 'ensure-generic-function (list 'quote method-name)
-                                                                   :generic-function-class ''java-generic-function
-                                                                   :lambda-list (list 'quote
-                                                                                      (cons (intern "this" :openldk)
-                                                                                            (loop for i from 1 upto param-count
-                                                                                                  collect (intern (format nil "arg~A" i) :openldk))))))
+                                                       (list '%ensure-java-gf (list 'quote method-name) (1+ param-count))
                                                        (list 'defmethod method-name
                                                              (cons (list (intern "this" :openldk) (intern (slot-value (slot-value m 'class) 'name) pkg))
                                                                    (loop for i from 1 upto param-count
@@ -1349,57 +1335,7 @@ one generic function: the bridge would call itself."
                                                                                      collect (intern (format nil "arg~A" i) :openldk))))))))))))
                                    methods)))))))
 
-    (append defclass-code methods-code (%boxing-bridge-methods class pkg))))
-
-(defun %boxing-bridge-methods (class pkg)
-  "Methods are named without their return type, so a bridge collides with
-the method it bridges to, and only the latter is emitted.  For references
-that loses nothing, but a bridge returning Object for a method returning
-boolean or char boxes the result (Scala's BooleanSetting.value), which
-callers expecting an Object rely on.  Box such methods' results with an
-:around method; call sites expecting a boolean or char unbox (see
-%PRIMITIVE-RESULT)."
-  (let ((by-name (make-hash-table :test #'equal))
-        (class-sym (intern (slot-value class 'name) pkg)))
-    (loop for m across (slot-value class 'methods)
-          unless (static-p m)
-            do (push m (gethash (lispize-method-name (format nil "~A~A" (slot-value m 'name)
-                                                              (slot-value m 'descriptor)))
-                                by-name)))
-    (loop for name being the hash-keys of by-name using (hash-value ms)
-          for return-chars = (loop for m in ms
-                                   for d = (slot-value m 'descriptor)
-                                   collect (char d (1+ (position #\) d)))
-                                   ;; A bridge's target may be in a superclass.
-                                   when (%same-name-bridge-p class m)
-                                     collect (let ((target (%bridge-target-descriptor class m)))
-                                               (char target (1+ (position #\) target)))))
-          for primitive = (find-if (lambda (c) (member c '(#\Z #\C))) return-chars)
-          when (and primitive (some (lambda (c) (member c '(#\L #\[))) return-chars))
-            collect (let ((params (loop for i from 1 upto (count-parameters (slot-value (first ms) 'descriptor))
-                                        collect (intern (format nil "arg~A" i) :openldk))))
-                      `(defmethod ,(intern name :openldk) :around ((,(intern "this" :openldk) ,class-sym) ,@params)
-                         (declare (ignorable ,@params))
-                         (%box-primitive-result (call-next-method) ,primitive))))))
-
-(defun %box-primitive-result (value char)
-  "VALUE boxed as the primitive type CHAR (Z or C) boxes, unless already boxed."
-  (if (integerp value)
-      (if (char= char #\Z)
-          (%boolean-object (not (zerop value)))
-          (%box-primitive-return value #\C))
-      value))
-
-(declaim (inline %primitive-result))
-(defun %primitive-result (value)
-  "The boolean or char a call site expects, from VALUE, which a method
-returning it boxed for a bridge (see %BOXING-BRIDGE-METHODS) may have."
-  (if (integerp value)
-      value
-      (cond ((%java-class-p value "java/lang/Boolean") (slot-value value '|value|))
-            ((%java-class-p value "java/lang/Character") (slot-value value '|value|))
-            (t value))))
-
+    (append defclass-code methods-code)))
 
 (defun find-class-in-loader-hierarchy (classname ldk-loader)
   "Search for class in this loader and all parent loaders sharing the same package."
@@ -1481,7 +1417,14 @@ returning it boxed for a bridge (see %BOXING-BRIDGE-METHODS) may have."
              ;; Class.getModifiers() reports source-level modifiers, not raw class
              ;; access flags: mask out ACC_SUPER (0x20), set on every modern class,
              ;; which would otherwise render as "synchronized".
-             (setf (slot-value klass '|modifiers|) (logandc2 (access-flags class) #x20)))
+             ;; A nested class's come from its InnerClasses entry, which
+             ;; has static, private and protected, as on a JVM.
+             (setf (slot-value klass '|modifiers|)
+                   (logandc2 (let ((entry (%inner-class-entry class)))
+                               (if entry
+                                   (slot-value entry 'inner-class-access-flags)
+                                   (access-flags class)))
+                             #x20)))
            ;; The application's classes report the system class loader, as on
            ;; a JVM, where code asks it for their resources (Groovy's
            ;; META-INF/dgminfo).
@@ -1545,7 +1488,7 @@ returning it boxed for a bridge (see %BOXING-BRIDGE-METHODS) may have."
                                     for k-pkg = (if k-ldk-class
                                                     (loader-package (slot-value k-ldk-class 'ldk-loader))
                                                     pkg)
-                                    for clinit-function = (intern (format nil "~a.<clinit>()" (class-name k)) k-pkg)
+                                    for clinit-function = (intern (format nil "~a.<clinit>()V" (class-name k)) k-pkg)
                                     ;; JLS 12.4.2: initialize this class, its superclasses, and
                                     ;; only those superinterfaces that declare a default method --
                                     ;; NOT every superinterface in the precedence list.
@@ -1620,7 +1563,7 @@ parent could also provide."
       (if found
           overrides
           (setf (gethash clos-class *loaders-overriding-load-class*)
-                (loop with class = (get-ldk-class-for-java-class (|getClass()| java-loader))
+                (loop with class = (get-ldk-class-for-java-class (|getClass()Ljava/lang/Class;| java-loader))
                       while (and class (not (jdk-class-p (name class))))
                       thereis (some (lambda (m) (and m (string= (slot-value m 'name) "loadClass")))
                                     (coerce (methods class) 'list))
@@ -1650,7 +1593,7 @@ its own class of a name the classpath also has."
                        ;; context of a method compilation in progress.
                        (*context* nil))
                    (handler-case
-                       (let ((java-class (|loadClass(Ljava/lang/String;)|
+                       (let ((java-class (|loadClass(Ljava/lang/String;)Ljava/lang/Class;|
                                           java-loader
                                           (jstring (substitute #\. #\/ classname)))))
                          (when java-class
@@ -1836,7 +1779,7 @@ properties, and *CLASSPATH* construction."
   (sb-int:set-floating-point-modes :traps nil)
   ;; Stamp the VM start time (RuntimeMXBean.getStartTime) on first entry.
   (unless *vm-start-time-millis*
-    (setf *vm-start-time-millis* (|java/lang/System.currentTimeMillis()|)))
+    (setf *vm-start-time-millis* (|java/lang/System.currentTimeMillis()J|)))
   (ensure-JAVA_HOME)
   ;; Install SIGQUIT handler for debugging hangs (send kill -3 to dump all stacks)
   (install-sigquit-handler)
@@ -1876,7 +1819,7 @@ properties, and *CLASSPATH* construction."
    (slot-value |+static-java/lang/System+| '|props|))
   ;; Apply -D system properties from command line
   (dolist (prop *cli-jvm-properties*)
-    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)|
+    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;|
      (ijstring (car prop)) (ijstring (cdr prop))))
   (when *debug-slynk*
     (slynk:create-server :port 2025)
@@ -1887,6 +1830,10 @@ properties, and *CLASSPATH* construction."
                        (uiop:getenv "CLASSPATH")
                        (uiop:getenv "LDK_CLASSPATH")
                        ".")))
+    ;; java.class.path is the classpath used, given as an argument (-cp,
+    ;; openldk.interop:start-runtime) too: Scala's compiler reads it.
+    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;|
+     (ijstring "java.class.path") (ijstring classpath))
     (setf *classpath*
           (append
            (loop for cpe in (split-sequence:split-sequence (uiop:inter-directory-separator) classpath)
@@ -1905,7 +1852,7 @@ loader package (OPENLDK.SYSTEM for classes loaded during warm-up)."
                     (loader-package (slot-value class 'ldk-loader))
                     (or (find-package "OPENLDK.SYSTEM")
                         (make-package "OPENLDK.SYSTEM" :use '(:openldk)))))
-           (main-symbol (intern (format nil "~A.main([Ljava/lang/String;)" (name class)) pkg)))
+           (main-symbol (intern (format nil "~A.main([Ljava/lang/String;)V" (name class)) pkg)))
       (if (fboundp main-symbol)
           main-symbol
           (%find-java-main-symbol (gethash (super class) *ldk-classes-by-bin-name*))))))
@@ -1991,7 +1938,7 @@ timeout with LDK_THREAD_WAIT_SECONDS=0."
     (unless (gethash throwable visited)
       (setf (gethash throwable visited) t)
       (let* ((indent-str (make-string indent :initial-element #\space))
-             (header (%java-string (|toString()| throwable))))
+             (header (%java-string (|toString()Ljava/lang/String;| throwable))))
         (if prefix
             (format stream "~&~A~A~A~%" indent-str prefix header)
             (format stream "~&~A~A~%" indent-str header))
@@ -2000,7 +1947,7 @@ timeout with LDK_THREAD_WAIT_SECONDS=0."
           (let ((depth (|getStackTraceDepth()| throwable)))
             (dotimes (i depth)
               (let* ((ste (|getStackTraceElement(I)| throwable i))
-                     (line (%java-string (|toString()| ste))))
+                     (line (%java-string (|toString()Ljava/lang/String;| ste))))
                 (format stream "~&~A    at ~A~%" indent-str line))))))
       (let ((cause (cond
                      ((and (slot-exists-p throwable '|cause|)
@@ -2100,14 +2047,14 @@ jdk.internal.misc.UnsafeConstants with the real platform values (its
                "java/lang/ref/SoftReference"
                "java/util/Properties"
                "java/lang/SecurityManager"))
-    (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil)))
+    (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;| (jstring c) nil boot-class-loader nil)))
 
 (defun %seed-system-properties (property-alist)
   "Create the System props table and seed essential properties needed
 during early JDK init (many JDK components assume non-NIL encodings),
 plus user.* properties and the caller-supplied PROPERTY-ALIST."
   (let ((props (%make-java-instance "java/util/Properties")))
-    (|<init>()| props)
+    (|<init>()V| props)
     (setf (slot-value |+static-java/lang/System+| '|props|) props))
 
   ;; Seed essential system properties needed during early JDK init.
@@ -2123,24 +2070,24 @@ plus user.* properties and the caller-supplied PROPERTY-ALIST."
                 ("os.arch" . "amd64")
                 ("os.version" . "")
                 ("java.io.tmpdir" . "/tmp")))
-    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring (car kv)) (ijstring (cdr kv))))
+    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;| (ijstring (car kv)) (ijstring (cdr kv))))
 
   ;; Also set java.home for code that queries it early.
   (when-let ((jh (uiop:getenv "JAVA_HOME")))
-    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring "java.home") (ijstring jh)))
+    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;| (ijstring "java.home") (ijstring jh)))
 
   ;; Populate common user properties
   (when-let ((cwd (uiop:getcwd)))
-    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring "user.dir") (ijstring (namestring cwd))))
+    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;| (ijstring "user.dir") (ijstring (namestring cwd))))
   (when-let ((uh (or (uiop:getenv "HOME") "/")))
-    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring "user.home") (ijstring uh)))
+    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;| (ijstring "user.home") (ijstring uh)))
   (when-let ((un (or (uiop:getenv "USER") (uiop:getenv "LOGNAME") "openldk")))
-    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring "user.name") (ijstring un)))
+    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;| (ijstring "user.name") (ijstring un)))
 
   ;; Add user-provided properties...
   (dolist (prop property-alist)
     (assert (typep prop 'list))
-    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)| (ijstring (car prop)) (ijstring (cdr prop)))))
+    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;| (ijstring (car prop)) (ijstring (cdr prop)))))
 
 (defun %initialize-system-phase1 (boot-class-loader)
   "Run System.initPhase1 and the module/class-loader setup around it."
@@ -2152,7 +2099,7 @@ plus user.* properties and the caller-supplied PROPERTY-ALIST."
   ;; Call System.initPhase1() which sets up JavaLangAccess (JLA),
   ;; system properties (via SystemProps$Raw native methods), I/O streams
   ;; (System.in/out/err), and VM.initLevel(1).
-  (|java/lang/System.initPhase1()|)
+  (|java/lang/System.initPhase1()V|)
 
   ;; Create an unnamed Module for bootstrap classes.
   ;; Class.getModule() returns the module field; if null, calls like
@@ -2177,7 +2124,7 @@ plus user.* properties and the caller-supplied PROPERTY-ALIST."
   ;; registerAsParallelCapable(). In JDK 17 this can throw InternalError
   ;; "Unable to register as parallel capable" — non-fatal for our purposes.
   (handler-case
-      (|<init>()| boot-class-loader)
+      (|<init>()V| boot-class-loader)
     (condition (c)
       (format t "~&; Warning during ClassLoader init (non-fatal): ~A~%" c)))
   ;; JDK 17's ClassLoader() calls getSystemClassLoader() which returns
@@ -2247,7 +2194,7 @@ lazy initialization via ClassSpecializer needs runtime ordering."
                "java/lang/Readable"
                "java/nio/CharBuffer"
                "sun/nio/cs/Surrogate$Parser"))
-    (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring c) nil boot-class-loader nil)))
+    (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;| (jstring c) nil boot-class-loader nil)))
 
 (defun initialize (&optional (property-alist (list)))
   "Bootstrap the Java runtime: classpath, core classes, system
@@ -2285,5 +2232,6 @@ supplies additional system properties as (name . value) pairs."
   ;; reliably emits the CLOS classes so the Lambda* subclasses can
   ;; finalize their inheritance at runtime.
   (%preload-lambda-interfaces "finalizing")
+  (%adopt-native-short-methods)
   (setf *debug-load* nil)
   (setf *debug-compile* nil))

@@ -172,6 +172,23 @@
              (unless (uiop:symbol-call :fiveam '#:run! :openldk-clojure-tests)
                (error "openldk/clojure tests failed"))))
 
+(asdf:defsystem "openldk/scala"
+  :description "Use Scala from Common Lisp"
+  :author "Anthony Green <green@moxielogic.com>"
+  :license "GPL3+Classpath Exception"
+  :depends-on ("openldk/interop" "sb-introspect")
+  :components ((:file "interop/scala"))
+  :in-order-to ((test-op (test-op "openldk/scala/tests"))))
+
+(asdf:defsystem "openldk/scala/tests"
+  :description "Tests for openldk/scala; need `make sbcl-scala`"
+  :depends-on ("openldk/scala" "fiveam")
+  :pathname "test"
+  :components ((:file "scala"))
+  :perform (test-op (o c)
+             (unless (uiop:symbol-call :fiveam '#:run! :openldk-scala-tests)
+               (error "openldk/scala tests failed"))))
+
 (asdf:defsystem "openldk/kawa"
   :description "Use Kawa Scheme from Common Lisp"
   :author "Anthony Green <green@moxielogic.com>"

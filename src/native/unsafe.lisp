@@ -44,7 +44,7 @@
 ;;; JDK 9+ jdk/internal/misc/Unsafe native methods
 ;;; These mirror the sun/misc/Unsafe methods but are on the new class.
 
-(defmethod |arrayBaseOffset0(Ljava/lang/Class;)| ((unsafe |jdk/internal/misc/Unsafe|) array)
+(defmethod |arrayBaseOffset0(Ljava/lang/Class;)I| ((unsafe |jdk/internal/misc/Unsafe|) array)
   0)
 
 (defun %unsafe-array-index-scale (array-class)
@@ -479,22 +479,22 @@ the storage object does not (yet) exist."
 (%define-internal-unsafe-scalar-accessors "Float" "F" :float)
 (%define-internal-unsafe-scalar-accessors "Double" "D" :double)
 
-(defmethod |getReference(Ljava/lang/Object;J)|
+(defmethod |getReference(Ljava/lang/Object;J)Ljava/lang/Object;|
     ((unsafe |jdk/internal/misc/Unsafe|) object offset)
   (declare (ignore unsafe))
   (%unsafe-get-reference object offset))
 
-(defmethod |putReference(Ljava/lang/Object;JLjava/lang/Object;)|
+(defmethod |putReference(Ljava/lang/Object;JLjava/lang/Object;)V|
     ((unsafe |jdk/internal/misc/Unsafe|) object offset value)
   (declare (ignore unsafe))
   (%unsafe-put-reference object offset value))
 
-(defmethod |getReferenceVolatile(Ljava/lang/Object;J)|
+(defmethod |getReferenceVolatile(Ljava/lang/Object;J)Ljava/lang/Object;|
     ((unsafe |jdk/internal/misc/Unsafe|) object offset)
   (declare (ignore unsafe))
   (%unsafe-get-reference object offset))
 
-(defmethod |putReferenceVolatile(Ljava/lang/Object;JLjava/lang/Object;)|
+(defmethod |putReferenceVolatile(Ljava/lang/Object;JLjava/lang/Object;)V|
     ((unsafe |jdk/internal/misc/Unsafe|) object offset value)
   (declare (ignore unsafe))
   (%unsafe-put-reference object offset value))
@@ -515,40 +515,40 @@ the storage object does not (yet) exist."
         (%unsafe-put-reference object offset replacement))
       old)))
 
-(defmethod |compareAndSetInt(Ljava/lang/Object;JII)|
+(defmethod |compareAndSetInt(Ljava/lang/Object;JII)Z|
     ((unsafe |jdk/internal/misc/Unsafe|) object offset expected replacement)
   (declare (ignore unsafe))
   (if (eql expected (%unsafe-compare-and-exchange-scalar
                      object offset expected replacement :int))
       1 0))
 
-(defmethod |compareAndExchangeInt(Ljava/lang/Object;JII)|
+(defmethod |compareAndExchangeInt(Ljava/lang/Object;JII)I|
     ((unsafe |jdk/internal/misc/Unsafe|) object offset expected replacement)
   (declare (ignore unsafe))
   (%unsafe-compare-and-exchange-scalar
    object offset expected replacement :int))
 
-(defmethod |compareAndSetLong(Ljava/lang/Object;JJJ)|
+(defmethod |compareAndSetLong(Ljava/lang/Object;JJJ)Z|
     ((unsafe |jdk/internal/misc/Unsafe|) object offset expected replacement)
   (declare (ignore unsafe))
   (if (eql expected (%unsafe-compare-and-exchange-scalar
                      object offset expected replacement :long))
       1 0))
 
-(defmethod |compareAndExchangeLong(Ljava/lang/Object;JJJ)|
+(defmethod |compareAndExchangeLong(Ljava/lang/Object;JJJ)J|
     ((unsafe |jdk/internal/misc/Unsafe|) object offset expected replacement)
   (declare (ignore unsafe))
   (%unsafe-compare-and-exchange-scalar
    object offset expected replacement :long))
 
-(defmethod |compareAndSetReference(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)|
+(defmethod |compareAndSetReference(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)Z|
     ((unsafe |jdk/internal/misc/Unsafe|) object offset expected replacement)
   (declare (ignore unsafe))
   (if (eq expected (%unsafe-compare-and-exchange-reference
                     object offset expected replacement))
       1 0))
 
-(defmethod |compareAndExchangeReference(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)|
+(defmethod |compareAndExchangeReference(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;|
     ((unsafe |jdk/internal/misc/Unsafe|) object offset expected replacement)
   (declare (ignore unsafe))
   (%unsafe-compare-and-exchange-reference
@@ -596,11 +596,11 @@ the storage object does not (yet) exist."
               (setf (slot-value this '|value|) update))
             current))))
 
-(defmethod |fullFence()| ((unsafe |jdk/internal/misc/Unsafe|))
+(defmethod |fullFence()V| ((unsafe |jdk/internal/misc/Unsafe|))
   (declare (ignore unsafe))
   nil)
 
-(defmethod |arrayIndexScale0(Ljava/lang/Class;)| ((unsafe |jdk/internal/misc/Unsafe|) array)
+(defmethod |arrayIndexScale0(Ljava/lang/Class;)I| ((unsafe |jdk/internal/misc/Unsafe|) array)
   (declare (ignore unsafe))
   (%unsafe-array-index-scale array))
 
@@ -612,7 +612,7 @@ the storage object does not (yet) exist."
    (|clazz| :initarg :clazz :accessor %sf-clazz))
   (:documentation "Lightweight stand-in for java/lang/reflect/Field used by objectFieldOffset1."))
 
-(defmethod |objectFieldOffset1(Ljava/lang/Class;Ljava/lang/String;)| ((unsafe |jdk/internal/misc/Unsafe|) clazz field-name)
+(defmethod |objectFieldOffset1(Ljava/lang/Class;Ljava/lang/String;)J| ((unsafe |jdk/internal/misc/Unsafe|) clazz field-name)
   "JDK 9+ objectFieldOffset by class and field name.
    Creates a synthetic field descriptor and registers it, same as the JDK 8 path."
   (declare (ignore unsafe))
@@ -673,21 +673,25 @@ the storage object does not (yet) exist."
         (let ((address (slot-value this '|address|)))
           (when (/= address 0)
             (when-let ((entry (gethash address *unsafe-memory-table*)))
-              (handler-case
-                  (sb-alien:free-alien (car entry))
-                (error () nil))  ; stale pointer from image save — ignore
+              (%free-unsafe-entry entry)
               (remhash address *unsafe-memory-table*))
             (setf (slot-value this '|address|) 0)))))
 
-(defmethod |allocateMemory0(J)| ((unsafe |jdk/internal/misc/Unsafe|) size)
+(defun %free-unsafe-entry (entry)
+  "Free the memory of the *UNSAFE-MEMORY-TABLE* ENTRY, (alien . size); a
+block restored after an image restart (:restored . size) is never freed."
+  (when (typep (car entry) 'sb-alien:alien)
+    (ignore-errors (sb-alien:free-alien (car entry)))))
+
+(defmethod |allocateMemory0(J)J| ((unsafe |jdk/internal/misc/Unsafe|) size)
   (let* ((mem (sb-alien:make-alien sb-alien:char size))
          (ptr (sb-sys:sap-int (sb-alien:alien-sap mem))))
     (setf (gethash ptr *unsafe-memory-table*) (cons mem size))
     ptr))
 
-(defmethod |freeMemory0(J)| ((unsafe |jdk/internal/misc/Unsafe|) address)
+(defmethod |freeMemory0(J)V| ((unsafe |jdk/internal/misc/Unsafe|) address)
   (when-let (entry (gethash address *unsafe-memory-table*))
-    (sb-alien:free-alien (car entry))
+    (%free-unsafe-entry entry)
     (remhash address *unsafe-memory-table*)))
 
 (defmethod |putLong0(JJ)| ((unsafe |jdk/internal/misc/Unsafe|) address value)
@@ -699,7 +703,7 @@ the storage object does not (yet) exist."
 (defmethod |putByte0(JB)| ((unsafe |jdk/internal/misc/Unsafe|) address value)
   (setf (sb-sys:sap-ref-8 (sb-sys:int-sap address) 0) (logand value #xFF)))
 
-(defmethod |copyMemory0(Ljava/lang/Object;JLjava/lang/Object;JJ)| ((unsafe |jdk/internal/misc/Unsafe|) source source-offset dest dest-offset length)
+(defmethod |copyMemory0(Ljava/lang/Object;JLjava/lang/Object;JJ)V| ((unsafe |jdk/internal/misc/Unsafe|) source source-offset dest dest-offset length)
   (declare (ignore unsafe))
   (cond
     ;; Native memory → Java array (common for ICU data loading)
@@ -732,29 +736,28 @@ the storage object does not (yet) exist."
                       (%unsafe-array-read-byte source
                                                (+ source-offset i))))))))
 
-(defmethod |reallocateMemory0(JJ)| ((unsafe |jdk/internal/misc/Unsafe|) address new-size)
+(defmethod |reallocateMemory0(JJ)J| ((unsafe |jdk/internal/misc/Unsafe|) address new-size)
   (if (zerop address)
       ;; Zero address means fresh allocation (realloc(NULL, size) == malloc(size))
-      (|allocateMemory0(J)| unsafe new-size)
+      (|allocateMemory0(J)J| unsafe new-size)
       ;; Allocate new block, copy old data, free old block
       (let* ((new-mem (sb-alien:make-alien sb-alien:char new-size))
              (new-ptr (sb-sys:sap-int (sb-alien:alien-sap new-mem)))
              (new-sap (sb-alien:alien-sap new-mem))
              (old-entry (gethash address *unsafe-memory-table*)))
         (when old-entry
-          (let* ((old-alien (car old-entry))
-                 (old-size (cdr old-entry))
-                 (old-sap (sb-alien:alien-sap old-alien))
+          (let* ((old-size (cdr old-entry))
+                 (old-sap (sb-sys:int-sap address))
                  (copy-size (min old-size new-size)))
             (loop for i below copy-size
                   do (setf (sb-sys:sap-ref-8 new-sap i)
                            (sb-sys:sap-ref-8 old-sap i)))
-            (sb-alien:free-alien old-alien)
+            (%free-unsafe-entry old-entry)
             (remhash address *unsafe-memory-table*)))
         (setf (gethash new-ptr *unsafe-memory-table*) (cons new-mem new-size))
         new-ptr)))
 
-(defmethod |setMemory0(Ljava/lang/Object;JJB)| ((unsafe |jdk/internal/misc/Unsafe|) obj offset bytes value)
+(defmethod |setMemory0(Ljava/lang/Object;JJB)V| ((unsafe |jdk/internal/misc/Unsafe|) obj offset bytes value)
   (if (null obj)
       ;; Direct memory — use memset for bulk operations
       (progn
@@ -804,11 +807,11 @@ number, zero or less if the deadline has passed.  TIME is nanoseconds from
 now (0 for no limit), or with IS-ABSOLUTE, a deadline in epoch ms."
   (cond
     ((and is-absolute (not (eql is-absolute 0)))
-     (/ (- time (|java/lang/System.currentTimeMillis()|)) 1000))
+     (/ (- time (|java/lang/System.currentTimeMillis()J|)) 1000))
     ((> time 0) (/ time 1000000000))
     (t nil)))
 
-(defmethod |park(ZJ)| ((unsafe |jdk/internal/misc/Unsafe|) is-absolute time)
+(defmethod |park(ZJ)V| ((unsafe |jdk/internal/misc/Unsafe|) is-absolute time)
   "Park the current thread until it is unparked, interrupted, or the time
 runs out (LockSupport.park)."
   (declare (ignore unsafe))
@@ -818,7 +821,7 @@ runs out (LockSupport.park)."
       ;; Check and consume permit
       (when (gethash fiber *fiber-park-flags*)
         (remhash fiber *fiber-park-flags*)
-        (return-from |park(ZJ)|))
+        (return-from |park(ZJ)V|))
       ;; Park with predicate: wake when permit is set
       (if (> time 0)
           (sb-thread:fiber-park (lambda () (gethash fiber *fiber-park-flags*))
@@ -826,9 +829,9 @@ runs out (LockSupport.park)."
           (sb-thread:fiber-park (lambda () (gethash fiber *fiber-park-flags*))))
       ;; Consume permit after waking
       (remhash fiber *fiber-park-flags*))
-    (return-from |park(ZJ)|))
+    (return-from |park(ZJ)V|))
   ;; Platform thread: consume the permit, or wait for one.
-  (let* ((java-thread (|java/lang/Thread.currentThread()|))
+  (let* ((java-thread (|java/lang/Thread.currentThread()Ljava/lang/Thread;|))
          (state (%park-state java-thread)))
     (sb-thread:with-mutex ((park-state-mutex state))
       (unless (or (park-state-permit state)
@@ -844,7 +847,7 @@ runs out (LockSupport.park)."
       (setf (park-state-permit state) nil))
     nil))
 
-(defmethod |unpark(Ljava/lang/Object;)| ((unsafe |jdk/internal/misc/Unsafe|) thread)
+(defmethod |unpark(Ljava/lang/Object;)V| ((unsafe |jdk/internal/misc/Unsafe|) thread)
   "Unpark a thread by granting a permit."
   (declare (ignore unsafe))
   #+sb-fiber
@@ -852,7 +855,7 @@ runs out (LockSupport.park)."
     (when fiber
       ;; Set the permit flag — the fiber's park predicate will see this
       (setf (gethash fiber *fiber-park-flags*) t)
-      (return-from |unpark(Ljava/lang/Object;)|)))
+      (return-from |unpark(Ljava/lang/Object;)V|)))
   ;; Platform thread
   (when thread
     (%unpark-java-thread thread))
@@ -861,17 +864,17 @@ runs out (LockSupport.park)."
 ;;; JDK 9+ renamed Unsafe CAS and accessor methods.
 ;;; These delegate to the existing sun/misc/Unsafe implementations via inheritance.
 
-(defmethod |compareAndSetInt(Ljava/lang/Object;JII)| ((unsafe |sun/misc/Unsafe|) obj field-id expected-value new-value)
-  (|compareAndSwapInt(Ljava/lang/Object;JII)| unsafe obj field-id expected-value new-value))
+(defmethod |compareAndSetInt(Ljava/lang/Object;JII)Z| ((unsafe |sun/misc/Unsafe|) obj field-id expected-value new-value)
+  (|compareAndSwapInt(Ljava/lang/Object;JII)Z| unsafe obj field-id expected-value new-value))
 
-(defmethod |compareAndSetLong(Ljava/lang/Object;JJJ)| ((unsafe |sun/misc/Unsafe|) obj field-id expected-value new-value)
-  (|compareAndSwapLong(Ljava/lang/Object;JJJ)| unsafe obj field-id expected-value new-value))
+(defmethod |compareAndSetLong(Ljava/lang/Object;JJJ)Z| ((unsafe |sun/misc/Unsafe|) obj field-id expected-value new-value)
+  (|compareAndSwapLong(Ljava/lang/Object;JJJ)Z| unsafe obj field-id expected-value new-value))
 
-(defmethod |compareAndSetReference(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)| ((unsafe |sun/misc/Unsafe|) obj field-id expected-value new-value)
-  (|compareAndSwapObject(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)| unsafe obj field-id expected-value new-value))
+(defmethod |compareAndSetReference(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)Z| ((unsafe |sun/misc/Unsafe|) obj field-id expected-value new-value)
+  (|compareAndSwapObject(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)Z| unsafe obj field-id expected-value new-value))
 
 (defmethod |compareAndSetObject(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)| ((unsafe |sun/misc/Unsafe|) obj field-id expected-value new-value)
-  (|compareAndSwapObject(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)| unsafe obj field-id expected-value new-value))
+  (|compareAndSwapObject(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)Z| unsafe obj field-id expected-value new-value))
 
 ;;; Byte/boolean CAS — the JDK's Java implementation reads a surrounding int
 ;;; from raw memory, which doesn't work with CLOS slots.  Override both
@@ -895,15 +898,15 @@ runs out (LockSupport.park)."
         (setf (slot-value obj key) new-val))
       current)))
 
-(defmethod |compareAndSetByte(Ljava/lang/Object;JBB)| ((unsafe |sun/misc/Unsafe|) obj offset expected new-val)
+(defmethod |compareAndSetByte(Ljava/lang/Object;JBB)Z| ((unsafe |sun/misc/Unsafe|) obj offset expected new-val)
   (declare (ignore unsafe))
   (%cas-byte-field obj offset expected new-val))
 
-(defmethod |compareAndExchangeByte(Ljava/lang/Object;JBB)| ((unsafe |sun/misc/Unsafe|) obj offset expected new-val)
+(defmethod |compareAndExchangeByte(Ljava/lang/Object;JBB)B| ((unsafe |sun/misc/Unsafe|) obj offset expected new-val)
   (declare (ignore unsafe))
   (%cae-byte-field obj offset expected new-val))
 
-(defmethod |compareAndSetBoolean(Ljava/lang/Object;JZZ)| ((unsafe |sun/misc/Unsafe|) obj offset expected new-val)
+(defmethod |compareAndSetBoolean(Ljava/lang/Object;JZZ)Z| ((unsafe |sun/misc/Unsafe|) obj offset expected new-val)
   (declare (ignore unsafe))
   (%cas-byte-field obj offset expected new-val))
 
@@ -975,13 +978,13 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
 ;; standalone copy that lived here was a duplicate and has been removed.
 
 ;;; PreviewFeatures.isPreviewEnabled — always false (we don't support --enable-preview).
-(defun |jdk/internal/misc/PreviewFeatures.isPreviewEnabled()| ()
+(defun |jdk/internal/misc/PreviewFeatures.isPreviewEnabled()Z| ()
   0)
 
 ;;; ProcessImpl.init — static native initializer for process spawning.
 ;;; On a real JVM this sets up signal handling for child processes.
 ;;; We stub it as a no-op; forkAndExec is handled separately.
-(defun |java/lang/ProcessImpl.init()| ()
+(defun |java/lang/ProcessImpl.init()V| ()
   nil)
 
 ;;; NOTE: In JDK 17, the compiled bytecode methods getObjectVolatile/putObject/etc.
@@ -990,30 +993,30 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
 ;;; NOT delegate back to the "Object" variants (which would cause infinite recursion).
 ;;; The implementations are defined later, after the Object variants.
 
-(defmethod |hashCode()| (obj)
-  (|java/lang/System.identityHashCode(Ljava/lang/Object;)| obj))
+(defmethod |hashCode()I| (obj)
+  (|java/lang/System.identityHashCode(Ljava/lang/Object;)I| obj))
 
 (defclass %array-base-offset ()
   ((array :initarg :array)))
 
-(defmethod |arrayBaseOffset(Ljava/lang/Class;)| ((unsafe |sun/misc/Unsafe|) array)
+(defmethod |arrayBaseOffset(Ljava/lang/Class;)I| ((unsafe |sun/misc/Unsafe|) array)
   0)
 ;  (make-instance '%array-base-offset :array array))
 
-(defmethod |arrayIndexScale(Ljava/lang/Class;)| ((unsafe |sun/misc/Unsafe|) array)
+(defmethod |arrayIndexScale(Ljava/lang/Class;)I| ((unsafe |sun/misc/Unsafe|) array)
   (declare (ignore unsafe))
   (%unsafe-array-index-scale array))
 
-(defmethod |addressSize()| ((unsafe |sun/misc/Unsafe|))
+(defmethod |addressSize()I| ((unsafe |sun/misc/Unsafe|))
   8)
 
-(defmethod |isArray()| ((class |java/lang/Class|))
+(defmethod |isArray()Z| ((class |java/lang/Class|))
   (let ((name-string (lstring (slot-value class '|name|))))
     (if (eq #\[ (char name-string 0))
         1
         0)))
 
-(defmethod |getComponentType()| ((class |java/lang/Class|))
+(defmethod |getComponentType()Ljava/lang/Class;| ((class |java/lang/Class|))
   (let ((cn (lstring (slot-value class '|name|))))
     (if (eq #\[ (char cn 0))
         (let ((ct (or (and (slot-exists-p class '|componentType|)
@@ -1025,18 +1028,18 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
         nil)))
 
 ;; JDK 15+: Class.isHidden() — no classes in OpenLDK are hidden
-(defmethod |isHidden()| ((class |java/lang/Class|))
+(defmethod |isHidden()Z| ((class |java/lang/Class|))
   0)
 
 ;; JDK 21: Class.getClassAccessFlagsRaw0() — return raw access flags
-(defmethod |getClassAccessFlagsRaw0()| ((this |java/lang/Class|))
+(defmethod |getClassAccessFlagsRaw0()I| ((this |java/lang/Class|))
   (let ((ldk-class (get-ldk-class-for-java-class this)))
     (if ldk-class
         (slot-value ldk-class 'access-flags)
         0)))
 
 ;; JDK 21: Class.getClassFileVersion0() — return class file major version
-(defmethod |getClassFileVersion0()| ((this |java/lang/Class|))
+(defmethod |getClassFileVersion0()I| ((this |java/lang/Class|))
   (let ((ldk-class (get-ldk-class-for-java-class this)))
     (if (and ldk-class (slot-boundp ldk-class 'major-version)
              (slot-value ldk-class 'major-version))
@@ -1060,21 +1063,21 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
         (condition () nil))))
 
 ;; :around ensures this runs even when bytecoded getModule() is compiled later
-(defmethod |getModule()| :around ((class |java/lang/Class|))
+(defmethod |getModule()Ljava/lang/Module;| :around ((class |java/lang/Class|))
   (let ((result (call-next-method)))
     (or result (%get-unnamed-module))))
 
 ;; JDK 9+: JavaLangAccess.defineUnnamedModule — return a fresh unnamed Module
-(defmethod |defineUnnamedModule(Ljava/lang/ClassLoader;)| (this classloader)
+(defmethod |defineUnnamedModule(Ljava/lang/ClassLoader;)Ljava/lang/Module;| (this classloader)
   (declare (ignore this classloader))
   (%get-unnamed-module))
 
 ;; JDK 9+: JavaLangAccess.addEnableNativeAccess — identity stub
-(defmethod |addEnableNativeAccess(Ljava/lang/Module;)| (this module)
+(defmethod |addEnableNativeAccess(Ljava/lang/Module;)Ljava/lang/Module;| (this module)
   (declare (ignore this))
   module)
 
-(defun |jdk/internal/loader/BootLoader.getSystemPackageLocation(Ljava/lang/String;)| (name)
+(defun |jdk/internal/loader/BootLoader.getSystemPackageLocation(Ljava/lang/String;)Ljava/lang/String;| (name)
   "Location of a boot-loader (system) package: everything OpenLDK loads
 from the jimage lives in the runtime image, so report jrt:.  A non-null
 result is what lets Class.getPackage() define Package objects for
@@ -1087,7 +1090,7 @@ Without either on the classpath, every name is reported, as before."
     (jstring "jrt:/java.base")))
 
 ;; JDK 9+: BootLoader native — associate unnamed module with boot loader (no-op)
-(defun |jdk/internal/loader/BootLoader.setBootLoaderUnnamedModule0(Ljava/lang/Module;)| (module)
+(defun |jdk/internal/loader/BootLoader.setBootLoaderUnnamedModule0(Ljava/lang/Module;)V| (module)
   (declare (ignore module))
   nil)
 
@@ -1095,26 +1098,26 @@ Without either on the classpath, every name is reported, as before."
 ;; with the VM's module graph.  OpenLDK runs everything as one unnamed module
 ;; and enforces no module boundaries, so registration is a no-op.  Reached via
 ;; java.lang.reflect.Proxy, which defines a dynamic module for each proxy class.
-(defun |java/lang/Module.defineModule0(Ljava/lang/Module;ZLjava/lang/String;Ljava/lang/String;[Ljava/lang/Object;)|
+(defun |java/lang/Module.defineModule0(Ljava/lang/Module;ZLjava/lang/String;Ljava/lang/String;[Ljava/lang/Object;)V|
     (module is-open version location packages)
   (declare (ignore module is-open version location packages))
   nil)
 
 ;; The remaining Module graph natives (reads/exports edges) are likewise no-ops:
 ;; OpenLDK enforces no module boundaries, so all reads/exports already succeed.
-(defun |java/lang/Module.addReads0(Ljava/lang/Module;Ljava/lang/Module;)| (from to)
+(defun |java/lang/Module.addReads0(Ljava/lang/Module;Ljava/lang/Module;)V| (from to)
   (declare (ignore from to))
   nil)
 
-(defun |java/lang/Module.addExports0(Ljava/lang/Module;Ljava/lang/String;Ljava/lang/Module;)| (from pkg to)
+(defun |java/lang/Module.addExports0(Ljava/lang/Module;Ljava/lang/String;Ljava/lang/Module;)V| (from pkg to)
   (declare (ignore from pkg to))
   nil)
 
-(defun |java/lang/Module.addExportsToAll0(Ljava/lang/Module;Ljava/lang/String;)| (from pkg)
+(defun |java/lang/Module.addExportsToAll0(Ljava/lang/Module;Ljava/lang/String;)V| (from pkg)
   (declare (ignore from pkg))
   nil)
 
-(defun |java/lang/Module.addExportsToAllUnnamed0(Ljava/lang/Module;Ljava/lang/String;)| (from pkg)
+(defun |java/lang/Module.addExportsToAllUnnamed0(Ljava/lang/Module;Ljava/lang/String;)V| (from pkg)
   (declare (ignore from pkg))
   nil)
 
@@ -1130,24 +1133,24 @@ Without either on the classpath, every name is reported, as before."
       (lambda (location) (declare (ignore location)) nil))
 
 ;; Return our boot-class-loader for getSystemClassLoader() so it's never nil
-(defun |java/lang/ClassLoader.getSystemClassLoader()| ()
+(defun |java/lang/ClassLoader.getSystemClassLoader()Ljava/lang/ClassLoader;| ()
   *boot-class-loader*)
 (setf (gethash "java/lang/ClassLoader.getSystemClassLoader()Ljava/lang/ClassLoader;" *native-overrides*)
-      #'|java/lang/ClassLoader.getSystemClassLoader()|)
+      #'|java/lang/ClassLoader.getSystemClassLoader()Ljava/lang/ClassLoader;|)
 
 ;; JDK 17: registerAsParallelCapable always succeeds (avoids InternalError in <clinit>)
-(defun |java/lang/ClassLoader.registerAsParallelCapable()| ()
+(defun |java/lang/ClassLoader.registerAsParallelCapable()Z| ()
   1)
 (setf (gethash "java/lang/ClassLoader.registerAsParallelCapable()Z" *native-overrides*)
-      #'|java/lang/ClassLoader.registerAsParallelCapable()|)
+      #'|java/lang/ClassLoader.registerAsParallelCapable()Z|)
 
 ;; JDK 16+: Reference.refersTo0 — native method for weak reference checking
 ;; Used by ThreadLocalMap.getEntry() to match WeakReference keys.
-(defmethod |refersTo0(Ljava/lang/Object;)| ((this |java/lang/ref/Reference|) obj)
+(defmethod |refersTo0(Ljava/lang/Object;)Z| ((this |java/lang/ref/Reference|) obj)
   (if (eq (slot-value this '|referent|) obj) 1 0))
 
 ;; JDK 9+: Reflection.getClassAccessFlags — return class modifiers
-(defun |jdk/internal/reflect/Reflection.getClassAccessFlags(Ljava/lang/Class;)| (java-class)
+(defun |jdk/internal/reflect/Reflection.getClassAccessFlags(Ljava/lang/Class;)I| (java-class)
   (let ((ldk-class (get-ldk-class-for-java-class java-class)))
     (if (and ldk-class (slot-boundp ldk-class 'access-flags))
         (access-flags ldk-class)
@@ -1157,14 +1160,14 @@ Without either on the classpath, every name is reported, as before."
 ;; JDK 9+: JavaLangReflectAccess.getExecutableSharedParameterTypes — fallback
 ;; for when langReflectAccess on ReflectionFactory is nil (AccessibleObject
 ;; <clinit> hasn't run yet).  Delegates to the Executable's parameterTypes field.
-(defmethod |getExecutableSharedParameterTypes(Ljava/lang/reflect/Executable;)| (this exec)
+(defmethod |getExecutableSharedParameterTypes(Ljava/lang/reflect/Executable;)[Ljava/lang/Class;| (this exec)
   (declare (ignore this))
   (when (and exec (slot-exists-p exec '|parameterTypes|))
     (slot-value exec '|parameterTypes|)))
 
 ;; JDK 9+: findBootstrapClassOrNull — called via JavaLangAccess interface.
 ;; Delegates to the same logic as findBootstrapClass.
-(defmethod |findBootstrapClassOrNull(Ljava/lang/String;)| (this name)
+(defmethod |findBootstrapClassOrNull(Ljava/lang/String;)Ljava/lang/Class;| (this name)
   (declare (ignore this))
   (handler-case
       (let ((ldk-class (classload (substitute #\/ #\. (lstring name)))))
@@ -1175,12 +1178,12 @@ Without either on the classpath, every name is reported, as before."
 
 ;; JDK 9+: createOrGetClassLoaderValueMap — called via JavaLangAccess interface.
 ;; Returns (and lazily creates) the ConcurrentHashMap on ClassLoader.classLoaderValueMap.
-(defmethod |createOrGetClassLoaderValueMap(Ljava/lang/ClassLoader;)| (this classloader)
+(defmethod |createOrGetClassLoaderValueMap(Ljava/lang/ClassLoader;)Ljava/util/concurrent/ConcurrentHashMap;| (this classloader)
   (declare (ignore this))
   (when (and classloader (slot-exists-p classloader '|classLoaderValueMap|))
     (let ((existing (slot-value classloader '|classLoaderValueMap|)))
       (when existing
-        (return-from |createOrGetClassLoaderValueMap(Ljava/lang/ClassLoader;)| existing))))
+        (return-from |createOrGetClassLoaderValueMap(Ljava/lang/ClassLoader;)Ljava/util/concurrent/ConcurrentHashMap;| existing))))
   ;; Create a new ConcurrentHashMap and store it on the classloader
   (classload "java/util/concurrent/ConcurrentHashMap")
   (let ((map (%make-java-instance "java/util/concurrent/ConcurrentHashMap")))
@@ -1189,11 +1192,11 @@ Without either on the classpath, every name is reported, as before."
     map))
 
 ;; Fallback for any object (including nil) — unnamed modules return false
-(defmethod |isNamed()| (module)
+(defmethod |isNamed()Z| (module)
   (declare (ignore module))
   0)
 
-(defmethod |isPrimitive()| ((class |java/lang/Class|))
+(defmethod |isPrimitive()Z| ((class |java/lang/Class|))
   (let ((name-string (lstring (slot-value class '|name|))))
     (if (null (find name-string '("boolean"
                                   "char"
@@ -1225,14 +1228,14 @@ a same-named class from another loader."
         (class-package (substitute #\/ #\. (lstring (slot-value java-class '|name|)))))))
 
 (defun %class-interface-p (this)
-  (if (and (eq 0 (|isPrimitive()| this))
-           (eq 0 (|isArray()| this))
+  (if (and (eq 0 (|isPrimitive()Z| this))
+           (eq 0 (|isArray()Z| this))
            (let ((lclass (get-ldk-class-for-java-class this)))
              (and lclass (interface-p lclass))))
       1
       0))
 
-(defmethod |isInterface()| ((this |java/lang/Class|))
+(defmethod |isInterface()Z| ((this |java/lang/Class|))
   (%class-interface-p this))
 
 ;; Like getModifiers(), JDK 25's Class.isInterface() reads the `modifiers` field
@@ -1240,13 +1243,13 @@ a same-named class from another loader."
 ;; so the primary defmethod is clobbered by the JIT-compiled field read and
 ;; reports interfaces as non-interfaces (breaking Clojure deftype: "only
 ;; interfaces are supported, had: java.lang.Comparable"). An :around survives.
-(defmethod |isInterface()| :around ((this |java/lang/Class|))
+(defmethod |isInterface()Z| :around ((this |java/lang/Class|))
   (%class-interface-p this))
 
 (defclass/std <constant-pool> (|java/lang/Object|)
   ((ldk-class)))
 
-(defmethod |getConstantPool()| ((this |java/lang/Class|))
+(defmethod |getConstantPool()Ljdk/internal/reflect/ConstantPool;| ((this |java/lang/Class|))
   (let ((cp-class-bin "jdk/internal/reflect/ConstantPool")
         (cp-class-fq "jdk.internal.reflect.ConstantPool"))
     (unless (%get-ldk-class-by-fq-name cp-class-fq t)
@@ -1258,16 +1261,17 @@ a same-named class from another loader."
                 (make-instance '<constant-pool> :ldk-class ldk-class))
           cp)))))
 
-(defmethod |getDeclaredConstructors0(Z)| ((this |java/lang/Class|) public-only)
+(defmethod |getDeclaredConstructors0(Z)[Ljava/lang/reflect/Constructor;| ((this |java/lang/Class|) public-only)
   (unwind-protect
        (progn
          (when *debug-trace*
            (format t "~&~V@A trace: entering java/lang/Class.getDeclaredConstructors0(Z)~%" (incf *call-nesting-level* 1) "*"))
          (unless (%get-ldk-class-by-bin-name "java/lang/reflect/Constructor")
-           (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/reflect/Constructor") nil nil nil))
+           (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;| (jstring "java/lang/reflect/Constructor") nil nil nil))
 
          ;; Get the lclass for THIS (use correct loader)
-         (let ((lclass (get-ldk-class-for-java-class this)))
+         (let ((lclass (get-ldk-class-for-java-class this))
+               (*descriptor-loader* (%class-java-loader this)))
            (make-java-array
             :component-class (%get-java-class-by-fq-name "java.lang.reflect.Constructor")
             :initial-contents
@@ -1287,7 +1291,7 @@ a same-named class from another loader."
                                     |#
                                     collect (let ((c (%make-java-instance "java/lang/reflect/Constructor"))
                                                   (pt (%get-parameter-types (descriptor method))))
-                                              (|<init>(Ljava/lang/Class;[Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B)|
+                                              (|<init>(Ljava/lang/Class;[Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B)V|
                                                c this
                                                (make-java-array :component-class (%get-java-class-by-fq-name "java.lang.Class")
                                                                 :initial-contents pt)
@@ -1304,18 +1308,27 @@ a same-named class from another loader."
     (when *debug-trace*
       (incf *call-nesting-level* -1))))
 
-(defmethod |getDeclaredClasses0()| ((this |java/lang/Class|))
-  (let ((lclass (get-ldk-class-for-java-class this)))
-    ;; FIXME: need to get all inner classes
-    (let ((java-classes
-            (when lclass
-              (loop for iclass in (inner-classes lclass)
-                    for c = (%get-java-class-by-bin-name (value iclass) t)
-                    when c
-                      collect c))))
-      (make-java-array
-       :component-class (%get-java-class-by-fq-name "java.lang.Class")
-       :initial-contents (coerce java-classes 'vector)))))
+(defmethod |getDeclaredClasses0()[Ljava/lang/Class;| ((this |java/lang/Class|))
+  "The member classes THIS declares: the InnerClasses entries whose outer
+class is THIS, loaded if need be."
+  (let* ((lclass (and (eq 0 (|isArray()Z| this))
+                      (eq 0 (|isPrimitive()Z| this))
+                      (get-ldk-class-for-java-class this)))
+         (cp (and lclass (constant-pool lclass)))
+         (java-classes
+           (when lclass
+             (flet ((class-name-at (index)
+                      (slot-value (aref cp (index (aref cp index))) 'value)))
+               (loop for ic in (gethash "InnerClasses" (attributes lclass))
+                     for outer = (outer-class-info-index ic)
+                     when (and (not (zerop outer))
+                               (string= (class-name-at outer) (name lclass)))
+                       append (let ((c (%java-class-loading
+                                        (class-name-at (inner-class-info-index ic)) lclass)))
+                                (and c (list c))))))))
+    (make-java-array
+     :component-class (%get-java-class-by-fq-name "java.lang.Class")
+     :initial-contents (coerce java-classes 'vector))))
 
 (defun %checked-exception-classes (method lclass)
   "Class[] of METHOD's declared checked exceptions, from its Exceptions
@@ -1335,16 +1348,17 @@ Method/Constructor so reflection reports them (e.g. Method.toString()'s
                             (%get-java-class-by-bin-name cname t))
            when cls collect cls))))
 
-(defmethod |getDeclaredMethods0(Z)| ((this |java/lang/Class|) public-only)
+(defmethod |getDeclaredMethods0(Z)[Ljava/lang/reflect/Method;| ((this |java/lang/Class|) public-only)
   (unwind-protect
        (progn
          (when *debug-trace*
            (format t "~&~V@A trace: entering java/lang/Class.getDeclaredMethods(Z)~%" (incf *call-nesting-level* 1) "*"))
          (unless (gethash "java/lang/reflect/Method" *ldk-classes-by-bin-name*)
-           (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (jstring "java/lang/reflect/Method") nil nil nil))
+           (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;| (jstring "java/lang/reflect/Method") nil nil nil))
 
          ;; Get the lclass for THIS (use correct loader)
-         (let ((lclass (get-ldk-class-for-java-class this)))
+         (let ((lclass (get-ldk-class-for-java-class this))
+               (*descriptor-loader* (%class-java-loader this)))
            (make-java-array
             :component-class (%get-java-class-by-fq-name "java.lang.reflect.Method")
             :initial-contents (coerce (append (when lclass
@@ -1373,7 +1387,7 @@ Method/Constructor so reflection reports them (e.g. Method.toString()'s
                                                                  (descriptor method))))
                                                         (let ((init-fn
                                                                (function
-                                                                |<init>(Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/Class;Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B[B)|))) ; lint:suppress
+                                                                |<init>(Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/Class;Ljava/lang/Class;[Ljava/lang/Class;IILjava/lang/String;[B[B[B)V|))) ; lint:suppress
                                                           (funcall init-fn c this
                                                                    (ijstring (name method))
                                                                    (make-java-array

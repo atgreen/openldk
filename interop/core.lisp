@@ -123,20 +123,37 @@ classpath.  Several language systems can each add their own entries."
                                                (openldk::ldk-loader class)))
          (init (if (char= (char constructor 0) #\()
                    (concatenate 'string "<init>" constructor)
-                   constructor)))
+                   constructor))
+         ;; Constructors return void: method names carry return types.
+         (init (if (char= (char init (1- (length init))) #\)) (concatenate 'string init "V") init)))
     (apply (symbol-function (intern init :openldk)) object args)
     object))
 
 (defun java-call (method object &rest args)
-  "Call the instance method METHOD, e.g. \"toString()\", on OBJECT."
-  (apply (symbol-function (intern method :openldk)) object args))
+  "Call the instance method METHOD, e.g. \"toString()\" (the return type
+may be given too), on OBJECT."
+  (apply (symbol-function
+          (intern (if (typep object 'standard-object)
+                      ;; A DEFINE-JAVA-SUBCLASS instance resolves through its Java superclass.
+                      (or (loop for class in (closer-mop:class-precedence-list (class-of object))
+                                for name = (class-name class)
+                                for full = (and (symbolp name)
+                                                (or (eq class (class-of object)) (find #\/ (symbol-name name)))
+                                                (openldk::%resolve-method-name (symbol-name name) method))
+                                when (and full (string/= full method))
+                                  return full)
+                          method)
+                      method)
+                  :openldk))
+         object args))
 
 (defun java-static (class-name method &rest args)
   "Call the static method METHOD of CLASS-NAME, e.g. (java-static
 \"java.lang.Double\" \"valueOf(D)\" 1d0)."
   (let* ((class (java-load class-name))
          (symbol (openldk::static-method-symbol
-                  (format nil "~A.~A" (openldk::name class) method)
+                  (format nil "~A.~A" (openldk::name class)
+                          (openldk::%resolve-method-name (openldk::name class) method))
                   (openldk::ldk-class-package class))))
     (apply (symbol-function symbol) args)))
 
@@ -263,9 +280,11 @@ class JAVA-SUPERCLASS, with SLOTS, and METHODS, each (\"method(descriptor)\"
                              (openldk::ldk-class-package java-class))))
          (eval `(defclass ,',name (,super) ,',slots))
          ,@(loop for (method lambda-list . body) in methods
-                 collect `(eval '(defmethod ,(intern method :openldk)
-                                     ((,(first lambda-list) ,name) ,@(rest lambda-list))
-                                   ,@body)))
+                 collect `(eval `(defmethod ,(intern (openldk::%resolve-method-name
+                                                      (openldk::name java-class) ,method)
+                                                     :openldk)
+                                     ((,',(first lambda-list) ,',name) ,@',(rest lambda-list))
+                                   ,@',body)))
          ',name))))
 
 (defun make-java-subclass-instance (class &rest initargs)

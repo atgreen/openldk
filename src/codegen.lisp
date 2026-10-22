@@ -177,8 +177,8 @@ implements IR node INSN, generating operand code recursively."))
     (classload (symbol-name throwable-class)))
   (let ((throwable (make-instance throwable-class)))
     (if message
-        (|<init>(Ljava/lang/String;)| throwable (jstring message))
-        (|<init>()| throwable))
+        (|<init>(Ljava/lang/String;)V| throwable (jstring message))
+        (|<init>()V| throwable))
     throwable))
 
 (defmethod codegen ((insn ir-aastore) context)
@@ -374,7 +374,7 @@ result always stays in range (bitwise ops, floats, doubles)."
     (make-instance '<expression>
                    :insn insn
                    :code `(let ((lookup (%make-java-instance "java/lang/invoke/MethodHandles$Lookup")))
-                            (|<init>(Ljava/lang/Class;)| lookup ,class)
+                            (|<init>(Ljava/lang/Class;)V| lookup ,class)
                             (unimplemented "IR-CALL-DYNAMIC codegen")))))
 
 (defun %class-method-name-table (ldk-class)
@@ -1109,7 +1109,7 @@ component types must match exactly (short[] is not an int[])."
          (and obj-comp target-comp
               ;; target-comp.isAssignableFrom(obj-comp): obj's component is a
               ;; subtype of (or equal to) the target's component.
-              (eql 1 (|isAssignableFrom(Ljava/lang/Class;)| target-comp obj-comp))))))
+              (eql 1 (|isAssignableFrom(Ljava/lang/Class;)Z| target-comp obj-comp))))))
 
 (defun %instanceof-array (objref typename)
   "instanceof against an array target type TYPENAME."
@@ -1320,6 +1320,15 @@ component types must match exactly (short[] is not an int[])."
                                    cases
                                    (list `(otherwise ,default-target)))))))
 
+(defun %call-site-gf (method-name nargs)
+  "The generic function a virtual call to METHOD-NAME (a full name, or an
+OpenLDK-internal %NAME) with NARGS arguments calls: a Java method's is
+created if need be, so the call finds a function to forward from."
+  (let ((symbol (intern (format nil "~A" method-name) :openldk)))
+    (if (char= #\% (char (symbol-name symbol) 0))
+        symbol
+        (%ensure-java-gf symbol nargs))))
+
 (defmethod codegen ((insn ir-call-virtual-method) context)
   (with-slots (method-name args) insn
     ;; Virtual method dispatch uses :openldk package for generic function names
@@ -1339,9 +1348,9 @@ component types must match exactly (short[] is not an int[])."
                                         ((eq nargs 0)
                                          (internal-error "virtual call ~A has no receiver argument" method-name))
                                         ((eq nargs 1)
-                                         (list (intern (format nil "~A" method-name) :openldk) null-checked-receiver))
+                                         (list (%call-site-gf method-name nargs) null-checked-receiver))
                                         (t
-                                         `(funcall (function ,(intern (format nil "~A" method-name) :openldk))
+                                         `(funcall (function ,(%call-site-gf method-name nargs))
                                                    ,null-checked-receiver
                                                    ,@(mapcar (lambda (a) (code (codegen a context))) (cdr args)))))))
                            call))))
@@ -1495,7 +1504,7 @@ DYNAMIC-ARG-CODES) used to render boolean/char args the Java way."
     ((floatp val) (format nil "~F" val))
     ((characterp val) (string val))
     ((typep val '|java/lang/Object|)
-     (let ((str (|toString()| val)))
+     (let ((str (|toString()Ljava/lang/String;| val)))
        (if str (lstring str) "null")))
     (t (format nil "~A" val))))
 
@@ -1504,7 +1513,7 @@ DYNAMIC-ARG-CODES) used to render boolean/char args the Java way."
 Class (instanceof), a boxed integral constant, or a String constant."
   (cond
     ((typep label '|java/lang/Class|)
-     (= 1 (|isInstance(Ljava/lang/Object;)| label target)))
+     (= 1 (|isInstance(Ljava/lang/Object;)Z| label target)))
     ((integerp label)
      (and (typep target '(or |java/lang/Integer| |java/lang/Short|
                           |java/lang/Byte| |java/lang/Character|))
@@ -1514,7 +1523,7 @@ Class (instanceof), a boxed integral constant, or a String constant."
      (and (typep target '|java/lang/String|)
           (string= (lstring target) (lstring label))))
     (t (and target (typep target '|java/lang/Object|)
-            (= 1 (|equals(Ljava/lang/Object;)| target label))))))
+            (= 1 (|equals(Ljava/lang/Object;)Z| target label))))))
 
 (defun %type-switch (target restart labels)
   "Native implementation of java.lang.runtime.SwitchBootstraps.typeSwitch's target
@@ -1601,7 +1610,7 @@ boolean prints true/false and char prints the character rather than an int."
 
 (defun %record-field-hash (v)
   (cond ((null v) 0)
-        ((typep v '|java/lang/Object|) (or (|hashCode()| v) 0))
+        ((typep v '|java/lang/Object|) (or (|hashCode()I| v) 0))
         ((integerp v) v)
         ((characterp v) (char-code v))
         (t (sxhash v))))
@@ -1618,12 +1627,12 @@ boolean prints true/false and char prints the character rather than an int."
 (defun %record-field-equal (a b)
   (cond ((and (null a) (null b)) t)
         ((or (null a) (null b)) nil)
-        ((typep a '|java/lang/Object|) (= 1 (|equals(Ljava/lang/Object;)| a b)))
+        ((typep a '|java/lang/Object|) (= 1 (|equals(Ljava/lang/Object;)Z| a b)))
         (t (eql a b))))
 
 (defun %record-equals (record other class names-jstring)
   "Native implementation of a record's ObjectMethods-generated equals()."
-  (if (and other (= 1 (|isInstance(Ljava/lang/Object;)| class other)))
+  (if (and other (= 1 (|isInstance(Ljava/lang/Object;)Z| class other)))
       (if (every (lambda (name)
                    (%record-field-equal (%record-component-value record name)
                                         (%record-component-value other name)))
@@ -1841,7 +1850,7 @@ type."
         ;; Check for negative array size
         (when (< size 0)
           (let ((exc (%make-java-instance "java/lang/NegativeArraySizeException")))
-            (|<init>()| exc)
+            (|<init>()V| exc)
             (error (%lisp-condition exc))))
         (let ((component-class (%bin-type-name-to-class component-name)))
           (if rest-dims
@@ -2171,20 +2180,3 @@ Used to consult block-local substitutions in addition to global ones.")
                                                 (go ,(intern (format nil "branch-target-~A" (address handler-block)))))))
                             ,@fall-through-go))))))
           lisp-code)))))
-
-;; A method returning boolean or char may return it boxed, when a bridge
-;; returning Object shares its name (see %BOXING-BRIDGE-METHODS): unbox at
-;; instance-method call sites expecting one.
-(defmethod codegen :around ((insn ir-call) context)
-  (declare (ignore context))
-  (let ((expression (call-next-method)))
-    (if (and (typep insn '(or ir-call-virtual-method ir-call-special-method))
-             (not (typep insn 'ir-call-static-method))
-             (member (slot-value insn 'return-type) '(:BOOLEAN :CHAR))
-             (let ((name (format nil "~A" (slot-value insn 'method-name))))
-               (and (plusp (length name)) (char/= #\% (char name 0)))))
-        (make-instance '<expression>
-                       :insn insn
-                       :code `(%primitive-result ,(code expression))
-                       :expression-type (expression-type expression))
-        expression)))

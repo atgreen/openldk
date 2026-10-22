@@ -214,7 +214,7 @@ so that SAM methods returning Object get proper boxed values."
               result))
         (let ((args-array (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Object")
                                            :initial-contents (coerce (append captures args) 'vector))))
-          (|invokeWithArguments([Ljava/lang/Object;)| mh args-array)))))
+          (|invokeWithArguments([Ljava/lang/Object;)Ljava/lang/Object;| mh args-array)))))
 
 ;; Supplier implementation (for get() with no args)
 (defclass/std |openldk/LambdaSupplier| (|java/lang/Object| |java/util/function/Supplier|)
@@ -229,15 +229,15 @@ so that SAM methods returning Object get proper boxed values."
   ((target)
    (captures)))
 
-(defmethod |test(Ljava/lang/Object;)| ((this |openldk/LambdaPredicate|) obj)
+(defmethod |test(Ljava/lang/Object;)Z| ((this |openldk/LambdaPredicate|) obj)
   (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list obj)))
 
 ;; IntPredicate/LongPredicate/DoublePredicate bridge methods
-(defmethod |test(I)| ((this |openldk/LambdaPredicate|) int-val)
+(defmethod |test(I)Z| ((this |openldk/LambdaPredicate|) int-val)
   (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list int-val)))
-(defmethod |test(J)| ((this |openldk/LambdaPredicate|) long-val)
+(defmethod |test(J)Z| ((this |openldk/LambdaPredicate|) long-val)
   (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list long-val)))
-(defmethod |test(D)| ((this |openldk/LambdaPredicate|) double-val)
+(defmethod |test(D)Z| ((this |openldk/LambdaPredicate|) double-val)
   (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list double-val)))
 
 ;; BiPredicate implementation (for test(Object, Object))
@@ -245,7 +245,7 @@ so that SAM methods returning Object get proper boxed values."
   ((target)
    (captures)))
 
-(defmethod |test(Ljava/lang/Object;Ljava/lang/Object;)| ((this |openldk/LambdaBiPredicate|) a b)
+(defmethod |test(Ljava/lang/Object;Ljava/lang/Object;)Z| ((this |openldk/LambdaBiPredicate|) a b)
   (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list a b)))
 
 ;; Function implementation (for apply(Object))
@@ -259,9 +259,9 @@ so that SAM methods returning Object get proper boxed values."
 ;; IntFunction/LongFunction/DoubleFunction bridge methods (primitive-specialized apply)
 (defmethod |apply(I)| ((this |openldk/LambdaFunction|) int-val)
   (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list int-val) :box-return t))
-(defmethod |apply(J)| ((this |openldk/LambdaFunction|) long-val)
+(defmethod |apply(J)Ljava/lang/Object;| ((this |openldk/LambdaFunction|) long-val)
   (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list long-val) :box-return t))
-(defmethod |apply(D)| ((this |openldk/LambdaFunction|) double-val)
+(defmethod |apply(D)Ljava/lang/Object;| ((this |openldk/LambdaFunction|) double-val)
   (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list double-val) :box-return t))
 
 ;; Consumer implementation (for accept(Object))
@@ -274,13 +274,13 @@ so that SAM methods returning Object get proper boxed values."
   nil)
 
 ;; IntConsumer/LongConsumer/DoubleConsumer bridge methods
-(defmethod |accept(I)| ((this |openldk/LambdaConsumer|) int-val)
+(defmethod |accept(I)V| ((this |openldk/LambdaConsumer|) int-val)
   (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list int-val))
   nil)
-(defmethod |accept(J)| ((this |openldk/LambdaConsumer|) long-val)
+(defmethod |accept(J)V| ((this |openldk/LambdaConsumer|) long-val)
   (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list long-val))
   nil)
-(defmethod |accept(D)| ((this |openldk/LambdaConsumer|) double-val)
+(defmethod |accept(D)V| ((this |openldk/LambdaConsumer|) double-val)
   (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list double-val))
   nil)
 
@@ -289,7 +289,7 @@ so that SAM methods returning Object get proper boxed values."
   ((target)
    (captures)))
 
-(defmethod |accept(Ljava/lang/Object;Ljava/lang/Object;)| ((this |openldk/LambdaBiConsumer|) a b)
+(defmethod |accept(Ljava/lang/Object;Ljava/lang/Object;)V| ((this |openldk/LambdaBiConsumer|) a b)
   (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list a b))
   nil)
 
@@ -330,7 +330,7 @@ Returns the class symbol."
                           0))
          ;; Build the descriptor from SAM method type parameter types
          (descriptor (if sam-method-type
-                        (let ((desc (lstring (|toMethodDescriptorString()| sam-method-type))))
+                        (let ((desc (lstring (|toMethodDescriptorString()Ljava/lang/String;| sam-method-type))))
                           desc)
                         "()Ljava/lang/Object;"))
          (lispized-name (lispize-method-name (format nil "~A~A" method-str descriptor)))
@@ -457,7 +457,7 @@ lambda also implements the marker interfaces they name (Serializable)."
                 (ignore-errors
                  (some #'identity
                        (%descriptor-param-prim-flags
-                        (lstring (|toMethodDescriptorString()| sam-method-type)))))))
+                        (lstring (|toMethodDescriptorString()Ljava/lang/String;| sam-method-type)))))))
          (lambda-class (or
                         ;; A SAM with primitive parameters (e.g. a custom
                         ;; interface `int apply(int,int)`) cannot use the generic
@@ -482,7 +482,7 @@ lambda also implements the marker interfaces they name (Serializable)."
 ;; tripping the UnsupportedOperationException override in ClassReader$2.  We
 ;; keep it simple: if the expected slots exist, set them and clear cached
 ;; params.  Works for both Type$ClassType and the anonymous subclass.
-(defmethod |setEnclosingType(Lcom/sun/tools/javac/code/Type;)| (this outer)
+(defmethod |setEnclosingType(Lcom/sun/tools/javac/code/Type;)V| (this outer)
   (when (slot-exists-p this '|outer_field|)
     (setf (slot-value this '|outer_field|) outer))
   (when (slot-exists-p this '|allparams_field|)
@@ -507,14 +507,14 @@ lambda also implements the marker interfaces they name (Serializable)."
           (setf (slot-value form '|methodHandles|) cache))))
     cache))
 
-(defun |java/lang/invoke/MethodTypeForm.setCachedMethodHandle(ILjava/lang/invoke/MethodHandle;)| (form index mh)
+(defun |java/lang/invoke/MethodTypeForm.setCachedMethodHandle(ILjava/lang/invoke/MethodHandle;)Ljava/lang/invoke/MethodHandle;| (form index mh)
   "Native shim used by LambdaForm generation to cache handles per MethodTypeForm."
   (assert (and form (>= index 0)))
   (let ((cache (%ensure-methodtypeform-handle-cache form index)))
     (setf (jaref cache index) mh)
     mh))
 
-(defun |java/lang/invoke/MethodHandleNatives.objectFieldOffset(Ljava/lang/invoke/MemberName;)| (member-name)
+(defun |java/lang/invoke/MethodHandleNatives.objectFieldOffset(Ljava/lang/invoke/MemberName;)J| (member-name)
   (declare (ignore unsafe))
   (let ((offset (unsigned-to-signed-integer (cl-murmurhash:murmurhash (sxhash member-name)))))
     (setf (gethash offset *field-offset-table*) member-name)
@@ -535,9 +535,9 @@ lambda also implements the marker interfaces they name (Serializable)."
             for method = (aref (methods ldk-class) index)
             do (if (eq skip 0)
                    (progn
-                     (|init(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Object;I)|
+                     (|init(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Object;I)V|
                       mn defc (jstring (name method))
-                      (|java/lang/invoke/MethodType.fromMethodDescriptorString(Ljava/lang/String;Ljava/lang/ClassLoader;)|
+                      (|java/lang/invoke/MethodType.fromMethodDescriptorString(Ljava/lang/String;Ljava/lang/ClassLoader;)Ljava/lang/invoke/MethodType;|
                        (jstring (descriptor method)) class-loader)
                       (+ (access-flags method)
                          (if (static-p method) (ash 6 24) (ash 5 24))

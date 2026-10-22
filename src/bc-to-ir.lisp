@@ -1605,7 +1605,7 @@ are ordinary declared methods and use normal dispatch.")
                                      (slot-value name-and-type 'name-index))
                                'value))
                  (method-type
-                   (let ((mt (|java/lang/invoke/MethodType.fromMethodDescriptorString(Ljava/lang/String;Ljava/lang/ClassLoader;)|
+                   (let ((mt (|java/lang/invoke/MethodType.fromMethodDescriptorString(Ljava/lang/String;Ljava/lang/ClassLoader;)Ljava/lang/invoke/MethodType;|
                               (jstring (emit (aref constant-pool (slot-value name-and-type 'type-descriptor-index)) constant-pool))
                               nil)))
                      (make-instance 'ir-object-literal

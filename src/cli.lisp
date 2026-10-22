@@ -288,14 +288,97 @@ relative paths against its user.dir)."
   (let ((class (gethash "jdk/internal/util/StaticProperty" *ldk-classes-by-bin-name*)))
     (when class (setf (initialized-p class) nil))))
 
+(defvar *saved-native-memory* '()
+  "(address . contents) of each block of Unsafe memory alive when the
+image was saved, for %RESTORE-NATIVE-MEMORY.")
+
+(defun %save-native-memory ()
+  (setf *saved-native-memory*
+        (loop for address being the hash-keys of *unsafe-memory-table* using (hash-value entry)
+              collect (let* ((size (cdr entry))
+                             (contents (make-array size :element-type '(unsigned-byte 8)))
+                             (sap (sb-sys:int-sap address)))
+                        (dotimes (i size) (setf (aref contents i) (sb-sys:sap-ref-8 sap i)))
+                        (cons address contents))))
+  (clrhash *unsafe-memory-table*)
+  (pushnew '%restore-native-memory sb-ext:*init-hooks*))
+
+(defconstant +map-fixed-noreplace+ #x100000
+  "Linux's MAP_FIXED_NOREPLACE: map at exactly this address, or fail.")
+
+(defun %restore-native-memory ()
+  "SB-EXT:*INIT-HOOKS* function: map each block %SAVE-NATIVE-MEMORY kept
+back at its address and fill it in, so the Java objects holding those
+addresses work in the restarted image.  A block whose pages the restarted
+process already uses stays lost."
+  (let ((page-size 4096)
+        (mapped (make-hash-table)))
+    (loop for (address . contents) in *saved-native-memory*
+          for size = (length contents)
+          for first-page = (* page-size (floor address page-size))
+          for end = (+ address (max size 1))
+          for ok = (loop for page from first-page below end by page-size
+                         always (or (gethash page mapped)
+                                    (let ((result (ignore-errors
+                                                   (sb-posix:mmap (sb-sys:int-sap page) page-size
+                                                                  (logior sb-posix:prot-read sb-posix:prot-write)
+                                                                  (logior sb-posix:map-private sb-posix:map-anon
+                                                                          +map-fixed-noreplace+)
+                                                                  -1 0))))
+                                      (and result (= (sb-sys:sap-int result) page)
+                                           (setf (gethash page mapped) t)))))
+          if ok
+            do (let ((sap (sb-sys:int-sap address)))
+                 (dotimes (i size) (setf (sb-sys:sap-ref-8 sap i) (aref contents i)))
+                 (setf (gethash address *unsafe-memory-table*) (cons :restored size)))
+          else
+            do (format *error-output* "~&; OpenLDK: native memory at #x~X (~D bytes) not restored~%"
+                       address size))
+    (setf *saved-native-memory* '()))
+  ;; Files Java code mapped (FileChannel.map): map them again in place.
+  (maphash (lambda (address mapping)
+             (destructuring-bind (path position length prot) mapping
+               (let ((result
+                       (and path
+                            (ignore-errors
+                             (let ((fd (sb-posix:open path (if (zerop prot) sb-posix:o-rdonly sb-posix:o-rdwr))))
+                               (unwind-protect
+                                    (sb-posix:mmap (sb-sys:int-sap address) length
+                                                   (if (zerop prot) sb-posix:prot-read
+                                                       (logior sb-posix:prot-read sb-posix:prot-write))
+                                                   (logior (if (= prot 2) sb-posix:map-private sb-posix:map-shared)
+                                                           +map-fixed-noreplace+)
+                                                   fd position)
+                                 (sb-posix:close fd)))))))
+                 (unless (and result (= (sb-sys:sap-int result) address))
+                   (format *error-output* "~&; OpenLDK: mapping of ~A at #x~X not restored~%"
+                           path address)))))
+           *file-mappings*)
+  (maphash (lambda (path sap-and-size)
+             (destructuring-bind (sap . size) sap-and-size
+               (let ((result (ignore-errors
+                              (let ((fd (sb-posix:open path sb-posix:o-rdonly)))
+                                (unwind-protect
+                                     (sb-posix:mmap sap size sb-posix:prot-read
+                                                    (logior sb-posix:map-private +map-fixed-noreplace+)
+                                                    fd 0)
+                                  (sb-posix:close fd))))))
+                 (unless (and result (= (sb-sys:sap-int result) (sb-sys:sap-int sap)))
+                   (format *error-output* "~&; OpenLDK: jimage ~A at #x~X not restored~%"
+                           path (sb-sys:sap-int sap))
+                   (remhash path *jimage-native-maps*)))))
+           *jimage-native-maps*))
+
 (defun %reset-runtime-for-save ()
   "Put the runtime in a state that survives SAVE-LISP-AND-DIE and a restart:
 kill other threads, drop process-local handles, and give every lock a fresh
 mutex.  Call this last, right before saving, after any build-time runs of
 Java code (warmups)."
-  ;; Clear unsafe memory table — foreign heap pointers from warmup
-  ;; won't survive image save/load.
-  (clrhash *unsafe-memory-table*)
+  ;; Native memory Java code allocated (Unsafe.allocateMemory: direct
+  ;; buffers NIO caches, for one) is malloc'd, outside the saved heap, but
+  ;; the Java objects holding its addresses are saved: keep the contents,
+  ;; to put back at the same addresses on restart.
+  (%save-native-memory)
   ;; Force ProcessEnvironment to re-initialize at runtime so it reads
   ;; the actual runtime environment, not stale warmup state.
   (let ((pe (%get-ldk-class-by-bin-name "java/lang/ProcessEnvironment" t)))
@@ -358,7 +441,9 @@ Java code (warmups)."
   ;; jrt: filesystem state (providers, mmapped jimage buffers) is
   ;; process-local; drop it so the restarted image rebuilds it.
   (setf *installed-file-system-providers* nil)
-  (clrhash *jimage-native-maps*)
+  ;; The mmapped jimages are mapped again in place on restart (see
+  ;; %RESTORE-NATIVE-MEMORY): Java objects outside these caches (the Scala
+  ;; compiler's JDK classpath) hold buffers over them.
   ;; Java-side static caches also hold the build-time ImageReader whose
   ;; mmapped buffer dies with this process; using them after restart
   ;; segfaults.  Clear them so the runtime rebuilds the jrt filesystem.

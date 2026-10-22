@@ -140,11 +140,11 @@ say) and return the next one's class."
                (some #'java-class-of (nthcdr (1+ caller-sensitive) frames)))
           (%get-java-class-by-bin-name "java/lang/System")))))
 
-(defun |jdk/internal/reflect/Reflection.areNestMates(Ljava/lang/Class;Ljava/lang/Class;)| (a b)
+(defun |jdk/internal/reflect/Reflection.areNestMates(Ljava/lang/Class;Ljava/lang/Class;)Z| (a b)
   "True when classes A and B belong to the same nest."
   (if (eq (%nest-host a) (%nest-host b)) 1 0))
 
-(defun |jdk/internal/reflect/Reflection.getCallerClass()| ()
+(defun |jdk/internal/reflect/Reflection.getCallerClass()Ljava/lang/Class;| ()
   (|sun/reflect/Reflection.getCallerClass()|))
 
 (defun %type-to-descriptor (type)
@@ -207,7 +207,47 @@ say) and return the next one's class."
   (let* ((cname (format nil "[~A" (%type-to-descriptor element-type))))
     (%get-array-ldk-class-from-name cname)))
 
-(defmethod |getClass()| (object)
+(defun %lisp-only-java-class (class-symbol)
+  "A java.lang.Class for CLASS-SYMBOL, a class OpenLDK defines in Lisp with
+no class file (openldk/LambdaSupplier, a dynamic lambda class): a public
+final synthetic subclass of Object implementing the Java interfaces among
+its superclasses, made and registered on first use; or NIL for any other."
+  (let ((cname (and (symbolp class-symbol) (symbol-name class-symbol))))
+    (when (and cname (eq (symbol-package class-symbol) (find-package :openldk))
+               (starts-with? "openldk/" cname)
+               (find-class class-symbol nil))
+      (or (gethash cname *java-classes-by-bin-name*)
+          (let* ((fq-name (substitute #\. #\/ cname))
+                 (jclass (%make-java-instance "java/lang/Class"))
+                 (lclass (make-instance '<class>))
+                 (interfaces
+                   (loop for super in (closer-mop:class-direct-superclasses (find-class class-symbol))
+                         for super-name = (symbol-name (class-name super))
+                         for super-lclass = (gethash super-name *ldk-classes-by-bin-name*)
+                         when (and super-lclass (logtest #x200 (or (access-flags super-lclass) 0)))
+                           collect super-name)))
+            (setf (slot-value jclass '|name|) (ijstring fq-name))
+            (when (slot-exists-p jclass '|modifiers|)
+              (setf (slot-value jclass '|modifiers|) #x1011))
+            (when (and *unnamed-module* (slot-exists-p jclass '|module|))
+              (setf (slot-value jclass '|module|) *unnamed-module*))
+            (setf (name lclass) cname
+                  (super lclass) "java/lang/Object"
+                  (interfaces lclass) (coerce interfaces 'vector)
+                  (access-flags lclass) #x1011
+                  (fields lclass) #()
+                  (methods lclass) #()
+                  (constant-pool lclass) #()
+                  (attributes lclass) (make-hash-table :test #'equal)
+                  (initialized-p lclass) t
+                  (java-class lclass) jclass)
+            (setf (gethash fq-name *ldk-classes-by-fq-name*) lclass
+                  (gethash cname *ldk-classes-by-bin-name*) lclass
+                  (gethash fq-name *java-classes-by-fq-name*) jclass
+                  (gethash cname *java-classes-by-bin-name*) jclass)
+            jclass)))))
+
+(defmethod |getClass()Ljava/lang/Class;| (object)
   (when (null object)
     (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|))))
   (unwind-protect
@@ -243,7 +283,7 @@ say) and return the next one's class."
                                  (format nil "[~A" comp-name))
                                 ;; Reference type → [Lname;
                                 (t (format nil "[L~A;" comp-name)))))
-                       (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
+                       (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;|
                         (jstring array-name) nil nil nil)))
                     (t
                      ;; The class's symbol is in its defining loader's package;
@@ -254,7 +294,8 @@ say) and return the next one's class."
                                                              (and (symbolp class-symbol)
                                                                   (%ldk-loader-for-symbol class-symbol)))))
                        (or jc
-                           (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)|
+                           (%lisp-only-java-class class-symbol)
+                           (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;|
                             (jstring (format nil "~A" (type-of object))) nil nil nil)))))))
            c))
     (when *debug-trace*
@@ -276,7 +317,7 @@ say) and return the next one's class."
                 (java-class lclass)))
           (condition () nil))))
 
-(defmethod |java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (name initialize loader caller)
+(defmethod |java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;| (name initialize loader caller)
   (unwind-protect
        (progn
          (when *debug-trace*
@@ -290,7 +331,7 @@ say) and return the next one's class."
                   ;; calls findClass.  Then fall back to our classpath search.
                   (or (and (and loader (not (equal loader *boot-class-loader*)))
                            (handler-case
-                               (|loadClass(Ljava/lang/String;)| loader name)
+                               (|loadClass(Ljava/lang/String;)Ljava/lang/Class;| loader name)
                              (|condition-java/lang/ClassNotFoundException| () nil)
                              (error () nil)))
                       (and (eq (char lname 0) #\[)
@@ -323,7 +364,7 @@ say) and return the next one's class."
     (when *debug-trace*
       (incf *call-nesting-level* -1))))
 
-(defun |java/lang/System.currentTimeMillis()| ()
+(defun |java/lang/System.currentTimeMillis()J| ()
   ;; Do some more math if this is not true.
   (assert (eq org.shirakumo.precise-time:precise-time-units-per-second
               1000000000))
@@ -343,7 +384,7 @@ say) and return the next one's class."
     (when *debug-trace*
       (incf *call-nesting-level* -1))))
 
-(defun |java/lang/System.nanoTime()| ()
+(defun |java/lang/System.nanoTime()J| ()
   ;; Do some more math if this is not true.
   (assert (eq org.shirakumo.precise-time:precise-time-units-per-second
               1000000000))
@@ -354,7 +395,7 @@ say) and return the next one's class."
           1000000000)
        nanoseconds)))
 
-(defun |jdk/internal/misc/VM.getNanoTimeAdjustment(J)| (offset-in-seconds)
+(defun |jdk/internal/misc/VM.getNanoTimeAdjustment(J)J| (offset-in-seconds)
   "Nanoseconds from OFFSET-IN-SECONDS (seconds since the epoch) to now, or -1
 when the offset is 2^32 seconds or more away, as HotSpot answers.  This backs
 Clock.currentInstant, and so Instant.now()."
@@ -372,11 +413,11 @@ Clock.currentInstant, and so Instant.now()."
 (defun %throw-arraycopy-index-error (format-control &rest format-arguments)
   "System.arraycopy bounds violations throw ArrayIndexOutOfBoundsException."
   (let ((exc (%make-java-instance "java/lang/ArrayIndexOutOfBoundsException")))
-    (|<init>(Ljava/lang/String;)| exc
+    (|<init>(Ljava/lang/String;)V| exc
      (jstring (apply #'format nil format-control format-arguments)))
     (error (%lisp-condition exc))))
 
-(defmethod |java/lang/System.arraycopy(Ljava/lang/Object;ILjava/lang/Object;II)| (src-array src-pos dest-array dest-pos length)
+(defmethod |java/lang/System.arraycopy(Ljava/lang/Object;ILjava/lang/Object;II)V| (src-array src-pos dest-array dest-pos length)
   "Copies LENGTH elements from SRC-ARRAY starting at SRC-POS
    to DEST-ARRAY starting at DEST-POS.
    Handles overlapping regions correctly even within the same array."
@@ -417,30 +458,26 @@ Clock.currentInstant, and so Instant.now()."
           (setf (row-major-aref dest-array (+ dest-pos i))
                 (row-major-aref src-array (+ src-pos i)))))))
 
-(defmethod |run()| (arg)
-  (declare (ignore arg))
-  (error (%lisp-condition (%make-throwable '|java/lang/UnsupportedOperationException|))))
+(defmethod |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedAction;)Ljava/lang/Object;| (action)
+  (|run()Ljava/lang/Object;| action))
 
-(defmethod |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedAction;)| (action)
-  (|run()| action))
-
-(defmethod |java/lang/Class.getPrimitiveClass(Ljava/lang/String;)| (class-name)
+(defmethod |java/lang/Class.getPrimitiveClass(Ljava/lang/String;)Ljava/lang/Class;| (class-name)
   (let ((name (lstring class-name)))
     (%get-java-class-by-fq-name name)))
 
-(defmethod |java/lang/Float.floatToRawIntBits(F)| (float)
+(defmethod |java/lang/Float.floatToRawIntBits(F)I| (float)
   ;; single-float-bits yields the unsigned 32-bit pattern; Java returns a
   ;; signed int, so a negative float (sign bit set) must come back negative --
   ;; otherwise Float.toString reads the sign as positive and drops the '-'.
   (%int-to-signed (float-features:single-float-bits (coerce float 'single-float))))
 
-(defmethod |java/lang/Double.doubleToRawLongBits(D)| (double)
+(defmethod |java/lang/Double.doubleToRawLongBits(D)J| (double)
   ;; Likewise: Java returns a signed 64-bit long.
   (%long-to-signed (float-features:double-float-bits (coerce double 'double-float))))
 
-(defmethod |java/lang/Double.longBitsToDouble(J)| (long-bits)
+(defmethod |java/lang/Double.longBitsToDouble(J)D| (long-bits)
   (float-features:bits-double-float (ldb (byte 64 0) long-bits)))
 
-(defmethod |java/lang/Float.intBitsToFloat(I)| (int-bits)
+(defmethod |java/lang/Float.intBitsToFloat(I)F| (int-bits)
   (float-features:bits-single-float (ldb (byte 32 0) int-bits)))
 

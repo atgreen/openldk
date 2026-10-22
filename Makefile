@@ -24,6 +24,9 @@ JSCHEME_URL = https://norvig.com/jscheme
 JSCHEME_SRC_JAR = lib/jscheme/jscheme-src.jar
 JSCHEME_MAIN = lib/jscheme/classes/jscheme/Scheme.class
 
+SCALA_VERSION = 2.13.16
+SCALA_JARS = lib/scala/scala-library-$(SCALA_VERSION).jar lib/scala/scala-reflect-$(SCALA_VERSION).jar lib/scala/scala-compiler-$(SCALA_VERSION).jar
+
 ABCL_VERSION = 1.9.2
 ABCL_JAR = lib/abcl/abcl.jar
 ABCL_URL = https://abcl.org/releases/$(ABCL_VERSION)/abcl-bin-$(ABCL_VERSION).tar.gz
@@ -82,6 +85,11 @@ lib/clojure/core.specs.alpha-0.4.74.jar:
 clojure: src/*.lisp src/native/*.lisp *.asd Makefile lib/clojure/build-image.lisp $(CLOJURE_JARS) | check-jdk
 	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))" --load lib/clojure/build-image.lisp
 
+lib/scala/scala-%-$(SCALA_VERSION).jar:
+	mkdir -p lib/scala
+	curl -sSfL -o $@.tmp $(MAVEN_URL)/org/scala-lang/scala-$*/$(SCALA_VERSION)/scala-$*-$(SCALA_VERSION).jar
+	mv $@.tmp $@
+
 $(JSCHEME_SRC_JAR):
 	curl -sSfL -o $@.tmp $(JSCHEME_URL)/jscheme.jar
 	mv $@.tmp $@
@@ -109,6 +117,10 @@ check-clojure: sbcl-clojure
 check-kawa: sbcl-kawa
 	./sbcl-kawa --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:test-system \"openldk/kawa\"))"
 
+# Tests for openldk/scala, run in sbcl-scala, where Scala is started.
+check-scala: sbcl-scala
+	./sbcl-scala --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:test-system \"openldk/scala\"))"
+
 # SBCLs with a language started, for using it from Lisp (see docs/INTEROP.md).
 sbcl-jscheme: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(JSCHEME_MAIN) | check-jdk
 	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/jscheme\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-jscheme\" :init (lambda () (jscheme:startup) (jscheme:eval-string \"(define (f n) (if (< n 2) 1 (* n (f (- n 1))))) (f 10) (map (lambda (x) (* x x)) (list 1 2 3))\")))"
@@ -118,6 +130,9 @@ sbcl-kawa: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(KAWA_JAR
 
 sbcl-clojure: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(CLOJURE_JARS) | check-jdk
 	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/clojure\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-clojure\" :init (lambda () (clojure:startup) (clojure:eval-string \"(defn f [n] (if (< n 2) 1 (*' n (f (dec n))))) (f 20) (mapv inc (range 5)) (into {} [[:a 1]]) (str 1 :k)\")))"
+
+sbcl-scala: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(SCALA_JARS) | check-jdk
+	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/scala\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-scala\" :init (lambda () (scala:startup) (scala:eval \"def f(n: Int): BigInt = if (n < 2) 1 else n * f(n - 1); f(20); List(1, 2, 3).map(_ * 2).sum; Vector(1, 2); Map(1 -> 2); Some((1, 2))\")))"
 
 # A warm image: JScheme's Java code is compiled at build time (see docs/IMAGES.md).
 jscheme: src/*.lisp src/native/*.lisp *.asd Makefile lib/jscheme/build-image.lisp $(JSCHEME_MAIN) lib/jscheme/r4rstest.scm | check-jdk
