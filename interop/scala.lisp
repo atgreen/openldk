@@ -269,6 +269,7 @@ nothing."
                   (%list (loop for k being the hash-keys of value using (hash-value v)
                                collect (java-new "scala.Tuple2" "(Ljava/lang/Object;Ljava/lang/Object;)"
                                                  (from-lisp k) (from-lisp v))))))
+    ((typep value 'foreign-function) (foreign-function-object value))
     ((functionp value) (%scala-function value))
     (t value)))
 
@@ -301,6 +302,7 @@ nothing."
       ((and (is :product) (%tuple-p object))
        (loop for i below (java-call "productArity()" object)
              collect (to-lisp (java-call "productElement(I)" object i))))
+      ((or (is :function-0) (is :function-1) (is :function-2) (is :function-3)) (make-foreign-function object "Scala" #'funcall))
       (t object))))
 
 (defun %tuple-p (object)
@@ -330,7 +332,7 @@ unconverted, so a function can be passed to FUNCALL."
 REPL binds to one) with ARGS, converted with FROM-LISP; return the result
 as Lisp data."
   (%ensure-started)
-  (let ((object (if (stringp function) (eval-raw function) function))
+  (let ((object (if (stringp function) (eval-raw function) (foreign-object function)))
         (args (mapcar #'from-lisp args)))
     (to-lisp
      (with-foreign-errors ("Scala")
@@ -344,7 +346,7 @@ as a val of TYPE (a string of Scala; by default Any, or (Any, ...) => Any
 for a function).  A function becomes a Scala function of ARITY arguments,
 by default the number its lambda list requires."
   (%ensure-started)
-  (let* ((arity (and (functionp value) (or arity (%arity value))))
+  (let* ((arity (and (and (functionp value) (not (typep value 'foreign-function))) (or arity (%arity value))))
          (object (if arity (%scala-function value arity) (from-lisp value)))
          (type (or type
                    (if arity
@@ -389,6 +391,7 @@ by default the number its lambda list requires."
     ((listp value) "List[Any]")
     ((vectorp value) "Vector[Any]")
     ((hash-table-p value) "Map[Any, Any]")
+    ((typep value 'foreign-function) "Any")
     ((functionp value)
      (format nil "(~{~A~^, ~}) => Any" (make-list (%arity value) :initial-element "Any")))
     ((symbolp value) "String")

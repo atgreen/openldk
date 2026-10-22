@@ -153,7 +153,8 @@ by DEFAULT-CLASSPATH).  Calling it again does nothing."
                                       (:character . "org.armedbear.lisp.LispCharacter")
                                       (:symbol . "org.armedbear.lisp.Symbol")
                                       (:cons . "org.armedbear.lisp.Cons")
-                                      (:simple-vector . "org.armedbear.lisp.SimpleVector"))
+                                      (:simple-vector . "org.armedbear.lisp.SimpleVector")
+                                      (:function . "org.armedbear.lisp.Function"))
                 collect (cons key (java-class-symbol name))))
     (setf *nil* (java-static-field "org.armedbear.lisp.Lisp" "NIL")
           *t* (java-static-field "org.armedbear.lisp.Lisp" "T")
@@ -240,6 +241,7 @@ by DEFAULT-CLASSPATH).  Calling it again does nothing."
     ((vectorp value)
      (java-new "org.armedbear.lisp.SimpleVector" "([Lorg/armedbear/lisp/LispObject;)"
                (make-java-array-of "org.armedbear.lisp.LispObject" (map 'list #'from-lisp value))))
+    ((typep value 'foreign-function) (foreign-function-object value))
     ((functionp value) (%lisp-function value nil))
     (t value)))
 
@@ -283,6 +285,7 @@ by DEFAULT-CLASSPATH).  Calling it again does nothing."
        (coerce (loop for i below (java-call "length()" object)
                      collect (to-lisp (java-call "AREF(I)" object i)))
                'simple-vector))
+      ((is :function) (make-foreign-function object "ABCL" #'funcall))
       (t object))))
 
 ;;; Evaluating
@@ -358,7 +361,7 @@ ARGS, converted with FROM-LISP; return the result as SBCL data."
   (%ensure-started)
   (let ((function (if (or (stringp function) (symbolp function))
                       (lookup function)
-                      function)))
+                      (foreign-object function))))
     (to-lisp (apply #'%call function (mapcar #'from-lisp args)))))
 
 (defun define (name value)
@@ -368,7 +371,7 @@ converted with FROM-LISP."
   (%ensure-started)
   (let ((symbol (%abcl-symbol name)))
     (with-foreign-errors ("ABCL")
-      (if (functionp value)
+      (if (and (functionp value) (not (typep value 'foreign-function)))
           (java-call "setSymbolFunction(Lorg/armedbear/lisp/LispObject;)" symbol
                      (%lisp-function value symbol))
           (progn

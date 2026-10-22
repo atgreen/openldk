@@ -202,7 +202,8 @@ DEFAULT-CLASSPATH finds).  Calling it again does nothing."
                                       (:unit . "kotlin.Unit")
                                       (:pair . "kotlin.Pair")
                                       (:map . "java.util.Map")
-                                      (:collection . "java.util.Collection"))
+                                      (:collection . "java.util.Collection")
+                                      (:function . "kotlin.Function"))
                 collect (cons key (java-class-symbol name))))
     (%install-lisp-functions)
     (setf *started* t))
@@ -271,6 +272,7 @@ OpenLDK passes them, references through FROM-LISP."
                   (java-call "put(Ljava/lang/Object;Ljava/lang/Object;)" map (from-lisp k) (from-lisp v)))
                 value)
        map))
+    ((typep value 'foreign-function) (foreign-function-object value))
     ((functionp value) (%kotlin-function value))
     (t value)))
 
@@ -303,6 +305,7 @@ OpenLDK passes them, references through FROM-LISP."
              while (eql 1 (java-call "hasNext()" iterator))
              collect (to-lisp (java-call "next()" iterator))))
       ((typep object 'openldk::java-array) (map 'vector #'to-lisp (java-array-list object)))
+      ((is :function) (make-foreign-function object "Kotlin" #'funcall))
       (t object))))
 
 ;;; Compiling
@@ -377,7 +380,7 @@ FROM-LISP; return the result as Lisp data."
              (apply #'java-call
                     (format nil "invoke(~{~A~})Ljava/lang/Object;"
                             (make-list (length args) :initial-element "Ljava/lang/Object;"))
-                    function (mapcar #'from-lisp args)))))
+                    (foreign-object function) (mapcar #'from-lisp args)))))
 
 ;;; #@kotlin{ ... }
 ;;;
@@ -409,6 +412,7 @@ FROM-LISP; return the result as Lisp data."
     ((characterp value) "Char")
     ((or (consp value) (vectorp value)) "List<Any?>")
     ((hash-table-p value) "Map<Any?, Any?>")
+    ((typep value 'foreign-function) "Any?")
     ((functionp value)
      (format nil "(~{~A~^, ~}) -> Any?" (make-list (%arity value) :initial-element "Any?")))
     ((symbolp value) "String")

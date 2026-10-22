@@ -63,6 +63,13 @@ fun applyAll(f: (Any?) -> Any?, xs: List<Any?>) = xs.map(f)")))
   (signals openldk.interop:foreign-error (kotlin:compile "fun broken( = 1"))
   (signals openldk.interop:foreign-error (kotlin:eval "error(\"boom\")")))
 
+(test foreign-functions-are-lisp-functions
+  (let ((f (kotlin:eval "{ x: Int -> x * x }")))
+    (is (typep f 'openldk.interop:foreign-function))
+    (is (= 49 (funcall f 7)))
+    (is (equal '(1 4 9) (mapcar f '(1 2 3))))
+    (is (equal '(3 2 1) (sort (list 1 2 3) #'> :key f)))))
+
 ;;; #@kotlin{ ... } source syntax, in a readtable of this file's own
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (setf *readtable* (openldk.interop:enable-source-syntax (copy-readtable))))

@@ -70,6 +70,11 @@
            #:call-from-java
            #:define-source-syntax
            #:enable-source-syntax
+           #:foreign-function
+           #:foreign-function-object
+           #:foreign-function-language
+           #:make-foreign-function
+           #:foreign-object
            #:define-java-class
            #:make-java-object
            #:java-class-of-lisp-class
@@ -724,3 +729,34 @@ their initforms."
           do (setf (%java-slot object slot)
                    (getf initargs (intern (symbol-name slot) :keyword) (funcall initform))))
     object))
+
+;;; Foreign functions as Lisp functions
+;;;
+;;; A language's function object -- a Clojure fn, a Scala or Kotlin
+;;; function, a Groovy closure, a Scheme procedure, an ABCL function -- comes
+;;; to Lisp as a FOREIGN-FUNCTION: a funcallable instance, so FUNCALL, APPLY,
+;;; MAPCAR and SORT call it like any Lisp function, converting arguments and
+;;; result as its language's FUNCALL does.  Passed back to a language, it is
+;;; the original object again.
+
+(defclass foreign-function ()
+  ((object :initarg :object :reader foreign-function-object
+           :documentation "The language's function object.")
+   (language :initarg :language :reader foreign-function-language))
+  (:metaclass closer-mop:funcallable-standard-class))
+
+(defmethod print-object ((function foreign-function) stream)
+  (print-unreadable-object (function stream :type t :identity t)
+    (princ (foreign-function-language function) stream)))
+
+(defun make-foreign-function (object language caller)
+  "A FOREIGN-FUNCTION for the function OBJECT of LANGUAGE (a string),
+calling (CALLER OBJECT arg...) when called."
+  (let ((function (make-instance 'foreign-function :object object :language language)))
+    (closer-mop:set-funcallable-instance-function
+     function (lambda (&rest args) (apply caller object args)))
+    function))
+
+(defun foreign-object (value)
+  "VALUE's foreign object if it is a FOREIGN-FUNCTION, else VALUE."
+  (if (typep value 'foreign-function) (foreign-function-object value) value))

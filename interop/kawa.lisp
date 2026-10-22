@@ -211,6 +211,7 @@ by DEFAULT-CLASSPATH).  Calling it again does nothing."
     ((vectorp value)
      (java-new "gnu.lists.FVector" "([Ljava/lang/Object;)"
                (make-java-array-of "java.lang.Object" (map 'list #'from-lisp value))))
+    ((typep value 'foreign-function) (foreign-function-object value))
     ((functionp value) (%lisp-procedure value nil))
     (t value)))
 
@@ -243,6 +244,7 @@ by DEFAULT-CLASSPATH).  Calling it again does nothing."
       ((is :symbol) (intern (%lisp-name (lstring (java-call "getName()" object)))))
       ((is :f-vector)
        (map 'vector #'to-lisp (java-array-list (java-call "toArray()" object))))
+      ((is :procedure) (make-foreign-function object "Kawa" #'funcall))
       (t object))))
 
 ;;; Evaluating
@@ -289,7 +291,7 @@ Scheme code would call it."
   (%ensure-started)
   (let ((object (if (or (stringp procedure) (symbolp procedure))
                     (lookup procedure)
-                    procedure)))
+                    (foreign-object procedure))))
     (if (typep object (%class :procedure))
         (to-lisp (with-foreign-errors ("Kawa")
                    (java-call "applyN([Ljava/lang/Object;)" object
@@ -310,7 +312,7 @@ with FROM-LISP.  A function becomes a Scheme procedure; with PREDICATE, its
 NIL result is #f rather than '()."
   (%ensure-started)
   (let* ((scheme-name (if (stringp name) name (%name name)))
-         (value (if (functionp value)
+         (value (if (and (functionp value) (not (typep value 'foreign-function)))
                     (%lisp-procedure value scheme-name :predicate predicate)
                     (from-lisp value))))
     (with-foreign-errors ("Kawa")

@@ -219,6 +219,7 @@ sbcl-groovy` downloads).  Calling it again does nothing."
                   (java-call "put(Ljava/lang/Object;Ljava/lang/Object;)" map (from-lisp k) (from-lisp v)))
                 value)
        map))
+    ((typep value 'foreign-function) (foreign-function-object value))
     ((functionp value) (%groovy-closure value))
     (t value)))
 
@@ -252,6 +253,7 @@ sbcl-groovy` downloads).  Calling it again does nothing."
              while (eql 1 (java-call "hasNext()" iterator))
              collect (to-lisp (java-call "next()" iterator))))
       ((typep object 'openldk::java-array) (map 'vector #'to-lisp (java-array-list object)))
+      ((is :closure) (make-foreign-function object "Groovy" #'funcall))
       (t object))))
 
 ;;; Evaluating
@@ -287,7 +289,7 @@ FROM-LISP; a Lisp function becomes a Groovy closure."
   "Call the Groovy CLOSURE (a closure, or the name of a binding holding one)
 with ARGS, converted with FROM-LISP; return the result as Lisp data."
   (%ensure-started)
-  (let ((closure (if (stringp closure) (lookup closure) closure)))
+  (let ((closure (if (stringp closure) (lookup closure) (foreign-object closure))))
     (to-lisp (with-foreign-errors ("Groovy")
                (java-call "call([Ljava/lang/Object;)" closure
                           (make-java-array-of "java.lang.Object" (mapcar #'from-lisp args)))))))

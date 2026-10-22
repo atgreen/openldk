@@ -121,3 +121,12 @@
   (let ((xs '(1 2)))
     (is (= 2 (gethash :b #@clojure{ (zipmap [:a :b] $xs) ; } in a comment
                          })))))
+
+(test foreign-functions-are-lisp-functions
+  (let ((f (clojure:eval-string "(fn [x] (* x x))")))
+    (is (typep f 'openldk.interop:foreign-function))
+    (is (= 49 (funcall f 7)))
+    (is (equal '(1 4 9) (mapcar f '(1 2 3))))
+    (is (equal '(3 2 1) (sort (list 1 2 3) #'> :key f)))
+    (clojure:define "lispy" f)
+    (is (equal '(1 4 9) (clojure:eval '(map lispy (list 1 2 3)))) "passed back, it is the original function")))
