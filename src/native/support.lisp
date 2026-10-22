@@ -158,7 +158,7 @@ defmethod before the JIT would upgrade them), which is why the name check matter
 (defmethod |getNestHost()| ((this |java/lang/Class|))
   "Return the nest host of this class.  Returns self if no NestHost attribute."
   (let* ((name (slot-value this '|name|))
-         (bin-name (if (stringp name) name (coerce (java-array-data name) 'string)))
+         (bin-name (if (stringp name) name (%char-data-string (java-array-data name))))
          (bin-name (substitute #\/ #\. bin-name))
          (ldk-class (%get-ldk-class-by-bin-name bin-name t)))
     (if (and ldk-class (nest-host ldk-class))
@@ -169,7 +169,7 @@ defmethod before the JIT would upgrade them), which is why the name check matter
 (defmethod |getNestMembers()| ((this |java/lang/Class|))
   "Return an array of nest member classes.  Returns singleton array of self if no NestMembers."
   (let* ((name (slot-value this '|name|))
-         (bin-name (if (stringp name) name (coerce (java-array-data name) 'string)))
+         (bin-name (if (stringp name) name (%char-data-string (java-array-data name))))
          (bin-name (substitute #\/ #\. bin-name))
          (ldk-class (%get-ldk-class-by-bin-name bin-name t)))
     (if (and ldk-class (nest-members ldk-class))

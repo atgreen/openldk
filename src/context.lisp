@@ -77,6 +77,15 @@
     :std (make-hash-table :test #'equal))
    (pc :std 0)
    (needs-array-bounds-check :std nil)
+   (compact-p
+    :std nil
+    :doc "True to generate compact code -- out-of-line array and field
+access, no variable typing -- for code that runs once (<clinit>) or is
+very large, where SBCL compile time outweighs run time.")
+   (variable-sources
+    :std (make-hash-table :test #'eq)
+    :doc "Local/stack variable symbol -> where the values codegen assigns to
+it come from (see %NOTE-VARIABLE-SOURCE), for declaring variable types.")
    (stack :std (list (make-instance '<stack-bottom-marker>)))
    (in-dead-code :std nil)))
 

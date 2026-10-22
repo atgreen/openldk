@@ -376,18 +376,12 @@ Clock.currentInstant, and so Instant.now()."
       (%throw-arraycopy-index-error "destination size=~A, access=~A"
                                     (array-total-size dest-array) (+ dest-pos length -1)))
 
-    ;; Handle the case when src-array and dest-array are the same and regions overlap
-    (if (and (eq src-array dest-array)
-             (> dest-pos src-pos)
-             (< dest-pos (+ src-pos length)))
-        ;; Copy backwards to avoid overwriting source elements before they're copied
-        (loop for i from (1- length) downto 0 do
-          (setf (row-major-aref dest-array (+ dest-pos i))
-                (row-major-aref src-array (+ src-pos i))))
-        ;; Otherwise, copy forwards
-        (loop for i from 0 below length do
-          (setf (row-major-aref dest-array (+ dest-pos i))
-                (row-major-aref src-array (+ src-pos i)))))))
+    ;; REPLACE copies overlapping regions of one array correctly, and is a
+    ;; block move when both arrays have the same specialized element type.
+    (replace dest-array src-array
+             :start1 dest-pos :end1 (+ dest-pos length)
+             :start2 src-pos)
+    nil))
 
 (defmethod |run()| (arg)
   (declare (ignore arg))

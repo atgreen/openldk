@@ -406,7 +406,7 @@ current0 for why it must not delegate to the wrapper name)."
                    (let ((data (java-array-data b)))
                      (loop for i below n
                            do (setf (aref data (+ off i))
-                                    (sb-sys:sap-ref-8 sap i))))
+                                    (sb-sys:signed-sap-ref-8 sap i))))
                    (sb-alien:free-alien mem)
                    n)
                   (t

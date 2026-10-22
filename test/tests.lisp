@@ -98,6 +98,74 @@ file, nothing."
     (is (= 0 coder))
     (is (equalp '(112 108 97 105 110) (coerce bytes 'list)))))
 
+(test primitive-arrays-are-specialized
+  ;; Primitive arrays use specialized vectors so JIT'd code can AREF them
+  ;; unboxed.  Component classes given as descriptors need no JVM.
+  (flet ((data (component &rest args)
+           (openldk::java-array-data
+            (apply #'openldk::make-java-array :component-class component args))))
+    (is (equal '(signed-byte 32) (array-element-type (data "I" :size 3))))
+    (is (equal '(signed-byte 8) (array-element-type (data "Z" :size 3))))
+    (is (equal '(unsigned-byte 16) (array-element-type (data "C" :size 3))))
+    (is (eq 'double-float (array-element-type (data "D" :size 3))))
+    (is (eq t (array-element-type (data "[I" :size 3))))
+    (is (equalp #(0 0) (data "J" :size 2)))
+    (is (equalp #(0d0 0d0) (data "D" :size 2)))
+    ;; Values are normalized as Java's narrowing stores would.
+    (is (equalp #(104 105 0) (data "C" :initial-contents (coerce '(#\h #\i #\Null) 'string))))
+    (is (equalp #(-56 1 0) (data "B" :initial-contents #(200 t nil))))
+    (is (equalp #(1.5f0) (data "F" :initial-contents #(1.5d0))))
+    (let ((array (openldk::make-java-array :component-class "S" :size 1)))
+      (setf (openldk::jaref array 0) 40000)
+      (is (= -25536 (openldk::jaref array 0))))))
+
+(test unsafe-array-memory-view
+  ;; Unsafe byte offsets address a primitive array's memory as the JVM
+  ;; lays it out: little-endian, two's complement, IEEE.
+  (let ((ints (openldk::make-java-array :component-class "I" :initial-contents #(1 -2))))
+    (is (= 4 (openldk::%unsafe-array-element-scale ints)))
+    (is (= 1 (openldk::%unsafe-array-read-byte ints 0)))
+    (is (= #xFE (openldk::%unsafe-array-read-byte ints 4)))
+    (is (= #xFFFFFFFE00000001 (openldk::%unsafe-read-array-bits ints 0 8)))
+    (openldk::%unsafe-write-array-bits ints 2 2 #x1234)
+    (is (= #x12340001 (openldk::jaref ints 0))))
+  (let ((bytes (openldk::make-java-array :component-class "B" :size 4)))
+    (openldk::%unsafe-array-write-byte bytes 3 #xFF)
+    (is (= -1 (openldk::jaref bytes 3)))
+    (is (= #xFF000000 (openldk::%unsafe-read-array-bits bytes 0 4))))
+  (let ((doubles (openldk::make-java-array :component-class "D" :initial-contents #(1d0))))
+    (is (= #x3FF0000000000000 (openldk::%unsafe-read-array-bits doubles 0 8)))))
+
+(test method-variable-typing
+  (flet ((categories (&rest sources)
+           (let ((table (make-hash-table)))
+             (loop for (variable . list) in sources
+                   do (setf (gethash variable table) list))
+             (sort (loop for v being the hash-keys of (openldk::%variable-categories table)
+                           using (hash-value c)
+                         collect (list v c))
+                   #'string< :key (lambda (e) (symbol-name (first e)))))))
+    ;; A loop counter copied through a stack variable stays typed.
+    (is (equal '((i :int) (s :int))
+               (categories '(i :int (:copy . s)) '(s (:copy . i)))))
+    ;; Unknown values (field reads, parameters) and mixed categories don't.
+    (is (equal '() (categories '(p nil :int) '(q :int :long))))
+    ;; Nor does a copy of an untyped variable, or a copy-only cycle.
+    (is (equal '((b :long)) (categories '(a :int (:copy . p)) '(p nil) '(b :long))))
+    (is (equal '() (categories '(x :int (:copy . y)) '(y (:copy . z)) '(z (:copy . y))))))
+  ;; Assignments to declared variables are normalized; others untouched.
+  (is (equal '(progn (setf a (openldk::%as-int (+ a 1)))
+                     (setf b '(setf a 2))
+                     (setf (aref v 0) (setf a (openldk::%as-int 3))))
+             (openldk::%normalize-typed-assignments
+              '(progn (setf a (+ a 1))
+                      (setf b '(setf a 2))
+                      (setf (aref v 0) (setf a 3)))
+              '((a signed-byte 32)))))
+  (is (= 97 (openldk::%as-int #\a)))
+  (is (= 1 (openldk::%as-int t)))
+  (is (= -1 (openldk::%as-int #xFFFFFFFF))))
+
 (test vm-nano-time-adjustment
   ;; VM.getNanoTimeAdjustment(offset): nanoseconds from OFFSET (epoch
   ;; seconds) to now, or -1 when OFFSET is 2^32 seconds or more away.  It

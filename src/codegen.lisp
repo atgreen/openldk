@@ -59,6 +59,65 @@ implements IR node INSN, generating operand code recursively."))
   "Write a dynamically defined Java field without baking in an SBCL global slot accessor."
   (setf (slot-value object slot-name) value))
 
+;;; Field accesses cache, per access site, the layout of the last object
+;;; seen and where that layout keeps the slot: a fixnum index into the
+;;; instance's slot vector, or for a static field (a class-allocated slot
+;;; of the +static-X+ instance) the class's slot cell.  A hit costs a
+;;; layout compare and one load, against SLOT-VALUE's lookup by name.
+;;; Java classes are plain STANDARD-CLASSes with no slot protocol methods,
+;;; so going around SLOT-VALUE is safe.  Each CACHE is a site's own
+;;; (LOAD-TIME-VALUE (LIST NIL)); its car is replaced whole, never
+;;; mutated, so other threads see a consistent (LAYOUT . LOCATION).
+;;; The access stays an ordinary call: inlined at every site, it made
+;;; SBCL's compile time, which dominates most programs' run, 20% longer.
+
+(declaim (inline %slot-cache-location))
+
+(defun %slot-cache-location (object cache)
+  "OBJECT's slot location from the site CACHE, or NIL on a miss."
+  (let ((entry (car cache)))
+    (and entry
+         (sb-kernel:%instancep object)
+         (eq (sb-kernel:%instance-layout object) (car entry))
+         (cdr entry))))
+
+(defun %slot-cache-fill (object slot-name cache)
+  "Remember where OBJECT's layout keeps SLOT-NAME in the site CACHE."
+  (when (and (sb-kernel:%instancep object) (typep object 'standard-object))
+    (let ((layout (sb-kernel:%instance-layout object)))
+      (unless (sb-kernel:layout-invalid layout)
+        (let ((slotd (find slot-name (sb-mop:class-slots (class-of object))
+                           :key #'sb-mop:slot-definition-name)))
+          (when slotd
+            (setf (car cache)
+                  (cons layout (sb-mop:slot-definition-location slotd)))))))))
+
+(defun %cached-slot-value-miss (object slot-name cache)
+  (prog1 (slot-value object slot-name)
+    (%slot-cache-fill object slot-name cache)))
+
+(defun %set-cached-slot-value-miss (value object slot-name cache)
+  (prog1 (setf (slot-value object slot-name) value)
+    (%slot-cache-fill object slot-name cache)))
+
+(defun %cached-slot-value (object slot-name cache)
+  "SLOT-VALUE of the Java field SLOT-NAME of OBJECT, via the site CACHE."
+  (let* ((location (%slot-cache-location object cache))
+         (value (typecase location
+                  (fixnum (sb-mop:standard-instance-access object location))
+                  (cons (cdr location))
+                  (t sb-pcl:+slot-unbound+))))
+    (if (eq value sb-pcl:+slot-unbound+)
+        (%cached-slot-value-miss object slot-name cache)
+        value)))
+
+(defun (setf %cached-slot-value) (value object slot-name cache)
+  (let ((location (%slot-cache-location object cache)))
+    (typecase location
+      (fixnum (setf (sb-mop:standard-instance-access object location) value))
+      (cons (setf (cdr location) value))
+      (t (%set-cached-slot-value-miss value object slot-name cache)))))
+
 (defclass/std <expression> ()
   ((insn
     code
@@ -98,6 +157,7 @@ implements IR node INSN, generating operand code recursively."))
                         :insn insn
                         ;; Reference the pre-computed vector directly
                         :code `(make-java-array :component-class ,(component-class insn)
+                                                :element-type ',(%component-element-type (component-class insn))
                                                 :initial-contents (copy-seq ',java-strings))
                         :expression-type (slot-value insn 'type))))
       ;; Small constant array or vectorp - inline it
@@ -110,6 +170,7 @@ implements IR node INSN, generating operand code recursively."))
          (make-instance '<expression>
                         :insn insn
                         :code `(make-java-array :component-class ,(component-class insn)
+                                                :element-type ',(%component-element-type (component-class insn))
                                                 :initial-contents (vector ,@wrapped-values))
                         :expression-type (slot-value insn 'type))))
       ;; IR nodes - must codegen each one
@@ -120,6 +181,7 @@ implements IR node INSN, generating operand code recursively."))
          (make-instance '<expression>
                         :insn insn
                         :code `(make-java-array :component-class ,(component-class insn)
+                                                :element-type ',(%component-element-type (component-class insn))
                                                 :initial-contents (vector ,@codegenned-values))
                         :expression-type (slot-value insn 'type)))))))
 
@@ -188,82 +250,76 @@ implements IR node INSN, generating operand code recursively."))
                                 (arrayref ,(code (codegen arrayref context))))
                             (%aastore arrayref index value)))))
 
-(defmethod codegen ((insn ir-iastore) context)
+;;; Primitive array loads and stores compile to an inline AREF on the
+;;; array's specialized data vector (see arrays.lisp).  A null array
+;;; reference fails JAVA-ARRAY-DATA's type check and an out-of-range index
+;;; fails AREF's bounds check; WITH-JAVA-CONDITIONS turns these into
+;;; NullPointerException and ArrayIndexOutOfBoundsException.
+
+(defun %array-data-form (arrayref-form element-type)
+  `(the (simple-array ,element-type (*)) (java-array-data ,arrayref-form)))
+
+(defun %codegen-array-store (insn element-type value-form context)
+  "Codegen a primitive xASTORE into an ELEMENT-TYPE array, storing
+VALUE-FORM (which may refer to VALUE, the operand).  Compact code calls
+the generic (SETF JAREF), which normalizes the value itself."
   (with-slots (arrayref index value) insn
     (make-instance '<expression>
                    :insn insn
                    :code `(let ((value ,(code (codegen value context)))
                                 (index ,(code (codegen index context)))
                                 (arrayref ,(code (codegen arrayref context))))
-                            (setf (jaref arrayref index) value)))))
+                            ,(if (compact-p context)
+                                 '(setf (jaref arrayref index) value)
+                                 `(setf (aref ,(%array-data-form 'arrayref element-type) index)
+                                        ,value-form))))))
+
+(defmethod codegen ((insn ir-iastore) context)
+  (%codegen-array-store insn '(signed-byte 32) '(sb-c::mask-signed-field 32 value) context))
 
 (defmethod codegen ((insn ir-lastore) context)
-  (with-slots (arrayref index value) insn
-    (make-instance '<expression>
-                   :insn insn
-                   :code `(let ((value ,(code (codegen value context)))
-                                (index ,(code (codegen index context)))
-                                (arrayref ,(code (codegen arrayref context))))
-                            (setf (jaref arrayref index) value)))))
+  (%codegen-array-store insn '(signed-byte 64) '(sb-c::mask-signed-field 64 value) context))
 
 (defmethod codegen ((insn ir-fastore) context)
-  (with-slots (arrayref index value) insn
-    (make-instance '<expression>
-                   :insn insn
-                   :code `(let ((value ,(code (codegen value context)))
-                                (index ,(code (codegen index context)))
-                                (arrayref ,(code (codegen arrayref context))))
-                            (setf (jaref arrayref index) value)))))
+  (%codegen-array-store insn 'single-float '(float value 1f0) context))
 
 (defmethod codegen ((insn ir-sastore) context)
-  (with-slots (arrayref index value) insn
-    (make-instance '<expression>
-                   :insn insn
-                   :code `(let ((value ,(code (codegen value context)))
-                                (index ,(code (codegen index context)))
-                                (arrayref ,(code (codegen arrayref context))))
-                            (setf (jaref arrayref index) value)))))
+  (%codegen-array-store insn '(signed-byte 16) '(sb-c::mask-signed-field 16 value) context))
 
 (defmethod codegen ((insn ir-bastore) context)
-  (with-slots (arrayref index value) insn
-    (make-instance '<expression>
-                   :insn insn
-                   :code `(let ((value ,(code (codegen value context)))
-                                (index ,(code (codegen index context)))
-                                (arrayref ,(code (codegen arrayref context))))
-                            (setf (jaref arrayref index) value)))))
+  ;; Shared by byte[] and boolean[]; a boolean may arrive as T/NIL.
+  (%codegen-array-store insn '(signed-byte 8)
+                        '(sb-c::mask-signed-field 8 (case value ((nil) 0) ((t) 1) (t value)))
+                        context))
 
 (defmethod codegen ((insn ir-dastore) context)
-  (with-slots (arrayref index value) insn
-    (make-instance '<expression>
-                   :insn insn
-                   :code `(let ((value ,(code (codegen value context)))
-                                (index ,(code (codegen index context)))
-                                (arrayref ,(code (codegen arrayref context))))
-                            (setf (jaref arrayref index) value)))))
+  (%codegen-array-store insn 'double-float '(float value 1d0) context))
+
+(defmethod codegen ((insn ir-castore) context)
+  (%codegen-array-store insn '(unsigned-byte 16)
+                        '(ldb (byte 16 0) (if (characterp value) (char-code value) value))
+                        context))
 
 (defmethod codegen ((insn ir-idiv) context)
   ;; Java integer division truncates toward zero (not floor toward -infinity)
   (make-instance '<expression>
                  :insn insn
-                 :code `(handler-case
-                            (let ((value2 ,(code (codegen (value2 insn) context)))
-                                  (value1 ,(code (codegen (value1 insn) context))))
-                              (unsigned-to-signed-integer (logand (truncate value1 value2) #xFFFFFFFF)))
-                          (division-by-zero ()
-                            (error (%lisp-condition (%make-throwable '|java/lang/ArithmeticException|)))))
+                 :code `(let ((value2 ,(code (codegen (value2 insn) context)))
+                              (value1 ,(code (codegen (value1 insn) context))))
+                          (if (eql value2 0)
+                              (error (%lisp-condition (%make-throwable '|java/lang/ArithmeticException|)))
+                              (sb-c::mask-signed-field 32 (truncate value1 value2))))
                  :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-ldiv) context)
   ;; Java long division truncates toward zero (not floor toward -infinity)
   (make-instance '<expression>
                  :insn insn
-                 :code `(handler-case
-                            (let ((value2 ,(code (codegen (value2 insn) context)))
-                                  (value1 ,(code (codegen (value1 insn) context))))
-                              (unsigned-to-signed-long (logand (truncate value1 value2) #xFFFFFFFFFFFFFFFF)))
-                          (division-by-zero ()
-                            (error (%lisp-condition (%make-throwable '|java/lang/ArithmeticException|)))))
+                 :code `(let ((value2 ,(code (codegen (value2 insn) context)))
+                              (value1 ,(code (codegen (value1 insn) context))))
+                          (if (eql value2 0)
+                              (error (%lisp-condition (%make-throwable '|java/lang/ArithmeticException|)))
+                              (sb-c::mask-signed-field 64 (truncate value1 value2))))
                  :expression-type :LONG))
 
 (defun %codegen-binop (insn operator jtype context)
@@ -276,29 +332,23 @@ implements IR node INSN, generating operand code recursively."))
                  :expression-type jtype))
 
 (defun %codegen-integer-binop (insn operator context)
-  "Codegen an int op with Java 32-bit wrap-around overflow semantics."
+  "Codegen an int op with Java 32-bit wrap-around overflow semantics.
+MASK-SIGNED-FIELD is SBCL's modular arithmetic: with typed operands the
+whole form compiles to a single machine instruction."
   (make-instance '<expression>
                  :insn insn
-                 :code (list 'let* (list (list 'value2 (code (codegen (value2 insn) context)))
-                                         (list 'value1 (code (codegen (value1 insn) context)))
-                                         (list 'result (list 'logand (list operator 'value1 'value2) #xFFFFFFFF))
-                                         (list 'sresult (list 'if (list '> 'result 2147483647)
-                                                              (list '- 'result 4294967296)
-                                                              'result)))
-                             'sresult)
+                 :code `(let ((value2 ,(code (codegen (value2 insn) context)))
+                              (value1 ,(code (codegen (value1 insn) context))))
+                          (sb-c::mask-signed-field 32 (,operator value1 value2)))
                  :expression-type :INTEGER))
 
 (defun %codegen-long-binop (insn operator context)
   "Codegen a long op with Java 64-bit wrap-around overflow semantics."
   (make-instance '<expression>
                  :insn insn
-                 :code (list 'let* (list (list 'value2 (code (codegen (value2 insn) context)))
-                                         (list 'value1 (code (codegen (value1 insn) context)))
-                                         (list 'result (list 'logand (list operator 'value1 'value2) #xFFFFFFFFFFFFFFFF))
-                                         (list 'sresult (list 'if (list '> 'result 9223372036854775807)
-                                                              (list '- 'result 18446744073709551616)
-                                                              'result)))
-                             'sresult)
+                 :code `(let ((value2 ,(code (codegen (value2 insn) context)))
+                              (value1 ,(code (codegen (value1 insn) context))))
+                          (sb-c::mask-signed-field 64 (,operator value1 value2)))
                  :expression-type :LONG))
 
 (defmacro %define-binop-codegen-methods (&rest opcodes)
@@ -356,16 +406,92 @@ result always stays in range (bitwise ops, floats, doubles)."
   (make-instance '<expression>
                  :insn insn
                  :code `(let ((arrayref ,(code (codegen (slot-value insn 'arrayref) context))))
-                          (if arrayref
-                              (if (stringp arrayref) (length arrayref) (java-array-length arrayref))
-                              (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|)))))
+                          (if (java-array-p arrayref)
+                              (length (java-array-data arrayref))
+                              (%array-length-slow arrayref)))
                  :expression-type :INTEGER))
+
+;;; Typed variables.  Codegen records where each value assigned to a
+;;; local or stack variable comes from; a variable whose values all have
+;;; one primitive category is declared with that Lisp type (see %TYPED-LET
+;;; in openldk.lisp), letting SBCL keep it unboxed and open-code its
+;;; arithmetic.  Only values JIT'd code computes itself count -- arithmetic,
+;;; conversions, numeric literals, primitive array loads -- plus copies of
+;;; other typed variables.  Field reads, call results and parameters don't:
+;;; natives store all sorts in Java fields (an int fd field holds a Lisp
+;;; stream).  Every assignment to a declared variable also goes through a
+;;; %AS-<category> normalizer, which compiles to nothing when the value's
+;;; type is already known.
+
+(defun %jtype-category (jtype)
+  "Variable type category for the Java stack type JTYPE, or NIL."
+  (case jtype
+    ((:INTEGER :CHAR :SHORT :BYTE :BOOLEAN) :int)
+    (:LONG :long)
+    (:FLOAT :float)
+    (:DOUBLE :double)
+    (t nil)))
+
+(defun %note-variable-source (symbol source context)
+  "Record that SYMBOL is assigned a value from SOURCE: a category
+keyword, (:COPY . VARIABLE), or NIL for a value of unknown type."
+  (push source (gethash symbol (variable-sources context))))
+
+(defun %value-source (expression)
+  "The variable source (see %NOTE-VARIABLE-SOURCE) of EXPRESSION's value."
+  (let ((code (code expression))
+        (insn (insn expression)))
+    (cond
+      ((and code (symbolp code) (not (eq code t))) (cons :copy code))
+      ((typep insn '(and (or ir-binop ir-unop ir-literal ir-array-length
+                             ir-array-index ir-instanceof)
+                         (not ir-i2l)))
+       (%jtype-category (expression-type expression)))
+      (t nil))))
 
 (defmethod codegen ((insn ir-assign) context)
   (with-slots (lvalue rvalue) insn
-   (make-instance '<expression>
-                   :insn insn
-                   :code (list 'setf (code (codegen lvalue context)) (code (codegen rvalue context))))))
+    (let ((place (code (codegen lvalue context)))
+          (value (codegen rvalue context)))
+      (when (symbolp place)
+        (%note-variable-source place (%value-source value) context))
+      (make-instance '<expression>
+                     :insn insn
+                     :code (list 'setf place (code value))))))
+
+(declaim (inline %as-int %as-long %as-float %as-double))
+
+(defun %as-primitive-slow (value bits)
+  "VALUE as a BITS-wide Java integer: chars become code units, booleans 0/1."
+  (sb-c::mask-signed-field
+   bits
+   (typecase value
+     (integer value)
+     (character (char-code value))
+     (null 0)
+     ((eql t) 1)
+     (t (internal-error "~S assigned to a ~D-bit integer variable" value bits)))))
+
+(defun %as-int (value)
+  (if (typep value '(signed-byte 32)) value (%as-primitive-slow value 32)))
+
+(defun %as-long (value)
+  (if (typep value '(signed-byte 64)) value (%as-primitive-slow value 64)))
+
+(defun %as-float-slow (value)
+  (float value 1f0))
+
+(defun %as-double-slow (value)
+  (float value 1d0))
+
+;;; The slow paths stay out of line: inlined, SBCL can derive an operand
+;;; type FLOAT rejects (Lisp's SQRT of a negative double is complex) and
+;;; print a compile-time warning into the program's output.
+(defun %as-float (value)
+  (if (typep value 'single-float) value (%as-float-slow value)))
+
+(defun %as-double (value)
+  (if (typep value 'double-float) value (%as-double-slow value)))
 
 (defmethod codegen ((insn ir-call-dynamic) context)
   (with-slots (class) insn
@@ -464,71 +590,38 @@ default method -- not every superinterface."
                            call)
                    :expression-type return-type)))
 
-(defmethod codegen ((insn ir-caload) context)
+(defun %codegen-array-load (insn element-type jtype context)
+  "Codegen a primitive xALOAD from an ELEMENT-TYPE array, typed JTYPE."
   (with-slots (index arrayref) insn
     (make-instance '<expression>
                    :insn insn
                    :code `(let ((index ,(code (codegen index context)))
                                 (arrayref ,(code (codegen arrayref context))))
-                            (let ((c (jaref arrayref index)))
-                              (typecase c
-                                (character (char-code c))
-                                (integer c))))
-                   :expression-type :CHAR)))
+                            ,(if (compact-p context)
+                                 '(jaref arrayref index)
+                                 `(aref ,(%array-data-form 'arrayref element-type) index)))
+                   :expression-type jtype)))
+
+(defmethod codegen ((insn ir-caload) context)
+  (%codegen-array-load insn '(unsigned-byte 16) :CHAR context))
 
 (defmethod codegen ((insn ir-iaload) context)
-  (with-slots (index arrayref) insn
-    (make-instance '<expression>
-                   :insn insn
-                   :code `(let ((index ,(code (codegen index context)))
-                                (arrayref ,(code (codegen arrayref context))))
-                            (jaref arrayref index))
-                   :expression-type :INTEGER)))
+  (%codegen-array-load insn '(signed-byte 32) :INTEGER context))
 
 (defmethod codegen ((insn ir-saload) context)
-  (with-slots (index arrayref) insn
-    (make-instance '<expression>
-                   :insn insn
-                   :code `(let ((index ,(code (codegen index context)))
-                                (arrayref ,(code (codegen arrayref context))))
-                            (jaref arrayref index))
-                   :expression-type :SHORT)))
+  (%codegen-array-load insn '(signed-byte 16) :SHORT context))
 
 (defmethod codegen ((insn ir-laload) context)
-  (with-slots (index arrayref) insn
-    (make-instance '<expression>
-                   :insn insn
-                   :code `(let ((index ,(code (codegen index context)))
-                                (arrayref ,(code (codegen arrayref context))))
-                            (jaref arrayref index))
-                   :expression-type :LONG)))
+  (%codegen-array-load insn '(signed-byte 64) :LONG context))
 
 (defmethod codegen ((insn ir-baload) context)
-  (with-slots (index arrayref) insn
-    (make-instance '<expression>
-                   :insn insn
-                   :code `(let ((index ,(code (codegen index context)))
-                                (arrayref ,(code (codegen arrayref context))))
-                            (jaref arrayref index))
-                   :expression-type :BYTE)))
+  (%codegen-array-load insn '(signed-byte 8) :BYTE context))
 
 (defmethod codegen ((insn ir-daload) context)
-  (with-slots (index arrayref) insn
-    (make-instance '<expression>
-                   :insn insn
-                   :code `(let ((index ,(code (codegen index context)))
-                                (arrayref ,(code (codegen arrayref context))))
-                            (jaref arrayref index))
-                   :expression-type :DOUBLE)))
+  (%codegen-array-load insn 'double-float :DOUBLE context))
 
 (defmethod codegen ((insn ir-faload) context)
-  (with-slots (index arrayref) insn
-    (make-instance '<expression>
-                   :insn insn
-                   :code `(let ((index ,(code (codegen index context)))
-                                (arrayref ,(code (codegen arrayref context))))
-                            (jaref arrayref index))
-                   :expression-type :FLOAT)))
+  (%codegen-array-load insn 'single-float :FLOAT context))
 
 (defmethod codegen ((insn ir-aaload) context)
   (with-slots (index arrayref) insn
@@ -538,16 +631,6 @@ default method -- not every superinterface."
                                 (arrayref ,(code (codegen arrayref context))))
                             (jaref arrayref index))
                    :expression-type :REFERENCE)))
-
-(defmethod codegen ((insn ir-castore) context)
-  ;;; FIXME: throw nullpointerexception and invalid array index exception if needed
-  (with-slots (arrayref index value) insn
-    (make-instance '<expression>
-                   :insn insn
-                   :code `(let ((value ,(code (codegen value context)))
-                                (index ,(code (codegen index context)))
-                                (arrayref ,(code (codegen arrayref context))))
-                            (setf (jaref arrayref index) (code-char value))))))
 
 (defmethod codegen ((insn ir-checkcast) context)
   (with-slots (classname) insn
@@ -864,14 +947,13 @@ class is a self-reference to the class currently being compiled."
 (defmethod codegen ((insn ir-lneg) context)
   (make-instance '<expression>
                  :insn insn
-                 :code `(let ((value ,(code (codegen (value insn) context))))
-                          (unsigned-to-signed-long (- value)))
+                 :code `(sb-c::mask-signed-field 64 (- ,(code (codegen (value insn) context))))
                  :expression-type :LONG))
 
 (defmethod codegen ((insn ir-ineg) context)
   (make-instance '<expression>
                  :insn insn
-                 :code `(unsigned-to-signed-integer (- ,(code (codegen (value insn) context))))
+                 :code `(sb-c::mask-signed-field 32 (- ,(code (codegen (value insn) context))))
                  :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-dneg) context)
@@ -896,21 +978,21 @@ class is a self-reference to the class currently being compiled."
   ;; FIXME - char width, also maybe use :INTEGER?
   (make-instance '<expression>
                  :insn insn
-                 :code (list 'unsigned-to-signed-byte (list 'logand (code (codegen (value insn) context)) #xFF))
+                 :code `(sb-c::mask-signed-field 8 ,(code (codegen (value insn) context)))
                  :expression-type :BYTE))
 
 (defmethod codegen ((insn ir-i2s) context)
   ;; FIXME - maybe use :INTEGER?
   (make-instance '<expression>
                  :insn insn
-                 :code (list 'unsigned-to-signed-short (list 'logand (code (codegen (value insn) context)) #xFFFF))
+                 :code `(sb-c::mask-signed-field 16 ,(code (codegen (value insn) context)))
                  :expression-type :SHORT))
 
 (defmethod codegen ((insn ir-l2i) context)
   ;; FIXME - review this
   (make-instance '<expression>
                  :insn insn
-                 :code (list 'unsigned-to-signed-integer (list 'logand (code (codegen (value insn) context)) #xFFFFFFFF))
+                 :code `(sb-c::mask-signed-field 32 ,(code (codegen (value insn) context)))
                  :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-i2c) context)
@@ -951,13 +1033,12 @@ class is a self-reference to the class currently being compiled."
 (defmethod codegen ((insn ir-iinc) context)
   ;; Local variables use :openldk package - they don't need per-loader isolation
   (with-slots (index const) insn
-    (let* ((local-var (intern (format nil "local-~A" index) :openldk))
-           (expr (make-instance '<expression>
-                                :insn insn
-                                :code (list 'setf local-var
-                                            (list 'unsigned-to-signed-integer
-                                                  (list 'logand (list '+ local-var const) #xFFFFFFFF))))))
-      expr)))
+    (let ((local-var (intern (format nil "local-~A" index) :openldk)))
+      (%note-variable-source local-var :int context)
+      (make-instance '<expression>
+                     :insn insn
+                     :code `(setf ,local-var
+                                  (sb-c::mask-signed-field 32 (+ ,local-var ,const)))))))
 
 (defmethod codegen ((insn ir-if-acmpeq) context)
   (with-slots (offset value1 value2) insn
@@ -1173,7 +1254,7 @@ component types must match exactly (short[] is not an int[])."
                               `(%instanceof-check ,obj ,cname (quote ,(intern cname pkg))))))
                    :expression-type :INTEGER)))
 
-;; Utility functions for signed shifts
+;; Signed views of raw 32/64-bit patterns (float bits in frames.lisp).
 (defun %int-to-signed (n)
   "Convert a 32-bit unsigned integer to signed representation"
   (if (logbitp 31 n)
@@ -1186,75 +1267,54 @@ component types must match exactly (short[] is not an int[])."
       (- n #x10000000000000000)
       n))
 
-;; Fixed codegen methods
 (defmethod codegen ((insn ir-ishl) context)
   (make-instance '<expression>
                  :insn insn
-                 :code `(let* ((int-value (logand ,(code (codegen (value1 insn) context)) #xFFFFFFFF))
-                               (shift-amount (logand ,(code (codegen (value2 insn) context)) #x1F))
-                               (result (logand (ash int-value shift-amount) #xFFFFFFFF)))
-                          (%int-to-signed result))
+                 :code `(sb-c::mask-signed-field
+                         32 (ash ,(code (codegen (value1 insn) context))
+                                 (logand ,(code (codegen (value2 insn) context)) #x1F)))
                  :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-ishr) context)
   (make-instance '<expression>
                  :insn insn
-                 :code `(let* ((int-value (logand ,(code (codegen (value1 insn) context)) #xFFFFFFFF))
-                               (shift-amount (logand ,(code (codegen (value2 insn) context)) #x1F)))
-                          ;; Special case for -1
-                          (if (= int-value #xFFFFFFFF)
-                              -1
-                              (let ((sign-bit (logbitp 31 int-value)))
-                                (%int-to-signed
-                                 (logand
-                                  (if sign-bit
-                                      (logior (ash int-value (- shift-amount))
-                                              (ash (lognot 0) (- 32 shift-amount)))
-                                      (ash int-value (- shift-amount)))
-                                  #xFFFFFFFF)))))
+                 :code `(let ((shift-amount (logand ,(code (codegen (value2 insn) context)) #x1F)))
+                          (ash (sb-c::mask-signed-field 32 ,(code (codegen (value1 insn) context)))
+                               (- shift-amount)))
                  :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-iushr) context)
   (make-instance '<expression>
                  :insn insn
                  :code `(let ((shift-amount (logand ,(code (codegen (value2 insn) context)) #x1F)))
-                          (%int-to-signed (logand (ash (logand ,(code (codegen (value1 insn) context)) #xFFFFFFFF) (- shift-amount)) #xFFFFFFFF)))
+                          (sb-c::mask-signed-field
+                           32 (ash (logand ,(code (codegen (value1 insn) context)) #xFFFFFFFF)
+                                   (- shift-amount))))
                  :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-lshl) context)
   (make-instance '<expression>
                  :insn insn
-                 :code `(let* ((long-value (logand ,(code (codegen (value1 insn) context)) #xFFFFFFFFFFFFFFFF))
-                               (shift-amount (logand ,(code (codegen (value2 insn) context)) #x3F))
-                               (result (logand (ash long-value shift-amount) #xFFFFFFFFFFFFFFFF)))
-                          (%long-to-signed result))
+                 :code `(sb-c::mask-signed-field
+                         64 (ash ,(code (codegen (value1 insn) context))
+                                 (logand ,(code (codegen (value2 insn) context)) #x3F)))
                  :expression-type :LONG))
 
 (defmethod codegen ((insn ir-lshr) context)
   (make-instance '<expression>
                  :insn insn
-                 :code `(let* ((long-value (logand ,(code (codegen (value1 insn) context)) #xFFFFFFFFFFFFFFFF))
-                               (shift-amount (logand ,(code (codegen (value2 insn) context)) #x3F)))
-                          ;; Special case for -1
-                          (if (= long-value #xFFFFFFFFFFFFFFFF)
-                              -1
-                              (let ((sign-bit (logbitp 63 long-value)))
-                                (%long-to-signed
-                                 (logand
-                                  (if sign-bit
-                                      (logior (ash long-value (- shift-amount))
-                                              (ash (lognot 0) (- 64 shift-amount)))
-                                      (ash long-value (- shift-amount)))
-                                  #xFFFFFFFFFFFFFFFF)))))
+                 :code `(let ((shift-amount (logand ,(code (codegen (value2 insn) context)) #x3F)))
+                          (ash (sb-c::mask-signed-field 64 ,(code (codegen (value1 insn) context)))
+                               (- shift-amount)))
                  :expression-type :LONG))
 
 (defmethod codegen ((insn ir-lushr) context)
   (make-instance '<expression>
                  :insn insn
                  :code `(let ((shift-amount (logand ,(code (codegen (value2 insn) context)) #x3F)))
-                          (%long-to-signed (logand (ash (logand ,(code (codegen (value1 insn) context)) #xFFFFFFFFFFFFFFFF)
-                                                       (- shift-amount))
-                                                  #xFFFFFFFFFFFFFFFF)))
+                          (sb-c::mask-signed-field
+                           64 (ash (logand ,(code (codegen (value1 insn) context)) #xFFFFFFFFFFFFFFFF)
+                                   (- shift-amount))))
                  :expression-type :LONG))
 
 (defmethod codegen ((insn ir-lcmp) context)
@@ -1748,23 +1808,20 @@ boolean prints true/false and char prints the character rather than an int."
                        :expression-type :REFERENCE)))))
 
 (defmethod codegen ((insn ir-new-array) context)
-  (let ((init-element
-          (case (atype insn)
-            ;; Determine the initial element based on the array type
-            (4 0)        ; Integer
-            (5 #\Null)   ; Character
-            (6 0.0)      ; Single-precision float
-            (7 0.0d0)    ; Double-precision float
-            ((8 9 10 11) 0) ; Other integer types (assuming default to 0)
-            (t nil))))   ; Default to nil for unknown types
-    (make-instance '<expression>
-                   :insn insn
-                   :code `(progn
-                            ;; Create the array with the determined initial element
-                            (make-java-array :size ,(code (codegen (size insn) context))
-                                             :component-class ,(component-class insn)
-                                             :initial-element ,init-element))
-                   :expression-type :ARRAY)))
+  (make-instance '<expression>
+                 :insn insn
+                 :code `(make-java-array :size ,(code (codegen (size insn) context))
+                                         :component-class ,(component-class insn)
+                                         :element-type ',(case (atype insn)
+                                                           ((4 8) '(signed-byte 8)) ; boolean, byte
+                                                           (5 '(unsigned-byte 16))  ; char
+                                                           (6 'single-float)
+                                                           (7 'double-float)
+                                                           (9 '(signed-byte 16))    ; short
+                                                           (10 '(signed-byte 32))   ; int
+                                                           (11 '(signed-byte 64))   ; long
+                                                           (t t)))                  ; anewarray
+                 :expression-type :ARRAY))
 
 (defun %multi-array-leaf-default (component-name)
   "Default element for a leaf array whose component descriptor is
@@ -1884,21 +1941,29 @@ own class-qualified slot recorded in *FIELD-SHADOW-SLOTS*."
                      (setf cname (slot-value cls 'super))))
               finally (return plain)))))
 
+(defun %slot-accessor (context)
+  "The operator for a field access: a per-site cached access, or for
+compact code a plain call."
+  (if (compact-p context) '(%java-slot-value) '(%cached-slot-value)))
+
+(defun %slot-cache-argument (context)
+  (unless (compact-p context) '((load-time-value (list nil)))))
+
 (defmethod codegen ((insn ir-member) context)
   (with-slots (objref member-name ref-class) insn
     (make-instance '<expression>
                    :insn insn
-                   :code `(%java-slot-value
+                   :code `(,@(%slot-accessor context)
                            (let ((objref ,(code (codegen objref context))))
                              (when (null objref)
                                (error (%lisp-condition
                                        (%make-throwable '|java/lang/NullPointerException|))))
                              objref)
                            ;; Field names stay in :openldk for CLOS slot inheritance
-                           (quote ,(%resolve-field-slot ref-class member-name))))))
+                           (quote ,(%resolve-field-slot ref-class member-name))
+                           ,@(%slot-cache-argument context)))))
 
 (defmethod codegen ((insn ir-static-member) context)
-  (declare (ignore context))
   (with-slots (class member-name) insn
     (let ((class-name (slot-value (slot-value class 'class) 'name)))
       ;; Ensure class is loaded before looking up its package
@@ -1909,10 +1974,11 @@ own class-qualified slot recorded in *FIELD-SHADOW-SLOTS*."
              (sym (intern static-sym-name pkg)))
         (make-instance '<expression>
                        :insn insn
-                       :code `(%java-slot-value
+                       :code `(,@(%slot-accessor context)
                                ,sym
                                ;; Field names stay in :openldk for CLOS slot inheritance
-                               (quote ,(intern (mangle-field-name member-name) :openldk))))))))
+                               (quote ,(intern (mangle-field-name member-name) :openldk))
+                               ,@(%slot-cache-argument context)))))))
 
 (defmethod codegen ((insn ir-throw) context)
   (make-instance '<expression>

@@ -39,27 +39,115 @@
 
 (in-package :openldk)
 
+;;; Primitive arrays are backed by specialized Lisp vectors -- int[] by
+;;; (SIMPLE-ARRAY (SIGNED-BYTE 32) (*)), char[] by (UNSIGNED-BYTE 16) code
+;;; units, and so on -- so JIT'd code can access them with an inline,
+;;; unboxed AREF.  byte[] and boolean[] share (SIGNED-BYTE 8) because the
+;;; JVM's baload/bastore serve both.  Reference arrays are SIMPLE-VECTORs.
+
 (defstruct (java-array (:constructor make-java-array-default))
   (component-class nil :type t)
   (data #() :type vector))
 
-(defun make-java-array (&key component-class (size 0) initial-element initial-contents)
-  "Construct a Java-style array wrapper with COMPONENT-CLASS and DATA built from SIZE/INITIAL-ELEMENT or INITIAL-CONTENTS."
+(defun %primitive-element-type (name)
+  "Lisp element type for an array whose component is the primitive type
+NAME (\"int\", \"char\", ...), or T for anything else."
+  (cond
+    ((string= name "int") '(signed-byte 32))
+    ((or (string= name "byte") (string= name "boolean")) '(signed-byte 8))
+    ((string= name "char") '(unsigned-byte 16))
+    ((string= name "long") '(signed-byte 64))
+    ((string= name "double") 'double-float)
+    ((string= name "short") '(signed-byte 16))
+    ((string= name "float") 'single-float)
+    (t t)))
+
+(defun %descriptor-element-type (descriptor)
+  "Lisp element type for an array whose component is the field DESCRIPTOR."
+  (if (= (length descriptor) 1)
+      (case (char descriptor 0)
+        (#\I '(signed-byte 32))
+        ((#\B #\Z) '(signed-byte 8))
+        (#\C '(unsigned-byte 16))
+        (#\J '(signed-byte 64))
+        (#\D 'double-float)
+        (#\S '(signed-byte 16))
+        (#\F 'single-float)
+        (t t))
+      t))
+
+(defvar *component-element-types*
+  (make-hash-table :test #'eq :weakness :key :synchronized t)
+  "Cache of component Class -> Lisp element type for its arrays.")
+
+(defun %component-element-type (component-class)
+  "Lisp element type for arrays whose component is COMPONENT-CLASS, in any
+of the forms a java-array's component-class slot can take."
+  (cond
+    ((member component-class '(:early-placeholder :early-byte-placeholder))
+     '(signed-byte 8))
+    ((stringp component-class) (%descriptor-element-type component-class))
+    ((typep component-class '<class>) (%primitive-element-type (name component-class)))
+    ((null component-class) t)
+    (t
+     (or (gethash component-class *component-element-types*)
+         (let ((name (and (slot-exists-p component-class '|name|)
+                          (slot-boundp component-class '|name|)
+                          (slot-value component-class '|name|))))
+           ;; A Class still being bootstrapped has no name yet: don't cache.
+           (if name
+               (setf (gethash component-class *component-element-types*)
+                     (%primitive-element-type (lstring name)))
+               t))))))
+
+(defun %array-value (element-type value)
+  "Normalize VALUE for storage in an array of ELEMENT-TYPE: characters
+become UTF-16 code units, booleans 0/1, and integers wrap to the
+element width as Java's narrowing stores do."
+  (if (eq element-type t)
+      value
+      (let ((value (typecase value
+                     (character (char-code value))
+                     (null 0)
+                     ((eql t) 1)
+                     (t value))))
+        (cond
+          ((eq element-type 'single-float) (float value 1f0))
+          ((eq element-type 'double-float) (float value 1d0))
+          ((equal element-type '(unsigned-byte 16)) (ldb (byte 16 0) value))
+          (t (sb-c::mask-signed-field (second element-type) value))))))
+
+(defun %char-data-string (data)
+  "Lisp string of the UTF-16 code units (or characters) in char[] DATA."
+  (map 'string (lambda (c) (if (characterp c) c (code-char c))) data))
+
+(defun make-java-array (&key component-class (size 0) initial-element initial-contents
+                          (element-type (%component-element-type component-class)))
+  "Construct a Java-style array wrapper with COMPONENT-CLASS and DATA built
+from SIZE/INITIAL-ELEMENT or INITIAL-CONTENTS.  ELEMENT-TYPE, the Lisp
+element type of DATA, defaults from COMPONENT-CLASS."
   (assert component-class)
   ;; Validate size for negativity (JVM spec: throw NegativeArraySizeException)
   (when (< size 0)
     (let ((exc (%make-java-instance "java/lang/NegativeArraySizeException")))
       (|<init>()| exc)
       (error (%lisp-condition exc))))
-  (if initial-contents
-      (let* ((contents-length (length initial-contents))
-             (data (if (zerop contents-length)
-                       (make-array size :initial-element initial-element)
-                       (make-array contents-length :initial-contents initial-contents))))
-        (make-java-array-default :component-class component-class :data data))
-      (make-java-array-default
-       :component-class component-class
-       :data (make-array size :initial-element initial-element))))
+  (let ((initial-element (if (eq element-type t)
+                             initial-element
+                             (%array-value element-type (or initial-element 0)))))
+    (make-java-array-default
+     :component-class component-class
+     :data (cond
+             ((or (null initial-contents) (zerop (length initial-contents)))
+              (make-array size :element-type element-type :initial-element initial-element))
+             ((eq element-type t)
+              (make-array (length initial-contents) :initial-contents initial-contents))
+             ((typep initial-contents `(simple-array ,element-type (*)))
+              (copy-seq initial-contents))
+             (t
+              (map-into (make-array (length initial-contents) :element-type element-type)
+                        (lambda (v) (%array-value element-type v))
+                        initial-contents))))))
 
 (defun %array-component-class (array)
   "Return ARRAY's component class as a |java/lang/Class| object, healing
@@ -83,18 +171,20 @@ descriptor strings."
              healed)
             (t cc))))))
 
+(defun %throw-array-index-error (index)
+  "Throw ArrayIndexOutOfBoundsException for INDEX."
+  (let ((exc (%make-java-instance "java/lang/ArrayIndexOutOfBoundsException")))
+    (|<init>(Ljava/lang/String;)| exc
+     (jstring (format nil "~A" index)))
+    (error (%lisp-condition exc))))
+
 (defun jaref (array index)
   "Java-style array access for ARRAY at INDEX."
   (when (null array)
     (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|))))
-  (let* ((data (java-array-data array))
-         (len (length data)))
-    (when (or (< index 0) (>= index len))
-      ;; Throw Java ArrayIndexOutOfBoundsException
-      (let ((exc (%make-java-instance "java/lang/ArrayIndexOutOfBoundsException")))
-        (|<init>(Ljava/lang/String;)| exc
-         (jstring (format nil "~A" index)))
-        (error (%lisp-condition exc))))
+  (let ((data (java-array-data array)))
+    (unless (< -1 index (length data))
+      (%throw-array-index-error index))
     (aref data index)))
 
 (defun (setf jaref) (new-value array index)
@@ -102,15 +192,13 @@ descriptor strings."
   ;; Null check (JVM spec: throw NullPointerException)
   (when (null array)
     (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|))))
-  (let* ((data (java-array-data array))
-         (len (length data)))
-    ;; Bounds check
-    (when (or (< index 0) (>= index len))
-      (let ((exc (%make-java-instance "java/lang/ArrayIndexOutOfBoundsException")))
-        (|<init>(Ljava/lang/String;)| exc
-         (jstring (format nil "~A" index)))
-        (error (%lisp-condition exc))))
-    (setf (aref data index) new-value)))
+  (let ((data (java-array-data array)))
+    (unless (< -1 index (length data))
+      (%throw-array-index-error index))
+    (setf (aref data index)
+          (if (simple-vector-p data)
+              new-value
+              (%array-value (array-element-type data) new-value)))))
 
 (defun %array-type-name-for-component (component-name)
   "Class.getName()-style name of an array type whose component Class is
@@ -162,6 +250,13 @@ not assignable to ARRAY's component type."
                  (not (%array-store-compatible-p component value)))
         (error (%lisp-condition (%make-throwable '|java/lang/ArrayStoreException|))))))
   (setf (jaref array index) value))
+
+(defun %array-length-slow (arrayref)
+  "arraylength of something other than a java-array: NIL throws
+NullPointerException; a Lisp string serves as a char[]."
+  (if arrayref
+      (length arrayref)
+      (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|)))))
 
 (defun java-array-length (array)
   "Return the logical length of the Java-style ARRAY."

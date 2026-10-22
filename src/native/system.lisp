@@ -446,7 +446,9 @@ target component is assignable from the source component."
      (slot-value param-object (%unsafe-slot-key param-long)))))
 
 (defmethod |clone()| ((array java-array))
-  (make-java-array :component-class (java-array-component-class array) :initial-contents (copy-seq (java-array-data array))))
+  (make-java-array :component-class (java-array-component-class array)
+                   :element-type (array-element-type (java-array-data array))
+                   :initial-contents (java-array-data array)))
 
 (defun |sun/reflect/Reflection.getClassAccessFlags(Ljava/lang/Class;)| (class)
   (let ((lclass (get-ldk-class-for-java-class class)))

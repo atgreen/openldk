@@ -235,8 +235,9 @@ symbol or a string).  A Lisp symbol in upper case is lowercased."
     ((typep object *string*) (%lisp-symbol (lstring object)))
     ((openldk::java-array-p object)
      (let ((elements (openldk::java-array-data object)))
-       (if (and (plusp (length elements)) (every #'characterp elements))
-           (coerce elements 'string)
+       (if (and (plusp (length elements))
+                (equal (array-element-type elements) '(unsigned-byte 16)))
+           (map 'string #'code-char elements)
            (map 'vector #'to-lisp elements))))
     (t object)))
 

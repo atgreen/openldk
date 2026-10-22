@@ -414,7 +414,7 @@ loaders, whose classes are not in the global or app loader tables."
                      (if fail-ok
                          (return-from %get-java-class-by-bin-name nil)
                          (internal-error "bin-name is NIL in %get-java-class-by-bin-name")))
-                    (t (coerce (java-array-data bin-name) 'string)))))
+                    (t (%char-data-string (java-array-data bin-name))))))
     (assert (stringp bin-name))
     (assert (not (find #\. bin-name)))
     (let ((result (if loader
@@ -436,7 +436,7 @@ loaders, whose classes are not in the global or app loader tables."
                     (if fail-ok
                         (return-from %get-java-class-by-fq-name nil)
                         (internal-error "fq-name is NIL in %get-java-class-by-fq-name")))
-                   (t (coerce (java-array-data fq-name) 'string)))))
+                   (t (%char-data-string (java-array-data fq-name))))))
     (assert (stringp fq-name))
     (assert (not (find #\/ fq-name)))
     (let ((result (if loader
@@ -456,7 +456,7 @@ loaders, whose classes are not in the global or app loader tables."
                      (if fail-ok
                          (return-from %get-ldk-class-by-bin-name nil)
                          (internal-error "bin-name is NIL in %get-ldk-class-by-bin-name")))
-                    (t (coerce (java-array-data bin-name) 'string)))))
+                    (t (%char-data-string (java-array-data bin-name))))))
     (assert (stringp bin-name))
     (assert (not (find #\. bin-name)))
     (let ((result (if loader
@@ -476,7 +476,7 @@ loaders, whose classes are not in the global or app loader tables."
                     (if fail-ok
                         (return-from %get-ldk-class-by-fq-name nil)
                         (internal-error "fq-name is NIL in %get-ldk-class-by-fq-name")))
-                   (t (coerce (java-array-data fq-name) 'string)))))
+                   (t (%char-data-string (java-array-data fq-name))))))
     (assert (stringp fq-name))
     (let ((result (if loader
                       (%lookup-class-with-delegation loader fq-name 'ldk-classes-by-fq-name)
