@@ -822,19 +822,148 @@ the method might use; those with no initial value that BODY never
 mentions are dropped, and %TYPED-LET declares the types of the rest."
   (%typed-let (%prune-unused-bindings bindings body) body))
 
+;;; Folding single-use stack variables.  Bytecode passes nearly every
+;;; value through a stack variable: (setf s{5} (call ...)) followed by a
+;;; statement that reads s{5} once.  When nothing in that statement is
+;;; evaluated before the read except variables and constants, putting the
+;;; expression in place of the read keeps every side effect in the same
+;;; order, and leaves SBCL a nested expression instead of an assigned
+;;; variable.  This works on the generated Lisp, where evaluation order is
+;;; plain left to right, and only through forms whose order it knows.
+
+(defparameter *pure-functions*
+  '(+ - * = /= < > <= >= eq eql not null logand logior logxor lognot ash
+    sb-c::mask-signed-field ldb float coerce)
+  "Functions with no side effects that generated code calls.")
+
+(defun %stack-variable-symbol-p (x)
+  (and (symbolp x)
+       (eq (symbol-package x) (find-package :openldk))
+       (let ((name (symbol-name x)))
+         (and (> (length name) 2) (char= (char name 0) #\s) (char= (char name 1) #\{)))))
+
+(defun %fold-scan (form variable)
+  "How evaluating FORM reaches VARIABLE: :FOUND when VARIABLE is evaluated
+first and unconditionally, with only side-effect-free forms before it;
+:PURE when FORM has no side effects and doesn't mention VARIABLE;
+otherwise :BLOCKED."
+  (labels ((scan-sequence (forms)
+             (dolist (f forms :pure)
+               (let ((r (%fold-scan f variable)))
+                 (unless (eq r :pure) (return r))))))
+    (cond
+      ((eq form variable) :found)
+      ((atom form) :pure)
+      (t
+       (let ((head (car form)))
+         (case head
+           ((quote function load-time-value) :pure)
+           (setf
+            (let ((place (second form)))
+              ;; Places are evaluated left to right, then the value; the
+              ;; assignment itself is a side effect.
+              (let ((r (cond ((/= (length form) 3) :blocked)
+                             ((symbolp place) (scan-sequence (cddr form)))
+                             ((and (consp place)
+                                   (member (car place)
+                                           '(aref jaref %cached-slot-value %java-slot-value)))
+                              (scan-sequence (append (cdr place) (cddr form))))
+                             (t :blocked))))
+                (if (eq r :pure) :blocked r))))
+           ((let let*)
+            (scan-sequence (append (mapcar (lambda (b) (if (consp b) (second b) nil))
+                                           (second form))
+                                   (cddr form))))
+           (progn (scan-sequence (cdr form)))
+           (return-from (if (eq (%fold-scan (third form) variable) :found) :found :blocked))
+           ((the sb-ext:truly-the) (%fold-scan (third form) variable))
+           ((if when unless)
+            (if (eq (%fold-scan (second form) variable) :found) :found :blocked))
+           (t
+            (if (and (symbolp head)
+                     (not (special-operator-p head))
+                     (not (macro-function head)))
+                ;; A function call: its arguments, in order, then the call.
+                (let ((r (scan-sequence (cdr form))))
+                  (if (and (eq r :pure) (not (member head *pure-functions*)))
+                      :blocked
+                      r))
+                :blocked))))))))
+
+(defun %count-variable-references (form counts)
+  (cond ((%stack-variable-symbol-p form) (incf (gethash form counts 0)))
+        ((atom form))
+        ((eq (car form) 'quote))
+        (t (loop for tail on form
+                 do (%count-variable-references (car tail) counts)
+                 while (consp (cdr tail))))))
+
+(defun %fold-statements (statements counts categories)
+  "Fold each (SETF s{N} E) in the tagbody STATEMENTS into the statement
+after it, as described above.  When CATEGORIES (see %VARIABLE-CATEGORIES)
+gives s{N} a primitive category, E goes in wrapped in that category's
+normalizer, keeping the type SBCL would have had from the declaration of
+s{N}: without it a folded array length compares by generic arithmetic."
+  (let ((out '()))
+    (dolist (statement statements (nreverse out))
+      (unless (atom statement)
+        (loop for previous = (first out)
+              while (and (consp previous)
+                         (eq (first previous) 'setf)
+                         (= (length previous) 3)
+                         (%stack-variable-symbol-p (second previous))
+                         (= (gethash (second previous) counts 0) 2)
+                         (eq (%fold-scan statement (second previous)) :found))
+              do (let* ((variable (second previous))
+                        (category (and categories (gethash variable categories)))
+                        (value (if category
+                                   (list (%category-normalizer category) (third previous))
+                                   (third previous))))
+                   (setf statement (subst value variable statement))
+                   (pop out))))
+      (push statement out))))
+
+(defun %category-normalizer (category)
+  (ecase category
+    (:int '%as-int)
+    (:long '%as-long)
+    (:float '%as-float)
+    (:double '%as-double)))
+
+(defun %fold-stack-variables (form categories
+                              &optional (counts (let ((c (make-hash-table :test #'eq)))
+                                                  (%count-variable-references form c)
+                                                  c)))
+  "FORM, a method body, with single-use stack variables folded into their
+use (see %FOLD-STATEMENTS for CATEGORIES)."
+  (cond ((atom form) form)
+        ((eq (car form) 'quote) form)
+        (t (let ((form (loop for tail on form
+                             collect (%fold-stack-variables (car tail) categories counts)
+                               into items
+                             unless (listp (cdr tail))
+                               do (return (nconc items (cdr tail)))
+                             finally (return items))))
+             (if (eq (car form) 'tagbody)
+                 (cons 'tagbody (%fold-statements (cdr form) counts categories))
+                 form)))))
+
 (defun %build-method-definition (class method blocks-after-dce parameter-hints max-locals)
   "Build the complete DEFUN/DEFMETHOD form for METHOD from its optimized
 BLOCKS-AFTER-DCE: generate each block's code, then wrap it with debug
 tracing, the NPE/array-bounds handler-binds, and ACC_SYNCHRONIZED monitor
 entry/exit as required."
   (let* ((lisp-code
-           (list (list 'block nil
-                       (append (list 'tagbody)
-                               (mapcan (lambda (x) (if (listp x) x (list x)))
-                                       (loop for block in blocks-after-dce
-                                             for code = (codegen-block block block)
-                                             when code
-                                               collect code))))))
+           (%fold-stack-variables
+            (list (list 'block nil
+                        (append (list 'tagbody)
+                                (mapcan (lambda (x) (if (listp x) x (list x)))
+                                        (loop for block in blocks-after-dce
+                                              for code = (codegen-block block block)
+                                              when code
+                                                collect code)))))
+            (unless (compact-p *context*)
+              (%variable-categories (variable-sources *context*)))))
          (traced-lisp-code (if *debug-trace* `((unwind-protect
                                                     ,(car lisp-code)
                                                  (incf *call-nesting-level* -1)))
