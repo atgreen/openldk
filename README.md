@@ -146,7 +146,6 @@ and generates the following:
     (openldk::with-java-conditions (:arrays nil)
       (block nil
         (tagbody
-         |branch-target-0|
           (return-from openldk.app::|demo.add(II)I|
             (let ((openldk::value2 openldk::|local-1|)
                   (openldk::value1 openldk::|local-0|))
