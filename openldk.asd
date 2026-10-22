@@ -53,6 +53,7 @@
   :serial t
   :components ((:file "src/package")
                (:file "src/conditions")
+               (:file "src/fetch")
                (:file "src/global-state")
                (:file "src/fiber")
                (:file "src/java-gf")
@@ -240,3 +241,20 @@
              (unless (uiop:symbol-call :fiveam '#:run! :openldk-kawa-tests)
                (error "openldk/kawa tests failed"))))
 
+
+(asdf:defsystem "openldk/abcl"
+  :description "Use ABCL (Armed Bear Common Lisp) from SBCL"
+  :author "Anthony Green <green@moxielogic.com>"
+  :license "GPL3+Classpath Exception"
+  :depends-on ("openldk/interop")
+  :components ((:file "interop/abcl"))
+  :in-order-to ((test-op (test-op "openldk/abcl/tests"))))
+
+(asdf:defsystem "openldk/abcl/tests"
+  :description "Tests for openldk/abcl; need `make abcl`"
+  :depends-on ("openldk/abcl" "fiveam")
+  :pathname "test"
+  :components ((:file "abcl"))
+  :perform (test-op (o c)
+             (unless (uiop:symbol-call :fiveam '#:run! :openldk-abcl-tests)
+               (error "openldk/abcl tests failed"))))

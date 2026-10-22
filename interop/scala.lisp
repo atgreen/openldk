@@ -109,11 +109,17 @@ hands Scala its values.")
   (cdr (assoc key *classes*)))
 
 (defun default-classpath ()
-  "Scala's jars, as `make sbcl-scala` downloads them."
-  (mapcar (lambda (jar)
-            (namestring (asdf:system-relative-pathname
-                         "openldk" (format nil "lib/scala/~A-2.13.16.jar" jar))))
-          '("scala-library" "scala-reflect" "scala-compiler")))
+  "Scala's jars, from CLASSPATH, `make sbcl-scala`, or downloads (see FIND-CLASSPATH)."
+  (find-classpath "scala/tools/nsc/Main"
+                  '(("lib/scala/scala-library-2.13.16.jar" "scala-2.13.16/scala-library-2.13.16.jar"
+                     "https://repo1.maven.org/maven2/org/scala-lang/scala-library/2.13.16/scala-library-2.13.16.jar"
+                     "1ebb2b6f9e4eb4022497c19b1e1e825019c08514f962aaac197145f88ed730f1")
+                    ("lib/scala/scala-reflect-2.13.16.jar" "scala-2.13.16/scala-reflect-2.13.16.jar"
+                     "https://repo1.maven.org/maven2/org/scala-lang/scala-reflect/2.13.16/scala-reflect-2.13.16.jar"
+                     "fb49ccd9cac7464486ab993cda20a3c1569d8ef26f052e897577ad2a4970fb1d")
+                    ("lib/scala/scala-compiler-2.13.16.jar" "scala-2.13.16/scala-compiler-2.13.16.jar"
+                     "https://repo1.maven.org/maven2/org/scala-lang/scala-compiler/2.13.16/scala-compiler-2.13.16.jar"
+                     "f59982714591e321ba9c087af2c8666e2f5fb92b11a0cef72c2c5e9b342152d3"))))
 
 ;;; Lisp functions as Scala functions
 
@@ -164,7 +170,7 @@ nothing."
   (unless *started*
     (dolist (jar classpath)
       (unless (probe-file jar)
-        (error "~A is missing; run `make sbcl-scala` first." jar)))
+        (error "~A is missing." jar)))
     (start-runtime :classpath classpath)
     (setf *classes*
           (loop for (key . name) in '((:boolean . "java.lang.Boolean")

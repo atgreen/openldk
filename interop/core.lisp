@@ -45,6 +45,8 @@
 (defpackage #:openldk.interop
   (:use #:cl)
   (:export #:start-runtime
+           #:find-classpath
+           #:classpath-from-environment
            #:runtime-started-p
            #:java-load
            #:java-new
@@ -99,6 +101,40 @@ classpath.  Several language systems can each add their own entries."
     (openldk::%main-runtime-setup (format nil "~{~A~^:~}" (reverse *classpath-entries*))
                                   nil nil)
     t))
+
+;;; Finding a language's jars
+;;;
+;;; A language's classes come from, in order: the CLASSPATH environment
+;;; variable, if it already has them; the copies `make <language>` leaves in
+;;; lib/; or else pinned downloads into OpenLDK's cache (see src/fetch.lisp).
+
+(defun %entry-provides-p (entry resource)
+  "True if the classpath ENTRY (a jar or directory) contains RESOURCE."
+  (if (uiop:directory-exists-p entry)
+      (uiop:file-exists-p (merge-pathnames resource (uiop:ensure-directory-pathname entry)))
+      (and (uiop:file-exists-p entry)
+           (ignore-errors
+            (zip:with-zipfile (zip entry)
+              (and (zip:get-zipfile-entry resource zip) t))))))
+
+(defun classpath-from-environment (class)
+  "CLASSPATH's entries, if one of them provides the Java class CLASS."
+  (let ((resource (concatenate 'string class ".class"))
+        (entries (split-sequence:split-sequence #\: (or (uiop:getenv "CLASSPATH") "")
+                                                :remove-empty-subseqs t)))
+    (when (some (lambda (entry) (%entry-provides-p entry resource)) entries)
+      entries)))
+
+(defun find-classpath (class jars)
+  "Classpath entries that provide the Java class CLASS (\"kawa/standard/Scheme\").
+JARS lists (LIB-PATH CACHE-PATH URL SHA256) for each jar the language
+needs: where `make` puts it, relative to OpenLDK's sources; where to
+keep it in OpenLDK's cache; and where to download it from."
+  (or (classpath-from-environment class)
+      (loop for (lib-path cache-path url sha256) in jars
+            collect (namestring
+                     (or (uiop:file-exists-p (asdf:system-relative-pathname "openldk" lib-path))
+                         (openldk::ensure-cached-file cache-path url sha256))))))
 
 ;;; Calling Java
 ;;;

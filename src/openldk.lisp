@@ -1708,18 +1708,66 @@ the class being compiled when there is one, as the JVM resolves references."
                                             :end (position #\. version)
                                             :junk-allowed t)))))))))
 
-(defun ensure-JAVA_HOME ()
-  (let ((JAVA_HOME (uiop:getenv "JAVA_HOME")))
-    (unless JAVA_HOME
-      (format *error-output* "~%OpenLDK Error: JAVA_HOME environment variable not set~%")
-      (format *error-output* "  Set JAVA_HOME to a JDK 25 installation (e.g. /usr/lib/jvm/java-25-openjdk).~%")
-      (uiop:quit 1))
+(defun %jdk-25-home-p (java-home)
+  "True if JAVA-HOME is a JDK 25 with runtime classes OpenLDK can read."
+  (let ((home (uiop:ensure-directory-pathname java-home)))
+    (and (eql 25 (%java-home-major-version home))
+         (or (directory (merge-pathnames "jmods/*.jmod" home))
+             (uiop:file-exists-p (merge-pathnames "lib/modules" home))))))
 
-    (let ((major (%java-home-major-version JAVA_HOME)))
-      (when (and major (/= major 25))
-        (format *error-output* "~%OpenLDK Error: JAVA_HOME points at a JDK ~A installation:~%  ~A~%" major JAVA_HOME)
-        (format *error-output* "  OpenLDK requires JDK 25. Set JAVA_HOME to a JDK 25 installation.~%")
-        (uiop:quit 1)))
+(defun %java-on-path-home ()
+  "The JDK home that the first `java' on PATH belongs to, if any."
+  (dolist (dir (uiop:split-string (or (uiop:getenv "PATH") "")
+                                  :separator (string (uiop:inter-directory-separator))))
+    (when (plusp (length dir))
+      (let ((java (uiop:file-exists-p
+                   (merge-pathnames "java" (uiop:ensure-directory-pathname dir)))))
+        (when java
+          ;; Follow the /usr/bin/java -> /etc/alternatives -> ... links
+          ;; to <home>/bin/java.
+          (return (uiop:pathname-parent-directory-pathname
+                   (uiop:pathname-directory-pathname (truename java)))))))))
+
+(defun find-installed-jdk ()
+  "Look for a JDK 25 in the places JDKs are commonly installed."
+  (let ((home (user-homedir-pathname)))
+    (flet ((matches (pattern &optional (base #p"/"))
+             (sort (mapcar #'namestring
+                           (directory (merge-pathnames pattern base) :resolve-symlinks nil))
+                   #'string>)))
+      (find-if #'%jdk-25-home-p
+               (remove nil
+                       (list* (%java-on-path-home)
+                              (append
+                               (matches "usr/lib/jvm/*/")
+                               (matches "usr/java/*/")
+                               (matches "opt/*/")
+                               (matches "opt/java/*/")
+                               (matches ".sdkman/candidates/java/*/" home)
+                               (matches ".jdks/*/" home)
+                               (matches ".asdf/installs/java/*/" home)
+                               (matches ".local/share/mise/installs/java/*/" home)
+                               (matches "Library/Java/JavaVirtualMachines/*/Contents/Home/")
+                               (matches "Library/Java/JavaVirtualMachines/*/Contents/Home/" home))))))))
+
+(defun ensure-JAVA_HOME ()
+  (let* ((JAVA_HOME (uiop:getenvp "JAVA_HOME"))
+         (major (and JAVA_HOME (%java-home-major-version JAVA_HOME))))
+    ;; No JDK 25 given: use an installed one, or else download our own,
+    ;; and point JAVA_HOME at it so everything that reads the variable
+    ;; finds it.
+    (when (or (null JAVA_HOME) (and major (/= major 25)))
+      (handler-case
+          (setf JAVA_HOME (string-right-trim "/" (uiop:native-namestring
+                                                  (or (find-installed-jdk) (ensure-cached-jdk))))
+                (uiop:getenv "JAVA_HOME") JAVA_HOME)
+        (fetch-error (e)
+          (if JAVA_HOME
+              (format *error-output* "~%OpenLDK Error: JAVA_HOME points at a JDK ~A installation:~%  ~A~%" major JAVA_HOME)
+              (format *error-output* "~%OpenLDK Error: JAVA_HOME environment variable not set~%"))
+          (format *error-output* "  and no JDK 25 is installed in the usual places, nor could one be downloaded:~%  ~A~%" e)
+          (format *error-output* "  Set JAVA_HOME to a JDK 25 installation (e.g. /usr/lib/jvm/java-25-openjdk).~%")
+          (uiop:quit 1))))
 
     (cond
       ((uiop:directory-exists-p (concatenate 'string JAVA_HOME "/jmods/"))

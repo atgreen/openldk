@@ -163,12 +163,20 @@ check-kotlin: sbcl-kotlin
 check-groovy: sbcl-groovy
 	./sbcl-groovy --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:test-system \"openldk/groovy\"))"
 
+# Tests for openldk/abcl, run in sbcl-abcl, where ABCL is started.  The
+# image's systems are left as they are: reloading OpenLDK into it fails.
+check-abcl: sbcl-abcl
+	./sbcl-abcl --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/abcl/tests\" :force-not (asdf:already-loaded-systems)) (unless (uiop:symbol-call :fiveam (quote #:run!) :openldk-abcl-tests) (uiop:quit 1)))"
+
 # SBCLs with a language started, for using it from Lisp (see docs/INTEROP.md).
 sbcl-jscheme: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(JSCHEME_MAIN) | check-jdk
 	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/jscheme\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-jscheme\" :init (lambda () (jscheme:startup) (jscheme:eval-string \"(define (f n) (if (< n 2) 1 (* n (f (- n 1))))) (f 10) (map (lambda (x) (* x x)) (list 1 2 3))\")))"
 
 sbcl-kawa: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(KAWA_JAR) | check-jdk
 	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/kawa\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-kawa\" :init (lambda () (kawa:startup) (kawa:eval-string \"(define (f n) (if (< n 2) 1 (* n (f (- n 1))))) (f 20) (map (lambda (x) (* x x)) (list 1 2 3)) (vector 1 2)\")))"
+
+sbcl-abcl: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(ABCL_JAR) | check-jdk
+	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/abcl\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-abcl\" :init (lambda () (abcl:startup) (abcl:eval-string \"(defun f (n) (if (< n 2) 1 (* n (f (1- n))))) (f 20) (mapcar (lambda (x) (* x x)) (list 1 2 3)) (prin1-to-string (list 1 2.5 (quote sym))) (handler-case (error (quote type-error) :datum 1 :expected-type (quote string)) (error (e) (princ-to-string e))) (defclass pt () ((x :initarg :x))) (make-instance (quote pt) :x 1) (compile (quote f))\")))"
 
 sbcl-clojure: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(CLOJURE_JARS) | check-jdk
 	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/clojure\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-clojure\" :init (lambda () (clojure:startup) (clojure:eval-string \"(defn f [n] (if (< n 2) 1 (*' n (f (dec n))))) (f 20) (mapv inc (range 5)) (into {} [[:a 1]]) (str 1 :k)\")))"

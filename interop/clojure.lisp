@@ -101,11 +101,17 @@
   (cdr (assoc key *classes*)))
 
 (defun default-classpath ()
-  "Clojure's jars, as `make clojure` downloads them."
-  (mapcar (lambda (jar) (namestring (asdf:system-relative-pathname "openldk" jar)))
-          '("lib/clojure/clojure-1.12.4.jar"
-            "lib/clojure/spec.alpha-0.5.238.jar"
-            "lib/clojure/core.specs.alpha-0.4.74.jar")))
+  "Clojure's jars, from CLASSPATH, `make clojure`, or downloads (see FIND-CLASSPATH)."
+  (find-classpath "clojure/lang/RT"
+                  '(("lib/clojure/clojure-1.12.4.jar" "clojure-1.12.4/clojure-1.12.4.jar"
+                     "https://repo1.maven.org/maven2/org/clojure/clojure/1.12.4/clojure-1.12.4.jar"
+                     "4b81e9ba6da38c45d9cc58023c674062b8c9f0714f33ff00ded22e6a949da177")
+                    ("lib/clojure/spec.alpha-0.5.238.jar" "clojure-1.12.4/spec.alpha-0.5.238.jar"
+                     "https://repo1.maven.org/maven2/org/clojure/spec.alpha/0.5.238/spec.alpha-0.5.238.jar"
+                     "94cd99b6ea639641f37af4860a643b6ed399ee5a8be5d717cff0b663c8d75077")
+                    ("lib/clojure/core.specs.alpha-0.4.74.jar" "clojure-1.12.4/core.specs.alpha-0.4.74.jar"
+                     "https://repo1.maven.org/maven2/org/clojure/core.specs.alpha/0.4.74/core.specs.alpha-0.4.74.jar"
+                     "eb73ac08cf49ba840c88ba67beef11336ca554333d9408808d78946e0feb9ddb"))))
 
 (defun %var (namespace name)
   (java-static "clojure.java.api.Clojure" "var(Ljava/lang/Object;Ljava/lang/Object;)"
@@ -143,14 +149,14 @@ more arguments, calls the Lisp function."
 ;;; Startup
 
 (defun startup (&key (classpath (default-classpath)))
-  "Start Clojure from the jars in CLASSPATH (by default, the ones
-`make clojure` downloads).  Loading clojure.core takes minutes cold;
+  "Start Clojure from the jars in CLASSPATH (by default, found or
+downloaded by DEFAULT-CLASSPATH).  Loading clojure.core takes minutes cold;
 `make sbcl-clojure` builds an SBCL with Clojure already started.  Calling
 it again does nothing."
   (unless *started*
     (dolist (jar classpath)
       (unless (probe-file jar)
-        (error "~A is missing; run `make clojure` first." jar)))
+        (error "~A is missing." jar)))
     (start-runtime :classpath classpath)
     (setf *classes*
           (loop for (key . name) in '((:boolean . "java.lang.Boolean")

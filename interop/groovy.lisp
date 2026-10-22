@@ -97,8 +97,11 @@ become.")
   (cdr (assoc key *classes*)))
 
 (defun default-classpath ()
-  "Groovy's jar, as `make sbcl-groovy` downloads it."
-  (list (namestring (asdf:system-relative-pathname "openldk" "lib/groovy/groovy-4.0.27.jar"))))
+  "Groovy's jar, from CLASSPATH, `make sbcl-groovy`, or a download (see FIND-CLASSPATH)."
+  (find-classpath "groovy/lang/GroovyShell"
+                  '(("lib/groovy/groovy-4.0.27.jar" "groovy-4.0.27/groovy-4.0.27.jar"
+                     "https://repo1.maven.org/maven2/org/apache/groovy/groovy/4.0.27/groovy-4.0.27.jar"
+                     "c9103813240be47a6c48bcdda7c5ed2e5fc9ecba3251c6ab8122258230a97f9d"))))
 
 ;;; Lisp functions as Groovy closures
 ;;;
@@ -146,7 +149,7 @@ sbcl-groovy` downloads).  Calling it again does nothing."
   (unless *started*
     (dolist (jar classpath)
       (unless (probe-file jar)
-        (error "~A is missing; run `make sbcl-groovy` first." jar)))
+        (error "~A is missing." jar)))
     (start-runtime :classpath classpath)
     (setf *classes*
           (loop for (key . name) in '((:boolean . "java.lang.Boolean")

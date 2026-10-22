@@ -96,8 +96,11 @@
   (cdr (assoc key *classes*)))
 
 (defun default-classpath ()
-  "Kawa's jar, as `make kawa` downloads it."
-  (list (namestring (asdf:system-relative-pathname "openldk" "lib/kawa-3.1.1.jar"))))
+  "Kawa's jar, from CLASSPATH, `make kawa`, or a download (see FIND-CLASSPATH)."
+  (find-classpath "kawa/standard/Scheme"
+                  '(("lib/kawa-3.1.1.jar" "kawa-3.1.1/kawa-3.1.1.jar"
+                     "https://repo1.maven.org/maven2/com/github/arvyy/kawa/3.1.1/kawa-3.1.1.jar"
+                     "6eb9507cdf2e3f15cfbfd74693027e7fb270285f8b32ce3a97290866a2746e70"))))
 
 ;;; Lisp functions as Scheme procedures
 
@@ -126,12 +129,12 @@
 ;;; Startup
 
 (defun startup (&key (classpath (default-classpath)))
-  "Start Kawa from its jar in CLASSPATH (by default, the one `make kawa`
-downloads).  Calling it again does nothing."
+  "Start Kawa from its jar in CLASSPATH (by default, found or downloaded
+by DEFAULT-CLASSPATH).  Calling it again does nothing."
   (unless *started*
     (dolist (jar classpath)
       (unless (probe-file jar)
-        (error "~A is missing; run `make kawa` first." jar)))
+        (error "~A is missing." jar)))
     (start-runtime :classpath classpath)
     (setf *classes*
           (loop for (key . name) in '((:boolean . "java.lang.Boolean")

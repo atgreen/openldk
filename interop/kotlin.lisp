@@ -104,13 +104,33 @@
   (cdr (assoc key *classes*)))
 
 (defun default-classpath ()
-  "The Kotlin compiler's jars, as `make sbcl-kotlin` downloads them; the
-standard library first."
-  (mapcar (lambda (jar)
-            (namestring (asdf:system-relative-pathname "openldk" (format nil "lib/kotlin/~A.jar" jar))))
-          '("kotlin-stdlib-2.2.20" "kotlin-compiler-embeddable-2.2.20" "kotlin-reflect-2.2.20"
-            "kotlin-script-runtime-2.2.20" "kotlin-daemon-embeddable-2.2.20"
-            "kotlinx-coroutines-core-jvm-1.8.0" "trove4j-1.0.20200330" "annotations-13.0")))
+  "The Kotlin compiler's jars, from CLASSPATH, `make sbcl-kotlin`, or
+downloads (see FIND-CLASSPATH)."
+  (find-classpath "org/jetbrains/kotlin/cli/jvm/K2JVMCompiler"
+                  '(("lib/kotlin/kotlin-stdlib-2.2.20.jar" "kotlin-2.2.20/kotlin-stdlib-2.2.20.jar"
+                     "https://repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-stdlib/2.2.20/kotlin-stdlib-2.2.20.jar"
+                     "8836ccffd3585fadda9901244b20d42901d2f3cd581058d8434e2ffabcf3a3e7")
+                    ("lib/kotlin/kotlin-compiler-embeddable-2.2.20.jar" "kotlin-2.2.20/kotlin-compiler-embeddable-2.2.20.jar"
+                     "https://repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-compiler-embeddable/2.2.20/kotlin-compiler-embeddable-2.2.20.jar"
+                     "1c6c3f810bfe6a41abcbc34b3a2ef639f1e3f4aeed3a953a4b0974eea4f41889")
+                    ("lib/kotlin/kotlin-reflect-2.2.20.jar" "kotlin-2.2.20/kotlin-reflect-2.2.20.jar"
+                     "https://repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-reflect/2.2.20/kotlin-reflect-2.2.20.jar"
+                     "8209083a4a7c4e476d9842b078308fa96a96f07a6bd99f05f3586ee13289ab26")
+                    ("lib/kotlin/kotlin-script-runtime-2.2.20.jar" "kotlin-2.2.20/kotlin-script-runtime-2.2.20.jar"
+                     "https://repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-script-runtime/2.2.20/kotlin-script-runtime-2.2.20.jar"
+                     "5c8bd5dd7ae1ea2eeb2778fdbeaa19a562184975f6cab8a0bb6779e4190731ae")
+                    ("lib/kotlin/kotlin-daemon-embeddable-2.2.20.jar" "kotlin-2.2.20/kotlin-daemon-embeddable-2.2.20.jar"
+                     "https://repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-daemon-embeddable/2.2.20/kotlin-daemon-embeddable-2.2.20.jar"
+                     "7c5c8cd2f8beadd3283239bb9ca219a0cafa1af02682b407b181e1179718f2f7")
+                    ("lib/kotlin/kotlinx-coroutines-core-jvm-1.8.0.jar" "kotlin-2.2.20/kotlinx-coroutines-core-jvm-1.8.0.jar"
+                     "https://repo1.maven.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm/1.8.0/kotlinx-coroutines-core-jvm-1.8.0.jar"
+                     "9860906a1937490bf5f3b06d2f0e10ef451e65b95b269f22daf68a3d1f5065c5")
+                    ("lib/kotlin/trove4j-1.0.20200330.jar" "kotlin-2.2.20/trove4j-1.0.20200330.jar"
+                     "https://repo1.maven.org/maven2/org/jetbrains/intellij/deps/trove4j/1.0.20200330/trove4j-1.0.20200330.jar"
+                     "c5fd725bffab51846bf3c77db1383c60aaaebfe1b7fe2f00d23fe1b7df0a439d")
+                    ("lib/kotlin/annotations-13.0.jar" "kotlin-2.2.20/annotations-13.0.jar"
+                     "https://repo1.maven.org/maven2/org/jetbrains/annotations/13.0/annotations-13.0.jar"
+                     "ace2a10dc8e2d5fd34925ecac03e4988b2c0f851650c94b8cef49ba1bd111478"))))
 
 ;;; Lisp functions as Kotlin functions
 
@@ -154,13 +174,12 @@ standard library first."
 ;;; Startup
 
 (defun startup (&key (classpath (default-classpath)))
-  "Start the Kotlin compiler from the jars in CLASSPATH (by default, the
-ones `make sbcl-kotlin` downloads), the standard library first.  Calling it
-again does nothing."
+  "Start the Kotlin compiler from the jars in CLASSPATH (by default, those
+DEFAULT-CLASSPATH finds).  Calling it again does nothing."
   (unless *started*
     (dolist (jar classpath)
       (unless (probe-file jar)
-        (error "~A is missing; run `make sbcl-kotlin` first." jar)))
+        (error "~A is missing." jar)))
     (let ((base (uiop:ensure-directory-pathname
                  (merge-pathnames (format nil "openldk-kotlin-~D/" (sb-posix:getpid))
                                   (uiop:temporary-directory)))))
@@ -168,7 +187,9 @@ again does nothing."
             *source-directory* (merge-pathnames "src/" base))
       (ensure-directories-exist *output-directory*)
       (ensure-directories-exist *source-directory*))
-    (setf *stdlib* (first classpath))
+    ;; Compiled code links against the standard library.
+    (setf *stdlib* (or (find-if (lambda (entry) (search "kotlin-stdlib" entry)) classpath)
+                       (first classpath)))
     (start-runtime :classpath (append classpath (list (namestring *output-directory*))))
     (setf *classes*
           (loop for (key . name) in '((:boolean . "java.lang.Boolean")

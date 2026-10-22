@@ -68,6 +68,7 @@
   (:nicknames #:jscheme)
   (:shadow #:eval #:load #:funcall)
   (:export #:startup
+           #:default-classpath
            #:*interpreter*
            #:eval
            #:eval-string
@@ -93,9 +94,48 @@
 (defvar *character* nil)
 (defvar *string* nil)
 
+(defun %scheme-class-in (directory)
+  (uiop:file-exists-p (merge-pathnames "jscheme/Scheme.class" directory)))
+
+(defun %cached-classes ()
+  "JScheme's classes, compiled in OpenLDK's cache from downloaded sources."
+  (let ((classes (merge-pathnames "jscheme/classes/" (openldk::ldk-cache-dir))))
+    (unless (%scheme-class-in classes)
+      (let* ((source-jar (openldk::ensure-cached-file
+                          "jscheme/jscheme-src.jar" "https://norvig.com/jscheme/jscheme.jar"
+                          "a178070302e20f43922bdbe4bc8d5eccb54c6ce988db5557ce3e1556dca73d49"))
+             (build (uiop:ensure-directory-pathname (openldk::%temporary-name classes)))
+             (sources (merge-pathnames "src/" build))
+             (output (merge-pathnames "classes/" build)))
+        (unwind-protect
+             (progn
+               (zip:unzip source-jar (ensure-directories-exist sources))
+               (ensure-directories-exist output)
+               ;; javac through the JDK's own module, as `make abcl` does,
+               ;; so a JDK without bin/javac works too.
+               (openldk::ensure-JAVA_HOME)
+               (openldk::%run-tool
+                (list* (uiop:native-namestring
+                        (merge-pathnames "bin/java" (uiop:ensure-directory-pathname
+                                                     (uiop:getenv "JAVA_HOME"))))
+                       "-m" "jdk.compiler/com.sun.tools.javac.Main" "-nowarn"
+                       "-d" (uiop:native-namestring output)
+                       (mapcar #'uiop:native-namestring
+                               (directory (merge-pathnames "jscheme/*.java" sources)))))
+               ;; Another process may have got there first; theirs is as good.
+               (unless (%scheme-class-in classes)
+                 (sb-posix:rename (string-right-trim "/" (uiop:native-namestring output))
+                                  (string-right-trim "/" (uiop:native-namestring classes)))))
+          (uiop:delete-directory-tree build :validate t :if-does-not-exist :ignore))))
+    classes))
+
 (defun default-classpath ()
-  "JScheme's classes, as `make jscheme` builds them."
-  (namestring (asdf:system-relative-pathname "openldk" "lib/jscheme/classes/")))
+  "JScheme's classes: from CLASSPATH, as `make jscheme` builds them, or
+else compiled from downloaded sources."
+  (or (classpath-from-environment "jscheme/Scheme")
+      (list (namestring
+             (let ((made (asdf:system-relative-pathname "openldk" "lib/jscheme/classes/")))
+               (if (%scheme-class-in made) made (%cached-classes)))))))
 
 ;;; Lisp functions as Scheme procedures
 
@@ -122,12 +162,11 @@
 ;;; Startup
 
 (defun startup (&key (classpath (default-classpath)))
-  "Start JScheme, from its classes in CLASSPATH (by default, the ones
-`make jscheme` builds).  Calling it again does nothing."
+  "Start JScheme, from its classes in CLASSPATH, a list of directories
+and jars (by default, found or built by DEFAULT-CLASSPATH).  Calling it
+again does nothing."
   (unless *interpreter*
-    (unless (probe-file (merge-pathnames "jscheme/Scheme.class" classpath))
-      (error "JScheme's classes aren't in ~A; run `make jscheme` first." classpath))
-    (start-runtime :classpath (list classpath))
+    (start-runtime :classpath classpath)
     (setf *true* (java-static-field "jscheme.SchemeUtils" "TRUE")
           *false* (java-static-field "jscheme.SchemeUtils" "FALSE")
           *pair* (java-class-symbol "jscheme.Pair")
