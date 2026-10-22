@@ -45,6 +45,14 @@ point at your JDK 25 installation:
 $ export JAVA_HOME=/usr/lib/jvm/java-25-openjdk
 ```
 
+If `JAVA_HOME` is unset or isn't a JDK 25, `openldk` looks for one where
+JDKs are usually installed (the `java` on your `PATH`, `/usr/lib/jvm`,
+SDKMAN, and so on), and failing that downloads a pinned Temurin JDK 25
+into `$XDG_CACHE_HOME/openldk/` (`~/.cache/openldk/`).  The interop
+languages below fetch their jars there too when you don't provide them.
+Set `LDK_CACHE_DIR` to use another directory, or `LDK_OFFLINE=1` to never
+download.
+
 You can provide additional classpath elements through the
 `LDK_CLASSPATH` environment variable.
 

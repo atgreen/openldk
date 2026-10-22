@@ -178,3 +178,11 @@ only appears once fully unpacked, so a partial one is never used."
           (fetch-tarball url home :sha256 sha256
                                   :exclude '("*/jmods" "*/lib/src.zip" "*/man" "*/demo")))))
     home))
+
+(defun ensure-cached-file (path url sha256)
+  "Return the file PATH, relative to the cache, downloading it from URL
+first if it isn't there."
+  (let ((file (merge-pathnames path (ldk-cache-dir))))
+    (unless (uiop:file-exists-p file)
+      (fetch-url url file :sha256 sha256))
+    file))

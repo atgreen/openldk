@@ -103,8 +103,11 @@
   (cdr (assoc key *classes*)))
 
 (defun default-classpath ()
-  "ABCL's jar, as `make abcl` downloads it."
-  (list (namestring (asdf:system-relative-pathname "openldk" "lib/abcl/abcl.jar"))))
+  "ABCL's jar, from CLASSPATH, `make abcl`, or a download (see FIND-CLASSPATH)."
+  (find-classpath "org/armedbear/lisp/Lisp"
+                  '(("lib/abcl/abcl.jar" "abcl-1.9.2/abcl.jar"
+                     "https://repo1.maven.org/maven2/org/abcl/abcl/1.9.2/abcl-1.9.2.jar"
+                     "51d0dafac1cea85fc2896b5cead62ce529569c6c02962f854a72b9484a6e45d7"))))
 
 ;;; SBCL functions as ABCL functions
 
@@ -126,12 +129,12 @@
 ;;; Startup
 
 (defun startup (&key (classpath (default-classpath)))
-  "Start ABCL from its jar in CLASSPATH (by default, the one `make abcl`
-downloads).  Calling it again does nothing."
+  "Start ABCL from its jar in CLASSPATH (by default, found or downloaded
+by DEFAULT-CLASSPATH).  Calling it again does nothing."
   (unless *started*
     (dolist (jar classpath)
       (unless (probe-file jar)
-        (error "~A is missing; run `make abcl` first." jar)))
+        (error "~A is missing." jar)))
     (start-runtime :classpath classpath)
     (with-foreign-errors ("ABCL")
       ;; As ABCL's main does, which loads more of the system (PRINT-OBJECT)
