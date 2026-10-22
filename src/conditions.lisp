@@ -106,9 +106,7 @@ every scope a Java catch clause protects, not merely around a method body."
        (,@(when arrays
             '((sb-int:invalid-array-index-error
                (lambda (e)
-                 (declare (ignore e))
-                 (error (%lisp-condition
-                         (%make-throwable '|java/lang/ArrayIndexOutOfBoundsException|)))))))
+                 (%throw-array-index-error (type-error-datum e))))))
         (sb-sys:memory-fault-error
          (lambda (e)
            (declare (ignore e))
