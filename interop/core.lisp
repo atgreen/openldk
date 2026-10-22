@@ -103,6 +103,7 @@
            #:compile-foreign-file
            #:load-foreign-file
            #:define-foreign-file-type
+           #:define-java-method
            #:define-java-class
            #:make-java-object
            #:java-class-of-lisp-class
@@ -1231,3 +1232,32 @@ converted with CONVERT, superclasses' fields after the class's own."
                                                                                   :openldk))))))
           do (setf class (and (openldk::super class)
                               (openldk::%get-ldk-class-by-bin-name (openldk::super class) t))))))
+
+;;; CLOS methods on Java methods
+;;;
+;;; A Java instance method is a generic function in OpenLDK, so Lisp can add
+;;; methods to it -- :before, :after, :around, or a primary method -- for a
+;;; Java class, and they run on every call, including calls from compiled
+;;; Java or Kotlin code:
+;;;
+;;;   (define-java-method :around ("wonderland.Book" "getPrice()D") (book)
+;;;     (* (call-next-method) 0.8d0))
+
+(defmacro define-java-method (qualifier (class-name method) lambda-list &body body)
+  "Define a method, with QUALIFIER (:BEFORE, :AFTER, :AROUND, or NIL for a
+primary method), on the Java method METHOD -- its full JVM name, as
+\"getPrice()D\" -- of the Java class CLASS-NAME, whose instances the
+first parameter of LAMBDA-LIST receives.  BODY can use CALL-NEXT-METHOD.
+The class is loaded, and the method defined, when the form is evaluated."
+  `(%define-java-method ',qualifier ,class-name ,method '(,lambda-list ,@body)))
+
+(defun %define-java-method (qualifier class-name method definition)
+  (unless (runtime-started-p) (start-runtime))
+  (destructuring-bind (lambda-list &rest body) definition
+    (let* ((class (java-load class-name))
+           (class-symbol (intern (openldk::name class) (openldk::ldk-class-package class)))
+           (gf (intern method :openldk)))
+      (openldk::%ensure-java-gf gf (length lambda-list))
+      (cl:eval `(defmethod ,gf ,@(when qualifier (list qualifier))
+                    ((,(first lambda-list) ,class-symbol) ,@(rest lambda-list))
+                  ,@body)))))
