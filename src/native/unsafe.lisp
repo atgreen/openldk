@@ -59,67 +59,78 @@
           (otherwise 8))
         1)))
 
+(defun %data-element-scale (data)
+  "Width in bytes of an element of the java-array DATA vector."
+  (typecase data
+    ((simple-array (signed-byte 8) (*)) 1)
+    ((or (simple-array (unsigned-byte 16) (*)) (simple-array (signed-byte 16) (*))) 2)
+    ((or (simple-array (signed-byte 32) (*)) (simple-array single-float (*))) 4)
+    (t 8)))
+
 (defun %unsafe-array-element-scale (array)
   "Return the storage width of ARRAY's component type in bytes."
-  (let ((name (%unsafe-array-component-name array)))
-    (cond
-      ((member name '("byte" "boolean") :test #'string=) 1)
-      ((member name '("char" "short") :test #'string=) 2)
-      ((member name '("float" "int") :test #'string=) 4)
-      ((member name '("double" "long") :test #'string=) 8)
-      (t 8))))
+  (%data-element-scale (java-array-data array)))
 
-(defun %unsafe-array-component-name (array)
-  "Return ARRAY's component class name as a Lisp string."
-  (lstring (slot-value (%array-component-class array) '|name|)))
+;;; A primitive array's data is a specialized vector laid out exactly as
+;;; the JVM lays the array out (little-endian, IEEE floats, UTF-16 chars),
+;;; so Unsafe byte-offset access reads and writes that memory directly.
 
-(defun %unsafe-array-value-bits (array index)
-  "Return ARRAY element INDEX as its unsigned in-memory bit pattern."
-  (let ((name (%unsafe-array-component-name array))
-        (value (jaref array index)))
-    (cond
-      ((string= name "float")
-       (float-features:single-float-bits (coerce value 'single-float)))
-      ((string= name "double")
-       (float-features:double-float-bits (coerce value 'double-float)))
-      ((string= name "char")
-       (if (characterp value) (char-code value) value))
-      (t (logand value
-                 (1- (ash 1 (* 8 (%unsafe-array-element-scale array)))))))))
+(defun %primitive-data-p (data)
+  (not (simple-vector-p data)))
+
+(defun %check-array-bytes (data byte-offset byte-count)
+  "Throw ArrayIndexOutOfBoundsException unless BYTE-COUNT bytes at
+BYTE-OFFSET lie within DATA."
+  (unless (<= 0 byte-offset (- (* (length data) (%data-element-scale data)) byte-count))
+    (%throw-array-index-error byte-offset)))
+
+(defun %data-ref-bits (data byte-offset byte-count)
+  "Unsigned BYTE-COUNT-byte little-endian value at BYTE-OFFSET in primitive DATA."
+  (%check-array-bytes data byte-offset byte-count)
+  (sb-sys:with-pinned-objects (data)
+    (let ((sap (sb-sys:vector-sap data)))
+      (case byte-count
+        (1 (sb-sys:sap-ref-8 sap byte-offset))
+        (2 (sb-sys:sap-ref-16 sap byte-offset))
+        (4 (sb-sys:sap-ref-32 sap byte-offset))
+        (8 (sb-sys:sap-ref-64 sap byte-offset))
+        (t (loop for i below byte-count
+                 sum (ash (sb-sys:sap-ref-8 sap (+ byte-offset i)) (* i 8))))))))
+
+(defun %data-set-bits (data byte-offset byte-count bits)
+  "Store the low BYTE-COUNT bytes of BITS, little-endian, at BYTE-OFFSET in primitive DATA."
+  (%check-array-bytes data byte-offset byte-count)
+  (sb-sys:with-pinned-objects (data)
+    (let ((sap (sb-sys:vector-sap data)))
+      (case byte-count
+        (1 (setf (sb-sys:sap-ref-8 sap byte-offset) (ldb (byte 8 0) bits)))
+        (2 (setf (sb-sys:sap-ref-16 sap byte-offset) (ldb (byte 16 0) bits)))
+        (4 (setf (sb-sys:sap-ref-32 sap byte-offset) (ldb (byte 32 0) bits)))
+        (8 (setf (sb-sys:sap-ref-64 sap byte-offset) (ldb (byte 64 0) bits)))
+        (t (dotimes (i byte-count)
+             (setf (sb-sys:sap-ref-8 sap (+ byte-offset i))
+                   (ldb (byte 8 (* i 8)) bits)))))))
+  nil)
 
 (defun %unsafe-array-read-byte (array byte-offset)
   "Read one byte from ARRAY's primitive in-memory representation."
-  (let* ((scale (%unsafe-array-element-scale array))
-         (index (truncate byte-offset scale))
-         (shift (* 8 (mod byte-offset scale))))
-    (ldb (byte 8 shift) (%unsafe-array-value-bits array index))))
+  (let ((data (java-array-data array)))
+    (if (%primitive-data-p data)
+        (%data-ref-bits data byte-offset 1)
+        ;; Reference arrays have no byte representation; treat elements
+        ;; as 8-byte integers, as before typed arrays.
+        (multiple-value-bind (index byte) (truncate byte-offset 8)
+          (ldb (byte 8 (* 8 byte)) (aref data index))))))
 
 (defun %unsafe-array-write-byte (array byte-offset byte)
   "Write BYTE into ARRAY's primitive in-memory representation."
-  (let* ((name (%unsafe-array-component-name array))
-         (scale (%unsafe-array-element-scale array))
-         (index (truncate byte-offset scale))
-         (shift (* 8 (mod byte-offset scale)))
-         (bit-count (* 8 scale))
-         (value-mask (1- (ash 1 bit-count)))
-         (byte-mask (ash #xff shift))
-         (old-bits (%unsafe-array-value-bits array index))
-         (new-bits (logand value-mask
-                           (logior (logand old-bits (lognot byte-mask))
-                                   (ash (logand byte #xff) shift))))
-         (new-value
-           (cond
-             ((string= name "float")
-              (float-features:bits-single-float new-bits))
-             ((string= name "double")
-              (float-features:bits-double-float new-bits))
-             ((string= name "byte") (%unsigned-to-signed-byte new-bits))
-             ((string= name "short") (unsigned-to-signed-short new-bits))
-             ((string= name "int") (unsigned-to-signed-integer new-bits))
-             ((string= name "long") (unsigned-to-signed-long new-bits))
-             ((string= name "boolean") (if (zerop new-bits) 0 1))
-             (t new-bits))))
-    (setf (jaref array index) new-value)))
+  (let ((data (java-array-data array)))
+    (if (%primitive-data-p data)
+        (%data-set-bits data byte-offset 1 byte)
+        (multiple-value-bind (index offset) (truncate byte-offset 8)
+          (setf (aref data index)
+                (sb-c::mask-signed-field
+                 64 (dpb byte (byte 8 (* 8 offset)) (aref data index))))))))
 
 (defun %unsafe-array-index (array byte-offset)
   "Translate Unsafe BYTE-OFFSET into ARRAY's element index."
@@ -139,10 +150,7 @@
 
 (defun %unsafe-get-unaligned (obj offset nbytes signedp)
   (if (typep obj 'java-array)
-      (let ((data (java-array-data obj))
-            (v 0))
-        (dotimes (i nbytes)
-          (setf v (logior v (ash (logand (aref data (+ offset i)) #xff) (* 8 i)))))
+      (let ((v (%unsafe-read-array-bits obj offset nbytes)))
         (if signedp
             (%signed-of-width v (* 8 nbytes))
             v))
@@ -318,14 +326,20 @@ the storage object does not (yet) exist."
   nil)
 
 (defun %unsafe-read-array-bits (array offset byte-count)
-  (loop for index below byte-count
-        sum (ash (%unsafe-array-read-byte array (+ offset index))
-                 (* index 8))))
+  (let ((data (java-array-data array)))
+    (if (%primitive-data-p data)
+        (%data-ref-bits data offset byte-count)
+        (loop for index below byte-count
+              sum (ash (%unsafe-array-read-byte array (+ offset index))
+                       (* index 8))))))
 
 (defun %unsafe-write-array-bits (array offset byte-count bits)
-  (dotimes (index byte-count)
-    (%unsafe-array-write-byte array (+ offset index)
-                              (ldb (byte 8 (* index 8)) bits)))
+  (let ((data (java-array-data array)))
+    (if (%primitive-data-p data)
+        (%data-set-bits data offset byte-count bits)
+        (dotimes (index byte-count)
+          (%unsafe-array-write-byte array (+ offset index)
+                                    (ldb (byte 8 (* index 8)) bits)))))
   nil)
 
 (defun %unsafe-normalize-scalar (value kind)
@@ -641,9 +655,10 @@ the storage object does not (yet) exist."
          (ptr (sb-sys:sap-int (sb-alien:alien-sap mem)))
          (sap (sb-alien:alien-sap mem)))
     (setf (gethash ptr *unsafe-memory-table*) (cons mem (1+ len)))
-    ;; Copy bytes to native memory
+    ;; Copy bytes to native memory.  Java bytes are signed; SAP-REF-8 stores
+    ;; unsigned, so mask (a UTF-8 path byte >= #x80 is stored negative).
     (loop for i below len
-          do (setf (sb-sys:sap-ref-8 sap i) (aref data i)))
+          do (setf (sb-sys:sap-ref-8 sap i) (logand (aref data i) #xFF)))
     ;; Null terminate
     (setf (sb-sys:sap-ref-8 sap len) 0)
     ;; Ensure the NativeBuffer class is loaded before creating instances
