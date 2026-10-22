@@ -77,4 +77,10 @@
   (is (string= "a } b" #@gv{ 'a' + ' } ' + "b" }) "a } in strings")
   (dotimes (i 3)
     (is (= (* i i) #@gv{ $i * $i }) "compiled once, called again"))
-  (is (equal '(2 3) #@gv{ [1, 2].collect { $#'1+(it) } })))
+  (is (equal '(2 3) #@gv{ [1, 2].collect { $#'1+(it) } }))
+  (let ((n 3))
+    (is (string= "6" #@gv{
+                       import java.math.BigInteger
+                       BigInteger.valueOf($n).shiftLeft(1).toString()
+                     })
+        "a block's imports")))

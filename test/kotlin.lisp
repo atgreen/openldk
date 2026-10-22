@@ -93,9 +93,21 @@ fun origin() = Point(0, \"origin\")")))
     (is (equal '(("x" . 0) ("label" . "origin"))
                (openldk.interop:java-fields (kotlin:call class "origin") :convert #'kotlin:to-lisp)))))
 
+(test blocks-use-earlier-kotlin-classes
+  ;; Compiled classes land in a directory on the next compile's classpath:
+  ;; Kotlin finds a class there, and a top-level function through the
+  ;; module's META-INF/*.kotlin_module.
+  (kotlin:compile "package earlier
+class Point(val x: Int, val y: Int)
+fun origin(): Point = Point(3, 4)")
+  (is (= 7 (kotlin:eval "earlier.origin().x + earlier.Point(0, 4).y"))))
+
 (test coroutines
-  (is (= 42 (kotlin:eval "kotlinx.coroutines.runBlocking {
-                            val a = kotlinx.coroutines.async { 6 }
-                            val b = kotlinx.coroutines.async { 7 }
-                            a.await() * b.await()
-                          }"))))
+  ;; async is an extension on CoroutineScope, so it needs an import.
+  (is (= 42 (kotlin:call (kotlin:compile "import kotlinx.coroutines.*
+fun product(): Int = runBlocking {
+    val a = async { 6 }
+    val b = async { 7 }
+    a.await() * b.await()
+}")
+                         "product"))))
