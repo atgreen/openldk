@@ -14,7 +14,10 @@
 ;;;;   Groovy   the invoice template, wrapping titles with commons-text (Maven)
 ;;;;   ABCL     the amount in words, with FORMAT
 ;;;;
-;;;; The comments point out the OpenLDK features each part relies on.
+;;;; Each foreign piece is written inline, in its own language's syntax,
+;;;; in a #@LANGUAGE{ ... } block (or #[ ... ] for Clojure); $x passes a
+;;;; Lisp value in.  The comments point out the OpenLDK features each part
+;;;; relies on.
 ;;;;
 ;;;;   (asdf:load-system "polyglot-showcase")
 ;;;;   (polyglot-showcase:run)                 ; the bundled order-1042.txt
@@ -38,11 +41,13 @@
 
 ;;; The catalog
 
+(defvar *catalog* nil)
+
 (defun catalog ()
-  "The catalog: a java.util.List of Kotlin Book instances.  JAVA-SEQUENCE
-lets Lisp's sequence functions (FIND, REMOVE-IF, ...) work on it directly,
-without copying it into a Lisp list."
-  (java-sequence (java-static "wonderland.CatalogKt" "catalog()")))
+  "The catalog, a list of Kotlin Book instances.  The Kotlin block calls
+the catalog.kt function an ASDF component compiled: blocks compile against
+the components' classes.  Its java.util.List comes back a Lisp list."
+  (or *catalog* (setf *catalog* #@kt{ wonderland.catalog() })))
 
 (defun field (object name)
   "The field NAME of OBJECT, a Kotlin data-class instance, as Lisp data.
@@ -61,6 +66,22 @@ a static type, (THE DOUBLE-FLOAT ...), so it was compiled when this file
 was: the fasl holds its class, and no Kotlin compiler runs for it now."
   (declare (type double-float amount))
   #@kt{ Math.round($(the double-float amount) * 100) / 100.0 })
+
+;;; Carroll week: a sale, added to the Kotlin catalog from Lisp.  A Kotlin
+;;; method is a CLOS generic function, so Lisp can give it :before, :after
+;;; and :around methods.  This :around method on Book's getPrice() takes
+;;; 20% off Lewis Carroll's books wherever the price is read -- by compiled
+;;; Kotlin code too -- without changing catalog.kt.
+(define-java-method :around ("wonderland.Book" "getPrice()D") (book)
+  (let ((price (call-next-method)))
+    (if (string= (field book "author") "Lewis Carroll")
+        (round-cents (* price 0.8d0))
+        price)))
+
+(defun price (book)
+  "BOOK's price as the shop sells it: read through Kotlin's getter, so the
+sale applies.  (FIELD reads the field itself, the list price.)"
+  #@kt{ ($book as wonderland.Book).price })
 
 ;;; Validating order lines
 
@@ -88,7 +109,7 @@ ORDER-LINE-ERROR.  Kotlin's parser throws Java exceptions, which arrive as
 Lisp conditions of the matching type: a bad quantity's
 NumberFormatException is a FOREIGN-NUMBER-FORMAT-ERROR, a subtype of both
 FOREIGN-ILLEGAL-ARGUMENT-ERROR (its Java superclass) and PARSE-ERROR."
-  (let ((line (handler-case (kotlin:call "wonderland.CatalogKt" "parseOrderLine" text)
+  (let ((line (handler-case #@kt{ wonderland.parseOrderLine($text) }
                 (foreign-number-format-error ()
                   (error 'order-line-error :line text :problem "the quantity is not a number"))
                 (foreign-illegal-argument-error ()
@@ -106,7 +127,7 @@ FOREIGN-ILLEGAL-ARGUMENT-ERROR (its Java superclass) and PARSE-ERROR."
 ORDERED (a list of ISBNs), or NIL.  The candidates go to Kawa as a list of
 (isbn stock) lists; the search escapes through a continuation, call/cc, as
 soon as it finds one."
-  (let ((candidates (loop for other in (coerce (catalog) 'list)
+  (let ((candidates (loop for other in (catalog)
                           when (and (string= (field other "author") (field book "author"))
                                     (not (member (field other "isbn") ordered :test #'string=)))
                             collect (list (field other "isbn") (field other "stock")))))
@@ -118,8 +139,8 @@ soon as it finds one."
                 #f)) }))
 
 (defun order-line (isbn quantity)
-  "A new Kotlin OrderLine, made with its constructor from Lisp."
-  (java-new "wonderland.OrderLine" "(Ljava/lang/String;I)" (jstring isbn) quantity))
+  "A new Kotlin OrderLine."
+  #@kt{ wonderland.OrderLine($isbn, $quantity) })
 
 ;;; Pricing
 
@@ -143,14 +164,18 @@ called directly after that."
     ((tier :initform "standard"))
   ("applyAsDouble(Ljava/lang/Object;Ljava/lang/Object;)D" (self book quantity)
     (let ((quantity (kotlin:to-lisp quantity)))
-      (round-cents (* (field book "price") quantity
+      (round-cents (* (price book) quantity
                       (- 1 (discount (field book "category") quantity))
                       (if (string= tier "gold") 0.95d0 1d0))))))
 
 (defun price-lines (lines tier)
   "Each line's price, from Kotlin's engine: it prices the lines
-concurrently with coroutines, asking the Lisp policy for each."
-  (kotlin:call "wonderland.CatalogKt" "priceLines" lines (make-java-object 'store-policy :tier tier)))
+concurrently with coroutines, asking the Lisp policy for each.  LINES, a
+Lisp list, reaches Kotlin as a List; the policy object as itself."
+  (let ((policy (make-java-object 'store-policy :tier tier)))
+    #@kt{ @Suppress("UNCHECKED_CAST")
+          wonderland.priceLines($lines as List<wonderland.OrderLine>,
+                                $policy as java.util.function.ToDoubleBiFunction<wonderland.Book, Int>) }))
 
 ;;; The invoice
 
@@ -197,18 +222,17 @@ Lisp that runs as Java bytecode."
   "Past orders, as lists of ISBNs.")
 
 (defparameter *also-bought*
-  ;; A Clojure function.  It comes to Lisp as a FOREIGN-FUNCTION, which
-  ;; FUNCALL calls like any Lisp function, converting its arguments (Lisp
-  ;; lists become Clojure lists) and its result.
-  (clojure:eval-string
-   "(fn [isbn history]
-      (->> history
-           (filter #(some #{isbn} %))
-           (mapcat identity)
-           (remove #{isbn})
-           frequencies
-           (sort-by (juxt (comp - val) key))
-           (map key)))")
+  ;; A Clojure function, written in a #[ ] block.  It comes to Lisp as a
+  ;; FOREIGN-FUNCTION, which FUNCALL calls like any Lisp function,
+  ;; converting its arguments (Lisp lists become Clojure lists) and result.
+  #[ (fn [isbn history]
+       (->> history
+            (filter #(some #{isbn} %))
+            (mapcat identity)
+            (remove #{isbn})
+            frequencies
+            (sort-by (juxt (comp - val) key))
+            (map key))) ]
   "The ISBNs most often bought together with an ISBN, most often first.")
 
 (defun recommendations (ordered)
@@ -280,7 +304,7 @@ that the order doesn't already have."
                                  (row (make-hash-table :test #'equal)))
                             (setf (gethash "title" row) (field book "title")
                                   (gethash "quantity" row) quantity
-                                  (gethash "price" row) (field book "price")
+                                  (gethash "price" row) (price book)
                                   (gethash "off" row) (round (* 100 (discount (field book "category") quantity)))
                                   (gethash "amount" row) price
                                   (gethash "note" row) (gethash (field book "isbn") notes))

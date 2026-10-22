@@ -136,3 +136,15 @@
       (is (string= "one" (lstring (java-call "get(Ljava/lang/Object;)Ljava/lang/Object;" view (jstring "a")))))
       (is (eql 1 (java-call "containsKey(Ljava/lang/Object;)Z" view (jstring "a"))))
       (is (= 1 (java-call "size()I" view))))))
+
+(define-java-class label () ((text :initform "label"))
+  ("toString()Ljava/lang/String;" (self) (jstring text)))
+
+(define-java-method :around ("lisp.openldk_interop_tests.label" "toString()Ljava/lang/String;") (self)
+  (jstring (concatenate 'string "[" (lstring (call-next-method)) "]")))
+
+(test define-java-method
+  (is (string= "[price]"
+               (lstring (java-static "java.lang.String" "valueOf(Ljava/lang/Object;)"
+                                     (make-java-object 'label :text "price"))))
+      "an :around method wraps the Java method, called from Java (String.valueOf)"))

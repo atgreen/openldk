@@ -670,6 +670,22 @@ isn't needed at run time, and a compile error is reported by
 `fixnum` a `Long`, `double-float` a `Double`, `string` a `String`, `list`
 a `List`.  Other blocks compile the first time they run.
 
+### CLOS methods on Java methods
+
+A Java instance method is a CLOS generic function in OpenLDK, so Lisp can
+add methods to it: `:before`, `:after`, `:around`, or a primary method,
+for a given Java class.  They run on every call, including calls from
+compiled Java, Kotlin, Scala or Groovy code.  `define-java-method` loads
+the class and defines the method on the full JVM method name:
+
+```lisp
+(define-java-method :around ("wonderland.Book" "getPrice()D") (book)
+  (* (call-next-method) 0.8d0))     ; a sale, wherever the price is read
+
+(define-java-method :before ("java.util.ArrayList" "clear()V") (list)
+  (format t "~&clearing ~D elements~%" (java-call "size()I" list)))
+```
+
 ### Java classes defined in Lisp
 
 `define-java-class` defines a real Java class whose methods are Lisp code:

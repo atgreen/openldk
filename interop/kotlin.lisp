@@ -334,7 +334,11 @@ compiler's messages when it doesn't compile."
                                "java.lang.String"
                                (mapcar #'jstring
                                        (list "-no-stdlib" "-no-reflect" "-nowarn"
-                                             "-cp" (format nil "~A:~A" *stdlib* (namestring *output-directory*))
+                                             ;; Earlier blocks' classes, and the classes and jars
+                                             ;; ASDF components contributed (a :kotlin-file's, a
+                                             ;; :maven-jar's), so a block can use them.
+                                             "-cp" (format nil "~A:~A:~A" *stdlib* (namestring *output-directory*)
+                                                           (openldk.interop::%compiled-classpath))
                                              "-d" (namestring *output-directory*)
                                              (namestring file))))))))
       (unless (string= "OK" (lstring (java-call "name()" code)))
@@ -458,7 +462,7 @@ Kotlin is running now, else compiled the first time it runs."
             (write-string (%kotlin-site-source types names source) out))
           (uiop:delete-directory-tree directory :validate t :if-does-not-exist :ignore)
           (ensure-directories-exist directory)
-          (compile-kotlin-files (list file) directory)
+          (compile-kotlin-files (list file) directory :classpath (openldk.interop::%compiled-classpath))
           `(%precompiled-site ,(format nil "~AKt" name) ',(openldk.interop::%class-files-in directory)
                               (list ,@forms)))
         `(%eval-site ,source ',names (list ,@forms)))))
