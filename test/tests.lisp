@@ -98,6 +98,12 @@ file, nothing."
     (is (= 0 coder))
     (is (equalp '(112 108 97 105 110) (coerce bytes 'list)))))
 
+(test method-let-drops-unused-variables
+  ;; Unmentioned variables without an initial value are dropped; bound
+  ;; parameters and mentioned variables stay.
+  (is (equal '((p arg0) (b))
+             (openldk::%prune-unused-bindings '((p arg0) (a) (b) (c)) '((setf b p))))))
+
 (test primitive-arrays-are-specialized
   ;; Primitive arrays use specialized vectors so JIT'd code can AREF them
   ;; unboxed.  Component classes given as descriptors need no JVM.

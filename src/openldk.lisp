@@ -803,6 +803,25 @@ every variable whose values all have one primitive category."
                               collect `(type ,type ,symbol)))
              ,@(%normalize-typed-assignments body types))))))
 
+(defun %prune-unused-bindings (bindings body)
+  "BINDINGS less those with no initial value that BODY never mentions."
+  (let ((used (make-hash-table :test #'eq)))
+    (labels ((walk (form)
+               (cond ((symbolp form) (setf (gethash form used) t))
+                     ((consp form) (walk (car form)) (walk (cdr form))))))
+      (walk body))
+    (remove-if (lambda (binding)
+                 (and (null (rest binding))
+                      (not (gethash (first binding) used))))
+               bindings)))
+
+(defun %method-let (bindings body)
+  "The LET binding a compiled method's variables around BODY.  BINDINGS
+covers every local slot, stack variable and exception-handler variable
+the method might use; those with no initial value that BODY never
+mentions are dropped, and %TYPED-LET declares the types of the rest."
+  (%typed-let (%prune-unused-bindings bindings body) body))
+
 (defun %build-method-definition (class method blocks-after-dce parameter-hints max-locals)
   "Build the complete DEFUN/DEFMETHOD form for METHOD from its optimized
 BLOCKS-AFTER-DCE: generate each block's code, then wrap it with debug
@@ -880,7 +899,7 @@ entry/exit as required."
                     (let ((i 0)
                           (pc -1))
                       (list (format nil "bridge=~A" (bridge-p method))
-                            (%typed-let (if (static-p method)
+                            (%method-let (if (static-p method)
                                                    (append
                                                     (list (list '|condition-cache|) (list '|handler-entry|))
                                                     (remove-duplicates
