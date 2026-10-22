@@ -224,6 +224,14 @@
              (unless (uiop:symbol-call :fiveam '#:run! :openldk-groovy-tests)
                (error "openldk/groovy tests failed"))))
 
+(asdf:defsystem "openldk/polyglot"
+  :description "Every JVM language OpenLDK runs, in one SBCL"
+  :author "Anthony Green <green@moxielogic.com>"
+  :license "GPL3+Classpath Exception"
+  :depends-on ("openldk/clojure" "openldk/kawa" "openldk/jscheme" "openldk/scala"
+               "openldk/kotlin" "openldk/groovy" "openldk/abcl")
+  :components ((:file "interop/polyglot")))
+
 (asdf:defsystem "openldk/kawa"
   :description "Use Kawa Scheme from Common Lisp"
   :author "Anthony Green <green@moxielogic.com>"

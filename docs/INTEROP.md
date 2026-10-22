@@ -16,6 +16,7 @@ both ways, with no serialization and no process boundary.
 | `openldk/kotlin` | [Kotlin](https://kotlinlang.org/) 2.2.20 | `openldk.kotlin`, nickname `kotlin` |
 | `openldk/groovy` | [Groovy](https://groovy-lang.org/) 4.0.27 | `openldk.groovy`, nickname `groovy` |
 | `openldk/abcl` | [ABCL](https://abcl.org/) (Armed Bear Common Lisp) 1.9.2 | `openldk.abcl`, nickname `abcl` |
+| `openldk/polyglot` | all of the above, in one SBCL | `openldk.polyglot`, nickname `polyglot` |
 
 ## Finding the jars
 
@@ -45,6 +46,7 @@ make sbcl-scala && ./sbcl-scala
 make sbcl-kotlin && ./sbcl-kotlin
 make sbcl-groovy && ./sbcl-groovy
 make sbcl-abcl && ./sbcl-abcl
+make sbcl-polyglot && ./sbcl-polyglot    # all of them
 ```
 
 ```lisp
@@ -413,6 +415,7 @@ objects, never printed into the source.
 | `#@kawa{ }` | Kawa Scheme | `openldk/kawa` |
 | `#@jscheme{ }` | JScheme | `openldk/jscheme` |
 | `#@groovy{ }`, `#@gv{ }` | Groovy | `openldk/groovy` |
+| `#@abcl{ }` | ABCL | `openldk/abcl` |
 
 ```lisp
 (setf *readtable* (openldk.interop:enable-source-syntax (copy-readtable)))
@@ -490,6 +493,23 @@ done.  A Lisp error in an SBCL function that ABCL called comes back as the
 original condition.
 
 Tests: `make check-abcl` runs them in `sbcl-abcl`.
+
+## Every language at once: `openldk/polyglot`
+
+`openldk/polyglot` loads every language system; `polyglot:startup` starts
+them all (reporting and skipping any that fail) and `polyglot:enable-syntax`
+turns on `#@LANGUAGE{ ... }` and Clojure's `#[ ... ]`.  `make sbcl-polyglot`
+builds an SBCL with all of them started, so a program can use any of them
+at once:
+
+```lisp
+(polyglot:enable-syntax)
+(let ((primes #[ (take 5 (filter (fn [n] (not-any? #(zero? (rem n %)) (range 2 n))) (iterate inc 2))) ]))
+  #@kt{ $primes.map { (it as Number).toLong() * 2 }.sum() })    ; => 56
+```
+
+`examples/tea-party.lisp` sets every language at one table:
+`./sbcl-polyglot --load examples/tea-party.lisp`.
 
 ## The shared core: `openldk/interop`
 
