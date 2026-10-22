@@ -137,7 +137,17 @@
   :author "Anthony Green <green@moxielogic.com>"
   :license "GPL3+Classpath Exception"
   :depends-on ("openldk")
-  :components ((:file "interop/core")))
+  :components ((:file "interop/core"))
+  :in-order-to ((test-op (test-op "openldk/interop/tests"))))
+
+(asdf:defsystem "openldk/interop/tests"
+  :description "Tests for openldk/interop"
+  :depends-on ("openldk/interop" "fiveam")
+  :pathname "test"
+  :components ((:file "interop"))
+  :perform (test-op (o c)
+             (unless (uiop:symbol-call :fiveam '#:run! :openldk-interop-tests)
+               (error "openldk/interop tests failed"))))
 
 (asdf:defsystem "openldk/jscheme"
   :description "Use Peter Norvig's JScheme from Common Lisp"

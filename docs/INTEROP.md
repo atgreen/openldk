@@ -555,3 +555,28 @@ startup.  `make-java-subclass-instance` creates an instance and runs the
 Java superclass's constructor, which initializes its Java fields.
 `call-from-java` carries a Lisp error out through the Java code that called
 the method, so that `with-foreign-errors` can re-signal it.
+
+### Java classes defined in Lisp
+
+`define-java-class` defines a real Java class whose methods are Lisp code:
+
+```lisp
+(define-java-class greeter (:implements ("java.util.function.Function"))
+    ((greeting :initform "hello") (count :initform 0))
+  ("apply(Ljava/lang/Object;)Ljava/lang/Object;" (self name)
+    (incf count)
+    (jstring (format nil "~A, ~A (~D)" greeting (lstring name) count))))
+
+(make-java-object 'greeter :greeting "hi")
+```
+
+The class is generated as a class file and defined through the application
+class loader, so `getClass`, reflection and `Class.forName` see an ordinary
+Java class (`lisp.my_package.greeter`): Java code, and languages that call
+methods by reflection, can call it like any other object.  Slots are fields
+(the method bodies refer to them by name); each method is the full JVM name
+of a method the class declares or implements; `:extends` names a superclass
+with a public no-argument constructor.  A Lisp error in a method is thrown
+into Java and comes back out of `with-foreign-errors` as the original
+condition, even from another thread.  `make check-interop` runs the core's
+tests.

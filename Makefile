@@ -139,6 +139,10 @@ $(JSCHEME_MAIN): $(JSCHEME_SRC_JAR)
 	cd lib/jscheme/src && unzip -q ../jscheme-src.jar
 	$(JAVAC) -nowarn -d lib/jscheme/classes lib/jscheme/src/jscheme/*.java
 
+# Tests for openldk/interop, the shared core (Java classes defined in Lisp, ...).
+check-interop: | check-jdk
+	sbcl --dynamic-space-size 32768 --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:test-system \"openldk/interop\"))"
+
 # Tests for openldk/jscheme, using JScheme from Lisp (see docs/INTEROP.md).
 check-jscheme: $(JSCHEME_MAIN) | check-jdk
 	sbcl --dynamic-space-size 32768 --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:test-system \"openldk/jscheme\"))"

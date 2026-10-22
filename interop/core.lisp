@@ -70,6 +70,9 @@
            #:call-from-java
            #:define-source-syntax
            #:enable-source-syntax
+           #:define-java-class
+           #:make-java-object
+           #:java-class-of-lisp-class
            #:dump-lisp-image))
 
 (in-package #:openldk.interop)
@@ -272,6 +275,14 @@ its cause's."
       (format nil "~A~{ (caused by: ~A)~}" (first messages)
               (remove-duplicates (rest messages) :test #'string= :from-end t)))))
 
+(defun %carried-lisp-condition (throwable)
+  "The Lisp condition THROWABLE, or an exception it was wrapped in on the
+way out (a CompletionException from another thread), carries."
+  (loop for cause = throwable then (ignore-errors (java-call "getCause()" cause))
+        for depth below 10
+        while cause
+        thereis (gethash cause *lisp-errors-in-java*)))
+
 (defmacro with-foreign-errors ((language) &body body)
   "Run BODY, turning a Java exception that escapes it into a FOREIGN-ERROR
 for LANGUAGE (a string), or into the Lisp condition it carries if it came
@@ -279,7 +290,7 @@ from CALL-FROM-JAVA."
   `(handler-case (progn ,@body)
      (openldk::|condition-java/lang/Throwable| (condition)
        (let* ((throwable (slot-value condition 'openldk::|objref|))
-              (lisp-condition (gethash throwable *lisp-errors-in-java*)))
+              (lisp-condition (%carried-lisp-condition throwable)))
          (if lisp-condition
              (error lisp-condition)
              (error 'foreign-error :language ,language
@@ -534,3 +545,182 @@ splices named lispArg1, ..."
 the current one); see above."
   (set-dispatch-macro-character #\# #\@ #'%read-source-syntax readtable)
   readtable)
+
+;;; Java classes defined in Lisp
+;;;
+;;; DEFINE-JAVA-CLASS defines a Java class whose methods are Lisp code:
+;;;
+;;;   (define-java-class greeter (:extends "java.lang.Object"
+;;;                               :implements ("java.util.function.Function"))
+;;;     ((greeting :initform "hello"))
+;;;     ("apply(Ljava/lang/Object;)Ljava/lang/Object;" (self name)
+;;;       (jstring (format nil "~A, ~A" (slot-value self 'greeting) (lstring name)))))
+;;;
+;;;   (make-java-object 'greeter :greeting "hi")
+;;;
+;;; It is a real Java class, defined from a class file generated here: Lisp
+;;; slots are fields of type Object, each method is a native method that
+;;; the Lisp body implements (OpenLDK calls a native instance method
+;;; through the generic function of its name), and a constructor calls the
+;;; superclass's no-argument one.  So getClass, reflection, Class.forName
+;;; and languages that call methods by reflection (Groovy, Clojure, Kotlin's
+;;; reflection) see an ordinary Java object.
+
+(defun %u2 (n) (list (ldb (byte 8 8) n) (ldb (byte 8 0) n)))
+(defun %u4 (n) (append (%u2 (ldb (byte 16 16) n)) (%u2 (ldb (byte 16 0) n))))
+
+(defun %modified-utf8 (string)
+  "STRING in the class file's modified UTF-8, as a list of octets."
+  (loop for char across string
+        for code = (char-code char)
+        append (cond ((and (<= 1 code) (<= code #x7F)) (list code))
+                     ((<= code #x7FF) (list (logior #xC0 (ash code -6)) (logior #x80 (logand code #x3F))))
+                     ((<= code #xFFFF) (list (logior #xE0 (ash code -12))
+                                             (logior #x80 (logand (ash code -6) #x3F))
+                                             (logior #x80 (logand code #x3F))))
+                     (t ;; a supplementary character, as its UTF-16 surrogate pair
+                      (let* ((v (- code #x10000))
+                             (high (logior #xD800 (ash v -10)))
+                             (low (logior #xDC00 (logand v #x3FF))))
+                        (append (%modified-utf8 (string (code-char high)))
+                                (%modified-utf8 (string (code-char low)))))))))
+
+(defun %class-file (name super interfaces fields methods)
+  "The octets of a class file for the class NAME (binary form) extending
+SUPER, implementing INTERFACES, with FIELDS (names, of type Object) and
+METHODS ((name . descriptor), native), and a no-argument constructor."
+  (let ((pool '()) (count 0) (index (make-hash-table :test #'equal)))
+    (labels ((entry (key octets)
+               (or (gethash key index)
+                   (progn (setf pool (append pool (list octets)))
+                          (setf (gethash key index) (incf count)))))
+             (utf8 (s) (let ((b (%modified-utf8 s))) (entry (list :utf8 s) (append '(1) (%u2 (length b)) b))))
+             (class (n) (let ((u (utf8 n))) (entry (list :class n) (cons 7 (%u2 u)))))
+             (name-and-type (n d) (let ((a (utf8 n)) (b (utf8 d)))
+                                    (entry (list :nat n d) (append '(12) (%u2 a) (%u2 b)))))
+             (methodref (c n d) (let ((a (class c)) (b (name-and-type n d)))
+                                  (entry (list :methodref c n d) (append '(10) (%u2 a) (%u2 b))))))
+      (let* ((this (class name))
+             (super-index (class super))
+             (interface-indices (mapcar #'class interfaces))
+             (code-name (utf8 "Code"))
+             (init-name (utf8 "<init>"))
+             (init-type (utf8 "()V"))
+             (super-init (methodref super "<init>" "()V"))
+             (field-octets (loop for f in fields
+                                 append (append (%u2 #x0001) (%u2 (utf8 f)) (%u2 (utf8 "Ljava/lang/Object;")) (%u2 0))))
+             (init-code (append '(#x2A #xB7) (%u2 super-init) '(#xB1))) ; aload_0, invokespecial, return
+             (init-octets (append (%u2 #x0001) (%u2 init-name) (%u2 init-type) (%u2 1)
+                                  (%u2 code-name) (%u4 (+ 12 (length init-code)))
+                                  (%u2 1) (%u2 1) (%u4 (length init-code)) init-code (%u2 0) (%u2 0)))
+             (method-octets (loop for (n . d) in methods
+                                  append (append (%u2 #x0101) (%u2 (utf8 n)) (%u2 (utf8 d)) (%u2 0)))))
+        (coerce (append '(#xCA #xFE #xBA #xBE) (%u2 0) (%u2 52)
+                        (%u2 (1+ count)) (apply #'append pool)
+                        (%u2 #x0021) (%u2 this) (%u2 super-index)
+                        (%u2 (length interface-indices)) (mapcan #'%u2 interface-indices)
+                        (%u2 (length fields)) field-octets
+                        (%u2 (1+ (length methods))) init-octets method-octets
+                        (%u2 0))
+                '(vector (unsigned-byte 8)))))))
+
+(defun %java-class-name (symbol)
+  "The binary name of the Java class DEFINE-JAVA-CLASS makes for SYMBOL:
+lisp/<package>/<name>, lowercased, other characters than letters and
+digits becoming _ (OPENLDK.INTEROP::GREETER: lisp/openldk_interop/greeter)."
+  (flet ((munge (s)
+           (map 'string (lambda (c) (if (alphanumericp c) (char-downcase c) #\_)) s)))
+    (format nil "lisp/~A/~A" (munge (package-name (symbol-package symbol))) (munge (symbol-name symbol)))))
+
+(defvar *java-classes* (make-hash-table :test #'eq)
+  "Lisp symbol -> the <class> DEFINE-JAVA-CLASS made for it.")
+
+(defun %define-java-class (symbol super interfaces slots methods)
+  "Define the Java class for SYMBOL from a generated class file, through
+the application class loader, and return its <class>."
+  (let* ((name (%java-class-name symbol))
+         (bytes (%class-file name (%binary-name super) (mapcar #'%binary-name interfaces)
+                             (mapcar #'%java-field-name slots) methods))
+         (class (openldk::%classload-from-stream
+                 name (flexi-streams:make-in-memory-input-stream bytes)
+                 openldk::*boot-class-loader* openldk::*app-ldk-class-loader*)))
+    (unless class
+      (error "Couldn't define the Java class ~A" name))
+    (setf (gethash symbol *java-classes*) class)))
+
+(defun java-class-of-lisp-class (symbol)
+  "The <class> of the Java class DEFINE-JAVA-CLASS defined for SYMBOL."
+  (or (gethash symbol *java-classes*)
+      (error "~S names no class defined with DEFINE-JAVA-CLASS" symbol)))
+
+(defun %method-parts (method)
+  "METHOD, \"name(descriptor)return\", as (name . descriptor)."
+  (let ((open (position #\( method)))
+    (cons (subseq method 0 open) (subseq method open))))
+
+(defmacro define-java-class (name (&key (extends "java.lang.Object") implements) slots &body methods)
+  "Define NAME as a Java class extending EXTENDS (which needs a public
+no-argument constructor) and implementing IMPLEMENTS, with SLOTS -- each a
+symbol or (symbol &key initform) -- and METHODS, each
+(\"name(arguments)return\" (self arg...) body...), the full JVM name of a
+method the class declares or implements.  Starts the runtime if needed;
+make instances with MAKE-JAVA-OBJECT."
+  (let ((slot-names (mapcar (lambda (s) (if (consp s) (first s) s)) slots)))
+    `(progn
+       (unless (runtime-started-p) (start-runtime))
+       (%define-java-class ',name ,extends ',implements
+                           ',(mapcar #'symbol-name slot-names)
+                           ',(mapcar (lambda (m) (%method-parts (first m))) methods))
+       (setf (get ',name 'java-slot-initforms)
+             (list ,@(loop for s in slots
+                           collect (if (consp s)
+                                       `(cons ',(first s) (lambda () ,(getf (rest s) :initform)))
+                                       `(cons ',s (lambda () nil))))))
+       (%install-java-methods
+        ',name
+        (list ,@(loop for (method lambda-list . body) in methods
+                      collect `(list ,method ,(length lambda-list)
+                                     (lambda ,lambda-list
+                                       (symbol-macrolet ,(loop for s in slot-names
+                                                               collect `(,s (%java-slot ,(first lambda-list) ',s)))
+                                         (call-from-java (lambda () ,@body))))))))
+       ',name)))
+
+(defun %install-java-methods (name methods)
+  "Make each of METHODS, (jvm-name arity function), the method of NAME's
+Java class: a method on the generic function of JVM-NAME for the class's
+CLOS class, calling FUNCTION."
+  (let* ((class (java-class-of-lisp-class name))
+         (class-symbol (intern (openldk::name class) (openldk::ldk-class-package class))))
+    (loop for (jvm-name arity function) in methods
+          for gf = (intern jvm-name :openldk)
+          for params = (loop for i from 1 below arity collect (intern (format nil "ARG~D" i) :openldk))
+          do (openldk::%ensure-java-gf gf arity)
+             (cl:eval `(defmethod ,gf ((this ,class-symbol) ,@params)
+                         (funcall ,function this ,@params))))))
+
+(defun %java-field-name (slot-name)
+  "The Java field holding the Lisp slot SLOT-NAME: prefixed, so it
+doesn't shadow a superclass field."
+  (concatenate 'string "lisp$" slot-name))
+
+(defun %java-slot-symbol (slot)
+  (intern (openldk::mangle-field-name (%java-field-name (symbol-name slot))) :openldk))
+
+(defun %java-slot (object slot)
+  (slot-value object (%java-slot-symbol slot)))
+
+(defun (setf %java-slot) (value object slot)
+  (setf (slot-value object (%java-slot-symbol slot)) value))
+
+(defun make-java-object (name &rest initargs)
+  "A new instance of the Java class NAME defined with DEFINE-JAVA-CLASS,
+its constructor run and its slots set from INITARGS (:slot value ...) or
+their initforms."
+  (let* ((class (java-class-of-lisp-class name))
+         (object (openldk::%make-java-instance (openldk::name class) (openldk::ldk-loader class))))
+    (java-call "<init>()V" object)
+    (loop for (slot . initform) in (get name 'java-slot-initforms)
+          do (setf (%java-slot object slot)
+                   (getf initargs (intern (symbol-name slot) :keyword) (funcall initform))))
+    object))
