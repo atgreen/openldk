@@ -217,3 +217,27 @@ nothing behind when it refuses."
         (is (equal "abc" (alexandria:read-file-into-string destination)))
         (setf (uiop:getenv "LDK_OFFLINE") "1")
         (signals openldk::fetch-error (openldk::fetch-url url destination))))))
+
+(test unsafe-fill-memory
+  ;; Unsafe.setMemory's fill value is a Java byte, and so signed.  Native
+  ;; memory holds it unsigned, so the whole -128..127 range has to be
+  ;; storable: filling with (byte) 0xFF is an ordinary thing for Java code
+  ;; to ask for, and arrives here as -1.
+  (let* ((size 4)
+         (mem (sb-alien:make-alien sb-alien:char size))
+         (sap (sb-alien:alien-sap mem)))
+    (unwind-protect
+         (flet ((bytes ()
+                  (loop for i below size collect (sb-sys:sap-ref-8 sap i))))
+           (openldk::%unsafe-fill-memory (sb-sys:sap-int sap) size -1)
+           (is (equal '(#xFF #xFF #xFF #xFF) (bytes)))
+           (openldk::%unsafe-fill-memory (sb-sys:sap-int sap) size -128)
+           (is (equal '(#x80 #x80 #x80 #x80) (bytes)))
+           (openldk::%unsafe-fill-memory (sb-sys:sap-int sap) size 127)
+           (is (equal '(#x7F #x7F #x7F #x7F) (bytes)))
+           (openldk::%unsafe-fill-memory (sb-sys:sap-int sap) size 0)
+           (is (equal '(0 0 0 0) (bytes)))
+           ;; A fill shorter than the block leaves the rest alone.
+           (openldk::%unsafe-fill-memory (sb-sys:sap-int sap) 2 -1)
+           (is (equal '(#xFF #xFF 0 0) (bytes))))
+      (sb-alien:free-alien mem))))
