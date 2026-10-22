@@ -95,7 +95,7 @@
          ;; is not a valid method descriptor, so skip it for field kinds (1-4).
          (type (unless (member ref-kind '(1 2 3 4))
                  (|java/lang/invoke/MethodType.fromMethodDescriptorString(Ljava/lang/String;Ljava/lang/ClassLoader;)Ljava/lang/invoke/MethodType;|
-                  (jstring (emit-type (aref cp nat-index) cp)) nil)))
+                  (jstring (emit-type (aref cp nat-index) cp)) (%context-java-loader))))
          ;; Select the appropriate Lookup method based on reference kind
          ;; See JVM spec: REF_getField=1, REF_getStatic=2, REF_putField=3, REF_putStatic=4,
          ;;               REF_invokeVirtual=5, REF_invokeStatic=6, REF_invokeSpecial=7,

@@ -202,13 +202,24 @@ OpenLDK can run non-trivial Java applications:
   `clojure.core` loaded that starts in under a second.
 - **JScheme** - Peter Norvig's [JScheme](https://norvig.com/jscheme.html)
   passes its R4RS test suite.  `make jscheme` builds a warm image.
+- **Scala** - The [Scala](https://www.scala-lang.org/) 2.13 compiler and
+  its REPL run: `scala -e` scripts, and the REPL's script engine, which
+  `openldk/scala` evaluates Scala through.
+- **Kotlin** - The [Kotlin](https://kotlinlang.org/) 2.2 compiler compiles
+  Kotlin to class files that run the same as `kotlinc`'s.
+- **Groovy** - [Groovy](https://groovy-lang.org/) 4 runs scripts, with
+  closures, metaclasses and invokedynamic, and `@CompileStatic` classes.
 
 The warm images are described in [docs/IMAGES.md](docs/IMAGES.md).
 
-JScheme and Clojure can also be used from Lisp, in the same process:
-`openldk/jscheme` and `openldk/clojure` evaluate code, call the language's
-functions, and let it call Lisp functions.  `make sbcl-clojure` builds an
-SBCL with Clojure already started.  See [docs/INTEROP.md](docs/INTEROP.md).
+Clojure, Kawa, JScheme, Scala, Kotlin, Groovy and ABCL can also be used
+from Lisp, in the same process: each `openldk/<language>` system evaluates
+code, calls the language's functions, lets it call Lisp functions, and
+converts values both ways, and `#@scala{ ... }`, `#@kt{ ... }`,
+`#@groovy{ ... }` and friends embed each language's source, as it writes
+it, in Lisp code.  `make sbcl-<language>` builds an SBCL with a language
+started, and `make sbcl-polyglot` one with all of them.  See
+[docs/INTEROP.md](docs/INTEROP.md).
 
 The code is not optimized.  Even with heavy optimization, OpenLDK's
 performance will not be competitive to modern Java implementations.

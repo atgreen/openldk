@@ -1283,17 +1283,22 @@ the file system: 0, what the JDK answers when it can't tell."
     (error () 0)))
 
 (defmethod |list0(Ljava/io/File;)[Ljava/lang/String;| ((this |java/io/UnixFileSystem|) file)
-  (handler-case
-      (let* ((path (lstring (slot-value file '|path|)))
-             (dir (uiop:directory-files (uiop:ensure-directory-pathname path)))
-             (files (mapcar (lambda (p) (jstring (file-namestring p))) dir)))
-        (when files
-          (make-java-array
-           :component-class (%get-java-class-by-bin-name "java/lang/String")
-           :initial-contents files)))
-    (error (e)
-      (declare (ignore e))
-      nil)))
+  "The names of the entries of the directory FILE, subdirectories included
+and . and .. not: an empty array for an empty directory, NIL if FILE isn't
+a directory that can be read, as the JDK's native answers."
+  (let ((dir (ignore-errors (sb-posix:opendir (lstring (slot-value file '|path|))))))
+    (when (and dir (not (sb-alien:null-alien dir)))
+      (unwind-protect
+           (make-java-array
+            :component-class (%get-java-class-by-bin-name "java/lang/String")
+            :initial-contents
+            (coerce (loop for entry = (sb-posix:readdir dir)
+                          until (sb-alien:null-alien entry)
+                          for name = (sb-posix:dirent-name entry)
+                          unless (member name '("." "..") :test #'string=)
+                            collect (jstring name))
+                    'vector))
+        (sb-posix:closedir dir)))))
 
 (defmethod |list(Ljava/io/File;)[Ljava/lang/String;| ((this |java/io/UnixFileSystem|) file)
   "Legacy name for list0 — older JDKs call this directly."

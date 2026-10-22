@@ -376,3 +376,30 @@ converted with FROM-LISP."
             (java-call "setSymbolValue(Lorg/armedbear/lisp/LispObject;)" symbol
                        (from-lisp value)))))
     name))
+
+;;; #@abcl{ ... }
+;;;
+;;; After (openldk.interop:enable-source-syntax), #@abcl{ ... } holds ABCL
+;;; source, read by ABCL's reader in its current package, and evaluates it
+;;; where it appears; $name and $(form) splice in SBCL values:
+;;;
+;;;   (let ((xs '(3 1 2))) #@abcl{ (sort (copy-list $xs) #'<) })   => (1 2 3)
+;;;
+;;; Each block becomes an ABCL function of the spliced values, compiled once
+;;; and then called.
+
+(defvar *sites* (make-hash-table :test #'equal)
+  "Source -> the ABCL function the block's source became.")
+
+(defun %eval-site (source names values)
+  (%ensure-started)
+  (apply #'funcall
+         (or (gethash source *sites*)
+             (setf (gethash source *sites*)
+                   (eval-string (format nil "(lambda (~{~A~^ ~})~%~A~%)" names source))))
+         values))
+
+(define-source-syntax '("abcl")
+  (lambda (source names forms)
+    `(%eval-site ,source ',names (list ,@forms)))
+  :reader #'openldk.interop::%read-lisp-family-source-and-names)

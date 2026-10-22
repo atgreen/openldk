@@ -143,30 +143,36 @@ $(JSCHEME_MAIN): $(JSCHEME_SRC_JAR)
 check-jscheme: $(JSCHEME_MAIN) | check-jdk
 	sbcl --dynamic-space-size 32768 --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:test-system \"openldk/jscheme\"))"
 
+# Run openldk/LANGUAGE's tests in sbcl-LANGUAGE, where the language is
+# started.  The image's systems are left as they are: reloading OpenLDK into
+# an image whose Java classes are loaded fails, so tests run as built.
+define check-in-image
+./sbcl-$(1) --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/$(1)/tests\" :force-not (asdf:already-loaded-systems)) (unless (uiop:symbol-call :fiveam (quote #:run!) :openldk-$(1)-tests) (uiop:quit 1)))"
+endef
+
 # Tests for openldk/clojure, run in sbcl-clojure, where Clojure is started.
 check-clojure: sbcl-clojure
-	./sbcl-clojure --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:test-system \"openldk/clojure\"))"
+	$(call check-in-image,clojure)
 
 # Tests for openldk/kawa, run in sbcl-kawa, where Kawa is started.
 check-kawa: sbcl-kawa
-	./sbcl-kawa --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:test-system \"openldk/kawa\"))"
+	$(call check-in-image,kawa)
 
 # Tests for openldk/scala, run in sbcl-scala, where Scala is started.
 check-scala: sbcl-scala
-	./sbcl-scala --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:test-system \"openldk/scala\"))"
+	$(call check-in-image,scala)
 
 # Tests for openldk/kotlin, run in sbcl-kotlin, where Kotlin is started.
 check-kotlin: sbcl-kotlin
-	./sbcl-kotlin --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:test-system \"openldk/kotlin\"))"
+	$(call check-in-image,kotlin)
 
 # Tests for openldk/groovy, run in sbcl-groovy, where Groovy is started.
 check-groovy: sbcl-groovy
-	./sbcl-groovy --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:test-system \"openldk/groovy\"))"
+	$(call check-in-image,groovy)
 
-# Tests for openldk/abcl, run in sbcl-abcl, where ABCL is started.  The
-# image's systems are left as they are: reloading OpenLDK into it fails.
+# Tests for openldk/abcl, run in sbcl-abcl, where ABCL is started.
 check-abcl: sbcl-abcl
-	./sbcl-abcl --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/abcl/tests\" :force-not (asdf:already-loaded-systems)) (unless (uiop:symbol-call :fiveam (quote #:run!) :openldk-abcl-tests) (uiop:quit 1)))"
+	$(call check-in-image,abcl)
 
 # SBCLs with a language started, for using it from Lisp (see docs/INTEROP.md).
 sbcl-jscheme: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(JSCHEME_MAIN) | check-jdk
@@ -174,6 +180,10 @@ sbcl-jscheme: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(JSCHE
 
 sbcl-kawa: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(KAWA_JAR) | check-jdk
 	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/kawa\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-kawa\" :init (lambda () (kawa:startup) (kawa:eval-string \"(define (f n) (if (< n 2) 1 (* n (f (- n 1))))) (f 20) (map (lambda (x) (* x x)) (list 1 2 3)) (vector 1 2)\")))"
+
+# Every language started, in one SBCL (openldk/polyglot).
+sbcl-polyglot: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(KAWA_JAR) $(CLOJURE_JARS) $(JSCHEME_MAIN) $(SCALA_JARS) $(KOTLIN_JARS) $(GROOVY_JAR) $(ABCL_JAR) | check-jdk
+	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/polyglot\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-polyglot\" :init (lambda () (polyglot:warm-up (polyglot:startup))))"
 
 sbcl-abcl: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(ABCL_JAR) | check-jdk
 	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/abcl\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-abcl\" :init (lambda () (abcl:startup) (abcl:eval-string \"(defun f (n) (if (< n 2) 1 (* n (f (1- n))))) (f 20) (mapcar (lambda (x) (* x x)) (list 1 2 3)) (prin1-to-string (list 1 2.5 (quote sym))) (handler-case (error (quote type-error) :datum 1 :expected-type (quote string)) (error (e) (princ-to-string e))) (defclass pt () ((x :initarg :x))) (make-instance (quote pt) :x 1) (compile (quote f))\")))"

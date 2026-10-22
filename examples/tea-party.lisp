@@ -1,35 +1,34 @@
 ;;;; The Mad Hatter's Polyglot Tea Party
 ;;;;
-;;;; Six languages share one table -- one SBCL process, one heap -- and pass
-;;;; the teapot around.  Common Lisp hosts; Clojure, Kawa Scheme, JScheme,
-;;;; Scala and Kotlin are guests, all running as Java bytecode on OpenLDK.
-;;;; Each guest shows off a trick it is known for, and values travel
-;;;; between them with no serialization at all: Clojure's primes become
-;;;; Scala's playing cards, and a question Kotlin asks is answered by Lisp,
-;;;; which asks Clojure.
+;;;; Seven languages share one table -- one SBCL process, one heap -- and
+;;;; pass the teapot around.  Common Lisp hosts; Clojure, Kawa Scheme,
+;;;; JScheme, Scala, Kotlin, Groovy and ABCL are guests, all running as Java
+;;;; bytecode on OpenLDK.  Each guest shows off a trick it is known for, and
+;;;; values travel between them with no serialization at all: Clojure's
+;;;; primes become Scala's playing cards, and a question Kotlin asks is
+;;;; answered by Lisp, which asks Clojure.
 ;;;;
-;;;; Run it from the repository root (the languages' jars must be there:
-;;;; `make sbcl-clojure sbcl-kawa sbcl-jscheme sbcl-scala sbcl-kotlin`
-;;;; downloads them all):
+;;;; Run it in the SBCL `make sbcl-polyglot` builds, where every guest has
+;;;; already arrived:
 ;;;;
-;;;;   sbcl --dynamic-space-size 32768 --load examples/tea-party.lisp
+;;;;   ./sbcl-polyglot --load examples/tea-party.lisp
 ;;;;
-;;;; Every guest starts cold here, so the party takes a while to assemble:
-;;;; the guests are compiling their Java bytecode to Lisp as they arrive.
+;;;; In a plain SBCL (sbcl --dynamic-space-size 32768 --load ...) the guests
+;;;; start cold, compiling their Java bytecode to Lisp as they arrive: the
+;;;; party takes a while to assemble.
 
 (require :asdf)
 (push (uiop:getcwd) asdf:*central-registry*)
-(dolist (system '("openldk/clojure" "openldk/kawa" "openldk/jscheme"
-                  "openldk/scala" "openldk/kotlin"))
-  (asdf:load-system system))
+(asdf:load-system "openldk/polyglot")
 
 (defpackage #:tea-party
   (:use #:cl))
 
 (in-package #:tea-party)
 
-;; #[ ... ] is Clojure, written as Clojure writes it; $x splices in Lisp.
-(setf *readtable* (clojure:enable-syntax (copy-readtable)))
+;; #[ ... ] is Clojure and #@LANGUAGE{ ... } any guest's language, written
+;; as the language writes it; $x splices in a Lisp value.
+(setf *readtable* (polyglot:enable-syntax (copy-readtable)))
 
 ;;; Party manners
 
@@ -73,7 +72,8 @@ regret, and the party goes on without them."
 (format t "~%Place cards, numbered the old-fashioned way:~%")
 (loop for name in '("the Hatter (Common Lisp)" "the Dormouse (Clojure)"
                     "the Cheshire Cat (Kawa)" "the March Hare (JScheme)"
-                    "the Queen of Hearts (Scala)" "Alice (Kotlin)")
+                    "the Queen of Hearts (Scala)" "Alice (Kotlin)"
+                    "the Caterpillar (Groovy)" "the Mock Turtle (ABCL)")
       for seat from 1
       do (format t "  ~@R. ~A~%" seat name))
 
@@ -156,7 +156,7 @@ regret, and the party goes on without them."
   ;; A Lisp function, called as a Scala function.
   (scala:define "pour" (lambda (cups) (format nil "~R cup~:P" cups)))
   (say "demands ~A"
-       (scala:eval "(1 to 3).map(n => pour(n)).mkString(\", \", \", then \", \" of tea\")"))
+       (scala:eval "(1 to 3).map(n => pour(n)).mkString(\", then \") + \" of tea\""))
   ;; Her temper, caught as a Lisp condition.
   (handler-case (scala:eval "throw new IllegalStateException(\"Off with your head!\")")
     (openldk.interop:foreign-error (e)
@@ -187,6 +187,27 @@ regret, and the party goes on without them."
                       (lambda (question)
                         (clojure:eval-string
                          (format nil "(clojure.string/upper-case ~S)" question)))))))
+
+;;; Groovy, the Caterpillar: closures, ranges, and exact decimals
+
+(guest "The Caterpillar (Groovy)" (:arrives (groovy:startup))
+  (say "asks \"Who are YOU?\" in ~A"
+       #@gv{ ['who', 'are', 'you?'].collect { it.toUpperCase() }.join(' ') })
+  ;; Groovy's decimals are exact: 0.1 + 0.2 really is 0.3, and Lisp agrees.
+  (say "adds 0.1 and 0.2 and gets exactly ~A" (groovy:eval "0.1 + 0.2"))
+  ;; A Lisp function, called as a Groovy closure.
+  (groovy:define "puff" (lambda (n) (format nil "~R smoke ring~:P" n)))
+  (say "blows ~A" (groovy:eval "(1..3).collect { puff(it) }.join(', then ')")))
+
+;;; ABCL, the Mock Turtle: a Common Lisp that lives inside the JVM
+
+(guest "The Mock Turtle (ABCL)" (:arrives (abcl:startup))
+  ;; Common Lisp, evaluated by another Common Lisp, running as Java bytecode.
+  (say "sighs over the lessons: ~{~A~^, ~}"
+       #@abcl{ (mapcar #'string-capitalize '("reeling" "writhing" "uglification")) })
+  ;; ABCL calls Java directly.
+  (say "and asks the JVM which is larger, 3 or 7: ~A"
+       (abcl:eval-string "(jstatic \"max\" \"java.lang.Math\" 3 7)")))
 
 ;;; The host clears up
 
