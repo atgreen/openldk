@@ -70,12 +70,12 @@ cached filesystem holds process-local state (mmapped buffers, channels).")
         (or *installed-file-system-providers*
             (setf *installed-file-system-providers*
                   (let ((list (%make-java-instance "java/util/ArrayList")))
-                    (|<init>()| list)
+                    (|<init>()V| list)
                     ;; The platform default (file:) provider, when available.
                     (handler-case
                         (let* ((pkg (loader-package *boot-ldk-class-loader*))
                                (get-default (static-method-symbol
-                                             "java/nio/file/FileSystems.getDefault()" pkg)))
+                                             "java/nio/file/FileSystems.getDefault()Ljava/nio/file/FileSystem;" pkg)))
                           (classload "java/nio/file/FileSystems")
                           (when (fboundp get-default)
                             (|add(Ljava/lang/Object;)| list
@@ -88,7 +88,7 @@ cached filesystem holds process-local state (mmapped buffers, channels).")
                         (progn
                           (classload "jdk/internal/jrtfs/JrtFileSystemProvider")
                           (let ((jrt (%make-java-instance "jdk/internal/jrtfs/JrtFileSystemProvider")))
-                            (|<init>()| jrt)
+                            (|<init>()V| jrt)
                             (|add(Ljava/lang/Object;)| list jrt)))
                       (condition (c)
                         (format *error-output*
@@ -100,7 +100,7 @@ cached filesystem holds process-local state (mmapped buffers, channels).")
 process; cleared (without munmap -- the process is about to dump or exit)
 before image save.")
 
-(defun |jdk/internal/jimage/NativeImageBuffer.getNativeMap(Ljava/lang/String;)| (path-jstring)
+(defun |jdk/internal/jimage/NativeImageBuffer.getNativeMap(Ljava/lang/String;)Ljava/nio/ByteBuffer;| (path-jstring)
   "mmap the jimage file at PATH and return a DirectByteBuffer over it --
 the job libjimage's JNI implementation does in HotSpot."
   (let* ((path (lstring path-jstring))
@@ -117,7 +117,7 @@ the job libjimage's JNI implementation does in HotSpot."
     (classload "java/nio/DirectByteBuffer")
     (let ((dbb (%make-java-instance "java/nio/DirectByteBuffer")))
       ;; JDK 25's JNI-NewDirectByteBuffer constructor is (long, long).
-      (|<init>(JJ)| dbb
+      (|<init>(JJ)V| dbb
        (sb-sys:sap-int (car sap-and-size))
        (cdr sap-and-size))
       dbb)))

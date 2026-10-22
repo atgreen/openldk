@@ -79,6 +79,8 @@
                (:file "src/native/frames")
                (:file "src/native/bytearray")
                (:file "src/native/threads")
+               (:file "src/native/management")
+               (:file "src/native/jsr292")
                (:file "src/native/unsafe")
                (:file "src/native/reflection")
                (:file "src/native/system")
@@ -170,6 +172,65 @@
   :perform (test-op (o c)
              (unless (uiop:symbol-call :fiveam '#:run! :openldk-clojure-tests)
                (error "openldk/clojure tests failed"))))
+
+(asdf:defsystem "openldk/scala"
+  :description "Use Scala from Common Lisp"
+  :author "Anthony Green <green@moxielogic.com>"
+  :license "GPL3+Classpath Exception"
+  :depends-on ("openldk/interop" "sb-introspect")
+  :components ((:file "interop/scala"))
+  :in-order-to ((test-op (test-op "openldk/scala/tests"))))
+
+(asdf:defsystem "openldk/scala/tests"
+  :description "Tests for openldk/scala; need `make sbcl-scala`"
+  :depends-on ("openldk/scala" "fiveam")
+  :pathname "test"
+  :components ((:file "scala"))
+  :perform (test-op (o c)
+             (unless (uiop:symbol-call :fiveam '#:run! :openldk-scala-tests)
+               (error "openldk/scala tests failed"))))
+
+(asdf:defsystem "openldk/kotlin"
+  :description "Use Kotlin from Common Lisp"
+  :author "Anthony Green <green@moxielogic.com>"
+  :license "GPL3+Classpath Exception"
+  :depends-on ("openldk/interop" "sb-introspect")
+  :components ((:file "interop/kotlin"))
+  :in-order-to ((test-op (test-op "openldk/kotlin/tests"))))
+
+(asdf:defsystem "openldk/kotlin/tests"
+  :description "Tests for openldk/kotlin; need `make sbcl-kotlin`"
+  :depends-on ("openldk/kotlin" "fiveam")
+  :pathname "test"
+  :components ((:file "kotlin"))
+  :perform (test-op (o c)
+             (unless (uiop:symbol-call :fiveam '#:run! :openldk-kotlin-tests)
+               (error "openldk/kotlin tests failed"))))
+
+(asdf:defsystem "openldk/groovy"
+  :description "Use Groovy from Common Lisp"
+  :author "Anthony Green <green@moxielogic.com>"
+  :license "GPL3+Classpath Exception"
+  :depends-on ("openldk/interop")
+  :components ((:file "interop/groovy"))
+  :in-order-to ((test-op (test-op "openldk/groovy/tests"))))
+
+(asdf:defsystem "openldk/groovy/tests"
+  :description "Tests for openldk/groovy; need `make sbcl-groovy`"
+  :depends-on ("openldk/groovy" "fiveam")
+  :pathname "test"
+  :components ((:file "groovy"))
+  :perform (test-op (o c)
+             (unless (uiop:symbol-call :fiveam '#:run! :openldk-groovy-tests)
+               (error "openldk/groovy tests failed"))))
+
+(asdf:defsystem "openldk/polyglot"
+  :description "Every JVM language OpenLDK runs, in one SBCL"
+  :author "Anthony Green <green@moxielogic.com>"
+  :license "GPL3+Classpath Exception"
+  :depends-on ("openldk/clojure" "openldk/kawa" "openldk/jscheme" "openldk/scala"
+               "openldk/kotlin" "openldk/groovy" "openldk/abcl")
+  :components ((:file "interop/polyglot")))
 
 (asdf:defsystem "openldk/kawa"
   :description "Use Kawa Scheme from Common Lisp"

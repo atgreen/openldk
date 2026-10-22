@@ -214,7 +214,7 @@ so that SAM methods returning Object get proper boxed values."
               result))
         (let ((args-array (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Object")
                                            :initial-contents (coerce (append captures args) 'vector))))
-          (|invokeWithArguments([Ljava/lang/Object;)| mh args-array)))))
+          (|invokeWithArguments([Ljava/lang/Object;)Ljava/lang/Object;| mh args-array)))))
 
 ;; Supplier implementation (for get() with no args)
 (defclass/std |openldk/LambdaSupplier| (|java/lang/Object| |java/util/function/Supplier|)
@@ -229,15 +229,15 @@ so that SAM methods returning Object get proper boxed values."
   ((target)
    (captures)))
 
-(defmethod |test(Ljava/lang/Object;)| ((this |openldk/LambdaPredicate|) obj)
+(defmethod |test(Ljava/lang/Object;)Z| ((this |openldk/LambdaPredicate|) obj)
   (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list obj)))
 
 ;; IntPredicate/LongPredicate/DoublePredicate bridge methods
-(defmethod |test(I)| ((this |openldk/LambdaPredicate|) int-val)
+(defmethod |test(I)Z| ((this |openldk/LambdaPredicate|) int-val)
   (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list int-val)))
-(defmethod |test(J)| ((this |openldk/LambdaPredicate|) long-val)
+(defmethod |test(J)Z| ((this |openldk/LambdaPredicate|) long-val)
   (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list long-val)))
-(defmethod |test(D)| ((this |openldk/LambdaPredicate|) double-val)
+(defmethod |test(D)Z| ((this |openldk/LambdaPredicate|) double-val)
   (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list double-val)))
 
 ;; BiPredicate implementation (for test(Object, Object))
@@ -245,7 +245,7 @@ so that SAM methods returning Object get proper boxed values."
   ((target)
    (captures)))
 
-(defmethod |test(Ljava/lang/Object;Ljava/lang/Object;)| ((this |openldk/LambdaBiPredicate|) a b)
+(defmethod |test(Ljava/lang/Object;Ljava/lang/Object;)Z| ((this |openldk/LambdaBiPredicate|) a b)
   (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list a b)))
 
 ;; Function implementation (for apply(Object))
@@ -259,9 +259,9 @@ so that SAM methods returning Object get proper boxed values."
 ;; IntFunction/LongFunction/DoubleFunction bridge methods (primitive-specialized apply)
 (defmethod |apply(I)| ((this |openldk/LambdaFunction|) int-val)
   (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list int-val) :box-return t))
-(defmethod |apply(J)| ((this |openldk/LambdaFunction|) long-val)
+(defmethod |apply(J)Ljava/lang/Object;| ((this |openldk/LambdaFunction|) long-val)
   (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list long-val) :box-return t))
-(defmethod |apply(D)| ((this |openldk/LambdaFunction|) double-val)
+(defmethod |apply(D)Ljava/lang/Object;| ((this |openldk/LambdaFunction|) double-val)
   (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list double-val) :box-return t))
 
 ;; Consumer implementation (for accept(Object))
@@ -274,13 +274,13 @@ so that SAM methods returning Object get proper boxed values."
   nil)
 
 ;; IntConsumer/LongConsumer/DoubleConsumer bridge methods
-(defmethod |accept(I)| ((this |openldk/LambdaConsumer|) int-val)
+(defmethod |accept(I)V| ((this |openldk/LambdaConsumer|) int-val)
   (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list int-val))
   nil)
-(defmethod |accept(J)| ((this |openldk/LambdaConsumer|) long-val)
+(defmethod |accept(J)V| ((this |openldk/LambdaConsumer|) long-val)
   (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list long-val))
   nil)
-(defmethod |accept(D)| ((this |openldk/LambdaConsumer|) double-val)
+(defmethod |accept(D)V| ((this |openldk/LambdaConsumer|) double-val)
   (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list double-val))
   nil)
 
@@ -289,7 +289,7 @@ so that SAM methods returning Object get proper boxed values."
   ((target)
    (captures)))
 
-(defmethod |accept(Ljava/lang/Object;Ljava/lang/Object;)| ((this |openldk/LambdaBiConsumer|) a b)
+(defmethod |accept(Ljava/lang/Object;Ljava/lang/Object;)V| ((this |openldk/LambdaBiConsumer|) a b)
   (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list a b))
   nil)
 
@@ -304,11 +304,23 @@ so that SAM methods returning Object get proper boxed values."
 (defvar *dynamic-lambda-classes* (make-hash-table :test #'equal)
   "Cache of dynamically created lambda classes keyed by SAM method lispized name.")
 
-(defun %ensure-dynamic-lambda-class (method-str sam-method-type &optional interface-type-name)
+(defun %interface-class-symbol (interface-name)
+  "The CLOS class name of the interface INTERFACE-NAME (binary form), loading
+it, in its loader's package (OPENLDK.APP for the application's classes), or
+NIL."
+  (handler-case
+      (let* ((ldk-class (classload interface-name))
+             (sym (and ldk-class
+                       (find-symbol (name ldk-class) (ldk-class-package ldk-class)))))
+        (and sym (find-class sym nil) sym))
+    (condition () nil)))
+
+(defun %ensure-dynamic-lambda-class (method-str sam-method-type &optional interface-type-name markers)
   "Get or create a dynamic lambda class for the given SAM method name and type.
 INTERFACE-TYPE-NAME is the binary name of the functional interface (e.g.
 \"com/sun/tools/javac/util/JavacMessages$ResourceBundleHelper\") so that
-instances pass CHECKCAST for that interface.
+instances pass CHECKCAST for that interface, and MARKERS those of marker
+interfaces (java/io/Serializable) the class implements too.
 Returns the class symbol."
   (let* ((param-count (if (and sam-method-type
                                (slot-exists-p sam-method-type '|ptypes|)
@@ -318,46 +330,49 @@ Returns the class symbol."
                           0))
          ;; Build the descriptor from SAM method type parameter types
          (descriptor (if sam-method-type
-                        (let ((desc (lstring (|toMethodDescriptorString()| sam-method-type))))
+                        (let ((desc (lstring (|toMethodDescriptorString()Ljava/lang/String;| sam-method-type))))
                           desc)
                         "()Ljava/lang/Object;"))
          (lispized-name (lispize-method-name (format nil "~A~A" method-str descriptor)))
+         ;; The interface method returns a reference: box a primitive result.
+         (box-return (let ((return-type (subseq descriptor (1+ (position #\) descriptor)))))
+                       (and (plusp (length return-type))
+                            (find (char return-type 0) "L["))))
          ;; Use interface name as cache key when available for proper CHECKCAST
-         (class-name-str (if interface-type-name
-                             (format nil "openldk/DynamicLambda_~A" (substitute #\_ #\/ interface-type-name))
-                             (format nil "openldk/DynamicLambda_~A_~A" method-str param-count)))
+         (class-name-str (format nil "~A~{+~A~}"
+                                 (if interface-type-name
+                                     (format nil "openldk/DynamicLambda_~A" (substitute #\_ #\/ interface-type-name))
+                                     (format nil "openldk/DynamicLambda_~A_~A" method-str param-count))
+                                 (mapcar (lambda (marker) (substitute #\_ #\/ marker)) markers)))
          (cached (gethash class-name-str *dynamic-lambda-classes*)))
     (if cached
         ;; Ensure the method is defined for this specific lispized name
         (let ((method-sym (intern lispized-name :openldk)))
           (unless (and (fboundp method-sym)
                        (typep (fdefinition method-sym) 'generic-function))
-            (%define-lambda-method method-sym cached param-count))
+            (%define-lambda-method method-sym cached param-count box-return))
           cached)
         ;; Create new dynamic lambda class, extending the interface if known
         (let* ((class-sym (intern class-name-str :openldk))
                (method-sym (intern lispized-name :openldk))
                (interface-sym (when interface-type-name
-                                (handler-case
-                                    (progn
-                                      (classload interface-type-name)
-                                      (let ((sym (find-symbol interface-type-name :openldk)))
-                                        (when (and sym (find-class sym nil))
-                                          sym)))
-                                  (condition () nil))))
-               (superclasses (if interface-sym
-                                 (list '|java/lang/Object| interface-sym)
-                                 (list '|java/lang/Object|))))
+                                (%interface-class-symbol interface-type-name)))
+               (marker-syms (remove nil (mapcar #'%interface-class-symbol markers)))
+               (superclasses (append (list '|java/lang/Object|)
+                                     (when interface-sym (list interface-sym))
+                                     marker-syms)))
           ;; Define the class with target and captures slots
           (eval `(defclass/std ,class-sym ,superclasses
                    ((target) (captures))))
           ;; Define the dispatch method
-          (%define-lambda-method method-sym class-sym param-count)
+          (%define-lambda-method method-sym class-sym param-count box-return)
           (setf (gethash class-name-str *dynamic-lambda-classes*) class-sym)
           class-sym))))
 
-(defun %define-lambda-method (method-sym class-sym param-count)
-  "Define a lambda dispatch method METHOD-SYM on CLASS-SYM with PARAM-COUNT parameters."
+(defun %define-lambda-method (method-sym class-sym param-count &optional box-return)
+  "Define a lambda dispatch method METHOD-SYM on CLASS-SYM with PARAM-COUNT
+parameters.  BOX-RETURN boxes a primitive the implementation returns, for an
+interface method returning a reference (Kotlin's Function1.invoke)."
   (let ((params (loop for i below param-count
                       collect (intern (format nil "P~A" i) :openldk))))
     ;; Only create/change GF if not already a GF (avoid change-class violation)
@@ -369,7 +384,8 @@ Returns the class symbol."
     (eval `(defmethod ,method-sym ((|this| ,class-sym) ,@params)
              (%lambda-invoke (slot-value |this| 'target)
                              (slot-value |this| 'captures)
-                             (list ,@params))))))
+                             (list ,@params)
+                             :box-return ,box-return)))))
 
 (defun %prebuilt-lambda-class (method-str sam-param-count interface-type-name)
   "Return the prebuilt openldk/Lambda* class for METHOD-STR when it
@@ -403,14 +419,33 @@ unknown, preserving legacy behavior), else NIL."
             (covers "java/util/function/BiConsumer"))
        '|openldk/LambdaBiConsumer|))))
 
-(defun %lambda-metafactory (impl-handle captures &optional (method-name "get") sam-method-type interface-type-name)
+(defun %alt-metafactory-markers (alt-args)
+  "The binary names of the marker interfaces that altMetafactory's extra
+static arguments ALT-ARGS (flags, then optional counted lists of marker
+classes and bridges) ask a lambda to implement."
+  (let ((flags (first alt-args))
+        (rest (rest alt-args))
+        (markers '()))
+    (when (logtest flags 2)             ; FLAG_MARKERS
+      (let ((count (pop rest)))
+        (dotimes (i count)
+          (push (substitute #\/ #\. (lstring (slot-value (pop rest) '|name|))) markers))))
+    (when (logtest flags 1)             ; FLAG_SERIALIZABLE
+      (pushnew "java/io/Serializable" markers :test #'string=))
+    (nreverse markers)))
+
+(defun %lambda-metafactory (impl-handle captures &optional (method-name "get") sam-method-type
+                                                           interface-type-name alt-args)
   "Construct a functional interface implementation for Java lambdas.
 METHOD-NAME is the interface method name (get, test, apply, accept, etc.).
 CAPTURES is a list of pre-bound values for captured variables.
 SAM-METHOD-TYPE is the MethodType of the functional interface method,
 used to determine the correct arity (e.g. Consumer vs BiConsumer).
-INTERFACE-TYPE-NAME is the binary name of the target functional interface."
-  (let* ((method-str (if (stringp method-name) method-name (lstring method-name)))
+INTERFACE-TYPE-NAME is the binary name of the target functional interface.
+ALT-ARGS are altMetafactory's static arguments after the first three: the
+lambda also implements the marker interfaces they name (Serializable)."
+  (let* ((markers (and alt-args (%alt-metafactory-markers alt-args)))
+         (method-str (if (stringp method-name) method-name (lstring method-name)))
          (sam-param-count (if (and sam-method-type
                                    (slot-exists-p sam-method-type '|ptypes|)
                                    (slot-boundp sam-method-type '|ptypes|)
@@ -422,7 +457,7 @@ INTERFACE-TYPE-NAME is the binary name of the target functional interface."
                 (ignore-errors
                  (some #'identity
                        (%descriptor-param-prim-flags
-                        (lstring (|toMethodDescriptorString()| sam-method-type)))))))
+                        (lstring (|toMethodDescriptorString()Ljava/lang/String;| sam-method-type)))))))
          (lambda-class (or
                         ;; A SAM with primitive parameters (e.g. a custom
                         ;; interface `int apply(int,int)`) cannot use the generic
@@ -433,9 +468,10 @@ INTERFACE-TYPE-NAME is the binary name of the target functional interface."
                         ;; custom SAM like java.util.stream.Sink (accept, but
                         ;; NOT a Consumer as far as checkcast is concerned)
                         ;; must get a generated class implementing it.
-                        (unless (and interface-type-name sam-has-primitive-param)
+                        (unless (or markers (and interface-type-name sam-has-primitive-param))
                           (%prebuilt-lambda-class method-str sam-param-count interface-type-name))
-                        (%ensure-dynamic-lambda-class method-str sam-method-type interface-type-name)))
+                        (%ensure-dynamic-lambda-class method-str sam-method-type interface-type-name
+                                                      markers)))
          (instance (make-instance lambda-class)))
     (setf (slot-value instance 'target) impl-handle)
     (setf (slot-value instance 'captures) captures)
@@ -446,7 +482,7 @@ INTERFACE-TYPE-NAME is the binary name of the target functional interface."
 ;; tripping the UnsupportedOperationException override in ClassReader$2.  We
 ;; keep it simple: if the expected slots exist, set them and clear cached
 ;; params.  Works for both Type$ClassType and the anonymous subclass.
-(defmethod |setEnclosingType(Lcom/sun/tools/javac/code/Type;)| (this outer)
+(defmethod |setEnclosingType(Lcom/sun/tools/javac/code/Type;)V| (this outer)
   (when (slot-exists-p this '|outer_field|)
     (setf (slot-value this '|outer_field|) outer))
   (when (slot-exists-p this '|allparams_field|)
@@ -471,14 +507,14 @@ INTERFACE-TYPE-NAME is the binary name of the target functional interface."
           (setf (slot-value form '|methodHandles|) cache))))
     cache))
 
-(defun |java/lang/invoke/MethodTypeForm.setCachedMethodHandle(ILjava/lang/invoke/MethodHandle;)| (form index mh)
+(defun |java/lang/invoke/MethodTypeForm.setCachedMethodHandle(ILjava/lang/invoke/MethodHandle;)Ljava/lang/invoke/MethodHandle;| (form index mh)
   "Native shim used by LambdaForm generation to cache handles per MethodTypeForm."
   (assert (and form (>= index 0)))
   (let ((cache (%ensure-methodtypeform-handle-cache form index)))
     (setf (jaref cache index) mh)
     mh))
 
-(defun |java/lang/invoke/MethodHandleNatives.objectFieldOffset(Ljava/lang/invoke/MemberName;)| (member-name)
+(defun |java/lang/invoke/MethodHandleNatives.objectFieldOffset(Ljava/lang/invoke/MemberName;)J| (member-name)
   (declare (ignore unsafe))
   (let ((offset (unsigned-to-signed-integer (cl-murmurhash:murmurhash (sxhash member-name)))))
     (setf (gethash offset *field-offset-table*) member-name)
@@ -499,9 +535,9 @@ INTERFACE-TYPE-NAME is the binary name of the target functional interface."
             for method = (aref (methods ldk-class) index)
             do (if (eq skip 0)
                    (progn
-                     (|init(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Object;I)|
+                     (|init(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Object;I)V|
                       mn defc (jstring (name method))
-                      (|java/lang/invoke/MethodType.fromMethodDescriptorString(Ljava/lang/String;Ljava/lang/ClassLoader;)|
+                      (|java/lang/invoke/MethodType.fromMethodDescriptorString(Ljava/lang/String;Ljava/lang/ClassLoader;)Ljava/lang/invoke/MethodType;|
                        (jstring (descriptor method)) class-loader)
                       (+ (access-flags method)
                          (if (static-p method) (ash 6 24) (ash 5 24))

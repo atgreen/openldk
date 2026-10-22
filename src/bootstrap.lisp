@@ -49,7 +49,7 @@
                          :generic-function-class 'java-generic-function
                          :lambda-list '(|this|))
 
-(defmethod |clone()| ((|this| |java/lang/Object|))
+(defmethod |clone()Ljava/lang/Object;| ((|this| |java/lang/Object|))
   "Default implementation of clone for CLONEABLE objects."
   (assert (typep |this| '|java/lang/Cloneable|))
   (let ((copy (allocate-instance (class-of |this|))))
@@ -261,12 +261,12 @@
   ()
   (:documentation "Stub for sun.management.VMManagementImpl"))
 
-(ensure-generic-function '|<init>()|
+(ensure-generic-function '|<init>()V|
                          :generic-function-class 'java-generic-function
                          :lambda-list '(|this|))
 
 ;; Stub constructor for ExceptionInInitializerError (needed during class loading)
-(defmethod |<init>()| ((e |java/lang/ExceptionInInitializerError|))
+(defmethod |<init>()V| ((e |java/lang/ExceptionInInitializerError|))
   e)
 
 ;; Bootstrap %lisp-condition implementations for early exception handling

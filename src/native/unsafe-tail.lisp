@@ -45,25 +45,25 @@
 ;;; uncommon in the game itself, but are part of the transitive NIO/atomic
 ;;; surface and should fail neither linkage nor lazy compilation.
 
-(defmethod |getUncompressedObject(J)|
+(defmethod |getUncompressedObject(J)Ljava/lang/Object;|
     ((unsafe |jdk/internal/misc/Unsafe|) address)
   (declare (ignore unsafe))
   (gethash address *unsafe-reference-memory-table*))
 
-(defmethod |writeback0(J)|
+(defmethod |writeback0(J)V|
     ((unsafe |jdk/internal/misc/Unsafe|) address)
   (declare (ignore unsafe address))
   nil)
 
-(defmethod |writebackPreSync0()| ((unsafe |jdk/internal/misc/Unsafe|))
+(defmethod |writebackPreSync0()V| ((unsafe |jdk/internal/misc/Unsafe|))
   (declare (ignore unsafe))
   nil)
 
-(defmethod |writebackPostSync0()| ((unsafe |jdk/internal/misc/Unsafe|))
+(defmethod |writebackPostSync0()V| ((unsafe |jdk/internal/misc/Unsafe|))
   (declare (ignore unsafe))
   nil)
 
-(defmethod |defineClass0(Ljava/lang/String;[BIILjava/lang/ClassLoader;Ljava/security/ProtectionDomain;)|
+(defmethod |defineClass0(Ljava/lang/String;[BIILjava/lang/ClassLoader;Ljava/security/ProtectionDomain;)Ljava/lang/Class;|
     ((unsafe |jdk/internal/misc/Unsafe|) class-name data offset length
      class-loader protection-domain)
   (declare (ignore unsafe protection-domain))
@@ -75,11 +75,11 @@
                   stream class-loader ldk-loader)))
     (unless result
       (let ((exception (%make-java-instance "java/lang/NoClassDefFoundError")))
-        (|<init>(Ljava/lang/String;)| exception class-name)
+        (|<init>(Ljava/lang/String;)V| exception class-name)
         (error (%lisp-condition exception))))
     (java-class result)))
 
-(defmethod |allocateInstance(Ljava/lang/Class;)|
+(defmethod |allocateInstance(Ljava/lang/Class;)Ljava/lang/Object;|
     ((unsafe |jdk/internal/misc/Unsafe|) class)
   (declare (ignore unsafe))
   (let* ((bin-name (substitute #\/ #\.
@@ -87,7 +87,7 @@
          (pkg (%java-class-package class)))
     (make-instance (intern bin-name pkg))))
 
-(defmethod |throwException(Ljava/lang/Throwable;)|
+(defmethod |throwException(Ljava/lang/Throwable;)V|
     ((unsafe |jdk/internal/misc/Unsafe|) throwable)
   (declare (ignore unsafe))
   (error (%lisp-condition throwable)))
@@ -103,7 +103,7 @@
       (setf (sb-sys:sap-ref-8 (sb-sys:int-sap offset) 0)
             (logand value #xff))))
 
-(defmethod |copySwapMemory0(Ljava/lang/Object;JLjava/lang/Object;JJJ)|
+(defmethod |copySwapMemory0(Ljava/lang/Object;JLjava/lang/Object;JJJ)V|
     ((unsafe |jdk/internal/misc/Unsafe|)
      source source-offset destination destination-offset bytes element-size)
   (declare (ignore unsafe))
@@ -121,7 +121,7 @@
                 (aref snapshot (+ base (- element-size index 1)))))))
   nil)
 
-(defmethod |getLoadAverage0([DI)|
+(defmethod |getLoadAverage0([DI)I|
     ((unsafe |jdk/internal/misc/Unsafe|) load-averages count)
   (declare (ignore unsafe load-averages count))
   -1)

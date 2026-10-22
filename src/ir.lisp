@@ -557,6 +557,14 @@ resolve shadowed fields to their declaring class's slot.")))
 (defclass/std ir-throw (ir-branch)
   ((objref)))
 
+(defclass/std ir-constant-dynamic (ir-node)
+  ((bootstrap-method-name)
+   (name)
+   (descriptor)
+   (args)
+   (caller))
+  (:documentation "ldc of a CONSTANT_Dynamic: the value its bootstrap method computes."))
+
 (defclass/std ir-condition-exception (ir-node)
   ((normal-value
     :doc "At a handler that normal code also reaches (Kawa's try-finally),

@@ -12,9 +12,11 @@ both ways, with no serialization and no process boundary.
 | `openldk/jscheme` | Peter Norvig's [JScheme](https://norvig.com/jscheme.html) | `openldk.jscheme`, nickname `jscheme` |
 | `openldk/clojure` | [Clojure](https://clojure.org/) 1.12.4 | `openldk.clojure`, nickname `clojure` |
 | `openldk/kawa` | [Kawa](https://www.gnu.org/software/kawa/) Scheme 3.1.1 | `openldk.kawa`, nickname `kawa` |
+| `openldk/scala` | [Scala](https://www.scala-lang.org/) 2.13.16 | `openldk.scala`, nickname `scala` |
+| `openldk/kotlin` | [Kotlin](https://kotlinlang.org/) 2.2.20 | `openldk.kotlin`, nickname `kotlin` |
+| `openldk/groovy` | [Groovy](https://groovy-lang.org/) 4.0.27 | `openldk.groovy`, nickname `groovy` |
 | `openldk/abcl` | [ABCL](https://abcl.org/) (Armed Bear Common Lisp) 1.9.2 | `openldk.abcl`, nickname `abcl` |
-
-Groovy, Scala and Kotlin are next, on the same core.
+| `openldk/polyglot` | all of the above, in one SBCL | `openldk.polyglot`, nickname `polyglot` |
 
 ## Finding the jars
 
@@ -40,7 +42,11 @@ Lisp REPL:
 make sbcl-clojure && ./sbcl-clojure      # Clojure ready at once
 make sbcl-jscheme && ./sbcl-jscheme
 make sbcl-kawa && ./sbcl-kawa
+make sbcl-scala && ./sbcl-scala
+make sbcl-kotlin && ./sbcl-kotlin
+make sbcl-groovy && ./sbcl-groovy
 make sbcl-abcl && ./sbcl-abcl
+make sbcl-polyglot && ./sbcl-polyglot    # all of them
 ```
 
 ```lisp
@@ -187,6 +193,33 @@ back as the original condition, and Clojure code can catch it as an
 
 Tests: `make check-clojure` runs them in `sbcl-clojure`.
 
+### Clojure syntax in Lisp source
+
+After `(clojure:enable-syntax)`, `#[ ... ]` holds Clojure source written as
+Clojure writes it (vectors, maps, sets, `#()` functions, `@`, `\c`
+characters) and evaluates it where it appears.  `$name` and `$(form)`
+splice in Lisp values, passed as objects rather than printed, so lexical
+variables and Lisp functions work too:
+
+```lisp
+(clojure:enable-syntax)
+#[ (->> (range 10) (filter even?) (map #(* % %))) ]   ; => (0 4 16 36 64)
+(let ((xs '(3 1 2))) #[ (sort > $xs) ])                ; => (3 2 1)
+#[ (map $#'1+ [1 2 3]) ]                                ; => (2 3 4)
+```
+
+In a backquoted macro template, `$,x` splices in the value of the macro
+argument `x`:
+
+```lisp
+(defmacro clj-max (form) `#[ (apply max $,form) ])
+(clj-max (list 3 9 4))                                 ; => 9
+```
+
+`enable-syntax` changes the current readtable, or the one it is given:
+`(setf *readtable* (clojure:enable-syntax (copy-readtable)))` keeps the
+change to one file.
+
 ## Kawa
 
 `make kawa` downloads Kawa's jar; `make sbcl-kawa` builds an SBCL with Kawa
@@ -245,6 +278,163 @@ back as the original condition.
 
 Tests: `make check-kawa` runs them in `sbcl-kawa`.
 
+## Scala
+
+`make sbcl-scala` downloads Scala's jars and builds an SBCL with Scala
+started.  Starting Scala means compiling the Scala compiler's bytecode,
+which takes OpenLDK several minutes, so use the image.
+
+```lisp
+(asdf:load-system "openldk/scala")
+(scala:startup)                                    ; already done in sbcl-scala
+
+(scala:eval "List(1, 2, 3).map(_ * 2)")            ; => (2 4 6)
+(scala:eval "def fact(n: Int): BigInt = if (n < 2) 1 else n * fact(n - 1); fact(25)")
+                                                   ; => 15511210043330985984000000
+(scala:eval "Map(\"a\" -> 1)")                     ; => a hash table
+(scala:funcall (scala:eval-raw "(a: Int, b: Int) => a * b") 6 7)   ; => 42
+
+;; Lisp functions callable from Scala, of their arity's FunctionN type
+(scala:define "square" (lambda (x) (* x x)))
+(scala:eval "(1 to 4).map(square).toList")         ; => (1 4 9 16)
+(scala:define "greeting" "hello" :type "String")
+(scala:eval "greeting.toUpperCase")                ; => "HELLO"
+```
+
+Code is evaluated by the Scala REPL's script engine (JSR 223), so
+definitions persist from one `eval` to the next, as in the REPL.
+
+| Function | |
+|---|---|
+| `startup &key classpath` | Start Scala (by default from the jars `make sbcl-scala` downloads). |
+| `eval source` | Evaluate a string of Scala; return the value as Lisp data. |
+| `eval-raw source` | Evaluate a string of Scala; return the value unconverted. |
+| `funcall function &rest args` | Call a Scala function, given as an object or by the name of a val. |
+| `define name value &key type arity` | Bind a `val`; a Lisp function becomes a Scala function. |
+| `to-lisp object`, `from-lisp value` | Convert values. |
+| `*engine*` | The script engine. |
+
+| Scala | Lisp |
+|---|---|
+| `Int`, `Long`, `BigInt` | integer |
+| `Double`, `Float` | `double-float`, `single-float` |
+| `String`, `Char`, `Boolean` | string, character, `T`/`NIL` (write `:false`) |
+| `List` and other `Seq`s, `Set`s | list (`from-lisp` makes a `List`) |
+| `Vector`, `Array` | vector (`from-lisp` makes a `Vector`) |
+| `Map` | hash table, test `equal` |
+| `Option` | `None` is `NIL`, `Some(x)` is `x` |
+| `Unit` | `NIL` |
+| `TupleN` | list |
+| functions, other objects | left as is |
+
+Scala errors, compile errors included, are signalled as `foreign-error`.
+
+Tests: `make check-scala` runs them in `sbcl-scala`.
+
+## Kotlin
+
+`make sbcl-kotlin` downloads the Kotlin compiler's jars and builds an SBCL
+with the compiler started and warm.
+
+```lisp
+(asdf:load-system "openldk/kotlin")
+(kotlin:startup)                                   ; already done in sbcl-kotlin
+
+(kotlin:eval "listOf(1, 2, 3).map { it * 2 }")     ; => (2 4 6)
+(let ((class (kotlin:compile "fun fact(n: Int): Long = if (n < 2) 1 else n * fact(n - 1)")))
+  (kotlin:call class "fact" 20))                   ; => 2432902008176640000
+(kotlin:call (kotlin:compile "fun twice(f: (Int) -> Int, x: Int) = f(f(x))")
+             "twice" (lambda (x) (* x 3)) 2)       ; => 18
+```
+
+`compile` compiles a source string as a file of its own, with the in-process
+Kotlin compiler, into a directory on the classpath, and returns the class
+holding its top-level functions; `call` calls one, converting arguments by
+its parameter types.  `eval` compiles and runs an expression.  Compiler
+errors are signalled as `foreign-error`, with the compiler's messages.
+
+| Function | |
+|---|---|
+| `startup &key classpath` | Start the compiler (by default from the jars `make sbcl-kotlin` downloads). |
+| `compile source &key name` | Compile a file; return its top-level class's name. |
+| `call class function &rest args` | Call a top-level function. |
+| `eval expression` | Compile and evaluate an expression. |
+| `funcall function &rest args` | Call a Kotlin function object. |
+| `to-lisp object`, `from-lisp value` | Convert values. |
+
+Tests: `make check-kotlin` runs them in `sbcl-kotlin`.
+
+## Groovy
+
+`make sbcl-groovy` downloads Groovy's jar and builds an SBCL with Groovy
+started.
+
+```lisp
+(asdf:load-system "openldk/groovy")
+(groovy:startup)                                   ; already done in sbcl-groovy
+
+(groovy:eval "[3, 1, 2].sort().collect { it * 10 }")    ; => (10 20 30)
+(groovy:eval "1.5 + 1")                                 ; => 5/2, exactly
+(groovy:funcall (groovy:eval-raw "{ a, b -> a * b }") 6 7)   ; => 42
+
+;; Lisp functions as Groovy closures
+(groovy:define "square" (lambda (x) (* x x)))
+(groovy:eval "(1..4).collect { square(it) }.sum()")     ; => 30
+```
+
+Code runs in one `GroovyShell`; variables a script assigns without `def`,
+and those `define` binds, live in its binding.  Groovy's `BigDecimal`
+literals (`1.5`) become exact rationals.  A Lisp function becomes an
+instance of a small closure class Groovy compiles statically at startup,
+whose `doCall` calls the Lisp function.
+
+| Function | |
+|---|---|
+| `startup &key classpath` | Start Groovy (by default from the jar `make sbcl-groovy` downloads). |
+| `eval source`, `eval-raw source` | Evaluate Groovy; return Lisp data, or the value unconverted. |
+| `funcall closure &rest args` | Call a closure, given as an object or by the name of a binding. |
+| `define name value` | Bind a variable; a Lisp function becomes a closure. |
+| `lookup name` | A binding's value, unconverted. |
+| `to-lisp object`, `from-lisp value` | Convert values. |
+
+Tests: `make check-groovy` runs them in `sbcl-groovy`.
+
+## Source syntax: `#@scala{ }`, `#@kotlin{ }`, `#@clj{ }`
+
+After `(openldk.interop:enable-source-syntax)`, `#@LANGUAGE{ ... }` holds
+source in that language, written as the language writes it, and evaluates
+it where it appears.  `$name`, `$(form)` and `$#'function` splice in Lisp
+values (and `$,x` in a backquoted macro template); they are passed as
+objects, never printed into the source.
+
+| Syntax | Language | System |
+|---|---|---|
+| `#@scala{ }`, `#@sc{ }` | Scala | `openldk/scala` |
+| `#@kotlin{ }`, `#@kt{ }` | Kotlin | `openldk/kotlin` |
+| `#@clojure{ }`, `#@clj{ }` | Clojure (also `#[ ]`) | `openldk/clojure` |
+| `#@kawa{ }` | Kawa Scheme | `openldk/kawa` |
+| `#@jscheme{ }` | JScheme | `openldk/jscheme` |
+| `#@groovy{ }`, `#@gv{ }` | Groovy | `openldk/groovy` |
+| `#@abcl{ }` | ABCL | `openldk/abcl` |
+
+```lisp
+(setf *readtable* (openldk.interop:enable-source-syntax (copy-readtable)))
+
+(let ((xs '(5 3 8)))
+  #@scala{ $xs.map { case n: Int => n * 2 }.sum })     ; => 32
+(let ((n 4))
+  #@kt{ (1..$n).map { it * it } })                      ; => (1 4 9 16)
+#@clj{ (zipmap [:a :b] [1 2]) }                         ; => a hash table
+(defmacro kt-square (x) `#@kt{ $,x * $,x })
+```
+
+In Scala and Kotlin, each splice is a parameter typed by its Lisp value
+(`Int`, `Long`, `Double`, `String`, `List`, `Map`, a function type), so it
+needs no cast; a block is compiled once for each set of parameter types and
+then called directly.  Splices work outside the language's strings and
+comments, so `s"$x"` and `"${x}"` stay the language's own.  A Kawa or
+JScheme block becomes a Scheme procedure of the spliced values, evaluated
+once and then called; definitions in it are local to it.
 ## ABCL
 
 A second Common Lisp, running on the JVM inside SBCL.  `make abcl`
@@ -303,6 +493,23 @@ done.  A Lisp error in an SBCL function that ABCL called comes back as the
 original condition.
 
 Tests: `make check-abcl` runs them in `sbcl-abcl`.
+
+## Every language at once: `openldk/polyglot`
+
+`openldk/polyglot` loads every language system; `polyglot:startup` starts
+them all (reporting and skipping any that fail) and `polyglot:enable-syntax`
+turns on `#@LANGUAGE{ ... }` and Clojure's `#[ ... ]`.  `make sbcl-polyglot`
+builds an SBCL with all of them started, so a program can use any of them
+at once:
+
+```lisp
+(polyglot:enable-syntax)
+(let ((primes #[ (take 5 (filter (fn [n] (not-any? #(zero? (rem n %)) (range 2 n))) (iterate inc 2))) ]))
+  #@kt{ $primes.map { (it as Number).toLong() * 2 }.sum() })    ; => 56
+```
+
+`examples/tea-party.lisp` sets every language at one table:
+`./sbcl-polyglot --load examples/tea-party.lisp`.
 
 ## The shared core: `openldk/interop`
 

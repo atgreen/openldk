@@ -172,7 +172,7 @@ file, nothing."
   ;; backs Clock.currentInstant, so Instant.now().
   (let* ((epoch-now (- (get-universal-time) (encode-universal-time 0 0 0 1 1 1970 0)))
          (adjust (lambda (offset)
-                   (openldk::|jdk/internal/misc/VM.getNanoTimeAdjustment(J)| offset))))
+                   (openldk::|jdk/internal/misc/VM.getNanoTimeAdjustment(J)J| offset))))
     (is (<= (* 9 1000000000) (funcall adjust (- epoch-now 10)) (* 12 1000000000)))
     (is (<= (* (- epoch-now 2) 1000000000) (funcall adjust 0) (* (+ epoch-now 2) 1000000000))
         "1970 is within 2^32 seconds")

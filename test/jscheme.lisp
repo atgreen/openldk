@@ -77,3 +77,16 @@
          (progn (jscheme:load file)
                 (is (= 99 (jscheme:eval 'loaded-value))))
       (delete-file file))))
+
+;;; #@jscheme{ ... } source syntax, in a readtable of this file's own
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (setf *readtable* (openldk.interop:enable-source-syntax (copy-readtable))))
+
+(test jscheme-syntax
+  (let ((xs '(1 2 3)))
+    (is (equal '(1 4 9) #@jscheme{ (map (lambda (x) (* x x)) $xs) })))
+  (is (string= "a } b" #@jscheme{ (string-append "a" " } " "b") ; a } in a comment
+                       }))
+  (dotimes (i 3)
+    (is (= (* i 10) #@jscheme{ (* $i 10) }) "evaluated once, called again"))
+  (is (equal '(2 3) #@jscheme{ (map $#'1+ '(1 2)) })))

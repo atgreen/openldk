@@ -76,7 +76,7 @@
   "True if GF represents a Java method, so a missing applicable method should map
 to Java semantics rather than an ordinary Lisp error. Java method GFs either use
 the java-generic-function metaclass or are named with a JVM method descriptor
-\(the name contains parentheses), e.g. |toString()| or |wait(J)|. Note some Java
+\(the name contains parentheses), e.g. |toString()Ljava/lang/String;| or |wait(J)V|. Note some Java
 method GFs are plain standard-generic-functions (created by a hand-written
 defmethod before the JIT would upgrade them), which is why the name check matters."
   (or (typep gf 'java-generic-function)
@@ -97,17 +97,83 @@ defmethod before the JIT would upgrade them), which is why the name check matter
     ((null (car args))
      (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|))))
     (t
-     (internal-error "no applicable method for invocation of ~A with arguments ~S" gf args))))
+     (let ((target (%forwarding-target gf (car args))))
+       (cond
+         (target (apply target args))
+         ;; A generic function a call site made, with no methods anywhere: in
+         ;; practice an unimplemented native method, so UnsatisfiedLinkError.
+         ((null (closer-mop:generic-function-methods gf))
+          (error (%lisp-condition
+                  (%make-unsatisfied-link-error (closer-mop:generic-function-name gf)))))
+         (t (internal-error "no applicable method for invocation of ~A with arguments ~S" gf args)))))))
+
+(defvar *forwarding* nil "Generic functions being forwarded from, against loops.")
+
+(defun %gf-applicable-p (symbol receiver)
+  (and (fboundp symbol)
+       (typep (fdefinition symbol) 'generic-function)
+       (let ((gf (fdefinition symbol)))
+         (compute-applicable-methods-using-classes-safely gf receiver))))
+
+(defun compute-applicable-methods-using-classes-safely (gf receiver)
+  (let ((nargs (length (closer-mop:generic-function-lambda-list gf))))
+    (ignore-errors
+     (closer-mop:compute-applicable-methods-using-classes
+      gf (cons (class-of receiver) (make-list (max 0 (1- nargs)) :initial-element (find-class 't)))))))
+
+(defun %forwarding-target (gf receiver)
+  "The generic function a Java method call on GF with no method for
+RECEIVER should go to: from a full name (with return type) to the short
+name a hand-written native uses, or from a short name (Lisp code's) to a
+full name with a method for RECEIVER.  Install a method on GF for
+RECEIVER's class that goes there directly, so the search runs once."
+  (let* ((symbol (closer-mop:generic-function-name gf))
+         (name (and (symbolp symbol) (symbol-name symbol)))
+         (close (and name (position #\) name))))
+    (when (and close (not (member gf *forwarding*)))
+      (let* ((*forwarding* (cons gf *forwarding*))
+             (target (if (< (1+ close) (length name))
+                         (let ((short (find-symbol (subseq name 0 (1+ close)) (symbol-package symbol))))
+                           (and short (%gf-applicable-p short receiver) short))
+                         (find-if (lambda (full) (%gf-applicable-p full receiver))
+                                  (%full-gfs-for-short-name name (symbol-package symbol))))))
+        (when target
+          (%install-forwarder symbol (class-of receiver)
+                              (length (closer-mop:generic-function-lambda-list gf)) target)
+          target)))))
+
+(defun %full-gfs-for-short-name (name package)
+  "Full-named generic functions for the short method NAME: those registered
+by %ensure-java-gf, else any fbound symbol in PACKAGE whose name extends NAME
+(hand-written defmethods register nothing)."
+  (or (gethash name *full-gfs-by-short-name*)
+      (let ((found '()))
+        (do-symbols (s package)
+          (let ((sn (symbol-name s)))
+            (when (and (> (length sn) (length name))
+                       (string= name sn :end2 (length name))
+                       (fboundp s)
+                       (typep (fdefinition s) 'generic-function))
+              (pushnew s found))))
+        (dolist (s found) (%register-full-gf s))
+        found)))
+
+(defun %install-forwarder (symbol class nargs target)
+  "A method on the generic function SYMBOL for CLASS calling TARGET."
+  (let ((params (loop for i from 1 below nargs collect (intern (format nil "ARG~A" i) :openldk))))
+    (ignore-errors
+     (eval `(defmethod ,symbol ((this ,(class-name class)) ,@params)
+              (,target this ,@params))))))
 
 (defun |java/lang/Object.registerNatives()| ()
   ())
 
-(defmethod |getExtendedNPEMessage()| (this)
+(defmethod |getExtendedNPEMessage()Ljava/lang/String;| (this)
   ;; JDK 14+ enhanced NPE messages.  Return nil for now.
   (declare (ignore this))
   nil)
 
-(defmethod |wait(J)| ((this |java/lang/Object|) timeout)
+(defmethod |wait(J)V| ((this |java/lang/Object|) timeout)
   (let* ((monitor (%get-monitor this))
          (mutex (mutex monitor))
          (cv (condition-variable monitor))
@@ -133,20 +199,20 @@ defmethod before the JIT would upgrade them), which is why the name check matter
               do (bordeaux-threads:condition-wait cv mutex))
         (setf (owner monitor) current-thread (recursion-count monitor) saved-recursion)))))
 
-(defun |java/lang/ClassLoader.registerNatives()| ()
+(defun |java/lang/ClassLoader.registerNatives()V| ()
   ())
 
-(defun |java/lang/System.registerNatives()| ()
+(defun |java/lang/System.registerNatives()V| ()
   ())
 
-(defun |java/lang/Class.registerNatives()| ()
+(defun |java/lang/Class.registerNatives()V| ()
   ())
 
-(defmethod |getClassLoader0()| ((this |java/lang/Class|))
+(defmethod |getClassLoader0()Ljava/lang/ClassLoader;| ((this |java/lang/Class|))
   "Return the ClassLoader that loaded this class, or NIL for bootstrap classes."
   (slot-value this '|classLoader|))
 
-(defun |java/lang/Class.desiredAssertionStatus0(Ljava/lang/Class;)| (class)
+(defun |java/lang/Class.desiredAssertionStatus0(Ljava/lang/Class;)Z| (class)
   (declare (ignore class))
   ;; Return 0 (false) to disable assertions
   0)
@@ -155,22 +221,28 @@ defmethod before the JIT would upgrade them), which is why the name check matter
   (classload "java/lang/SecurityManager")
   (eval (list 'make-instance (list 'quote '|java/lang/SecurityManager|))))
 
-(defmethod |getNestHost()| ((this |java/lang/Class|))
+(defmethod |getNestHost()Ljava/lang/Class;| ((this |java/lang/Class|))
   "Return the nest host of this class.  Returns self if no NestHost attribute."
-  (let* ((name (slot-value this '|name|))
-         (bin-name (if (stringp name) name (%char-data-string (java-array-data name))))
-         (bin-name (substitute #\/ #\. bin-name))
+  (%nest-host this))
+
+;; The JIT-compiled Class.getNestHost replaces the method above and calls
+;; this native.
+(defmethod |getNestHost0()Ljava/lang/Class;| ((this |java/lang/Class|))
+  (%nest-host this))
+
+(defun %nest-host (this)
+  "The nest host of the class THIS: the class its NestHost attribute names,
+or THIS."
+  (let* ((bin-name (substitute #\/ #\. (lstring (slot-value this '|name|))))
          (ldk-class (%get-ldk-class-by-bin-name bin-name t)))
     (if (and ldk-class (nest-host ldk-class))
         (or (%get-java-class-by-bin-name (nest-host ldk-class) t)
             this)
         this)))
 
-(defmethod |getNestMembers()| ((this |java/lang/Class|))
+(defmethod |getNestMembers()[Ljava/lang/Class;| ((this |java/lang/Class|))
   "Return an array of nest member classes.  Returns singleton array of self if no NestMembers."
-  (let* ((name (slot-value this '|name|))
-         (bin-name (if (stringp name) name (%char-data-string (java-array-data name))))
-         (bin-name (substitute #\/ #\. bin-name))
+  (let* ((bin-name (substitute #\/ #\. (lstring (slot-value this '|name|))))
          (ldk-class (%get-ldk-class-by-bin-name bin-name t)))
     (if (and ldk-class (nest-members ldk-class))
         (make-java-array
@@ -183,9 +255,9 @@ defmethod before the JIT would upgrade them), which is why the name check matter
          :component-class (%get-java-class-by-bin-name "java/lang/Class")
          :initial-contents (list this)))))
 
-(defmethod |isNestmateOf(Ljava/lang/Class;)| ((this |java/lang/Class|) other)
+(defmethod |isNestmateOf(Ljava/lang/Class;)Z| ((this |java/lang/Class|) other)
   "Return true (1) if this class and OTHER share the same nest host."
-  (if (eq (|getNestHost()| this) (|getNestHost()| other)) 1 0))
+  (if (eq (|getNestHost()Ljava/lang/Class;| this) (|getNestHost()Ljava/lang/Class;| other)) 1 0))
 
 (defun %java-frame-p (frame)
   "True when FRAME is a Java method frame (a name carrying a method
@@ -235,7 +307,7 @@ and Lisp-level plumbing (frames with no Java-method name)."
         (:lambda nil)
         (t t)))))
 
-(defmethod |fillInStackTrace(I)| ((this |java/lang/Throwable|) dummy)
+(defmethod |fillInStackTrace(I)Ljava/lang/Throwable;| ((this |java/lang/Throwable|) dummy)
   (declare (ignore dummy))
   (let ((backtrace (remove-if-not
                     #'%java-frame-p
@@ -324,7 +396,7 @@ computeFormat() on every element, which dereferences
 declaringClassObject (normally set by the JVM's native initializer), so
 it must point at a real Class object."
   (let ((class-name (%caller-class-name-from-stack-frame frame)))
-    (|<init>(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;I)|
+    (|<init>(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;I)V|
      ste
      (jstring class-name)
      (ijstring (%method-name-from-stack-frame frame)) nil -1)
@@ -350,7 +422,7 @@ it must point at a real Class object."
 
 ;; JDK 21 passes Throwable.backtrace and depth separately instead of passing
 ;; the Throwable itself.
-(defun |java/lang/StackTraceElement.initStackTraceElements([Ljava/lang/StackTraceElement;Ljava/lang/Object;I)|
+(defun |java/lang/StackTraceElement.initStackTraceElements([Ljava/lang/StackTraceElement;Ljava/lang/Object;I)V|
     (ste-array backtrace depth)
   "Populate STE-ARRAY from a JDK 21 Throwable backtrace object."
   (let* ((data (java-array-data ste-array))

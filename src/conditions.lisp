@@ -87,7 +87,7 @@
 
 (defun %java-method-name-p (name)
   "True when NAME, a function name, is a Java method's: OpenLDK names
-methods by their signature, as in |java/lang/Thread.start0()| or |foo(I)V|."
+methods by their signature, as in |java/lang/Thread.start0()V| or |foo(I)V|."
   (and (symbolp name)
        (let ((s (symbol-name name)))
          (and (find #\( s) (find #\) s)))))
@@ -95,7 +95,7 @@ methods by their signature, as in |java/lang/Thread.start0()| or |foo(I)V|."
 (defun %make-unsatisfied-link-error (name)
   "A java.lang.UnsatisfiedLinkError naming the method NAME."
   (let ((exc (%make-java-instance "java/lang/UnsatisfiedLinkError")))
-    (|<init>(Ljava/lang/String;)| exc (jstring (symbol-name name)))
+    (|<init>(Ljava/lang/String;)V| exc (jstring (symbol-name name)))
     exc))
 
 (defmacro with-java-conditions ((&key arrays) &body body)
@@ -114,7 +114,10 @@ every scope a Java catch clause protects, not merely around a method body."
                    (%make-throwable '|java/lang/NullPointerException|)))))
         (type-error
          (lambda (e)
-           (declare (ignore e))
+           ;; LDK_DEBUG=e: the Lisp error a NullPointerException stands for.
+           (when *debug-exceptions*
+             (format *error-output* "~&Lisp ~A becomes NullPointerException: ~A~%" (type-of e) e)
+             (sb-debug:print-backtrace :count 25 :stream *error-output*))
            (error (%lisp-condition
                    (%make-throwable '|java/lang/NullPointerException|)))))
         ;; A call to a Java method with no definition -- in practice a native

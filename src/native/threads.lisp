@@ -44,19 +44,19 @@
 ;;; The current |java/lang/Thread| object.
 (defvar *current-thread* nil)
 
-(defmethod |add(Ljava/lang/Thread;)| (thread-group thread)
+(defmethod |add(Ljava/lang/Thread;)V| (thread-group thread)
   (declare (ignore thread-group))
   (declare (ignore thread))
   (unimplemented "ThreadGroup.add(Thread)"))
 
-(defmethod |java/lang/Thread.currentThread()| ()
+(defmethod |java/lang/Thread.currentThread()Ljava/lang/Thread;| ()
   "Return the Java Thread object for the current Lisp thread (or fiber)."
   ;; When in a fiber, check fiber mapping first
   #+sb-fiber
   (when (in-fiber-p)
     (let ((java-thread (gethash (sb-thread:current-fiber) *fiber-to-java-threads*)))
       (when java-thread
-        (return-from |java/lang/Thread.currentThread()| java-thread))))
+        (return-from |java/lang/Thread.currentThread()Ljava/lang/Thread;| java-thread))))
   ;; Check if current Lisp thread has an associated Java Thread
   (let* ((current-lisp-thread (bordeaux-threads:current-thread))
          (java-thread (gethash current-lisp-thread *lisp-to-java-threads*)))
@@ -69,7 +69,7 @@
         ;; Create main thread if it doesn't exist
         (let ((thread (%make-java-instance "java/lang/Thread"))
               (thread-group (%make-java-instance "java/lang/ThreadGroup")))
-          (|<init>()| thread-group)
+          (|<init>()V| thread-group)
           (setf *current-thread* thread)
           ;; Register main thread in our mappings
           (setf (gethash current-lisp-thread *lisp-to-java-threads*) thread)
@@ -89,7 +89,7 @@
                   (setf (slot-value holder '|daemon|) 0))
                 (setf (slot-value thread '|holder|) holder))))
           (handler-case
-              (|<init>(Ljava/lang/ThreadGroup;Ljava/lang/Runnable;Ljava/lang/String;J)|
+              (|<init>(Ljava/lang/ThreadGroup;Ljava/lang/Runnable;Ljava/lang/String;J)V|
                thread thread-group nil (jstring "main") 0)
             (condition ()
               ;; If the old constructor doesn't work, set name directly
@@ -102,18 +102,18 @@
 ;; load-data-readers -> data-reader-urls NPEs calling .getResources on it. Read
 ;; the field directly and fall back to the system class loader when unset. An
 ;; :around survives JIT compilation of the bytecode body.
-(defmethod |getContextClassLoader()| :around ((thread |java/lang/Thread|))
+(defmethod |getContextClassLoader()Ljava/lang/ClassLoader;| :around ((thread |java/lang/Thread|))
   (or (and (slot-exists-p thread '|contextClassLoader|)
            (slot-boundp thread '|contextClassLoader|)
            (slot-value thread '|contextClassLoader|))
       *boot-class-loader*))
 
-(defmethod |setPriority0(I)| ((thread |java/lang/Thread|) priority)
+(defmethod |setPriority0(I)V| ((thread |java/lang/Thread|) priority)
   "Thread priorities are advisory; SBCL threads have none."
   (declare (ignore thread priority))
   nil)
 
-(defmethod |isAlive()| ((thread |java/lang/Thread|))
+(defmethod |isAlive()Z| ((thread |java/lang/Thread|))
   (let ((lisp-thread (gethash thread *java-threads*)))
     (cond
       ;; A started platform thread: alive iff its Lisp thread is.
@@ -142,29 +142,44 @@
 ;;; JDK 21 Thread native methods for virtual thread support.
 ;;; OpenLDK treats all threads as platform (carrier) threads.
 
-(defun |java/lang/Thread.currentCarrierThread()| ()
+(defun |java/lang/Thread.currentCarrierThread()Ljava/lang/Thread;| ()
   "Return the current carrier thread (always the OS thread, never a fiber)."
   (let* ((current-lisp-thread (bordeaux-threads:current-thread))
          (java-thread (gethash current-lisp-thread *lisp-to-java-threads*)))
     (or java-thread
-        (|java/lang/Thread.currentThread()|))))
+        (|java/lang/Thread.currentThread()Ljava/lang/Thread;|))))
+
+(defun |java/lang/Thread.getThreads()[Ljava/lang/Thread;| ()
+  "The live platform threads (Thread.activeCount, getAllStackTraces)."
+  (let ((threads (list (|java/lang/Thread.currentThread()Ljava/lang/Thread;|))))
+    (maphash (lambda (lisp-thread java-thread)
+               (when (bordeaux-threads:thread-alive-p lisp-thread)
+                 (pushnew java-thread threads)))
+             *lisp-to-java-threads*)
+    (maphash (lambda (java-thread lisp-thread)
+               (when (and (bordeaux-threads:threadp lisp-thread)
+                          (bordeaux-threads:thread-alive-p lisp-thread))
+                 (pushnew java-thread threads)))
+             *java-threads*)
+    (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Thread")
+                     :initial-contents (coerce (remove nil threads) 'vector))))
 
 (defun |java/lang/Thread.sleep0(J)| (milliseconds)
   "JDK 21 private native sleep0 — replaces public native sleep(J)."
   (%java-thread-sleep milliseconds))
 
-(defun |java/lang/Thread.sleepNanos0(J)| (nanos)
+(defun |java/lang/Thread.sleepNanos0(J)V| (nanos)
   "JDK 25 private native sleepNanos0 — Thread.sleep now passes
 nanoseconds and its bytecode wrapper clobbers any sleep(J) defun, so
 this must hold the real implementation path."
   (%java-thread-sleep (ceiling nanos 1000000)))
 
-(defun |java/lang/Thread.yield0()| ()
+(defun |java/lang/Thread.yield0()V| ()
   "JDK 21 private native yield0 — replaces public native yield()."
   #+sb-fiber
   (when (in-fiber-p)
     (sb-thread:fiber-yield)
-    (return-from |java/lang/Thread.yield0()|))
+    (return-from |java/lang/Thread.yield0()V|))
   ;; Platform thread: actually yield the OS thread (sched_yield).  A no-op here
   ;; turns java.util.concurrent spin-then-yield-then-park backoff loops
   ;; (SynchronousQueue rendezvous, AQS, the cached thread pool Clojure uses) into
@@ -176,19 +191,19 @@ this must hold the real implementation path."
 (defvar *scoped-value-cache* nil
   "Thread-local scoped value cache for JDK 21 ScopedValue support.")
 
-(defun |java/lang/Thread.scopedValueCache()| ()
+(defun |java/lang/Thread.scopedValueCache()[Ljava/lang/Object;| ()
   "Return the current thread's scoped value cache."
   *scoped-value-cache*)
 
-(defun |java/lang/Thread.setScopedValueCache([Ljava/lang/Object;)| (cache)
+(defun |java/lang/Thread.setScopedValueCache([Ljava/lang/Object;)V| (cache)
   "Set the current thread's scoped value cache."
   (setf *scoped-value-cache* cache))
 
-(defun |java/lang/Thread.findScopedValueBindings()| ()
+(defun |java/lang/Thread.findScopedValueBindings()Ljava/lang/Object;| ()
   "Return scoped value bindings for the current thread."
   nil)
 
-(defun |java/lang/Thread.ensureMaterializedForStackWalk(Ljava/lang/Object;)| (obj)
+(defun |java/lang/Thread.ensureMaterializedForStackWalk(Ljava/lang/Object;)V| (obj)
   "No-op for platform threads."
   (declare (ignore obj))
   nil)
@@ -196,7 +211,7 @@ this must hold the real implementation path."
 (defvar *next-thread-id* 0
   "Atomic thread ID counter for JDK 21 Thread$ThreadIdentifiers.")
 
-(defun |java/lang/Thread.getNextThreadIdOffset()| ()
+(defun |java/lang/Thread.getNextThreadIdOffset()J| ()
   "Return the field offset for the thread ID counter.
    Returns a dummy value — OpenLDK doesn't use Unsafe for thread IDs."
   0)
@@ -208,30 +223,30 @@ this must hold the real implementation path."
         (bordeaux-threads:with-lock-held (*identity-hash-counter-lock*)
           (incf *next-thread-id*))))
 
-(defmethod |setCurrentThread(Ljava/lang/Thread;)| ((thread |java/lang/Thread|) new-thread)
+(defmethod |setCurrentThread(Ljava/lang/Thread;)V| ((thread |java/lang/Thread|) new-thread)
   "Set the current thread reference. Used by virtual thread machinery."
   (declare (ignore thread))
   #+sb-fiber
   (when (in-fiber-p)
     (setf (gethash (sb-thread:current-fiber) *fiber-to-java-threads*) new-thread)
-    (return-from |setCurrentThread(Ljava/lang/Thread;)|))
+    (return-from |setCurrentThread(Ljava/lang/Thread;)V|))
   (let ((lisp-thread (bordeaux-threads:current-thread)))
     (setf (gethash lisp-thread *lisp-to-java-threads*) new-thread)))
 
-(defmethod |setNativeName(Ljava/lang/String;)| ((thread |java/lang/Thread|) name)
+(defmethod |setNativeName(Ljava/lang/String;)V| ((thread |java/lang/Thread|) name)
   "Name the OS thread; JDK 25's setName and InnocuousThread call it.  The
 name is recorded in the Java thread already, so there is nothing to do."
   (declare (ignore thread name))
   nil)
 
-(defmethod |getStackTrace0()| ((thread |java/lang/Thread|))
+(defmethod |getStackTrace0()Ljava/lang/Object;| ((thread |java/lang/Thread|))
   "Return stack trace elements for the thread."
   (declare (ignore thread))
   nil)
 
 ;;; JDK 21: Object.wait0(J) — private native wait.
 ;;; Must contain the actual wait logic (not delegate to wait(J) which calls wait0).
-(defmethod |wait0(J)| ((this |java/lang/Object|) timeout)
+(defmethod |wait0(J)V| ((this |java/lang/Object|) timeout)
   (let* ((monitor (%get-monitor this))
          (mutex (mutex monitor))
          (cv (condition-variable monitor))
@@ -258,7 +273,7 @@ name is recorded in the Java thread already, so there is nothing to do."
 ;;; JDK 21 VirtualThread — JVMTI notification stubs.
 ;;; OpenLDK doesn't support JVMTI, so all are no-ops.
 
-(defun |java/lang/VirtualThread.registerNatives()| ()
+(defun |java/lang/VirtualThread.registerNatives()V| ()
   nil)
 
 (setf (gethash "java/lang/VirtualThread.notifyJvmtiStart()V" *native-overrides*)
@@ -279,10 +294,10 @@ name is recorded in the Java thread already, so there is nothing to do."
 ;;; JDK 21 Continuation — virtual thread continuation support stubs.
 ;;; OpenLDK doesn't implement continuations; virtual threads run as platform threads.
 
-(defun |jdk/internal/vm/Continuation.registerNatives()| ()
+(defun |jdk/internal/vm/Continuation.registerNatives()V| ()
   nil)
 
-(defun |jdk/internal/vm/Continuation.doYield()| ()
+(defun |jdk/internal/vm/Continuation.doYield()I| ()
   "Stub: yield from continuation. Returns 0 (success)."
   0)
 
@@ -291,10 +306,10 @@ name is recorded in the Java thread already, so there is nothing to do."
         (declare (ignore cont is-virtual-thread force-yield))
         nil))
 
-(defun |jdk/internal/vm/Continuation.pin()| ()
+(defun |jdk/internal/vm/Continuation.pin()V| ()
   nil)
 
-(defun |jdk/internal/vm/Continuation.unpin()| ()
+(defun |jdk/internal/vm/Continuation.unpin()V| ()
   nil)
 
 (setf (gethash "jdk/internal/vm/Continuation.isPinned0(Ljdk/internal/vm/ContinuationScope;)I" *native-overrides*)
@@ -302,7 +317,7 @@ name is recorded in the Java thread already, so there is nothing to do."
         (declare (ignore scope))
         0))
 
-(defun |jdk/internal/vm/ContinuationSupport.isSupported0()| ()
+(defun |jdk/internal/vm/ContinuationSupport.isSupported0()Z| ()
   "Continuations are not supported in OpenLDK. This causes the JDK to create
    BoundVirtualThread (extends BaseVirtualThread) instead of VirtualThread.
    BoundVirtualThread uses start0()/run() like platform threads."
@@ -320,29 +335,29 @@ name is recorded in the Java thread already, so there is nothing to do."
 ;;; instances, so correct isAlive() is critical. We also override join(J)
 ;;; directly to use bordeaux-threads:join-thread for reliable waiting.
 
-(defmethod |isAlive()| :around ((thread |java/lang/BaseVirtualThread|))
+(defmethod |isAlive()Z| :around ((thread |java/lang/BaseVirtualThread|))
   "Check if the virtual thread's underlying thread (OS or fiber) is still running."
   #+sb-fiber
   (let ((fiber (gethash thread *java-to-fibers*)))
     (when fiber
-      (return-from |isAlive()| (if (sb-thread:fiber-alive-p fiber) 1 0))))
+      (return-from |isAlive()Z| (if (sb-thread:fiber-alive-p fiber) 1 0))))
   (let ((lisp-thread (gethash thread *java-threads*)))
     (if (and lisp-thread (bordeaux-threads:thread-alive-p lisp-thread))
         1
         0)))
 
-(defmethod |join(J)| :around ((thread |java/lang/BaseVirtualThread|) millis)
+(defmethod |join(J)V| :around ((thread |java/lang/BaseVirtualThread|) millis)
   "Wait for the virtual thread to finish (OS thread or fiber)."
   #+sb-fiber
   (let ((fiber (gethash thread *java-to-fibers*)))
     (when fiber
       (cond
-        ((not (sb-thread:fiber-alive-p fiber)) (return-from |join(J)|))
+        ((not (sb-thread:fiber-alive-p fiber)) (return-from |join(J)V|))
         (t
          (if (zerop millis)
              (sb-thread:fiber-join fiber)
              (sb-thread:fiber-join fiber :timeout (/ millis 1000.0d0)))
-         (return-from |join(J)|)))))
+         (return-from |join(J)V|)))))
   ;; Fall through to OS thread join
   (let ((lisp-thread (gethash thread *java-threads*)))
     (cond
@@ -362,7 +377,7 @@ name is recorded in the Java thread already, so there is nothing to do."
 ;;; Fiber-based start0 for virtual threads (when SBCL has fiber support).
 ;;; Creates a fiber instead of an OS thread for BaseVirtualThread instances.
 #+sb-fiber
-(defmethod |start0()| :around ((thread |java/lang/BaseVirtualThread|))
+(defmethod |start0()V| :around ((thread |java/lang/BaseVirtualThread|))
   "Start a virtual thread as a fiber on the fiber scheduler."
   (let ((fiber (sb-thread:make-fiber
                 (lambda ()
@@ -373,7 +388,7 @@ name is recorded in the Java thread already, so there is nothing to do."
                            (setf (gethash (sb-thread:current-fiber) *fiber-to-java-threads*) thread)
                            ;; Call the Thread's run() method
                            (handler-case
-                               (|run()| thread)
+                               (|run()V| thread)
                              (error (e)
                                (format *error-output* "~&VThread ~A terminated with error: ~A~%" thread e))))
                       ;; Cleanup mappings
@@ -391,10 +406,10 @@ name is recorded in the Java thread already, so there is nothing to do."
 (defun |sun/misc/Unsafe.registerNatives()| ()
   nil)
 
-(defun |jdk/internal/misc/Unsafe.registerNatives()| ()
+(defun |jdk/internal/misc/Unsafe.registerNatives()V| ()
   nil)
 
-(defun |jdk/internal/misc/ScopedMemoryAccess.registerNatives()| ()
+(defun |jdk/internal/misc/ScopedMemoryAccess.registerNatives()V| ()
   nil)
 
 ;; Runtime native methods
@@ -414,30 +429,30 @@ name is recorded in the Java thread already, so there is nothing to do."
                            (string= "processor" line :end2 9)))))
       1))
 
-(defmethod |availableProcessors()| ((rt |java/lang/Runtime|))
+(defmethod |availableProcessors()I| ((rt |java/lang/Runtime|))
   (%available-processor-count))
 
-(defmethod |freeMemory()| ((rt |java/lang/Runtime|))
+(defmethod |freeMemory()J| ((rt |java/lang/Runtime|))
   ;; Return SBCL's available dynamic space
   (- (sb-ext:dynamic-space-size) (sb-kernel:dynamic-usage)))
 
-(defmethod |totalMemory()| ((rt |java/lang/Runtime|))
+(defmethod |totalMemory()J| ((rt |java/lang/Runtime|))
   (sb-kernel:dynamic-usage))
 
-(defmethod |maxMemory()| ((rt |java/lang/Runtime|))
+(defmethod |maxMemory()J| ((rt |java/lang/Runtime|))
   (sb-ext:dynamic-space-size))
 
-(defmethod |gc()| ((rt |java/lang/Runtime|))
+(defmethod |gc()V| ((rt |java/lang/Runtime|))
   (sb-ext:gc :full t)
   nil)
 
 ;; JDK 9+: Signal native methods — no-op stubs for Terminator.setup()
-(defun |jdk/internal/misc/Signal.findSignal0(Ljava/lang/String;)| (name)
+(defun |jdk/internal/misc/Signal.findSignal0(Ljava/lang/String;)I| (name)
   (declare (ignore name))
   ;; Return a dummy signal number
   0)
 
-(defun |jdk/internal/misc/Signal.handle0(IJ)| (sig handler)
+(defun |jdk/internal/misc/Signal.handle0(IJ)J| (sig handler)
   (declare (ignore sig handler))
   ;; Return 0 (success / previous handler was default)
   0)
@@ -456,6 +471,14 @@ name is recorded in the Java thread already, so there is nothing to do."
           (when url-string
             (%make-url-from-string url-string)))))
 
+(setf (gethash "jdk/internal/loader/BootLoader.findResources(Ljava/lang/String;)Ljava/util/Enumeration;" *native-overrides*)
+      (lambda (name)
+        (let ((urls (%make-java-instance "java/util/ArrayList")))
+          (|<init>()V| urls)
+          (dolist (url-string (get-resource-urls-on-classpath (lstring name)))
+            (|add(Ljava/lang/Object;)Z| urls (%make-url-from-string url-string)))
+          (|java/util/Collections.enumeration(Ljava/util/Collection;)Ljava/util/Enumeration;| urls))))
+
 (setf (gethash "jdk/internal/loader/BootLoader.findResourceAsStream(Ljava/lang/String;Ljava/lang/String;)Ljava/io/InputStream;" *native-overrides*)
       (lambda (module-name name)
         (declare (ignore module-name))
@@ -467,14 +490,14 @@ name is recorded in the Java thread already, so there is nothing to do."
                                  while byte do (write-byte byte out)))))
               (close stream)
               (let ((bais (%make-java-instance "java/io/ByteArrayInputStream")))
-                (|<init>([B)| bais
+                (|<init>([B)V| bais
                  (make-java-array
                   :component-class (%get-java-class-by-bin-name "byte")
                   :initial-contents (coerce bytes 'vector)))
                 bais))))))
 
 ;; JDK 9+: NativeLibraries — return nil (no built-in libraries)
-(defun |jdk/internal/loader/NativeLibraries.findBuiltinLib(Ljava/lang/String;)| (name)
+(defun |jdk/internal/loader/NativeLibraries.findBuiltinLib(Ljava/lang/String;)Ljava/lang/String;| (name)
   (declare (ignore name))
   nil)
 
@@ -486,7 +509,7 @@ name is recorded in the Java thread already, so there is nothing to do."
 ;; the JDK calls load without first checking for the file.  Without this,
 ;; anything reaching BootLoader.loadLibrary("nio"), such as the first use of
 ;; java.nio.file or MessageDigest.getInstance, signalled UNDEFINED-FUNCTION.
-(defun |jdk/internal/loader/NativeLibraries.load(Ljdk/internal/loader/NativeLibraries$NativeLibraryImpl;Ljava/lang/String;ZZ)|
+(defun |jdk/internal/loader/NativeLibraries.load(Ljdk/internal/loader/NativeLibraries$NativeLibraryImpl;Ljava/lang/String;ZZ)Z|
     (impl name is-builtin throw-exception-if-fail)
   (declare (ignore impl name is-builtin throw-exception-if-fail))
   0)

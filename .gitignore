@@ -47,10 +47,17 @@ data/
 /lib/jscheme/classes/
 /jscheme
 /lib/clojure/*.jar
+/lib/scala/*.jar
+/lib/kotlin/*.jar
+/lib/groovy/*.jar
 /clojure
 /lib/jscheme/tmp1
 /lib/jscheme/tmp2
 /sbcl-jscheme
 /sbcl-clojure
 /sbcl-kawa
+/sbcl-scala
+/sbcl-kotlin
+/sbcl-groovy
 /sbcl-abcl
+/sbcl-polyglot

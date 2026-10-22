@@ -79,6 +79,7 @@
            #:funcall
            #:define
            #:ex-data
+           #:enable-syntax
            #:to-lisp
            #:from-lisp))
 
@@ -371,3 +372,57 @@ FOREIGN-ERROR, or of its first cause that has one, as Lisp data."
         while throwable
         do (let ((data (%invoke *ex-data-fn* throwable)))
              (when data (return (to-lisp data))))))
+
+;;; Clojure syntax in Lisp source
+;;;
+;;; After (clojure:enable-syntax), #[ ... ] holds Clojure source, written
+;;; as Clojure writes it -- vectors, maps, sets, #() functions, @, \c
+;;; characters -- and evaluates it, returning the last value as Lisp data:
+;;;
+;;;   #[ (->> (range 10) (filter even?) (map #(* % %))) ]   => (0 4 16 36 64)
+;;;
+;;; $name and $(form) splice in Lisp values, passed as objects (not
+;;; printed), so lexical variables and Lisp functions work too:
+;;;
+;;;   (let ((xs '(3 1 2))) #[ (sort > $xs) ])                => (3 2 1)
+;;;   #[ (map $#'1+ [1 2 3]) ]                                => (2 3 4)
+;;;
+;;; In a backquoted macro template, $,x splices in the macro argument's
+;;; value: (defmacro clj-max (form) `#[ (apply max $,form) ])
+
+(defvar *lisp-value-counter* 0)
+
+(defun %read-clojure-source (stream &optional (close #\]))
+  "Read Clojure source from STREAM up to the CLOSE (] or }) that closes it.
+Return the source, with each $ splice replaced by the name of a Clojure
+var, and an alist of those names and the Lisp forms whose values they hold."
+  (multiple-value-bind (source names forms)
+      (openldk.interop::%read-lisp-family-source
+       stream close (lambda (i)
+                      (declare (ignore i))
+                      (format nil "lisp-value-~D" (incf *lisp-value-counter*))))
+    (values source (mapcar #'cons names forms))))
+
+(defun %eval-with-lisp-values (source names values)
+  "Bind each of NAMES to its Lisp value of VALUES in the user namespace,
+then evaluate the Clojure SOURCE, which refers to them."
+  (mapc #'define names values)
+  (eval-string source))
+
+(defun %read-clojure-syntax (stream subchar arg)
+  (declare (ignore subchar arg))
+  (multiple-value-bind (source splices) (%read-clojure-source stream)
+    `(%eval-with-lisp-values ,source ',(mapcar #'car splices) (list ,@(mapcar #'cdr splices)))))
+
+(define-source-syntax '("clojure" "clj")
+  (lambda (source names forms)
+    `(%eval-with-lisp-values ,source ',names (list ,@forms)))
+  :reader (lambda (stream)
+            (multiple-value-bind (source splices) (%read-clojure-source stream #\})
+              (values source (mapcar #'car splices) (mapcar #'cdr splices)))))
+
+(defun enable-syntax (&optional (readtable *readtable*))
+  "Make #[ ... ] read Clojure source in READTABLE (by default, the current
+one), evaluating it where it appears; see above."
+  (set-dispatch-macro-character #\# #\[ #'%read-clojure-syntax readtable)
+  readtable)

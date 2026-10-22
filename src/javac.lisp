@@ -13,7 +13,7 @@
   ;; filesystem captures user.dir in its clinit, which make-javac-image
   ;; arranged to re-run at first access).
   (handler-case
-      (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)|
+      (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;|
        (openldk::ijstring "user.dir")
        (openldk::jstring (namestring (uiop:getcwd))))
     (condition () nil))
@@ -21,7 +21,7 @@
   ;; BUILD directory as its defaultDirectory; patch it so relative paths
   ;; resolve against the actual current directory.
   (handler-case
-      (let ((get-default (static-method-symbol "java/nio/file/FileSystems.getDefault()"
+      (let ((get-default (static-method-symbol "java/nio/file/FileSystems.getDefault()Ljava/nio/file/FileSystem;"
                                                (loader-package *boot-ldk-class-loader*))))
         (when (fboundp get-default)
           (let ((fs (funcall get-default))
@@ -268,7 +268,7 @@
 
 (defun %warmup-javac ()
   (dolist (c *javac-warmup-classes*)
-    (openldk::|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)| (openldk::jstring c) nil openldk::*boot-class-loader* nil)))
+    (openldk::|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;| (openldk::jstring c) nil openldk::*boot-class-loader* nil)))
 
 (defun make-javac-image (&optional (output-path "javacl"))
   "Build an executable image that jumps straight into javac."

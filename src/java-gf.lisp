@@ -136,3 +136,81 @@ dispatch (equals/hashCode/toString) from scratch."
                   (setf (gethash class cache) new-emfun)))
               (funcall new-emfun args)))))))
 
+
+;;; Method names carry their return types, as the JVM's do, but some
+;;; hand-written natives, and Lisp code calling Java methods, use names
+;;; without them.  Each full-named generic function is registered under its
+;;; short name, and a call that finds no applicable method in one forwards
+;;; to the other (see NO-APPLICABLE-METHOD in native/support.lisp).
+
+(defvar *full-gfs-by-short-name* (make-hash-table :test #'equal :synchronized t)
+  "Short method name (no return type) -> full-named generic function symbols.")
+
+(defun %register-full-gf (symbol)
+  (let* ((name (symbol-name symbol))
+         (close (position #\) name)))
+    (when (and close (< (1+ close) (length name)))
+      (pushnew symbol (gethash (subseq name 0 (1+ close)) *full-gfs-by-short-name*)))))
+
+(defun %ensure-java-gf-1 (symbol nargs)
+  (unless (fboundp symbol)
+    (ensure-generic-function symbol
+                             :generic-function-class 'java-generic-function
+                             :lambda-list (cons (intern "this" :openldk)
+                                                (loop for i from 1 below nargs
+                                                      collect (intern (format nil "arg~A" i) :openldk))))))
+
+(defun %ensure-java-gf (symbol nargs)
+  "Make SYMBOL a Java method generic function of NARGS arguments (receiver
+included) unless it already names a function, and register it.  The
+generic function of its short name exists too, for Lisp code calling it."
+  (%ensure-java-gf-1 symbol nargs)
+  (let* ((name (symbol-name symbol))
+         (close (position #\) name)))
+    (when (and close (< (1+ close) (length name)))
+      (%ensure-java-gf-1 (intern (subseq name 0 (1+ close)) (symbol-package symbol)) nargs)))
+  (%register-full-gf symbol)
+  symbol)
+
+(defun %adopt-native-short-methods ()
+  "For each hand-written native method named without its return type and
+specialized on a loaded Java class, give the generic function of its full
+name (the class's method of that name and arguments) a method forwarding
+to it, unless it has one for that class.  Forwarding on a missing method
+can't serve these: a method the full-named generic function has for a
+superclass would shadow the native, as the bytecode of
+sun.misc.Unsafe.getLongVolatile, calling itself on the
+jdk.internal.misc.Unsafe instance OpenLDK's natives handle, did.  Run once
+the runtime's classes are loaded."
+  (do-symbols (short (find-package :openldk))
+    (let* ((name (symbol-name short))
+           (close (position #\) name)))
+      (when (and close (= (1+ close) (length name))
+                 (eq (symbol-package short) (find-package :openldk))
+                 (fboundp short)
+                 (typep (fdefinition short) 'generic-function))
+        (dolist (method (closer-mop:generic-function-methods (fdefinition short)))
+          (let* ((specializers (closer-mop:method-specializers method))
+                 (class (first specializers))
+                 (class-name (and (typep class 'class) (class-name class)))
+                 (bin-name (and (symbolp class-name) (symbol-name class-name))))
+            (when (and (null (method-qualifiers method))
+                       bin-name (find #\/ bin-name)
+                       (gethash bin-name *ldk-classes-by-bin-name*))
+              (let ((full-name (%resolve-method-name bin-name name)))
+                (unless (string= full-name name)
+                  (let* ((full (intern full-name :openldk))
+                         (nargs (length specializers)))
+                    (%ensure-java-gf full nargs)
+                    (let ((full-gf (fdefinition full)))
+                      (when (and (typep full-gf 'generic-function)
+                                 (= nargs (length (closer-mop:generic-function-lambda-list full-gf)))
+                                 (notany (lambda (m)
+                                           (and (null (method-qualifiers m))
+                                                (eq class (first (closer-mop:method-specializers m)))))
+                                         (closer-mop:generic-function-methods full-gf)))
+                        (let ((params (loop for i from 1 below nargs
+                                            collect (intern (format nil "ARG~A" i) :openldk))))
+                          (ignore-errors
+                           (eval `(defmethod ,full ((this ,class-name) ,@params)
+                                    (,short this ,@params)))))))))))))))))

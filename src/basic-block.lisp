@@ -185,7 +185,10 @@ Combined with global substitutions during codegen for this block only.")
         while (< pc (length code))
         do (let* ((opcode (aref *opcodes* (aref code pc)))
                   (targets (let ((next-insn-list (aref (next-insn-list *context*) pc)))
-                             (if (or (eql opcode :GOTO) (> (length next-insn-list) 1))
+                             ;; A switch's targets start blocks even when it
+                             ;; has only a default (scalac emits such switches).
+                             (if (or (member opcode '(:GOTO :TABLESWITCH :LOOKUPSWITCH))
+                                     (> (length next-insn-list) 1))
                                  next-insn-list
                                  nil))))
              (incf pc (aref (insn-size *context*) pc))

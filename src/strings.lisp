@@ -136,7 +136,7 @@ String.equals compares the bytes."
                                                       :initial-contents bytes))
       (setf (slot-value s '|coder|) coder))
     (setf (slot-value s '|hash|) 0)
-    (|intern()| s)))
+    (|intern()Ljava/lang/String;| s)))
 
 (defun %java-string-hash (s)
   "Java String.hashCode() over Lisp string S: s[0]*31^(n-1)+...+s[n-1] in 32-bit
@@ -158,7 +158,7 @@ pair to match the JVM (which hashes UTF-16 code units)."
 ;; memory) and NPE on OpenLDK's CLOS byte arrays -- surfacing when Clojure's ASM
 ;; SymbolTable hashes a constant while compiling clojure/java/process.clj. Compute
 ;; the hash directly. An :around survives the JIT-compiled bytecode body.
-(defmethod |hashCode()| :around ((this |java/lang/String|))
+(defmethod |hashCode()I| :around ((this |java/lang/String|))
   (let ((cached (and (slot-exists-p this '|hash|)
                      (slot-boundp this '|hash|)
                      (slot-value this '|hash|))))
@@ -169,7 +169,7 @@ pair to match the JVM (which hashes UTF-16 code units)."
             (setf (slot-value this '|hash|) h))
           h))))
 
-(defmethod |intern()| ((str |java/lang/String|))
+(defmethod |intern()Ljava/lang/String;| ((str |java/lang/String|))
   (let ((lisp-string (lstring str)))
     (let ((istr (gethash lisp-string *interned-string-table*)))
       (or istr
@@ -182,5 +182,5 @@ pair to match the JVM (which hashes UTF-16 code units)."
         (let ((istr (setf (gethash str *interned-string-table*) (jstring str))))
           istr))))
 
-(defmethod |toString()| (str)
+(defmethod |toString()Ljava/lang/String;| (str)
   str)

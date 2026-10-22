@@ -235,13 +235,18 @@ loaders, whose classes are not in the global or app loader tables."
     (intern class-name (loader-package loader))))
 
 (defun static-method-symbol (method-name loader-pkg)
-  "Get the symbol for a static method name.
-   First checks :openldk for native method implementations,
-   then falls back to the loader's package for Java-defined methods."
-  (let ((openldk-sym (find-symbol method-name (find-package :openldk))))
-    (if (and openldk-sym (fboundp openldk-sym))
-        openldk-sym
-        (intern method-name loader-pkg))))
+  "Get the symbol for a static method name (its full descriptor).
+   First checks :openldk for native method implementations, by the full
+   name and then without the return type (as hand-written natives may be
+   named), then falls back to the loader's package for Java-defined methods."
+  (let* ((openldk (find-package :openldk))
+         (full (find-symbol method-name openldk))
+         (short (find-symbol (subseq method-name 0 (1+ (or (position #\) method-name)
+                                                          (1- (length method-name)))))
+                             openldk)))
+    (cond ((and full (fboundp full)) full)
+          ((and short (fboundp short)) short)
+          (t (intern method-name loader-pkg)))))
 
 (defun %make-java-instance (class-name &optional ldk-loader)
   "Create an instance of a Java class using the correct class symbol.
