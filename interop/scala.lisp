@@ -417,6 +417,89 @@ by default the number its lambda list requires."
               (format nil "apply(~{~A~})" (make-list (length values) :initial-element "Ljava/lang/Object;"))
               function (mapcar #'from-lisp values))))))
 
+(defparameter *static-scala-types*
+  '(((signed-byte 32) . "Int") ((signed-byte 64) . "Long") (fixnum . "Long") (integer . "BigInt")
+    (double-float . "Double") (single-float . "Float") (string . "String") (character . "Char")
+    (boolean . "Boolean") (list . "List[Any]") (vector . "Vector[Any]") (hash-table . "Map[Any, Any]")))
+
+(defparameter *scala-type-descriptors*
+  '(("Int" . "I") ("Long" . "J") ("Double" . "D") ("Float" . "F") ("Char" . "C") ("Boolean" . "Z")
+    ("String" . "Ljava/lang/String;") ("BigInt" . "Lscala/math/BigInt;")
+    ("List[Any]" . "Lscala/collection/immutable/List;") ("Vector[Any]" . "Lscala/collection/immutable/Vector;")
+    ("Map[Any, Any]" . "Lscala/collection/immutable/Map;")))
+
+(defun %scala-argument (value type)
+  "VALUE as a parameter of the Scala TYPE: primitives as OpenLDK passes
+them, references through FROM-LISP."
+  (cond ((member type '("Int" "Long") :test #'string=) (values (round value)))
+        ((string= type "Double") (coerce value 'double-float))
+        ((string= type "Float") (coerce value 'single-float))
+        ((string= type "Char") (char-code value))
+        ((string= type "Boolean") (if (and value (not (eq value :false))) 1 0))
+        (t (from-lisp value))))
+
+(defmacro %scala-site (source names &rest forms)
+  "A #@scala{ } block: precompiled with scalac if its splices' types are
+static and Scala is running now, else compiled the first time it runs."
+  (let ((types (mapcar (lambda (form) (openldk.interop::%static-splice-type form *static-scala-types*)) forms)))
+    (if (and *started* (every #'identity types))
+        (let* ((name (openldk.interop::%site-name "LispSite" source types))
+               (base (uiop:ensure-directory-pathname
+                      (merge-pathnames (format nil "openldk-scala-~D/~A/" (sb-posix:getpid) name)
+                                       (uiop:temporary-directory))))
+               (directory (merge-pathnames "classes/" base))
+               (file (merge-pathnames (format nil "~A.scala" name) base)))
+          (uiop:delete-directory-tree base :validate t :if-does-not-exist :ignore)
+          (ensure-directories-exist directory)
+          (with-open-file (out file :direction :output :if-exists :supersede)
+            (format out "object ~A {~%  def lispSite(~{~A~^, ~}): Any = {~%~A~%  }~%}~%" name
+                    (mapcar (lambda (n type) (format nil "~A: ~A" n type)) names types)
+                    source))
+          (compile-scala-files (list file) directory)
+          `(%precompiled-site ,name
+                              ,(format nil "lispSite(~{~A~})Ljava/lang/Object;"
+                                       (mapcar (lambda (type) (cdr (assoc type *scala-type-descriptors* :test #'string=)))
+                                               types))
+                              ',types
+                              ',(openldk.interop::%class-files-in directory)
+                              (list ,@forms)))
+        `(%eval-site ,source ',names (list ,@forms)))))
+
+(defun %precompiled-site (class method types classes values)
+  (openldk.interop::%define-precompiled-classes classes)
+  (to-lisp (with-foreign-errors ("Scala")
+             (apply (symbol-function
+                     (openldk::static-method-symbol
+                      (format nil "~A.~A" class method)
+                      (openldk::loader-package openldk::*app-ldk-class-loader*)))
+                    (mapcar #'%scala-argument values types)))))
+
 (define-source-syntax '("scala" "sc")
   (lambda (source names forms)
-    `(%eval-site ,source ',names (list ,@forms))))
+    `(%scala-site ,source ,names ,@forms)))
+
+;;; (:scala-file "name") ASDF components: compiled with scalac
+
+(defun compile-scala-files (sources output-directory &key (classpath ""))
+  "Compile the Scala SOURCES (pathnames) into OUTPUT-DIRECTORY against
+CLASSPATH (a colon-separated string) and the classpath OpenLDK runs with;
+signal FOREIGN-ERROR if they don't compile."
+  (%ensure-started)
+  (unless (eql 1 (with-foreign-errors ("Scala")
+                   (java-static "scala.tools.nsc.Main" "process([Ljava/lang/String;)Z"
+                                (make-java-array-of
+                                 "java.lang.String"
+                                 (mapcar #'jstring
+                                         (append (list "-usejavacp" "-nowarn"
+                                                       "-classpath" classpath
+                                                       "-d" (namestring output-directory))
+                                                 (mapcar #'namestring sources)))))))
+    (error 'foreign-error :language "Scala"
+                          :message (format nil "~{~A~^, ~} did not compile (scalac's messages are above)"
+                                           (mapcar #'namestring sources))))
+  output-directory)
+
+(openldk.interop::define-foreign-file-type scala-file openldk.interop::compiled-foreign-file "scala"
+  (openldk.interop:compile-foreign-file (component source output)
+    (declare (ignore component))
+    (compile-scala-files (list source) output :classpath (openldk.interop::%compiled-classpath))))

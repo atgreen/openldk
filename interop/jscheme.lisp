@@ -335,3 +335,10 @@ PREDICATE, its NIL result is #f rather than '()."
   (lambda (source names forms)
     `(%eval-site ,source ',names (list ,@forms)))
   :reader #'openldk.interop::%read-lisp-family-source-and-names)
+
+;;; (:jscheme-file "name") ASDF components: loaded by Jscheme at LOAD-OP
+
+(openldk.interop::define-foreign-file-type jscheme-file openldk.interop::loaded-foreign-file "scm"
+  (openldk.interop::load-foreign-file (component source)
+    (declare (ignore component))
+    (load source)))

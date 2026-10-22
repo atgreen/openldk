@@ -406,11 +406,18 @@ var, and an alist of those names and the Lisp forms whose values they hold."
                       (format nil "lisp-value-~D" (incf *lisp-value-counter*))))
     (values source (mapcar #'cons names forms))))
 
+(defvar *sites* (make-hash-table :test #'equal)
+  "Source -> the Clojure function the #[ ] block's source became.")
+
 (defun %eval-with-lisp-values (source names values)
-  "Bind each of NAMES to its Lisp value of VALUES in the user namespace,
-then evaluate the Clojure SOURCE, which refers to them."
-  (mapc #'define names values)
-  (eval-string source))
+  "Evaluate the Clojure SOURCE of a #[ ] block, in which NAMES stand for
+the Lisp VALUES: compiled once into a function of NAMES, then called, so
+the block is re-entrant (recursion, threads)."
+  (apply #'funcall
+         (or (gethash source *sites*)
+             (setf (gethash source *sites*)
+                   (eval-string (format nil "(fn [~{~A~^ ~}]~%~A~%)" names source))))
+         values))
 
 (defun %read-clojure-syntax (stream subchar arg)
   (declare (ignore subchar arg))
@@ -429,3 +436,10 @@ then evaluate the Clojure SOURCE, which refers to them."
 one), evaluating it where it appears; see above."
   (set-dispatch-macro-character #\# #\[ #'%read-clojure-syntax readtable)
   readtable)
+
+;;; (:clojure-file "name") ASDF components: loaded by Clojure at LOAD-OP
+
+(openldk.interop::define-foreign-file-type clojure-file openldk.interop::loaded-foreign-file "clj"
+  (openldk.interop::load-foreign-file (component source)
+    (declare (ignore component))
+    (load source)))

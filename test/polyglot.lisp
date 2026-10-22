@@ -30,4 +30,11 @@
   (is (string= "HI!" (clojure:funcall "words/shout" "hi")) "Clojure")
   (is (= 2432902008176640000 (kawa:funcall "kawa-fact" 20)) "Kawa")
   (is (= 55 (jscheme:funcall "jfib" 10)) "JScheme")
-  (is (= 3 (abcl:funcall "TOWER-HEIGHT")) "ABCL"))
+  (is (= 3 (abcl:funcall "TOWER-HEIGHT")) "ABCL")
+  (is (search (string #\Newline) (kotlin:call "ShapesKt" "wrapped" "a library from Maven, wrapped"))
+      "Kotlin, calling a Maven dependency")
+  (is (string= "Hello"
+               (openldk.interop:lstring
+                (openldk.interop:java-static "org.apache.commons.text.WordUtils" "capitalize(Ljava/lang/String;)"
+                                             (openldk.interop:jstring "hello"))))
+      "Lisp, calling it"))

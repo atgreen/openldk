@@ -322,3 +322,26 @@ with ARGS, converted with FROM-LISP; return the result as Lisp data."
   ;; Groovy's '...' are strings, not characters.
   :reader (lambda (stream)
             (openldk.interop::%read-braced-source-and-names stream :string-quotes '(#\" #\'))))
+
+;;; (:groovy-file "name") ASDF components: compiled with groovyc
+
+(defun compile-groovy-files (sources output-directory &key (classpath ""))
+  "Compile the Groovy SOURCES (pathnames) into OUTPUT-DIRECTORY against
+CLASSPATH (a colon-separated string); signal FOREIGN-ERROR if they don't
+compile."
+  (%ensure-started)
+  (with-foreign-errors ("Groovy")
+    (java-static "org.codehaus.groovy.tools.FileSystemCompiler" "commandLineCompile([Ljava/lang/String;Z)V"
+                 (make-java-array-of
+                  "java.lang.String"
+                  (mapcar #'jstring
+                          (append (list "-cp" (format nil "~{~A~^:~}" (append (default-classpath) (list classpath)))
+                                        "-d" (namestring output-directory))
+                                  (mapcar #'namestring sources))))
+                 0))
+  output-directory)
+
+(openldk.interop::define-foreign-file-type groovy-file openldk.interop::compiled-foreign-file "groovy"
+  (openldk.interop:compile-foreign-file (component source output)
+    (declare (ignore component))
+    (compile-groovy-files (list source) output :classpath (openldk.interop::%compiled-classpath))))

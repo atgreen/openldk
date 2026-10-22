@@ -93,3 +93,8 @@
   (dotimes (i 3)
     (is (= (* i i) #@sc{ $i * $i }) "compiled once, called again"))
   (is (equal '(2 3 4) #@sc{ List(1, 2, 3).map(n => $#'1+(n)) })))
+
+(test precompiled-scala-syntax
+  ;; Typed splices: compiled with this file, when Scala runs at COMPILE-FILE.
+  (let ((n 7))
+    (is (= 14 #@sc{ $(the (signed-byte 32) n) * 2 }))))

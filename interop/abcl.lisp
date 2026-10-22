@@ -406,3 +406,10 @@ converted with FROM-LISP."
   (lambda (source names forms)
     `(%eval-site ,source ',names (list ,@forms)))
   :reader #'openldk.interop::%read-lisp-family-source-and-names)
+
+;;; (:abcl-file "name") ASDF components: loaded by ABCL at LOAD-OP
+
+(openldk.interop::define-foreign-file-type abcl-file openldk.interop::loaded-foreign-file "lisp"
+  (openldk.interop::load-foreign-file (component source)
+    (declare (ignore component))
+    (load source)))

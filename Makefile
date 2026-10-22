@@ -174,6 +174,11 @@ check-kotlin: sbcl-kotlin
 check-groovy: sbcl-groovy
 	$(call check-in-image,groovy)
 
+# Tests for openldk/polyglot, run in sbcl-polyglot: every language at once,
+# and a system of foreign source files as ASDF components (test/polyglot-demo).
+check-polyglot: sbcl-polyglot
+	$(call check-in-image,polyglot)
+
 # Tests for openldk/abcl, run in sbcl-abcl, where ABCL is started.
 check-abcl: sbcl-abcl
 	$(call check-in-image,abcl)

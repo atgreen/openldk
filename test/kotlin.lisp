@@ -81,3 +81,21 @@ fun applyAll(f: (Any?) -> Any?, xs: List<Any?>) = xs.map(f)")))
   (dotimes (i 3)
     (is (= (* i i) #@kt{ $i * $i }) "compiled once, called again"))
   (is (= 18 #@kt{ val f = $(lambda (x) (* x 3)); f(f(2)) as Int })))
+
+(test precompiled-kotlin-syntax
+  ;; Typed splices: compiled with this file, when Kotlin runs at COMPILE-FILE.
+  (let ((n 7))
+    (is (= 14 #@kt{ $(the (signed-byte 32) n) * 2 + $(the double-float 0.5d0).toInt() }))))
+
+(test data-class-fields
+  (let ((class (kotlin:compile "data class Point(val x: Int, val label: String)
+fun origin() = Point(0, \"origin\")")))
+    (is (equal '(("x" . 0) ("label" . "origin"))
+               (openldk.interop:java-fields (kotlin:call class "origin") :convert #'kotlin:to-lisp)))))
+
+(test coroutines
+  (is (= 42 (kotlin:eval "kotlinx.coroutines.runBlocking {
+                            val a = kotlinx.coroutines.async { 6 }
+                            val b = kotlinx.coroutines.async { 7 }
+                            a.await() * b.await()
+                          }"))))

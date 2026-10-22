@@ -130,3 +130,10 @@
     (is (equal '(3 2 1) (sort (list 1 2 3) #'> :key f)))
     (clojure:define "lispy" f)
     (is (equal '(1 4 9) (clojure:eval '(map lispy (list 1 2 3)))) "passed back, it is the original function")))
+
+(defun clojure-countdown (n)
+  "A #[ ] block that calls back into Lisp, which runs the block again."
+  #[ (if (pos? $n) (+ $n ($#'clojure-countdown (dec $n))) 0) ])
+
+(test clojure-syntax-is-reentrant
+  (is (= 55 (clojure-countdown 10)) "each level of the recursion keeps its own N"))

@@ -347,3 +347,10 @@ NIL result is #f rather than '()."
   (lambda (source names forms)
     `(%eval-site ,source ',names (list ,@forms)))
   :reader #'openldk.interop::%read-lisp-family-source-and-names)
+
+;;; (:kawa-file "name") ASDF components: loaded by Kawa at LOAD-OP
+
+(openldk.interop::define-foreign-file-type kawa-file openldk.interop::loaded-foreign-file "scm"
+  (openldk.interop::load-foreign-file (component source)
+    (declare (ignore component))
+    (load source)))
