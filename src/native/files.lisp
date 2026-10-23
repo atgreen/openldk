@@ -508,6 +508,54 @@ serves the MappedByteBuffer as is."
   (let ((path (%read-c-string-from-sap address)))
     (if (probe-file path) 1 0)))
 
+(defun %stat-nanoseconds (file follow-links)
+  "The nanosecond parts of the access, modification and change times of
+FILE (a path, or a file descriptor), as three values, which SB-POSIX's
+STAT doesn't give; zeros where they aren't known.  Reads struct stat's
+st_atim, st_mtim and st_ctim, at the same offsets on x86-64 and AArch64
+Linux."
+  #+(and linux (or x86-64 arm64))
+  (let ((buffer (make-array 256 :element-type '(unsigned-byte 8)))
+        (name (if (stringp file)
+                  (sb-ext:string-to-octets file :external-format :utf-8 :null-terminate t)
+                  (make-array 1 :element-type '(unsigned-byte 8)))))
+    (sb-sys:with-pinned-objects (buffer name)
+      (if (zerop (handler-case
+                     (cond
+                       ((not (stringp file))
+                        (sb-alien:alien-funcall
+                          (sb-alien:extern-alien "fstat" (function sb-alien:int sb-alien:int
+                                                                   sb-sys:system-area-pointer))
+                          file (sb-sys:vector-sap buffer)))
+                       (follow-links
+                        (sb-alien:alien-funcall
+                         (sb-alien:extern-alien "stat" (function sb-alien:int sb-sys:system-area-pointer
+                                                                 sb-sys:system-area-pointer))
+                         (sb-sys:vector-sap name) (sb-sys:vector-sap buffer)))
+                       (t
+                        (sb-alien:alien-funcall
+                         (sb-alien:extern-alien "lstat" (function sb-alien:int sb-sys:system-area-pointer
+                                                                  sb-sys:system-area-pointer))
+                         (sb-sys:vector-sap name) (sb-sys:vector-sap buffer))))
+                   (error () -1)))
+          (let ((sap (sb-sys:vector-sap buffer)))
+            (values (sb-sys:signed-sap-ref-64 sap 80)
+                    (sb-sys:signed-sap-ref-64 sap 96)
+                    (sb-sys:signed-sap-ref-64 sap 112)))
+          (values 0 0 0))))
+  #-(and linux (or x86-64 arm64))
+  (declare (ignore file follow-links))
+  #-(and linux (or x86-64 arm64))
+  (values 0 0 0))
+
+(defun %set-time-nanoseconds (file attrs follow-links)
+  "Set ATTRS' (a UnixFileAttributes) st_*time_nsec slots from FILE, a path
+or a file descriptor."
+  (multiple-value-bind (atime mtime ctime) (%stat-nanoseconds file follow-links)
+    (loop for (slot value) in `((|st_atime_nsec| ,atime) (|st_mtime_nsec| ,mtime) (|st_ctime_nsec| ,ctime))
+          when (slot-exists-p attrs slot)
+            do (setf (slot-value attrs slot) value))))
+
 (defun %populate-unix-file-attributes (path attrs follow-links)
   "Populate a UnixFileAttributes object from PATH. FOLLOW-LINKS controls symlink behavior."
   (handler-case
@@ -536,6 +584,7 @@ serves the MappedByteBuffer as is."
           (setf (slot-value attrs '|st_mtime_sec|) (sb-posix:stat-mtime stat)))
         (when (slot-exists-p attrs '|st_ctime_sec|)
           (setf (slot-value attrs '|st_ctime_sec|) (sb-posix:stat-ctime stat)))
+        (%set-time-nanoseconds path attrs follow-links)
         0) ; success
     (sb-posix:syscall-error (e)
       (sb-posix:syscall-errno e))))
@@ -637,7 +686,8 @@ the errno value on failure; the Java caller throws the UnixException."
         (when (slot-exists-p attrs '|st_mtime_sec|)
           (setf (slot-value attrs '|st_mtime_sec|) (sb-posix:stat-mtime stat)))
         (when (slot-exists-p attrs '|st_ctime_sec|)
-          (setf (slot-value attrs '|st_ctime_sec|) (sb-posix:stat-ctime stat))))
+          (setf (slot-value attrs '|st_ctime_sec|) (sb-posix:stat-ctime stat)))
+        (%set-time-nanoseconds fd attrs nil))
     (sb-posix:syscall-error (e)
       (let ((ux (%make-java-instance "sun/nio/fs/UnixException")))
         (when (slot-exists-p ux '|errno|)

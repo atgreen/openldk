@@ -1781,12 +1781,10 @@ same-named defmethod."
 (defmethod |getLastModifiedTime0(Ljava/io/File;)J| ((ufs |java/io/UnixFileSystem|) file)
   "Modification time of FILE in milliseconds, or 0 if it does not exist."
   (declare (ignore ufs))
-  ;; MODIFICATION-TIME is a universal time, counted from 1900.
   (handler-case
-      (round (* (- (org.shirakumo.file-attributes:modification-time
-                    (lstring (slot-value file '|path|)))
-                   (encode-universal-time 0 0 0 1 1 1970 0))
-                1000))
+      (let ((path (lstring (slot-value file '|path|))))
+        (+ (* 1000 (sb-posix:stat-mtime (sb-posix:stat path)))
+           (floor (nth-value 1 (%stat-nanoseconds path t)) 1000000)))
     (error () 0)))
 
 (defmethod |getLastModifiedTime(Ljava/io/File;)J| ((ufs |java/io/UnixFileSystem|) file)
