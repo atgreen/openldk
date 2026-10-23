@@ -129,17 +129,38 @@
     (sb-alien:free-alien stream)
     (remhash address *zlib-streams*)))
 
+(defun %byte-array-data (array offset length)
+  "ARRAY's data, when it's a byte[]'s (SIGNED-BYTE 8) vector holding OFFSET
+to OFFSET + LENGTH, which can be copied as a block; else NIL."
+  (let ((data (and array (java-array-data array))))
+    (and (typep data '(simple-array (signed-byte 8) (*)))
+         (<= 0 offset (+ offset length) (length data))
+         data)))
+
 (defun %zlib-array-to-alien (array offset length)
-  (let ((memory (sb-alien:make-alien sb-alien:unsigned-char (max length 1))))
-    (loop for i below length
-          do (setf (sb-alien:deref memory i)
-                   (logand (jaref array (+ offset i)) #xff)))
+  (let ((memory (sb-alien:make-alien sb-alien:unsigned-char (max length 1)))
+        (data (%byte-array-data array offset length)))
+    (if data
+        ;; A block copy: signed and unsigned bytes have the same bits.
+        ;; Byte by byte, through JAREF, copying took a third of the time
+        ;; the Kotlin compiler spent reading class files out of jars.
+        (sb-sys:with-pinned-objects (data)
+          (sb-kernel:system-area-ub8-copy (sb-sys:vector-sap data) offset
+                                          (sb-alien:alien-sap memory) 0 length))
+        (loop for i below length
+              do (setf (sb-alien:deref memory i)
+                       (logand (jaref array (+ offset i)) #xff))))
     memory))
 
 (defun %zlib-alien-to-array (memory array offset length)
-  (loop for i below length
-        do (setf (jaref array (+ offset i))
-                 (%unsigned-to-signed-byte (sb-alien:deref memory i)))))
+  (let ((data (%byte-array-data array offset length)))
+    (if data
+        (sb-sys:with-pinned-objects (data)
+          (sb-kernel:system-area-ub8-copy (sb-alien:alien-sap memory) 0
+                                          (sb-sys:vector-sap data) offset length))
+        (loop for i below length
+              do (setf (jaref array (+ offset i))
+                       (%unsigned-to-signed-byte (sb-alien:deref memory i)))))))
 
 (defun %zlib-set-io (stream input-sap input-length output-sap output-length)
   (let ((value (sb-alien:deref stream)))
