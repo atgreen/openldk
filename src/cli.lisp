@@ -602,7 +602,10 @@ shutdown state System.exit leaves is undone."
                    (main mainclass args :classpath classpath)))
            (sb-ext:timeout ()
              (format *error-output* "~&;; WARMUP ~S timed out after ~Ds~%" args timeout))
-           (condition (c)
+           ;; Not CONDITION: the warnings compiling Java methods signals
+           ;; (redefinitions, as in an image whose languages loaded) would
+           ;; end the warmup there.  Java exceptions are ERRORs.
+           (error (c)
              (format *error-output* "~&;; WARMUP ~S caught: ~A~%" args c)))
       (funcall restore-shutdown)
       (when input-file
@@ -667,7 +670,9 @@ default time zone.  %WARM-UP-JDK resets those it initialized.")
 (defun %per-run-state-class-p (bin-name)
   (some (lambda (prefix) (eql 0 (search prefix bin-name))) *per-run-state-classes*))
 
-(defun %warm-up-jdk ()
+(defun %warm-up-jdk (&optional (run (lambda (directory)
+                                      (%run-warmup "openldk.warmup.JdkWarmup" nil
+                                                   (namestring directory)))))
   "Compile and run src/JdkWarmup.java, so the JDK code it calls is compiled
 into the image, then reset the classes in *PER-RUN-STATE-CLASSES* it
 initialized: SecureRandom's seed, the default time zone and the like are
@@ -675,7 +680,10 @@ a run's, not the build's.  Other JDK classes keep their state, as in every
 image -- resetting them all would rerun one-time initializers
 (java.lang.invoke's).  A user.timezone property it set goes too (System's
 properties outlive the reset; the runtime refreshes only those it sets).
-Skipped, with a note, without a javac."
+RUN, a function of the directory the warmup class was compiled into,
+runs it: by default with MAIN, as in an image of the openldk command; an
+image with a runtime already started (openldk.interop's) runs it without
+resetting its classpath.  Skipped, with a note, without a javac."
   (let* ((java-home (lstring (|java/lang/System.getProperty(Ljava/lang/String;)Ljava/lang/String;|
                               (jstring "java.home"))))
          (javac (merge-pathnames "bin/javac" (uiop:ensure-directory-pathname java-home)))
@@ -696,7 +704,9 @@ Skipped, with a note, without a javac."
                              (jstring "user.timezone")))
                   (count 0))
               (format *error-output* "~&;; WARMUP openldk.warmup.JdkWarmup~%")
-              (%run-warmup "openldk.warmup.JdkWarmup" nil (namestring directory))
+              (handler-case (cl:funcall run directory)
+                (error (c)
+                  (format *error-output* "~&;; WARMUP openldk.warmup.JdkWarmup caught: ~A~%" c)))
               (maphash (lambda (bin-name class)
                          (when (and (initialized-p class) (not (gethash class before))
                                     (%per-run-state-class-p bin-name))
