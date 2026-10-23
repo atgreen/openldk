@@ -73,12 +73,18 @@
 (defun %member-ref-kind (member)
   (ash (logand (slot-value member '|flags|) #x0F000000) -24))
 
+(defvar *member-field-slots* (make-hash-table :test 'eq :weakness :key :synchronized t)
+  "MemberName -> the CLOS slot holding the field it names.")
+
 (defun %member-field-slot (member)
-  "The CLOS slot holding the field MEMBER names."
-  (let* ((class-name (substitute #\/ #\. (lstring (slot-value (slot-value member '|clazz|) '|name|))))
-         (field-name (lstring (slot-value member '|name|))))
-    (or (gethash (format nil "~A.~A" class-name field-name) *field-shadow-slots*)
-        (intern (mangle-field-name field-name) :openldk))))
+  "The CLOS slot holding the field MEMBER names.  Computed once per
+MemberName: field access through a method handle asks on every call."
+  (or (gethash member *member-field-slots*)
+      (setf (gethash member *member-field-slots*)
+            (let* ((class-name (substitute #\/ #\. (lstring (slot-value (slot-value member '|clazz|) '|name|))))
+                   (field-name (lstring (slot-value member '|name|))))
+              (or (gethash (format nil "~A.~A" class-name field-name) *field-shadow-slots*)
+                  (intern (mangle-field-name field-name) :openldk))))))
 
 (defun %member-static-storage (member)
   "The object holding the static fields of MEMBER's class, initializing it."
@@ -101,17 +107,28 @@ putStatic 4)."
        nil)
     (t (apply #'%invoke-from-member-name member args))))
 
+(defvar *member-intrinsics* (make-hash-table :test 'eq :weakness :key :synchronized t)
+  "MemberName -> :INVOKE, :LINK-TO or :NONE: which method handle intrinsic
+it names, if any.")
+
+(defun %member-intrinsic (member)
+  (or (gethash member *member-intrinsics*)
+      (setf (gethash member *member-intrinsics*)
+            (let ((clazz (slot-value member '|clazz|)))
+              (if (and clazz (string= (lstring (slot-value clazz '|name|)) "java.lang.invoke.MethodHandle"))
+                  (let ((name (lstring (slot-value member '|name|))))
+                    (cond
+                      ((member name '("invokeBasic" "invokeExact" "invoke") :test #'string=) :invoke)
+                      ((starts-with? "linkTo" name) :link-to)
+                      (t :none)))
+                  :none)))))
+
 (defun %mh-intrinsic-invoke (member args)
   "When MEMBER is a method handle intrinsic, apply it to ARGS and return
 (values result T); otherwise NIL."
-  (let ((clazz (slot-value member '|clazz|)))
-    (when (and clazz (string= (lstring (slot-value clazz '|name|)) "java.lang.invoke.MethodHandle"))
-      (let ((name (lstring (slot-value member '|name|))))
-        (cond
-          ((member name '("invokeBasic" "invokeExact" "invoke") :test #'string=)
-           (values (%mh-invoke (first args) (rest args)) t))
-          ((starts-with? "linkTo" name)
-           (values (%member-invoke (car (last args)) (butlast args)) t)))))))
+  (case (%member-intrinsic member)
+    (:invoke (values (%mh-invoke (first args) (rest args)) t))
+    (:link-to (values (%member-invoke (car (last args)) (butlast args)) t))))
 
 (defun %named-function-invoke (function args)
   "Apply the LambdaForm NamedFunction FUNCTION to ARGS."
