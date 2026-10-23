@@ -377,10 +377,18 @@ CLASS-NAME, as COMPILE returns it, with ARGS; return its value as Lisp data."
                   (mapcar #'%argument args types)))
          return-type)))))
 
+(defvar *eval-classes* (make-hash-table :test #'equal)
+  "Expression -> the class EVAL compiled it into.")
+
 (defun eval (expression)
   "Evaluate the Kotlin EXPRESSION (a string, which can be a block of
-statements ending in an expression); return its value as Lisp data."
-  (call (compile (format nil "fun lispEval(): Any? = run {~%~A~%}~%" expression)) "lispEval"))
+statements ending in an expression); return its value as Lisp data.  An
+expression is compiled once (compiling one takes seconds), then run again
+on each EVAL."
+  (call (or (gethash expression *eval-classes*)
+            (setf (gethash expression *eval-classes*)
+                  (compile (format nil "fun lispEval(): Any? = run {~%~A~%}~%" expression))))
+        "lispEval"))
 
 (defun funcall (function &rest args)
   "Call the Kotlin function object FUNCTION with ARGS, converted with
