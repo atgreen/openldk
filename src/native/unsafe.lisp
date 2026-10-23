@@ -1316,7 +1316,8 @@ a same-named class from another loader."
                                                                 :initial-contents pt)
                                                (%checked-exception-classes method lclass)
                                                (access-flags method) 0
-                                               nil  ; generic signature (not yet supported)
+                                               (let ((signature (gethash "Signature" (attributes method))))
+                                                 (and signature (ijstring signature)))
                                                (gethash "RuntimeVisibleAnnotations" (attributes method))
                                                (or (gethash "RuntimeVisibleParameterAnnotations" (attributes method))
                                                    (make-java-array
@@ -1416,7 +1417,8 @@ Method/Constructor so reflection reports them (e.g. Method.toString()'s
                                                                    (%get-return-type (descriptor method))
                                                                    (%checked-exception-classes method lclass)
                                                                    (access-flags method) 0
-                                                                   nil  ; generic signature (not yet supported)
+                                                                   (let ((signature (gethash "Signature" (attributes method))))
+                                                                     (and signature (ijstring signature)))
                                                                    (gethash "RuntimeVisibleAnnotations"
                                                                             (attributes method))
                                                                    (or (gethash "RuntimeVisibleParameterAnnotations"

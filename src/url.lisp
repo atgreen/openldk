@@ -231,21 +231,25 @@ protocol field, or parse it out of the URL's string form."
   ()
   (:documentation "Stub for java.net.JarURLConnection; populated at runtime."))
 
-;; url.lisp loads before zip.lisp, so forward-declare the jar/zip stubs the
-;; connection methods below specialize on (harmlessly redefined in zip.lisp).
-(defclass |java/util/jar/JarFile| ()
-  ()
-  (:documentation "Stub for java.util.jar.JarFile; populated at runtime."))
-
-(defclass |java/util/zip/ZipEntry| ()
-  ()
-  (:documentation "Stub for java.util.zip.ZipEntry; populated at runtime."))
-
 (defvar *connection-urls* (make-hash-table :test #'eq :synchronized t)
   "Synthetic URLConnection -> its java.net.URL.")
 
 (defun %url-string-of (url)
   (or (gethash url *native-url-strings*) (lstring (|toString()Ljava/lang/String;| url))))
+
+(defun %set-jar-connection-fields (conn url url-string)
+  "Fill the fields JarURLConnection's constructor would, which its
+getJarFileURL, getEntryName and getJarEntry read (Spring's classpath
+scanning walks a jar from its directory's URL this way)."
+  (flet ((put (slot value)
+           (when (slot-exists-p conn slot)
+             (setf (slot-value conn slot) value))))
+    (put '|url| url)
+    (multiple-value-bind (jar-path entry-path) (%parse-jar-url url-string)
+      (when jar-path
+        (put '|jarFileURL| (%make-url-from-string (format nil "file:~A" jar-path)))
+        (put '|entryName| (when (plusp (length entry-path))
+                            (jstring entry-path)))))))
 
 (defun %open-url-connection-1 (url)
   "A synthetic URLConnection for URLs whose protocol we serve, else :FALLTHROUGH."
@@ -254,6 +258,7 @@ protocol field, or parse it out of the URL's string form."
       ((starts-with? "jar:" url-string)
        (let ((conn (%make-java-instance "java/net/JarURLConnection")))
          (setf (gethash conn *connection-urls*) url)
+         (%set-jar-connection-fields conn url url-string)
          conn))
       ((or (starts-with? "file:" url-string) (starts-with? "jrt:" url-string))
        (let ((conn (%make-java-instance "java/net/JarURLConnection")))
@@ -342,33 +347,14 @@ combination signals NO-PRIMARY-METHOD if only the :around above applies."
   (declare (ignore conn))
   -1)
 
-;; The JDK ZipFile/JarFile/ZipEntry stubs carry no CLOS slots (OpenLDK reads
-;; jars through its own Lisp zip library, not these classes), so we attach the
-;; open zip and per-entry info via side tables instead of object fields.  This
-;; supports RT.lastModified()'s getJarFile().getEntry(name).getTime() walk.
-(defvar *jarfile-zips* (make-hash-table :test #'eq :synchronized t)
-  "java.util.jar.JarFile -> its open zip:zipfile.")
-(defvar *zipentry-times* (make-hash-table :test #'eq :synchronized t)
-  "java.util.zip.ZipEntry -> its last-modified time (millis).")
-
 (defmethod |getJarFile()Ljava/util/jar/JarFile;| ((conn |java/net/JarURLConnection|))
   (when-let ((url (gethash conn *connection-urls*)))
     (multiple-value-bind (jar-path entry-path) (%parse-jar-url (%url-string-of url))
       (declare (ignore entry-path))
       (when jar-path
+        ;; A real JarFile, so its entries(), getJarEntry() and manifest
+        ;; work as for one the program opened itself.
+        (classload "java/util/jar/JarFile")
         (let ((jf (%make-java-instance "java/util/jar/JarFile")))
-          (setf (gethash jf *jarfile-zips*) (zip:open-zipfile jar-path))
+          (|<init>(Ljava/lang/String;)V| jf (jstring jar-path))
           jf)))))
-
-(defmethod |getEntry(Ljava/lang/String;)Ljava/util/zip/ZipEntry;| ((this |java/util/jar/JarFile|) name)
-  (if-let ((zf (gethash this *jarfile-zips*)))
-    (when (zip:get-zipfile-entry (lstring name) zf)
-      (let ((entry (%make-java-instance "java/util/zip/ZipEntry")))
-        ;; 0 = "very old", so callers reload rather than trust a stale class.
-        (setf (gethash entry *zipentry-times*) 0)
-        entry))
-    (call-next-method)))
-
-(defmethod |getTime()J| ((this |java/util/zip/ZipEntry|))
-  (multiple-value-bind (time present) (gethash this *zipentry-times*)
-    (if present time -1)))

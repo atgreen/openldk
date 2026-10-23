@@ -51,6 +51,7 @@
     #:read-file-into-byte-vector)
   (:import-from #:serapeum
     #:take
+    #:drop
     #:lastcar
     #:append1)
   (:import-from #:str

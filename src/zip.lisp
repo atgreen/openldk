@@ -64,10 +64,6 @@
   ()
   (:documentation "Stub for java.util.jar.JarInputStream; populated at runtime."))
 
-(defclass |java/util/zip/ZipFile$1| ()
-  ()
-  (:documentation "Stub for ZipFile's JavaUtilZipFileAccess bridge class."))
-
 ;; ZipFile and JarFile take their fields from the JDK's class files, and
 ;; JDK 25's have neither the name nor the jzfile field these methods once
 ;; kept their state in, so the path and the open zip live in a side table.
@@ -97,7 +93,14 @@ SAVE-LISP-AND-DIE, so each one reopens on first use after a restart."
 
 
 (defun |java/util/zip/ZipFile.<clinit>()V| ()
-  "Class initializer for ZipFile (no-op stub).")
+  "Class initializer for ZipFile.  Of the JDK's, keep only the registration
+of the JavaUtilZipFileAccess bridge: JarFile.entries() goes through it."
+  (classload "jdk/internal/access/SharedSecrets")
+  (classload "java/util/zip/ZipFile$1")
+  (let ((access (%make-java-instance "java/util/zip/ZipFile$1")))
+    (|<init>()V| access)
+    (|jdk/internal/access/SharedSecrets.setJavaUtilZipFileAccess(Ljdk/internal/access/JavaUtilZipFileAccess;)V|
+     access)))
 
 (defun |<init>| ()
   "Default constructor stub (no-op).")
@@ -131,35 +134,129 @@ SAVE-LISP-AND-DIE, so each one reopens on first use after a restart."
   (declare (ignore charset))
   (%zipfile-open this name))
 
-(defun %make-zip-entry (name ze)
+(defun %make-zip-entry (zip-file name ze)
   "A java.util.zip.ZipEntry named NAME (a Java string) for the zip library's
-entry ZE."
+entry ZE in ZIP-FILE."
   (classload "java/util/zip/ZipEntry")
   (let ((entry (%make-java-instance "java/util/zip/ZipEntry")))
     (|<init>(Ljava/lang/String;)V| entry name)
     (|setSize(J)| entry (zip::zipfile-entry-size ze))
     (|setCompressedSize(J)V| entry (zip::zipfile-entry-compressed-size ze))
-    entry))
+    ;; A JarFile's entries are JarEntries: JarFile.getJarEntry casts
+    ;; (Groovy's compiler, finding its global transforms in jars).
+    (if (typep zip-file '|java/util/jar/JarFile|)
+        (let ((jar-entry (%make-java-instance "java/util/jar/JarEntry")))
+          (|<init>(Ljava/util/zip/ZipEntry;)V| jar-entry entry)
+          jar-entry)
+        entry)))
 
 (defmethod |getEntry(Ljava/lang/String;)Ljava/util/zip/ZipEntry;| ((this |java/util/zip/ZipFile|) name)
   (when-let (ze (zip:get-zipfile-entry (lstring name) (%zipfile-zip this)))
-    (let ((entry (%make-zip-entry name ze)))
-      ;; A JarFile's entries are JarEntries: JarFile.getJarEntry casts
-      ;; (Groovy's compiler, finding its global transforms in jars).
-      (if (typep this '|java/util/jar/JarFile|)
-          (let ((jar-entry (%make-java-instance "java/util/jar/JarEntry")))
-            (|<init>(Ljava/util/zip/ZipEntry;)V| jar-entry entry)
-            jar-entry)
-          entry))))
+    (%make-zip-entry this name ze)))
+
+(defun %zipfile-entry-list (zip-file)
+  "A java.util.ArrayList of ZIP-FILE's entries."
+  (classload "java/util/ArrayList")
+  (let ((list (%make-java-instance "java/util/ArrayList")))
+    (|<init>()V| list)
+    (zip:do-zipfile-entries (name ze (%zipfile-zip zip-file))
+      (|add(Ljava/lang/Object;)| list (%make-zip-entry zip-file (jstring name) ze)))
+    list))
 
 (defmethod |entries()Ljava/util/Enumeration;| ((this |java/util/zip/ZipFile|))
   "An Enumeration of the entries (Scala's compiler lists jars this way)."
+  (|java/util/Collections.enumeration(Ljava/util/Collection;)Ljava/util/Enumeration;|
+   (%zipfile-entry-list this)))
+
+(defmethod |stream()Ljava/util/stream/Stream;| ((this |java/util/zip/ZipFile|))
+  (|stream()Ljava/util/stream/Stream;| (%zipfile-entry-list this)))
+
+;; JarFile reaches ZipFile's internals through the JavaUtilZipFileAccess
+;; bridge (ZipFile$1), whose methods call these private ZipFile methods.
+;; The JDK's read state that only its native zip code fills in, so serve
+;; them from the zip library (Spring's classpath scanning enumerates jars
+;; with JarFile.entries()).  jarEntries and jarStream list the entries
+;; directly: JarFile's entries() and stream() call back through the bridge.
+(defmethod |jarEntries()Ljava/util/Enumeration;| ((this |java/util/zip/ZipFile|))
+  (|java/util/Collections.enumeration(Ljava/util/Collection;)Ljava/util/Enumeration;|
+   (%zipfile-entry-list this)))
+
+(defmethod |jarStream()Ljava/util/stream/Stream;| ((this |java/util/zip/ZipFile|))
+  (|stream()Ljava/util/stream/Stream;| (%zipfile-entry-list this)))
+
+(defmethod |entryNameStream()Ljava/util/stream/Stream;| ((this |java/util/zip/ZipFile|))
   (classload "java/util/ArrayList")
   (let ((list (%make-java-instance "java/util/ArrayList")))
     (|<init>()V| list)
     (zip:do-zipfile-entries (name ze (%zipfile-zip this))
-      (|add(Ljava/lang/Object;)| list (%make-zip-entry (jstring name) ze)))
-    (|java/util/Collections.enumeration(Ljava/util/Collection;)Ljava/util/Enumeration;| list)))
+      (declare (ignore ze))
+      (|add(Ljava/lang/Object;)| list (jstring name)))
+    (|stream()Ljava/util/stream/Stream;| list)))
+
+(defun %zip-manifest-name (zip-file)
+  "The name of ZIP-FILE's META-INF/MANIFEST.MF entry, ignoring case, or NIL."
+  (zip:do-zipfile-entries (name ze (%zipfile-zip zip-file))
+    (declare (ignore ze))
+    (when (string-equal name "META-INF/MANIFEST.MF")
+      (return-from %zip-manifest-name name)))
+  nil)
+
+(defun %zip-signature-related-names (zip-file)
+  "The names of ZIP-FILE's signature-related files, as ZipFile's Source
+finds them: META-INF/*.SF, *.RSA, *.DSA, *.EC and SIG-*, not in subdirectories."
+  (let ((names nil))
+    (zip:do-zipfile-entries (name ze (%zipfile-zip zip-file))
+      (declare (ignore ze))
+      (when (and (> (length name) 9)
+                 (string-equal "META-INF/" name :end2 9)
+                 (not (find #\/ name :start 9)))
+        (let ((base (drop 9 name)))
+          (when (or (some (lambda (ext) (ends-with? ext base :ignore-case t))
+                          '(".SF" ".RSA" ".DSA" ".EC"))
+                    (starts-with? "SIG-" base :ignore-case t))
+            (push name names)))))
+    (nreverse names)))
+
+(defmethod |getManifestNum()I| ((this |java/util/zip/ZipFile|))
+  (%zip-manifest-count this))
+
+(defmethod |getManifestName(Z)Ljava/lang/String;| ((this |java/util/zip/ZipFile|) only-if-signature-related-files)
+  (let ((name (%zip-manifest-name this)))
+    (when (and name
+               (or (eql only-if-signature-related-files 0)
+                   (%zip-signature-related-names this)))
+      (jstring name))))
+
+(defmethod |getManifestAndSignatureRelatedFiles()Ljava/util/List;| ((this |java/util/zip/ZipFile|))
+  (classload "java/util/ArrayList")
+  (let ((list (%make-java-instance "java/util/ArrayList")))
+    (|<init>()V| list)
+    (dolist (name (append (when-let ((manifest (%zip-manifest-name this))) (list manifest))
+                          (%zip-signature-related-names this)))
+      (|add(Ljava/lang/Object;)| list (jstring name)))
+    list))
+
+(defmethod |getMetaInfVersions(Ljava/lang/String;)Ljava/util/BitSet;| ((this |java/util/zip/ZipFile|) name)
+  "The versions N with a META-INF/versions/N/NAME entry."
+  (classload "java/util/BitSet")
+  (let ((versions (%make-java-instance "java/util/BitSet"))
+        (name (lstring name)))
+    (|<init>()V| versions)
+    (zip:do-zipfile-entries (entry-name ze (%zipfile-zip this))
+      (declare (ignore ze))
+      (when (and (starts-with? "META-INF/versions/" entry-name)
+                 (ends-with? (concatenate 'string "/" name) entry-name))
+        (let ((version (parse-integer entry-name :start 18 :junk-allowed t)))
+          (when (and version
+                     (string= entry-name (format nil "META-INF/versions/~D/~A" version name)))
+            (|set(I)V| versions version)))))
+    versions))
+
+;; This one reads ZipFile's state itself rather than calling a method.
+(setf (gethash "java/util/zip/ZipFile$1.startsWithLocHeader(Ljava/util/zip/ZipFile;)Z" *native-overrides*)
+      (lambda (this zip-file)
+        (declare (ignore this))
+        (if (%zipfile-zip zip-file) 1 0)))
 
 (defmethod |size()I| ((this |java/util/zip/ZipFile|))
   (let ((count 0))
@@ -215,22 +312,6 @@ entry ZE."
       (when (string-equal entry-name "META-INF/MANIFEST.MF")
         (incf count)))
     count))
-
-(defmethod |getManifestNum(Ljava/util/jar/JarFile;)I| ((this |java/util/zip/ZipFile$1|) jar-file)
-  (declare (ignore this))
-  (%zip-manifest-count jar-file))
-
-(defmethod |getManifestNum(Ljava/util/jar/JarFile;)I| ((this t) jar-file)
-  (declare (ignore this))
-  (%zip-manifest-count jar-file))
-
-(defmethod |startsWithLocHeader(Ljava/util/zip/ZipFile;)Z| ((this |java/util/zip/ZipFile$1|) zip-file)
-  (declare (ignore this))
-  (not (null (%zipfile-zip zip-file))))
-
-(defmethod |startsWithLocHeader(Ljava/util/zip/ZipFile;)Z| ((this t) zip-file)
-  (declare (ignore this))
-  (not (null (%zipfile-zip zip-file))))
 
 (defmethod |close()V| ((this |java/util/zip/ZipFile|))
   (when-let ((zip (%zipfile-zip this)))

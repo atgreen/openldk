@@ -193,12 +193,7 @@ interrupts).  Usage on a hung process:  touch /tmp/openldk-dump-trigger"
              (string= (slot-value method 'descriptor) "(Lcom/sun/tools/javac/code/Type;)V"))
         ;; MethodHandles$Lookup security check bypassed to allow lambda metafactory
         (and (string= class-name "java/lang/invoke/MethodHandles$Lookup")
-             (string= (slot-value method 'name) "checkUnprivilegedlookupClass"))
-        ;; Generic type methods on Method - native stubs return non-generic types
-        (and (string= class-name "java/lang/reflect/Method")
-             (member (slot-value method 'name)
-                     '("getGenericReturnType" "getGenericParameterTypes")
-                     :test #'string=)))))
+             (string= (slot-value method 'name) "checkUnprivilegedlookupClass")))))
 
 (defun %find-branch-targets (code length)
   "Pre-scan bytecode to identify all PCs that are branch targets.
@@ -1274,7 +1269,13 @@ classes with the same name."
     (let ((compilation-completed nil))
       (unwind-protect
            (handler-case
-               (progn
+               (handler-bind
+                   ((error (lambda (c)
+                             (declare (ignore c))
+                             ;; Print the backtrace where the error is
+                             ;; signalled, before HANDLER-CASE unwinds it.
+                             (when *debug-codegen*
+                               (sb-debug:print-backtrace :stream *error-output* :count 60)))))
                  (when (gethash "Code" (slot-value method 'attributes)) ; otherwise it is abstract
                    (let* ((compile-start-time (get-internal-real-time))
                           (code-attribute (gethash "Code" (slot-value method 'attributes)))
@@ -1320,8 +1321,6 @@ classes with the same name."
              (error (c)
                ;; Compilation failed (IR translation, codegen, or eval error).
                (format *error-output* "~&;; JIT-ERROR in ~A: ~A~%" method-key c)
-               (when *debug-codegen*
-                 (sb-debug:print-backtrace :stream *error-output* :count 60))
                (force-output *error-output*)
                (%install-jit-error-stub class method method-key)
                (setf compilation-completed t)))
@@ -2283,7 +2282,8 @@ timeout with LDK_THREAD_WAIT_SECONDS=0."
         (let ((java-threads (append platform-threads fiber-threads)))
           (cond
             ((null java-threads)
-             (sleep 0.1)
+             ;; No sleep first: every non-daemon thread has ended, so what
+             ;; they wrote is in the stream already.
              (finish-output)
              (return))
             ((and deadline (> (get-internal-real-time) deadline))
