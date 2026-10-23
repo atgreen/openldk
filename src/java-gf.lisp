@@ -71,7 +71,8 @@ calling BODY-SYMBOL."
       (setf (gethash method *method-bodies*) (fdefinition body-symbol)))))
 
 (defun %compute-java-effective-method (gf class)
-  "Compute an effective method function for GF dispatching on CLASS.
+  "Compute an effective method function, called with GF's arguments, for GF
+dispatching on CLASS.
 Returns (values FUNCTION APPLICABLE-P); when APPLICABLE-P is NIL the
 function signals no-applicable-method and must not be cached (the class
 may still be a bare stub that a later classload fleshes out)."
@@ -86,7 +87,7 @@ may still be a bare stub that a later classload fleshes out)."
       (if (null methods)
           ;; No applicable methods — signal no-applicable-method
           ;; (preserves null → NullPointerException via native.lisp)
-          (values (lambda (args)
+          (values (lambda (&rest args)
                     (apply #'no-applicable-method gf args))
                   nil)
           ;; Partition into :around and primary methods
@@ -107,14 +108,14 @@ may still be a bare stub that a later classload fleshes out)."
                             (gethash (first primary) *method-bodies*))))
             (when body
               (return-from %compute-java-effective-method
-                (values (lambda (args) (apply body args)) t)))
+                (values body t)))
             (if (null chain)
-                (values (lambda (args)
+                (values (lambda (&rest args)
                           (apply #'no-applicable-method gf args))
                         nil)
                 (let ((first-mf (closer-mop:method-function (first chain)))
                       (rest-chain (rest chain)))
-                  (values (lambda (args)
+                  (values (lambda (&rest args)
                             (funcall first-mf args rest-chain))
                           t))))))))
 
@@ -151,18 +152,35 @@ flushing them wholesale here made every lazy class load recompute hot
 dispatch (equals/hashCode/toString) from scratch."
   (let ((cache (java-gf-dispatch-cache gf))
         (lock (java-gf-cache-lock gf)))
-    (lambda (&rest args)
-      (let* ((receiver (first args))
-             (class (class-of receiver))
-             (emfun (gethash class cache)))
-        (if emfun
-            (funcall emfun args)
-            (multiple-value-bind (new-emfun applicable-p)
-                (%compute-java-effective-method gf class)
-              (when applicable-p
-                (bordeaux-threads:with-lock-held (lock)
-                  (setf (gethash class cache) new-emfun)))
-              (funcall new-emfun args)))))))
+    (flet ((miss (args)
+             ;; Compute and cache the effective method for the receiver's
+             ;; class, then apply it.
+             (let ((class (class-of (first args))))
+               (multiple-value-bind (emfun applicable-p)
+                   (%compute-java-effective-method gf class)
+                 (when applicable-p
+                   (bordeaux-threads:with-lock-held (lock)
+                     (setf (gethash class cache) emfun)))
+                 (apply emfun args)))))
+      ;; One discriminating function per arity up to four arguments -- most
+      ;; Java methods' -- so a call conses no argument list; a cached body
+      ;; (see %COMPUTE-JAVA-EFFECTIVE-METHOD) is then called as is.
+      (macrolet ((dispatcher (&rest params)
+                   `(lambda ,params
+                      (let ((emfun (gethash (class-of ,(first params)) cache)))
+                        (if emfun
+                            (funcall emfun ,@params)
+                            (miss (list ,@params)))))))
+        (case (length (closer-mop:generic-function-lambda-list gf))
+          (1 (dispatcher a))
+          (2 (dispatcher a b))
+          (3 (dispatcher a b c))
+          (4 (dispatcher a b c d))
+          (t (lambda (&rest args)
+               (let ((emfun (gethash (class-of (first args)) cache)))
+                 (if emfun
+                     (apply emfun args)
+                     (miss args))))))))))
 
 
 ;;; Method names carry their return types, as the JVM's do, but some
