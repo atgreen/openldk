@@ -346,6 +346,10 @@ Returns a cons (method-fn . next-methods)."
              (next (rest tail)))
         (cons (closer-mop:method-function method) next)))))
 
+(defvar *invoke-special-cache* (make-hash-table :test 'eq :weakness :key :synchronized t)
+  "Plain generic function -> owner class -> (methods . entry), INVOKE-SPECIAL's
+cache for generic functions that aren't JAVA-GENERIC-FUNCTIONs.")
+
 (defun invoke-special (method-symbol owner-symbol args)
   "Invoke METHOD-SYMBOL on ARGS using Java invokespecial semantics.
 OWNER-SYMBOL designates the declaring class of the target method.
@@ -362,6 +366,26 @@ the normal call-next-method chain for the owner's superclasses."
           (when entry
             (bordeaux-threads:with-lock-held ((java-gf-cache-lock gf))
               (setf (gethash owner-class cache) entry))))
+        (when entry
+          (return-from invoke-special
+            (funcall (car entry) args (cdr entry))))))
+    ;; A plain generic function (a hand-written native's): its entries are
+    ;; cached with the method list they were computed from, which ADD-METHOD
+    ;; and REMOVE-METHOD replace.  Looking every call up in full -- Kotlin's
+    ;; compiler makes 17,000 such calls to String constructors in one
+    ;; compilation -- took a tenth of its time.
+    (when (typep gf 'standard-generic-function)
+      (let* ((methods (closer-mop:generic-function-methods gf))
+             (cache (or (gethash gf *invoke-special-cache*)
+                        (setf (gethash gf *invoke-special-cache*)
+                              (make-hash-table :test 'eq :synchronized t))))
+             (cached (gethash owner-class cache))
+             (entry (if (and cached (eq (car cached) methods))
+                        (cdr cached)
+                        (let ((entry (%compute-invoke-special-entry gf owner-class (length args))))
+                          (when entry
+                            (setf (gethash owner-class cache) (cons methods entry)))
+                          entry))))
         (when entry
           (return-from invoke-special
             (funcall (car entry) args (cdr entry))))))
