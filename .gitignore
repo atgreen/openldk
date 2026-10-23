@@ -62,5 +62,5 @@ data/
 /sbcl-abcl
 /sbcl-polyglot
 
-# Spring Boot benchmark builds (bench/spring-boot/run.sh)
-/bench/spring-boot/target/
+# Startup benchmark builds (bench/*/run.sh)
+/bench/*/target/
