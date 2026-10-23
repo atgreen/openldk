@@ -545,6 +545,72 @@ lambda also implements the marker interfaces they name (Serializable)."
                    (incf skip -1))))
     (- (length (methods ldk-class)) (or skip 0))))
 
-(defmethod |getProtectionDomain0()| ((clazz |java/lang/Class|))
-  nil)
+(defvar *classpath-protection-domains* (make-hash-table :test #'equal :synchronized t)
+  "Code source location -> the ProtectionDomain of the classpath classes
+loaded from it.")
+
+(defun %classpath-code-source-location (url)
+  "The code source location of a class whose class file has URL: the jar
+of a jar: URL, or the classpath directory of a file: URL."
+  (let ((bang (search "!/" url)))
+    (if (and bang (starts-with? "jar:" url))
+        (subseq url 4 bang)
+        url)))
+
+;; The protection domain a class loader defined CLAZZ with, or, for an
+;; application class from the classpath, one whose CodeSource is its jar or
+;; directory, as the JVM's application class loader gives (Quarkus finds its
+;; own jar this way).  NIL for JDK classes.
+(defun %class-protection-domain (clazz)
+  (or (gethash clazz *protection-domains*)
+      (let* ((lclass (and (eq 0 (|isArray()Z| clazz))
+                          (eq 0 (|isPrimitive()Z| clazz))
+                          (get-ldk-class-for-java-class clazz)))
+             (name (and lclass (name lclass)))
+             (url (and name
+                       (not (jdk-class-p name))
+                       (not (%user-ldk-loader-p (and (slot-boundp lclass 'ldk-loader)
+                                                     (slot-value lclass 'ldk-loader))))
+                       (get-resource-url-on-classpath (format nil "~A.class" name)))))
+        (when url
+          (let* ((class-file (format nil "~A.class" name))
+                 (location (%classpath-code-source-location
+                            (if (ends-with? class-file url)
+                                (subseq url 0 (- (length url) (length class-file)))
+                                url))))
+            (or (gethash location *classpath-protection-domains*)
+                (setf (gethash location *classpath-protection-domains*)
+                      (let ((code-source (%make-java-instance "java/security/CodeSource"))
+                            (domain (%make-java-instance "java/security/ProtectionDomain")))
+                        (|<init>(Ljava/net/URL;[Ljava/security/cert/Certificate;)V|
+                         code-source (%make-url-from-string location) nil)
+                        (|<init>(Ljava/security/CodeSource;Ljava/security/PermissionCollection;)V|
+                         domain code-source nil)
+                        domain))))))))
+
+(defvar *all-permission-domain* nil
+  "Class.Holder.allPermDomain's counterpart: the domain of classes that
+have none.")
+
+;; Class.getProtectionDomain reads the protectionDomain field the JVM sets
+;; when it defines a class; OpenLDK fills it in on first use.
+(setf (gethash "java/lang/Class.getProtectionDomain()Ljava/security/ProtectionDomain;" *native-overrides*)
+      (lambda (clazz)
+        (or (and (slot-exists-p clazz '|protectionDomain|)
+                 (slot-value clazz '|protectionDomain|))
+            (let ((domain (%class-protection-domain clazz)))
+              (when (and domain (slot-exists-p clazz '|protectionDomain|))
+                (setf (slot-value clazz '|protectionDomain|) domain))
+              domain)
+            *all-permission-domain*
+            (setf *all-permission-domain*
+                  (let ((permissions (%make-java-instance "java/security/Permissions"))
+                        (all (%make-java-instance "java/security/AllPermission"))
+                        (domain (%make-java-instance "java/security/ProtectionDomain")))
+                    (|<init>()V| permissions)
+                    (|<init>()V| all)
+                    (|add(Ljava/security/Permission;)V| permissions all)
+                    (|<init>(Ljava/security/CodeSource;Ljava/security/PermissionCollection;)V|
+                     domain nil permissions)
+                    domain)))))
 

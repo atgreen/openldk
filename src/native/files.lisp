@@ -72,6 +72,18 @@
 (defun |java/net/InetAddressImplFactory.isIPv6Supported()| ()
   0)
 
+;; JDK 25 asks InetAddress itself.  OpenLDK implements Inet4AddressImpl
+;; only, so it reports IPv4 and no IPv6, as InetAddressImplFactory does.
+(defun |java/net/InetAddress.isIPv4Available()Z| ()
+  1)
+
+(defun |java/net/InetAddress.isIPv6Supported()Z| ()
+  0)
+
+;; Native field-ID caching, as Inet4Address.init.
+(defun |java/net/Inet6Address.init()V| ()
+  nil)
+
 (defun |java/awt/image/IndexColorModel.initIDs()V| ()
   nil)
 

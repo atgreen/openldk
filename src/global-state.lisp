@@ -386,6 +386,9 @@ loaders, whose classes are not in the global or app loader tables."
 ;; (e.g. "java/lang/System.console()Ljava/io/Console;").
 (defvar *native-overrides* (make-hash-table :test #'equal))
 
+(defvar *protection-domains* (make-hash-table :test #'eq :weakness :key :synchronized t)
+  "java.lang.Class -> the ProtectionDomain its class loader defined it with.")
+
 ;; JVM field shadowing: a class may declare an instance field with the same
 ;; name as one in a superclass (javac's synthetic this$0 outer references do
 ;; this routinely); they are distinct fields resolved by declaring class.

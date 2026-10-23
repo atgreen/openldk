@@ -142,8 +142,7 @@
 
 (defmethod |defineClass1(Ljava/lang/String;[BIILjava/security/ProtectionDomain;Ljava/lang/String;)|
     ((class-loader |java/lang/ClassLoader|) class-name data offset length protection-domain source)
-  (declare (ignore source)
-           (ignore protection-domain))
+  (declare (ignore source))
   (let* ((ldk-loader (get-ldk-loader-for-java-loader class-loader))
          (stream (make-instance 'byte-array-input-stream :array data :start offset :end (+ offset length)))
          (result (%classload-from-stream (if class-name
@@ -154,6 +153,8 @@
       (let ((exc (%make-java-instance "java/lang/NoClassDefFoundError")))
         (|<init>(Ljava/lang/String;)V| exc class-name)
         (error (%lisp-condition exc))))
+    (when protection-domain
+      (setf (gethash (java-class result) *protection-domains*) protection-domain))
     (java-class result)))
 
 (defmethod |allocateInstance(Ljava/lang/Class;)Ljava/lang/Object;| ((unsafe |sun/misc/Unsafe|) class)
@@ -554,8 +555,13 @@ Lookup.checkAccess is bypassed."
 ;; own package-private `head` via findVarHandle. Force our trusted Lookup through
 ;; *native-overrides* so it wins over the compiled body. (Calls the helper, not
 ;; the same-named native, to avoid overriding itself into infinite recursion.)
+;; Its lookupClass is the caller's class: Lookup.findClass loads through that
+;; class's loader (JBoss Logging finds its generated loggers so).
+(defun %methodhandles-lookup ()
+  (%make-trusted-lookup (%java-caller-class '%methodhandles-lookup)))
+
 (setf (gethash "java/lang/invoke/MethodHandles.lookup()Ljava/lang/invoke/MethodHandles$Lookup;" *native-overrides*)
-      (lambda () (%make-trusted-lookup)))
+      (lambda () (%methodhandles-lookup)))
 
 (defun |java/lang/invoke/MethodHandles$Lookup.lookupClass()Ljava/lang/Class;| (this)
   "Return the class this lookup was created for."
