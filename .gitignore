@@ -61,3 +61,6 @@ data/
 /sbcl-groovy
 /sbcl-abcl
 /sbcl-polyglot
+
+# Spring Boot benchmark builds (bench/spring-boot/run.sh)
+/bench/spring-boot/target/
