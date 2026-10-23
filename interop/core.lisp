@@ -505,6 +505,15 @@ calling INIT, which typically starts a language and evaluates some code so
 its Java methods are compiled into the image.  A language that takes
 minutes to start (Clojure) is then ready in under a second."
   (when init (cl:funcall init))
+  ;; JDK code programs run once (SecureRandom, time zones, String.format...)
+  ;; compiled into the image too, its per-run state reset; see
+  ;; OPENLDK::%WARM-UP-JDK.  The classpath the languages built stays.
+  (when *runtime-started*
+    (openldk::%warm-up-jdk
+     (lambda (directory)
+       (add-to-classpath directory)
+       (java-static "openldk.warmup.JdkWarmup" "main([Ljava/lang/String;)V"
+                    (make-java-array-of "java.lang.String" '())))))
   (pushnew '%restart-runtime sb-ext:*init-hooks*)
   ;; OpenLDK's systems are part of the image now.  Reloading one into it --
   ;; as a system that :DEFSYSTEM-DEPENDS-ON a language would, once any
