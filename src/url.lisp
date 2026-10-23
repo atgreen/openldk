@@ -122,6 +122,13 @@
         ;; Fall back to Java implementation
         (call-next-method))))
 
+(defun %special-file-p (path)
+  "True if PATH names something other than a regular file or directory."
+  (handler-case
+      (let ((mode (sb-posix:stat-mode (sb-posix:stat path))))
+        (not (or (sb-posix:s-isreg mode) (sb-posix:s-isdir mode))))
+    (sb-posix:syscall-error () nil)))
+
 (defun %open-url-stream-1 (url)
   "Open an InputStream for URL when its protocol is one we serve natively
 (jar:, file:, jrt:).  Returns the stream, NIL for a servable protocol whose
@@ -136,10 +143,18 @@ target does not exist, or :FALLTHROUGH for other protocols."
       ;; Handle file: URLs
       ((starts-with? "file:" url-string)
        (let ((path (subseq url-string 5)))  ; Skip "file:"
-         (when (uiop:file-exists-p path)
-           (make-instance '<resource-input-stream>
-                          :lisp-stream (flexi-streams:make-in-memory-input-stream
-                                        (read-file-into-byte-vector path))))))
+         (cond
+           ((%special-file-p path)
+            ;; A device or FIFO -- file:/dev/random, which SecureRandom's
+            ;; seed generator reads -- never ends, so it can't be read into
+            ;; memory: stream it, as a JVM's FileURLConnection does.
+            (let ((stream (%make-java-instance "java/io/FileInputStream")))
+              (|<init>(Ljava/lang/String;)V| stream (jstring path))
+              stream))
+           ((uiop:file-exists-p path)
+            (make-instance '<resource-input-stream>
+                           :lisp-stream (flexi-streams:make-in-memory-input-stream
+                                         (read-file-into-byte-vector path)))))))
       ;; Handle jrt: URLs (JDK jimage resources: jrt:/<module>/<resource>)
       ((starts-with? "jrt:" url-string)
        (let* ((rest (subseq url-string 4))            ; drop "jrt:"
