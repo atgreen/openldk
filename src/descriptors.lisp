@@ -246,8 +246,13 @@ line's code naming an earlier line's class.  NIL outside a compilation."
          (%class-java-loader (java-class class)))))
 
 (defun %descriptor-class (name)
-  "The java.lang.Class for the class or array type NAME in a descriptor."
-  (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;| (jstring name) nil *descriptor-loader* nil))
+  "The java.lang.Class for the class or array type NAME in a descriptor.
+JDK classes come from the boot loader whatever *DESCRIPTOR-LOADER* is: a
+user class loader's own Java code (reading class bytes with NIO, say) runs
+while that loader is bound, and asking the loader for JDK classes there
+recurses into it."
+  (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;|
+   (jstring name) nil (unless (jdk-class-p name) *descriptor-loader*) nil))
 
 (defun %bin-type-name-to-class (bin-type-name)
   (let ((ch (char bin-type-name 0)))

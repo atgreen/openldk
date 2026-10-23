@@ -53,7 +53,9 @@
 ;;;    through module-declared services, which OpenLDK does not support, so
 ;;;    the "jrt" scheme is never found.  Override it to return the default
 ;;;    provider plus a JrtFileSystemProvider (whose getFileSystem lazily
-;;;    creates the filesystem, so no newFileSystem call is needed).
+;;;    creates the filesystem, so no newFileSystem call is needed) and
+;;;    jdk.zipfs's ZipFileSystemProvider, the "jar" scheme (SmallRye Config,
+;;;    and so Quarkus, reads jar: paths through it).
 ;;;
 ;;; 2. NativeImageBuffer.getNativeMap(path) is the native mmap that
 ;;;    libjimage provides in HotSpot (used when jdk.image.use.jvm.map is
@@ -93,6 +95,16 @@ cached filesystem holds process-local state (mmapped buffers, channels).")
                       (condition (c)
                         (format *error-output*
                                 "~&; Warning: jrt FileSystemProvider unavailable: ~A~%" c)))
+                    ;; The jar: provider.
+                    (handler-case
+                        (progn
+                          (classload "jdk/nio/zipfs/ZipFileSystemProvider")
+                          (let ((zipfs (%make-java-instance "jdk/nio/zipfs/ZipFileSystemProvider")))
+                            (|<init>()V| zipfs)
+                            (|add(Ljava/lang/Object;)| list zipfs)))
+                      (condition (c)
+                        (format *error-output*
+                                "~&; Warning: jar FileSystemProvider unavailable: ~A~%" c)))
                     list)))))
 
 (defvar *jimage-native-maps* (make-hash-table :test #'equal)

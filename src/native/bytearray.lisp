@@ -147,10 +147,13 @@ TimeZone.getTimeZone does not recognize, silently defaulting to GMT."
            (ignore name))
   (unimplemented "java/lang/Class$Atomic.objectFieldOffset"))
 
+;; A static field's base is its class's static storage object (NIL only
+;; while that does not exist yet): Unsafe accessors given a NIL base find it
+;; themselves, but compare-and-set (sun.misc.Unsafe's own
+;; trySetMemoryAccessWarned, which Quarkus calls) needs the object.
 (defmethod |staticFieldBase(Ljava/lang/reflect/Field;)Ljava/lang/Object;| ((unsafe |sun/misc/Unsafe|) field)
-  (declare (ignore unsafe)
-           (ignore field))
-  nil)
+  (declare (ignore unsafe))
+  (%unsafe-static-storage field :errorp nil))
 
 (defmethod |staticFieldOffset(Ljava/lang/reflect/Field;)J| ((unsafe |sun/misc/Unsafe|) field)
   (declare (ignore unsafe))
@@ -161,8 +164,8 @@ TimeZone.getTimeZone does not recognize, silently defaulting to GMT."
   (%register-field-offset field))
 
 (defmethod |staticFieldBase0(Ljava/lang/reflect/Field;)Ljava/lang/Object;| ((unsafe |jdk/internal/misc/Unsafe|) field)
-  (declare (ignore unsafe field))
-  nil)
+  (declare (ignore unsafe))
+  (%unsafe-static-storage field :errorp nil))
 
 (defmethod |objectFieldOffset0(Ljava/lang/reflect/Field;)J| ((unsafe |jdk/internal/misc/Unsafe|) field)
   (declare (ignore unsafe))

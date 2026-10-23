@@ -55,13 +55,15 @@ Every method a warmup calls is compiled into the image, so pick warmups that
 exercise the code paths real runs will take.  Each warmup is limited to
 `:timeout` seconds (600 by default).  A warmup that throws, times out or
 calls `System.exit` is reported in the build log, and the build carries on.
+The JDK's shutdown state that `System.exit` changes (its shutdown hooks
+have run, and new ones are refused) is put back after each warmup.
 
 **Warm code, cold state.**  Running `main` at build time also runs the
 program's static initializers and leaves whatever state `main` built in
 static fields.  If that were saved, `main` in the image would start where
 the warmup ended: a singleton would already exist, a registry would already
-be full.  So by default, after warming up, `dump-warm-image` resets every
-class from the application classpath: its static fields go back to their
+be full.  So by default, after each warmup run, `dump-warm-image` resets
+every class from the application classpath: its static fields go back to their
 initial values and its `<clinit>` runs again on first use.  Compiled
 methods are kept.  JDK classes keep their state, as they do in every image.
 
@@ -193,8 +195,17 @@ application and times them against HotSpot and a GraalVM native image (see
 `bench/spring-boot/README.md`).  Both use `:reset-classes nil`.  One warms up
 `BootApp` and starts Boot from scratch on every run (4.3 s); the other keeps
 the context its first warmup started, so a run only executes the
-application's `CommandLineRunner`s (66 ms, against 64 ms for the native
+application's `CommandLineRunner`s (82 ms, against 72 ms for the native
 image).
+
+### Example: Quarkus
+
+`make bench-quarkus` does the same for a small Quarkus application (see
+`bench/quarkus/README.md`).  Quarkus's static state outlives a run, so its
+warm image resets the application's classes (the default), and Quarkus
+starts from scratch on every run; its snapshot image, like Spring Boot's,
+keeps what its first warmup started (1.5 s and 72 ms, against 1.2 s on
+HotSpot and 20 ms for the native image).
 
 ### Example: `javacl`
 

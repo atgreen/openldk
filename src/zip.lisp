@@ -60,10 +60,6 @@
   ()
   (:documentation "Stub for java.util.jar.JarFile; populated at runtime."))
 
-(defclass |java/util/jar/JarInputStream| ()
-  ()
-  (:documentation "Stub for java.util.jar.JarInputStream; populated at runtime."))
-
 ;; ZipFile and JarFile take their fields from the JDK's class files, and
 ;; JDK 25's have neither the name nor the jzfile field these methods once
 ;; kept their state in, so the path and the open zip live in a side table.
@@ -275,13 +271,6 @@ finds them: META-INF/*.SF, *.RSA, *.DSA, *.EC and SIG-*, not in subdirectories."
      :component-class (%get-java-class-by-bin-name "java/lang/String")
      :initial-contents meta-entries)))
 
-(defmethod |<init>(Ljava/io/InputStream;Z)V| ((this |java/util/jar/JarInputStream|) is verify)
-  (with-slots (|in|) this
-    (setf |in| (zip::open-zipfile-from-stream (make-instance '<java-input-stream> :java-stream is)))))
-
-(defmethod |close()V| ((this |java/util/jar/JarInputStream|))
-  (zip:close-zipfile (slot-value this '|in|)))
-
 (defclass/std <zip-input-stream> (|java/io/InputStream|)
   ((zip-file)
    (entry)
@@ -317,40 +306,6 @@ finds them: META-INF/*.SF, *.RSA, *.DSA, *.EC and SIG-*, not in subdirectories."
   (when-let ((zip (%zipfile-zip this)))
     (zip:close-zipfile zip)
     (remhash this *zipfile-state*)))
-
-(defclass/std <buffer-input-stream> (|java/io/InputStream|)
-  ((buf)
-   (pos :std 0))
-  (:documentation "Simple in-memory input stream for byte buffers."))
-
-(defmethod |read()| ((bis <buffer-input-stream>))
-  (with-slots (pos buf) bis
-    (if (= pos (length buf))
-        -1
-        (let ((byte (aref buf pos)))
-          (incf (slot-value bis 'pos))
-          byte))))
-
-(defmethod |readBytes([BII)| ((bis <buffer-input-stream>) byte-array offset length)
-  (let ((buf (slot-value bis 'buf))
-        (bytes-read 0))
-    (with-slots (pos) bis
-      (loop for i from offset below (+ offset length)
-            for byte = (aref buf pos)
-            do (progn
-                 (incf pos)
-                 (incf bytes-read)
-                 (setf (jaref byte-array (+ offset pos)) byte)))
-      bytes-read)))
-
-(defmethod |getManifest()Ljava/util/jar/Manifest;| ((this |java/util/jar/JarInputStream|))
-  (classload "java/util/jar/Manifest")
-  (let ((buffer (zip:zipfile-entry-contents (zip:get-zipfile-entry "META-INF/MANIFEST.MF"
-                                                                   (slot-value this '|in|))))
-        (manifest (%make-java-instance "java/util/jar/Manifest")))
-    (|<init>()V| manifest)
-    (setf (slot-value this '|man|) manifest)
-    (|read(Ljava/io/InputStream;)| manifest (make-instance '<buffer-input-stream> :buf buffer))))
 
 (defvar *crc-table*
   (make-array

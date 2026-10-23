@@ -46,23 +46,28 @@ beans rather than 65, which is expected.
 
 ## Results on the development host
 
-16 vCPUs (2.6 GHz), JDK 25.0.4 (Fedora OpenJDK), GraalVM CE 25.0.4, load
-average 5 to 6 from other work, 20 runs each:
+A 16-CPU Xeon E5-2670 (2.6 GHz), JDK 25.0.4.1 (Fedora OpenJDK), GraalVM CE
+25.0.4.1.1, load average 5 to 8 from other work, 20 runs each:
 
 | Variant | Median | Peak RSS | On disk |
 |---|---|---|---|
-| HotSpot, fat jar | 3.8 s | 298 MB | 13 MB jar |
-| HotSpot, extracted jar | 2.9 s | 229 MB | |
-| HotSpot + Spring AOT | 2.2 s | 191 MB | |
-| HotSpot + JDK AOT cache | 2.9 s | 204 MB | 45 MB cache |
-| HotSpot + Spring AOT + AOT cache | 2.5 s | 169 MB | 42 MB cache |
-| GraalVM native image | 64 ms | 41 MB | 43 MB |
-| OpenLDK warm image | 4.3 s | 588 MB | 624 MB |
-| OpenLDK snapshot image | 66 ms | 219 MB | 622 MB |
+| HotSpot, fat jar | 3.4 s | 261 MB | 13 MB jar |
+| HotSpot, extracted jar | 2.9 s | 224 MB | |
+| HotSpot + Spring AOT | 2.5 s | 195 MB | |
+| HotSpot + JDK AOT cache | 1.4 s | 182 MB | 45 MB cache |
+| HotSpot + Spring AOT + AOT cache | 955 ms | 160 MB | 42 MB cache |
+| GraalVM native image | 72 ms | 41 MB | 45 MB |
+| OpenLDK warm image | 4.3 s | 496 MB | 628 MB |
+| OpenLDK snapshot image | 82 ms | 177 MB | 624 MB |
 
-A HotSpot run spends about 13 s of CPU in 4.4 s, mostly the JIT compiling
+A HotSpot run spends about 13 s of CPU in 3 to 4 s, mostly the JIT compiling
 Spring's startup path, so HotSpot's times depend on how busy the machine is;
 note the load averages the script prints.  The native image and the OpenLDK
-snapshot barely changed with load.  The native image still runs Boot's
+snapshot barely change with load.  The native image still runs Boot's
 startup, compiled ahead of time; the snapshot skips it, and most of its time
-is mapping the 622 MB image (a bare `openldk -version` takes about 48 ms).
+is mapping the 624 MB image (a bare `openldk -version` takes about 48 ms).
+
+A JDK AOT cache is only used with the classpath it was trained on, as
+given: the script trains each with the exact command line it times, and
+runs them with `-XX:AOTMode=on` so that a rejected cache fails the run
+instead of quietly running without it.

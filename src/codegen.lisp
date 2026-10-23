@@ -1241,11 +1241,40 @@ type must be assignable to the target's component type.  Primitive
 component types must match exactly (short[] is not an int[])."
   (and (typep objref 'java-array)
        (let ((obj-comp (%array-component-class objref))
-             (target-comp (%bin-type-name-to-class (subseq target-descriptor 1))))
-         (and obj-comp target-comp
-              ;; target-comp.isAssignableFrom(obj-comp): obj's component is a
-              ;; subtype of (or equal to) the target's component.
-              (eql 1 (|isAssignableFrom(Ljava/lang/Class;)Z| target-comp obj-comp))))))
+             (target (subseq target-descriptor 1)))
+         (if (char= (char target 0) #\L)
+             ;; A class or interface component: checked by name, without
+             ;; loading the target.  Resolving it ran Java class loaders
+             ;; (Quarkus's RunnerClassLoader checks its own arrays while
+             ;; loading classes, and recursed), and when OBJ-COMP is a
+             ;; subtype the target is loaded already.
+             (and obj-comp
+                  (%component-subtype-p obj-comp (subseq target 1 (1- (length target)))))
+             (let ((target-comp (%bin-type-name-to-class target)))
+               (and obj-comp target-comp
+                    ;; target-comp.isAssignableFrom(obj-comp): obj's component is a
+                    ;; subtype of (or equal to) the target's component.
+                    (eql 1 (|isAssignableFrom(Ljava/lang/Class;)Z| target-comp obj-comp))))))))
+
+(defun %component-subtype-p (java-class target-name)
+  "True when JAVA-CLASS, an array's component type, is the class or
+interface TARGET-NAME (a binary name) or a subtype of it."
+  (cond
+    ((eql 1 (|isPrimitive()Z| java-class)) nil)
+    ((string= target-name "java/lang/Object") t)
+    ((eql 1 (|isArray()Z| java-class))
+     (member target-name '("java/lang/Cloneable" "java/io/Serializable") :test #'string=))
+    (t
+     (labels ((subtype-p (class)
+                (and class
+                     (or (string= (name class) target-name)
+                         (flet ((named (name)
+                                  (subtype-p (%get-ldk-class-by-bin-name
+                                              name t (and (slot-boundp class 'ldk-loader)
+                                                          (ldk-loader class))))))
+                           (or (and (super class) (named (super class)))
+                               (some #'named (coerce (or (interfaces class) #()) 'list))))))))
+       (subtype-p (get-ldk-class-for-java-class java-class))))))
 
 (defun %instanceof-array (objref typename)
   "instanceof against an array target type TYPENAME."

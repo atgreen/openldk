@@ -674,7 +674,7 @@ REPL defines its classes so)."
   "Define a class from byte array data using the specified class loader.
    JDK 17 static native — delegates to %classload-from-stream for full
    class setup (module, inner classes, nest host, throwable conditions, etc.)."
-  (declare (ignore pd source))
+  (declare (ignore source))
   (let* ((ldk-loader (get-ldk-loader-for-java-loader loader))
          (class-name (if name
                          (substitute #\/ #\. (lstring name))
@@ -686,6 +686,8 @@ REPL defines its classes so)."
       (let ((exc (%make-java-instance "java/lang/NoClassDefFoundError")))
         (|<init>(Ljava/lang/String;)V| exc name)
         (error (%lisp-condition exc))))
+    (when pd
+      (setf (gethash (java-class result) *protection-domains*) pd))
     (java-class result)))
 
 (defvar *hidden-class-data* (make-hash-table :test #'eq)

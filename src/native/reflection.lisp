@@ -85,18 +85,18 @@
                          (apply (symbol-function sym) obj lisp-args)))
              ;; Return descriptor char is the one just past the ')'.
              (ret-char (char descriptor (1+ (position #\) descriptor)))))
-        ;; Method.invoke returns Object, so a primitive return must be boxed.
-        ;; A boolean (Z) return arrives as OpenLDK's raw false=nil-or-0 / true=1;
-        ;; without boxing it to java/lang/Boolean, downstream %box-if-native turns
-        ;; false into Long 0 -- which is TRUTHY in Clojure/etc.  (Other primitive
-        ;; returns box correctly via %box-if-native: char->Character, float->Float,
-        ;; etc.; only Z is mishandled there.)
-        (if (eql ret-char #\Z)
-            (let ((b (%make-java-instance "java/lang/Boolean")))
-              (setf (slot-value b '|value|)
-                    (if (or (null result) (eql result 0)) 0 1))
-              b)
-            result)))))
+        ;; Method.invoke returns Object, so a primitive return must be boxed
+        ;; by its declared type: left raw, %box-if-native would make every
+        ;; integral one a Long, and an int annotation member read reflectively
+        ;; (as ByteBuddy does) would not be an Integer.  A boolean (Z) return
+        ;; arrives as OpenLDK's raw false=nil-or-0 / true=1.
+        (case ret-char
+          (#\Z (let ((b (%make-java-instance "java/lang/Boolean")))
+                 (setf (slot-value b '|value|)
+                       (if (or (null result) (eql result 0)) 0 1))
+                 b))
+          (#\V nil)
+          (t (%box-primitive-return result ret-char)))))))
 
 ;; JDK 21 uses DirectMethodHandleAccessor$NativeAccessor instead of NativeMethodAccessorImpl
 (defun |jdk/internal/reflect/DirectMethodHandleAccessor$NativeAccessor.invoke0(Ljava/lang/reflect/Method;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;|

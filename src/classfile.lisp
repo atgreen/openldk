@@ -112,6 +112,8 @@
                           ;; interface methods use findVirtual
                           (9 '|java/lang/invoke/MethodHandles$Lookup.findVirtual(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/MethodHandle;|)
                           (t (internal-error "Unknown MethodHandle reference kind: ~A" ref-kind)))))
+    ;; A trusted Lookup, made directly: MethodHandles.lookup() finds its
+    ;; caller on the stack, and these forms run every time the constant does.
     (make-instance 'ir-method-handle
                    :reference-index (reference-index cmh)
                    :value (case ref-kind
@@ -121,16 +123,16 @@
                              ;; field descriptor (e.g. "I" or "Ljava/lang/String;");
                              ;; turn it directly into the field-type Class.
                              (let ((field-type (%bin-type-name-to-class (emit-type (aref cp nat-index) cp))))
-                               `(let ((lookup (|java/lang/invoke/MethodHandles.lookup()Ljava/lang/invoke/MethodHandles$Lookup;|)))
+                               `(let ((lookup (%make-trusted-lookup)))
                                   (,lookup-method lookup ,refc ,name ,field-type))))
                             ;; findSpecial needs an extra parameter (caller class)
-                            (7 `(let ((lookup (|java/lang/invoke/MethodHandles.lookup()Ljava/lang/invoke/MethodHandles$Lookup;|)))
+                            (7 `(let ((lookup (%make-trusted-lookup)))
                                   (,lookup-method lookup ,refc ,name ,type ,refc)))
                             ;; findConstructor doesn't take a name parameter
-                            (8 `(let ((lookup (|java/lang/invoke/MethodHandles.lookup()Ljava/lang/invoke/MethodHandles$Lookup;|)))
+                            (8 `(let ((lookup (%make-trusted-lookup)))
                                   (,lookup-method lookup ,refc ,type)))
                             ;; Standard method lookups (invokeVirtual, invokeStatic, invokeInterface)
-                            ((5 6 9) `(let ((lookup (|java/lang/invoke/MethodHandles.lookup()Ljava/lang/invoke/MethodHandles$Lookup;|)))
+                            ((5 6 9) `(let ((lookup (%make-trusted-lookup)))
                                         (,lookup-method lookup ,refc ,name ,type)))
                             (t (internal-error "Unhandled MethodHandle reference kind: ~A" ref-kind))))))
 
@@ -212,8 +214,10 @@
 (defmethod emit ((v constant-class-reference) cp)
   (let ((classname (emit (aref cp (slot-value v 'index)) cp)))
     (if (char= (aref classname 0) #\[)
-        (make-instance 'ir-class
-                       :class (%get-array-ldk-class-from-name classname))
+        ;; The component class is the compiled class's loader's to find.
+        (let ((*descriptor-loader* (or (%context-java-loader) *descriptor-loader*)))
+          (make-instance 'ir-class
+                         :class (%get-array-ldk-class-from-name classname)))
         (let ((ldk-class (%resolve-class-in-context classname)))
           (make-instance 'ir-class
                          :class (or ldk-class
@@ -270,6 +274,7 @@
     minor-version
     initialized-p
     initializing-p   ; <clinit> currently running (set before, cleared after)
+    init-error       ; what a failed <clinit> threw (a Throwable), or NIL
     name
     super
     interfaces

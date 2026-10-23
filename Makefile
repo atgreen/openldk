@@ -228,6 +228,10 @@ check-regression: openldk
 bench-spring-boot: openldk
 	bench/spring-boot/run.sh
 
+# The same for Quarkus.  See bench/quarkus/README.md.
+bench-quarkus: openldk
+	bench/quarkus/run.sh
+
 SRCDIR := $(shell pwd)/testsuite/mauve
 BUILDDIR := $(shell pwd)
 

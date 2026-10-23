@@ -133,12 +133,13 @@
                 (when (< i (length raw-args))
                   (setf aot (nth i raw-args)))
                 (incf i))
-               ;; -jar <jarfile>
+               ;; -jar <jarfile>: the manifest names the main class, and
+               ;; the classpath is the jar and its Class-Path, as on a JVM.
                ((string= arg "-jar")
                 (incf i)
                 (when (< i (length raw-args))
-                  ;; For -jar, the jarfile IS the mainclass (will be handled specially)
-                  (setf mainclass (nth i raw-args)))
+                  (multiple-value-setq (mainclass classpath)
+                    (%jar-launch (nth i raw-args))))
                 (incf i)
                 ;; Everything after -jar <jarfile> is program args
                 (setf program-args (subseq raw-args i))
@@ -157,6 +158,48 @@
                 (return))))
     (setf *cli-jvm-properties* (nreverse properties))
     (values mainclass program-args classpath dump-dir aot)))
+
+(defun %manifest-attributes (jarfile)
+  "The main attributes of JARFILE's manifest, an alist of (name . value),
+with continuation lines joined."
+  (let* ((zip (zip:open-zipfile jarfile))
+         (entry (zip:get-zipfile-entry "META-INF/MANIFEST.MF" zip))
+         (text (and entry (flexi-streams:octets-to-string (zip:zipfile-entry-contents entry)
+                                                          :external-format :utf-8)))
+         (lines nil))
+    (zip:close-zipfile zip)
+    (dolist (line (split-sequence:split-sequence #\Newline (remove #\Return (or text ""))))
+      (cond
+        ;; A blank line ends the main section.
+        ((zerop (length line)) (when lines (return)))
+        ((and (char= (char line 0) #\Space) lines)
+         (setf (car lines) (concatenate 'string (car lines) (subseq line 1))))
+        (t (push line lines))))
+    (loop for line in (nreverse lines)
+          for colon = (search ": " line)
+          when colon
+            collect (cons (subseq line 0 colon) (subseq line (+ colon 2))))))
+
+(defun %jar-launch (jarfile)
+  "The main class and classpath `java -jar JARFILE` runs with: the
+manifest's Main-Class, and JARFILE followed by its Class-Path entries,
+which are relative to JARFILE's directory."
+  (unless (uiop:file-exists-p jarfile)
+    (format *error-output* "Error: Unable to access jarfile ~A~%" jarfile)
+    (uiop:quit 1))
+  (let* ((attributes (%manifest-attributes jarfile))
+         (main-class (cdr (assoc "Main-Class" attributes :test #'string-equal)))
+         (class-path (cdr (assoc "Class-Path" attributes :test #'string-equal)))
+         (directory (uiop:pathname-directory-pathname (merge-pathnames jarfile))))
+    (unless main-class
+      (format *error-output* "no main manifest attribute, in ~A~%" jarfile)
+      (uiop:quit 1))
+    (values (string-trim " " main-class)
+            (format nil (concatenate 'string "~A~{" (string (uiop:inter-directory-separator)) "~A~}")
+                    jarfile
+                    (loop for entry in (split-sequence:split-sequence #\Space (or class-path ""))
+                          when (plusp (length entry))
+                            collect (namestring (merge-pathnames entry directory)))))))
 
 (defun main-wrapper ()
   "Main entry point into OpenLDK. Process command line errors here."
@@ -188,7 +231,10 @@
                              (finish-output *error-output*))
                            (format *error-output* "~&Unhandled Java condition: ~A~%" condition))))
                     (t
-                     (format *error-output* "~&Error: ~A~%" condition)))
+                     (format *error-output* "~&Error: ~A~%" condition)
+                     ;; LDK_DEBUG=e: where the internal error happened.
+                     (when *debug-exceptions*
+                       (sb-debug:print-backtrace :count 60 :stream *error-output*))))
                   (uiop:quit 1))))
       (main mainclass args :classpath classpath :dump-dir dump-dir :aot aot))
     ;; Force exit — daemon threads may be blocked in wait() and won't terminate
@@ -486,7 +532,8 @@ Java code (warmups)."
 initialized flag and put its static fields back to their initial values,
 so its <clinit> runs again on first use.  Compiled methods are kept."
   (setf (initialized-p class) nil
-        (initializing-p class) nil)
+        (initializing-p class) nil
+        (init-error class) nil)
   (let ((clos-class (find-class (intern (name class) (ldk-class-package class)) nil)))
     (when clos-class
       (dolist (slot (sb-mop:class-direct-slots clos-class))
@@ -508,12 +555,36 @@ classes reset."
                (slot-value *app-ldk-class-loader* 'ldk-classes-by-bin-name)))
     count))
 
+(defun %save-shutdown-state ()
+  "Return a function that puts the JDK's shutdown state back as it is now.
+A warmup that calls System.exit runs the shutdown hooks (*IGNORE-QUIT*
+only stops the halt): Shutdown records the hook it ran, VM goes to
+SYSTEM_SHUTDOWN and ApplicationShutdownHooks drops its table, so the next
+run's addShutdownHook throws \"Shutdown in progress\"."
+  (let* ((shutdown (%static-storage "java/lang/Shutdown"))
+         (vm (%static-storage "jdk/internal/misc/VM"))
+         (hooks (and shutdown (copy-seq (java-array-data (slot-value shutdown '|hooks|)))))
+         (init-level (and vm (slot-value vm '|initLevel|))))
+    (lambda ()
+      (when shutdown
+        (replace (java-array-data (slot-value shutdown '|hooks|)) hooks)
+        (setf (slot-value shutdown '|currentRunningHook|) -1))
+      (when vm
+        (setf (slot-value vm '|initLevel|) init-level))
+      (let ((app-hooks (%static-storage "java/lang/ApplicationShutdownHooks")))
+        (when (and app-hooks (null (slot-value app-hooks '|hooks|)))
+          (let ((table (%make-java-instance "java/util/IdentityHashMap")))
+            (|<init>()V| table)
+            (setf (slot-value app-hooks '|hooks|) table)))))))
+
 (defun %run-warmup (mainclass args classpath &key input directory (timeout 600))
   "Run MAINCLASS with ARGS once at build time, with INPUT (a string, or
 NIL for no input) as its standard input, and relative file names resolved
 against DIRECTORY when given.  Errors, timeouts and System.exit are
-reported and survived, so one bad warmup doesn't stop the build."
-  (let ((input-file (when input
+reported and survived, so one bad warmup doesn't stop the build, and the
+shutdown state System.exit leaves is undone."
+  (let ((restore-shutdown (%save-shutdown-state))
+        (input-file (when input
                       (uiop:with-temporary-file (:stream s :pathname p :keep t)
                         (write-string input s)
                         p)))
@@ -533,6 +604,7 @@ reported and survived, so one bad warmup doesn't stop the build."
              (format *error-output* "~&;; WARMUP ~S timed out after ~Ds~%" args timeout))
            (condition (c)
              (format *error-output* "~&;; WARMUP ~S caught: ~A~%" args c)))
+      (funcall restore-shutdown)
       (when input-file
         (delete-file input-file)))))
 
@@ -549,7 +621,7 @@ reset the application's own classes, and save.
                       resolve; a run with none runs main once, no arguments.
    TIMEOUT:           Seconds allowed for each warmup run.
    RESET-CLASSES:     When true (the default), reset the application's
-                      classes after warming up, so their <clinit>s run again
+                      classes after each warmup, so their <clinit>s run again
                       and main starts from scratch in the saved image.  When
                       NIL, the image keeps the state the warmups left, and
                       main must be written to reuse it.
@@ -562,9 +634,10 @@ JDK classes always keep their state."
       (destructuring-bind (&key args input directory) warmup
         (format *error-output* "~&;; WARMUP ~A ~{~A~^ ~}~%" default-mainclass args)
         (%run-warmup default-mainclass args cp :input input :directory directory
-                                               :timeout timeout))))
-  (when reset-classes
-    (format *error-output* "~&;; Reset ~D application classes~%" (%reset-app-classes)))
+                                               :timeout timeout)
+        ;; After each run, so the next warmup starts from scratch too.
+        (when reset-classes
+          (format *error-output* "~&;; Reset ~D application classes~%" (%reset-app-classes))))))
   (%reset-runtime-for-save)
   (sb-ext:save-lisp-and-die output-path
                             :executable t

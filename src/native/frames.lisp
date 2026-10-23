@@ -89,7 +89,8 @@ traces should not show."
        ;; Frames whose arguments carry reflective machinery objects.
        (and (consp frame)
             (some (lambda (a)
-                    (or (typep a '|java/lang/reflect/Method|)
+                    (or (and (find-class '|java/lang/reflect/Method| nil)
+                             (typep a '|java/lang/reflect/Method|))
                         (and (find-class '|sun/reflect/NativeMethodAccessorImpl| nil)
                              (typep a '|sun/reflect/NativeMethodAccessorImpl|))))
                   (rest frame)))))))
@@ -111,6 +112,39 @@ for the Java caller."
   (remove-if #'%invoke-frame-p
              (%remove-adjacent-repeats (sb-debug:list-backtrace))))
 
+(defun %frame-java-class (frame class-name)
+  "The java.lang.Class named CLASS-NAME that FRAME runs a method of, or NIL.
+A class a user-defined loader defined is in that loader's tables, not the
+global ones; the loader is the one whose Lisp package names the frame's
+function, or, for a CLOS method, its receiver's class."
+  (let* ((head (%frame-head frame))
+         (symbol (case (%frame-head-kind head)
+                   (:symbol head)
+                   (:method (let ((receiver (cadr frame)))
+                              (and (typep receiver 'standard-object)
+                                   (class-name (class-of receiver)))))
+                   (t nil)))
+         (loader (and symbol (symbolp symbol) (%ldk-loader-for-symbol symbol))))
+    (or (and loader (%get-java-class-by-bin-name class-name t loader))
+        (and (gethash class-name *java-classes-by-bin-name*)
+             (%get-java-class-by-bin-name class-name)))))
+
+(defun %frame-caller-java-class (frame)
+  "The java.lang.Class whose method FRAME runs, or NIL for frames that
+are not a Java method's."
+  (unless (%internal-frame-p frame)
+    (let ((class-name (%caller-class-name-from-stack-frame frame)))
+      (when (and (stringp class-name)
+                 (not (find #\. class-name)))
+        (%frame-java-class frame class-name)))))
+
+(defun %java-caller-class (function-name)
+  "The class of the Java method that called FUNCTION-NAME, the Lisp
+function implementing a caller-sensitive method, which must be running."
+  (let* ((backtrace (%filtered-backtrace))
+         (callee (position-if (lambda (frame) (eq (%frame-head frame) function-name)) backtrace)))
+    (and callee (some #'%frame-caller-java-class (nthcdr (1+ callee) backtrace)))))
+
 (defun |sun/reflect/Reflection.getCallerClass(I)| (index)
   (let ((backtrace (%filtered-backtrace)))
     (%get-java-class-by-bin-name
@@ -121,13 +155,7 @@ for the Java caller."
 called getCallerClass: past the getCallerClass frames, skip one Java
 frame (the caller-sensitive method, AtomicReferenceFieldUpdater.newUpdater
 say) and return the next one's class."
-  (flet ((java-class-of (frame)
-           (unless (%internal-frame-p frame)
-             (let ((class-name (%caller-class-name-from-stack-frame frame)))
-               (when (and (stringp class-name)
-                          (not (find #\. class-name))
-                          (gethash class-name *java-classes-by-bin-name*))
-                 (%get-java-class-by-bin-name class-name))))))
+  (flet ((java-class-of (frame) (%frame-caller-java-class frame)))
     (let* ((backtrace (%filtered-backtrace))
            (last-get-caller (position-if (lambda (frame)
                                            (and (eq (%frame-head-kind (%frame-head frame)) :symbol)
@@ -329,9 +357,14 @@ its superclasses, made and registered on first use; or NIL for any other."
                   ;; loader) through loadClass, as the JVM does: it checks the
                   ;; loader's own classes, delegates to its parent, and only then
                   ;; calls findClass.  Then fall back to our classpath search.
+                  ;; OpenLDK's own callers (descriptor resolution) pass
+                  ;; binary names, but Java loaders take dotted ones.
                   (or (and (and loader (not (equal loader *boot-class-loader*)))
                            (handler-case
-                               (|loadClass(Ljava/lang/String;)Ljava/lang/Class;| loader name)
+                               (|loadClass(Ljava/lang/String;)Ljava/lang/Class;|
+                                loader (if (find #\/ (lstring name))
+                                           (jstring (substitute #\. #\/ (lstring name)))
+                                           name))
                              (|condition-java/lang/ClassNotFoundException| () nil)
                              (error () nil)))
                       (and (eq (char lname 0) #\[)
@@ -522,7 +555,8 @@ usually gone already."
   (jstring (or (descriptor this) "()V")))
 
 (defmethod |getDeclaringClass()Ljava/lang/Class;| ((this |openldk/StackFrame|))
-  (or (%get-java-class-by-bin-name (class-name this) t)
+  (or (%frame-java-class (frame this) (class-name this))
+      (%get-java-class-by-bin-name (class-name this) t)
       (%get-java-class-by-bin-name "java/lang/Object")))
 
 (defmethod |getByteCodeIndex()I| ((this |openldk/StackFrame|))

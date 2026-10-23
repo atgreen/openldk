@@ -1298,9 +1298,11 @@ classes with the same name."
                    ((error (lambda (c)
                              (declare (ignore c))
                              ;; Print the backtrace where the error is
-                             ;; signalled, before HANDLER-CASE unwinds it.
+                             ;; signalled, before HANDLER-CASE unwinds it,
+                             ;; to the process's stderr: compilation can
+                             ;; rebind *ERROR-OUTPUT* to muffle the compiler.
                              (when *debug-codegen*
-                               (sb-debug:print-backtrace :stream *error-output* :count 60)))))
+                               (sb-debug:print-backtrace :stream sb-sys:*stderr* :count 60)))))
                  (when (gethash "Code" (slot-value method 'attributes)) ; otherwise it is abstract
                    (let* ((compile-start-time (get-internal-real-time))
                           (code-attribute (gethash "Code" (slot-value method 'attributes)))
@@ -1371,12 +1373,61 @@ sees the class as initialized while its statics are still unset -- the race
 that made concurrent Math.random()/holder-class first-use throw NPE."
   (unless (initialized-p class)
     (bordeaux-threads:with-recursive-lock-held ((%get-class-lock (slot-value class 'name)))
-      (unless (or (initialized-p class) (initializing-p class))
-        (setf (initializing-p class) t)
-        (unwind-protect
-             (funcall clinit-fn)
-          (setf (initialized-p class) t
-                (initializing-p class) nil))))))
+      (cond
+        ((init-error class)
+         (%throw-class-init-failed class))
+        ((or (initialized-p class) (initializing-p class)))
+        (t
+         (setf (initializing-p class) t)
+         (unwind-protect
+              (handler-case (funcall clinit-fn)
+                (|condition-java/lang/Throwable| (c)
+                  (if (slot-boundp c '|objref|)
+                      (%fail-class-init class (slot-value c '|objref|))
+                      (error c))))
+           ;; A Lisp-level failure (an internal error, a warmup's timeout)
+           ;; leaves the class usable, as it always has.
+           (setf (initializing-p class) nil)
+           (unless (init-error class)
+             (setf (initialized-p class) t))))))))
+
+(defun %class-init-error (throwable)
+  "What a <clinit> that threw THROWABLE throws (JLS 12.4.2): THROWABLE itself
+if it is an Error, else an ExceptionInInitializerError wrapping it."
+  (if (typep throwable '|java/lang/Error|)
+      throwable
+      (progn
+        (classload "java/lang/ExceptionInInitializerError")
+        (let ((eiie (%make-java-instance "java/lang/ExceptionInInitializerError")))
+          (|<init>(Ljava/lang/Throwable;)V| eiie throwable)
+          eiie))))
+
+(defun %fail-class-init (class throwable)
+  "Mark CLASS erroneous, its <clinit> having thrown THROWABLE, and throw
+what that <clinit> throws.  Later uses throw NoClassDefFoundError."
+  (setf (init-error class) throwable
+        (initialized-p class) nil)
+  (error (%lisp-condition (%class-init-error throwable))))
+
+(defun %throw-class-init-failed (class)
+  "Throw the NoClassDefFoundError a JVM throws on using CLASS, whose
+<clinit> failed.  As HotSpot's, its cause is an ExceptionInInitializerError
+naming what the <clinit> threw."
+  (classload "java/lang/NoClassDefFoundError")
+  (classload "java/lang/ExceptionInInitializerError")
+  (let* ((thrown (init-error class))
+         (message (and (slot-exists-p thrown '|detailMessage|)
+                       (slot-value thrown '|detailMessage|)))
+         (cause (%make-java-instance "java/lang/ExceptionInInitializerError"))
+         (ncdfe (%make-java-instance "java/lang/NoClassDefFoundError")))
+    (|<init>(Ljava/lang/String;)V| cause
+     (jstring (format nil "Exception ~A~@[: ~A~]"
+                      (substitute #\. #\/ (symbol-name (class-name (class-of thrown))))
+                      (and message (lstring message)))))
+    (|<init>(Ljava/lang/String;)V| ncdfe
+     (jstring (format nil "Could not initialize class ~A" (substitute #\. #\/ (name class)))))
+    (setf (slot-value ncdfe '|cause|) cause)
+    (error (%lisp-condition ncdfe))))
 
 (defun %clinit (class)
   (let ((class (gethash (name class) *ldk-classes-by-bin-name*)))
@@ -1407,6 +1458,8 @@ that made concurrent Math.random()/holder-class first-use throw NPE."
                      ;; registry to a fresh empty map, dropping already-registered
                      ;; namespaces (e.g. clojure.core.protocols during clojure.core
                      ;; bootstrap) -> "Unable to resolve" at core.clj:6866. (ldk-ia9)
+                     (when (init-error class)
+                       (%throw-class-init-failed class))
                      (when (not (or (initialized-p class) (initializing-p class)))
                        (when (search "TwoWayStream" (slot-value class 'name))
                          (format *error-output* "~&;; CLINIT: initializing ~A~%" (slot-value class 'name))
@@ -1435,6 +1488,9 @@ that made concurrent Math.random()/holder-class first-use throw NPE."
                            (if throwable
                                (%print-java-stack-trace throwable :stream *error-output*)
                                (trivial-backtrace:print-backtrace e :output *error-output*)))
+                         ;; A Java exception fails the class for good.
+                         (when (typep throwable '|java/lang/Throwable|)
+                           (%fail-class-init class throwable))
                          ;; Wrap exception in ExceptionInInitializerError if classes are loaded
                          ;; Use ignore-errors to handle case where parent class isn't loaded yet
                          (let ((eiie (ignore-errors
@@ -1638,7 +1694,7 @@ shadows a superclass field and needs its own storage."
         (methods-code
           (let ((method-index 0)
                 (done-method-table (make-hash-table :test #'equal)))
-            (if (find (name class) '("java/util/jar/JarInputStream" "java/util/zip/ZipFile" "java/util/zip/ZipInputStream") :test #'equal)
+            (if (equal (name class) "java/util/zip/ZipFile")
                 nil
                 (with-slots (name super methods) class
                   (remove nil (map 'list
