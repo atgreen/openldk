@@ -272,11 +272,11 @@
 
 (define-math-functions ("toDegrees(D)" (a))
   "Converts an angle from radians to degrees."
-  (* a (/ 180.0d0 pi)))
+  (* a (/ 180.0d0 cl:pi)))
 
 (define-math-functions ("toRadians(D)" (a))
   "Converts an angle from degrees to radians."
-  (* a (/ pi 180.0d0)))
+  (* a (/ cl:pi 180.0d0)))
 
 (define-math-functions ("ulp(F)" (a))
   "Returns the unit in the last place (ULP) of a float."
