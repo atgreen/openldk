@@ -721,7 +721,8 @@ waste since compiled Java methods never use it."
              ;; matching the block DEFMETHOD used to establish.
              (block ,fn-sym ,@body-forms))
            (defmethod ,fn-sym ((,this-sym ,class-spec) ,@args)
-             (,impl-sym ,this-sym ,@args))))))
+             (,impl-sym ,this-sym ,@args))
+           (%note-method-body ',fn-sym ',class-spec ',impl-sym)))))
 
 ;;; Declaring method variables' types (see the note on typed variables in
 ;;; codegen.lisp).

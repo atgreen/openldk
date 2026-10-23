@@ -53,6 +53,23 @@
                :reader java-gf-cache-lock))
   (:metaclass sb-mop:funcallable-standard-class))
 
+(defvar *method-bodies* (make-hash-table :test 'eq :weakness :key :synchronized t)
+  "A compiled Java method's DEFMETHOD trampoline -> the function holding its
+body, which the trampoline calls (see %WRAP-METHOD-BODY).")
+
+(defun %note-method-body (gf-symbol class-symbol body-symbol)
+  "Record that GF-SYMBOL's primary method on CLASS-SYMBOL is a trampoline
+calling BODY-SYMBOL."
+  (let* ((gf (and (fboundp gf-symbol) (fdefinition gf-symbol)))
+         (class (find-class class-symbol nil))
+         (method (and gf class
+                      (find-if (lambda (m)
+                                 (and (null (method-qualifiers m))
+                                      (eq (first (sb-mop:method-specializers m)) class)))
+                               (sb-mop:generic-function-methods gf)))))
+    (when method
+      (setf (gethash method *method-bodies*) (fdefinition body-symbol)))))
+
 (defun %compute-java-effective-method (gf class)
   "Compute an effective method function for GF dispatching on CLASS.
 Returns (values FUNCTION APPLICABLE-P); when APPLICABLE-P is NIL the
@@ -79,7 +96,18 @@ may still be a bare stub that a later classload fleshes out)."
                  (primary (remove-if-not
                            (lambda (m) (null (method-qualifiers m)))
                            methods))
-                 (chain (append around primary)))
+                 (chain (append around primary))
+                 ;; A compiled Java method's trampoline, with nothing around
+                 ;; it: call its body directly.  It never calls
+                 ;; call-next-method, so the rest of the chain can't run, and
+                 ;; going through PCL's method function -- which unpacks the
+                 ;; arguments for the fast method function -- cost a tenth of
+                 ;; the Kotlin compiler's time.
+                 (body (and (null around) primary
+                            (gethash (first primary) *method-bodies*))))
+            (when body
+              (return-from %compute-java-effective-method
+                (values (lambda (args) (apply body args)) t)))
             (if (null chain)
                 (values (lambda (args)
                           (apply #'no-applicable-method gf args))
