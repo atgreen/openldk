@@ -1203,16 +1203,11 @@ compilation fails silently (leaving the self-compiling stub in place)."
                                  :key (lambda (m)
                                         (first (sb-mop:method-specializers m)))
                                  :test #'eq)))
-          ;; Check if the method's source-name still references
-          ;; %compile-method — i.e. the stub was never replaced — or the
-          ;; trampoline's impl defun (see %wrap-method-body) never got
-          ;; installed.
+          ;; Check if the method is still the lazy stub -- i.e. it was
+          ;; never replaced -- or the trampoline's impl defun (see
+          ;; %wrap-method-body) never got installed.
           (when (or (null our-method)
-                    (let ((mf (sb-mop:method-function our-method)))
-                      (and mf
-                           (search "%COMPILE-METHOD"
-                                   (princ-to-string
-                                    (sb-kernel:%fun-name mf)))))
+                    (gethash our-method *method-stubs*)
                     (let ((impl-sym (find-symbol (format nil "%jimpl:~A.~A"
                                                          (slot-value class 'name)
                                                          (fn-name *context*))
@@ -1646,7 +1641,8 @@ shadows a superclass field and needs its own storage."
         (intern mangled :openldk))))
 
 (defun emit-<class> (class ldk-loader)
-  "Emit CLOS class and method definitions for a Java class.
+  "Emit the CLOS class definition for a Java class, and the defparameter
+   of its static instance.  %INSTALL-METHOD-STUBS installs its methods.
    LDK-LOADER is the class loader that will own this class.
    Class symbols are interned in the loader's package for isolation.
    Generic function names stay in :openldk for dispatch to work across loaders."
@@ -1690,73 +1686,69 @@ shadows a superclass field and needs its own storage."
               (list
                'defparameter (intern (format nil "+static-~A+" (intern name pkg)) pkg)
                (list
-                'make-instance (list 'quote (intern name pkg)))))))
-        (methods-code
-          (let ((method-index 0)
-                (done-method-table (make-hash-table :test #'equal)))
-            (if (equal (name class) "java/util/zip/ZipFile")
-                nil
-                (with-slots (name super methods) class
-                  (remove nil (map 'list
-                                   (lambda (m)
-                                     (if (or (native-p m)
-                                             (native-override-p m)
-                                             (null (gethash "Code" (attributes m)))
-                                             (and (bridge-p m)
-                                                  (gethash (lispize-method-name
-                                                            (format nil "~A~A"
-                                                                    (slot-value m 'name)
-                                                                    (slot-value m 'descriptor)))
-                                                           done-method-table)))
-                                         (progn
-                                           (incf method-index)
-                                           nil)
-                                         (progn
-                                           (setf (gethash (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) done-method-table) t)
-                                           (if (static-p m)
-                                               ;; Static methods: function name in loader's package (includes class name)
-                                               (list 'defun
-                                                     (intern (format nil "~A.~A"
-                                                                     (slot-value class 'name)
-                                                                     (lispize-method-name
-                                                                      (format nil "~A~A"
-                                                                              (slot-value m 'name)
-                                                                              (slot-value m 'descriptor))))
-                                                             pkg)
-                                                     (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
-                                                           collect (intern (format nil "arg~A" i) :openldk))
-                                                     (list '%compile-method (%stub-class-reference class) (incf method-index))
-                                                     (cons (intern (format nil "~A.~A"
-                                                                           (slot-value class 'name)
-                                                                           (lispize-method-name
-                                                                            (format nil "~A~A"
-                                                                                    (slot-value m 'name)
-                                                                                    (slot-value m 'descriptor))))
-                                                                   pkg)
-                                                           (loop for i from 1 upto (count-parameters (slot-value m 'descriptor))
-                                                                 collect (intern (format nil "arg~A" i) :openldk))))
-                                               ;; Instance methods: generic function name in :openldk for dispatch,
-                                               ;; class specializer in loader's package for isolation.
-                                               ;; Pre-create GF with java-generic-function metaclass for fast dispatch.
-                                               (let ((method-name (intern (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor))) :openldk))
-                                                     (param-count (count-parameters (slot-value m 'descriptor))))
-                                                 (list 'progn
-                                                       (list '%ensure-java-gf (list 'quote method-name) (1+ param-count))
-                                                       (list 'defmethod method-name
-                                                             (cons (list (intern "this" :openldk) (intern (slot-value (slot-value m 'class) 'name) pkg))
-                                                                   (loop for i from 1 upto param-count
-                                                                         collect (intern (format nil "arg~A" i) :openldk)))
-                                                             (list '%compile-method (%stub-class-reference class) (incf method-index))
-                                                             (list 'invoke-special
-                                                                   (list 'quote method-name)
-                                                                   (list 'quote (intern (slot-value (slot-value m 'class) 'name) pkg))
-                                                                   (cons 'list
-                                                                         (cons (intern "this" :openldk)
-                                                                               (loop for i from 1 upto param-count
-                                                                                     collect (intern (format nil "arg~A" i) :openldk))))))))))))
-                                   methods)))))))
+                'make-instance (list 'quote (intern name pkg))))))))
+    defclass-code))
 
-    (append defclass-code methods-code)))
+(defvar *method-stubs* (make-hash-table :test 'eq :weakness :key :synchronized t)
+  "Lazy-compilation stub methods installed by %INSTALL-METHOD-STUBS, so
+%INSTALL-METHOD-DEFINITION can tell whether compiling replaced one.")
+
+(defun %static-method-stub (class-ref method-index fn-symbol)
+  "A static method's lazy stub: compile method METHOD-INDEX of CLASS-REF,
+which replaces FN-SYMBOL's definition, then call the new definition."
+  (lambda (&rest args)
+    (%compile-method class-ref method-index)
+    (apply fn-symbol args)))
+
+(defun %instance-method-stub (gf class-ref method-index method-symbol class-symbol param-count)
+  "A standard method on GF specialized on CLASS-SYMBOL whose function compiles
+method METHOD-INDEX of CLASS-REF, which replaces this method, then invokes
+the new one."
+  (let ((method (make-instance (sb-mop:generic-function-method-class gf)
+                               :qualifiers nil
+                               :lambda-list (cons (intern "this" :openldk)
+                                                  (loop for i from 1 upto param-count
+                                                        collect (intern (format nil "arg~A" i) :openldk)))
+                               :specializers (cons (find-class class-symbol)
+                                                   (make-list param-count :initial-element (find-class t)))
+                               :function (lambda (args next-methods)
+                                           (declare (ignore next-methods))
+                                           (%compile-method class-ref method-index)
+                                           (invoke-special method-symbol class-symbol args)))))
+    (setf (gethash method *method-stubs*) t)
+    method))
+
+(defun %install-method-stubs (class ldk-loader)
+  "Install a lazy-compilation stub for each of CLASS's methods that has
+bytecode to compile: a function for a static method, a method on its
+generic function for an instance method.  The stubs are closures, made
+without running the compiler, since most methods are never called."
+  (unless (equal (name class) "java/util/zip/ZipFile")
+    (let ((pkg (loader-package ldk-loader))
+          (class-ref (%stub-class-reference class))
+          (done-method-table (make-hash-table :test #'equal)))
+      (loop for m across (methods class)
+            for method-index from 1
+            for method-name = (lispize-method-name (format nil "~A~A" (slot-value m 'name) (slot-value m 'descriptor)))
+            unless (or (native-p m)
+                       (native-override-p m)
+                       (null (gethash "Code" (attributes m)))
+                       (and (bridge-p m) (gethash method-name done-method-table)))
+              do (setf (gethash method-name done-method-table) t)
+                 (if (static-p m)
+                     ;; Static methods: function name in loader's package (includes class name)
+                     (let ((fn-symbol (intern (format nil "~A.~A" (slot-value class 'name) method-name) pkg)))
+                       (setf (fdefinition fn-symbol) (%static-method-stub class-ref method-index fn-symbol)))
+                     ;; Instance methods: generic function name in :openldk for dispatch,
+                     ;; class specializer in loader's package for isolation.
+                     (let* ((method-symbol (intern method-name :openldk))
+                            (param-count (count-parameters (slot-value m 'descriptor)))
+                            (class-symbol (intern (slot-value class 'name) pkg)))
+                       (%ensure-java-gf method-symbol (1+ param-count))
+                       (let ((gf (fdefinition method-symbol)))
+                         (add-method gf (%instance-method-stub gf class-ref method-index method-symbol
+                                                               class-symbol param-count)))))))))
+
 
 (defun find-class-in-loader-hierarchy (classname ldk-loader)
   "Search for class in this loader and all parent loaders sharing the same package."
@@ -1860,17 +1852,11 @@ shadows a superclass field and needs its own storage."
            (setf (gethash fq-classname *java-classes-by-fq-name*) klass))
 
          (let ((code (emit-<class> class ldk-loader)))
-           ;; In AOT mode, extract and write class definitions separately
+           ;; In AOT mode, also write the class definitions out
            (when *aot-dir*
-             ;; Code is a list like (progn (defclass...) (defparameter...) method-stub1 method-stub2 ...)
-             ;; Extract just the defclass and defparameter (elements 2 and 3)
-             (let ((class-defs (if (and (listp code) (eq (first code) 'progn))
-                                   ;; If it's a progn, take the defclass and defparameter (2nd and 3rd elements)
-                                   (list 'progn (second code) (third code))
-                                   ;; Otherwise, just take the first two elements
-                                   (list 'progn (first code) (second code)))))
-               (%write-aot-class classname class-defs)))
+             (%write-aot-class classname code))
            (%eval code))
+         (%install-method-stubs class ldk-loader)
 
          ;; Record this class's MEMBER classes (Class.getDeclaredClasses):
          ;; InnerClasses entries whose outer class is this class.  Entries
