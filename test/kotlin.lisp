@@ -21,7 +21,10 @@
   (is (= 3 (kotlin:eval "1 + 2")))
   (is (equal '(2 4 6) (kotlin:eval "listOf(1, 2, 3).map { it * 2 }")))
   (is (string= "a-b" (kotlin:eval "val xs = listOf(\"a\", \"b\")
-xs.joinToString(\"-\")"))))
+xs.joinToString(\"-\")")))
+  ;; Compiled once, run on every EVAL.
+  (let ((first (kotlin:eval "System.nanoTime()")))
+    (is (/= first (kotlin:eval "System.nanoTime()")))))
 
 (test values-to-lisp
   (is (equal '("s" #\c t nil) (kotlin:eval "listOf(\"s\", 'c', true, false)")))
