@@ -475,3 +475,96 @@ Clock.currentInstant, and so Instant.now()."
 (defmethod |java/lang/Float.intBitsToFloat(I)F| (int-bits)
   (float-features:bits-single-float (ldb (byte 32 0) int-bits)))
 
+
+;;; StackWalker.  The JDK fills StackWalker's frame buffers from VM frames
+;;; through StackStreamFactory natives; OpenLDK instead builds the frames
+;;; from the Lisp backtrace, as fillInStackTrace does.
+
+(defclass/std |openldk/StackFrame| (|java/lang/Object| |java/lang/StackWalker$StackFrame|)
+  ((class-name)
+   (method-name)
+   (descriptor)
+   (frame)))
+
+(defun %stack-walker-frame-p (frame)
+  (equal (%caller-class-name-from-stack-frame frame) "java/lang/StackWalker"))
+
+(defun %frames-after-stack-walker ()
+  "The Java frames of the code that called into StackWalker, innermost
+first.  The overrides below are tail-called, so StackWalker's own frame is
+usually gone already."
+  (let* ((backtrace (remove-if-not #'%java-frame-p (%filtered-backtrace)))
+         (frames (or (member-if #'%stack-walker-frame-p backtrace) backtrace)))
+    (loop while (and frames (%stack-walker-frame-p (car frames)))
+          do (pop frames))
+    frames))
+
+(defun %make-stack-frame (frame)
+  ;; The interface is openldk/StackFrame's superclass, and loading
+  ;; StackWalker does not load it.
+  (classload "java/lang/StackWalker$StackFrame")
+  (let* ((head (%frame-head frame))
+         (name (symbol-name (if (eq (%frame-head-kind head) :method) (cadr head) head)))
+         (paren (position #\( name)))
+    (make-instance '|openldk/StackFrame|
+                   :class-name (%caller-class-name-from-stack-frame frame)
+                   :method-name (%method-name-from-stack-frame frame)
+                   :descriptor (when paren (subseq name paren))
+                   :frame frame)))
+
+(defmethod |getClassName()Ljava/lang/String;| ((this |openldk/StackFrame|))
+  (jstring (substitute #\. #\/ (class-name this))))
+
+(defmethod |getMethodName()Ljava/lang/String;| ((this |openldk/StackFrame|))
+  (jstring (method-name this)))
+
+(defmethod |getDescriptor()Ljava/lang/String;| ((this |openldk/StackFrame|))
+  (jstring (or (descriptor this) "()V")))
+
+(defmethod |getDeclaringClass()Ljava/lang/Class;| ((this |openldk/StackFrame|))
+  (or (%get-java-class-by-bin-name (class-name this) t)
+      (%get-java-class-by-bin-name "java/lang/Object")))
+
+(defmethod |getByteCodeIndex()I| ((this |openldk/StackFrame|))
+  -1)
+
+(defmethod |getLineNumber()I| ((this |openldk/StackFrame|))
+  -1)
+
+(defmethod |getFileName()Ljava/lang/String;| ((this |openldk/StackFrame|))
+  nil)
+
+(defmethod |isNativeMethod()Z| ((this |openldk/StackFrame|))
+  0)
+
+(defmethod |toStackTraceElement()Ljava/lang/StackTraceElement;| ((this |openldk/StackFrame|))
+  (%fill-stack-trace-element (%make-java-instance "java/lang/StackTraceElement")
+                             (frame this)))
+
+(defmethod |toString()Ljava/lang/String;| ((this |openldk/StackFrame|))
+  (|toString()Ljava/lang/String;| (|toStackTraceElement()Ljava/lang/StackTraceElement;| this)))
+
+(setf (gethash "java/lang/StackWalker.walk(Ljava/util/function/Function;)Ljava/lang/Object;" *native-overrides*)
+      (lambda (this function)
+        (declare (ignore this))
+        (let ((frames (mapcar #'%make-stack-frame (%frames-after-stack-walker))))
+          (|apply(Ljava/lang/Object;)Ljava/lang/Object;|
+           function
+           (|java/util/Arrays.stream([Ljava/lang/Object;)Ljava/util/stream/Stream;|
+            (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/StackWalker$StackFrame")
+                             :initial-contents frames))))))
+
+(setf (gethash "java/lang/StackWalker.forEach(Ljava/util/function/Consumer;)V" *native-overrides*)
+      (lambda (this consumer)
+        (declare (ignore this))
+        (dolist (frame (%frames-after-stack-walker))
+          (|accept(Ljava/lang/Object;)V| consumer (%make-stack-frame frame)))))
+
+;; The class of the method that called the method calling getCallerClass.
+(setf (gethash "java/lang/StackWalker.getCallerClass()Ljava/lang/Class;" *native-overrides*)
+      (lambda (this)
+        (declare (ignore this))
+        (let ((caller (second (%frames-after-stack-walker))))
+          (if caller
+              (|getDeclaringClass()Ljava/lang/Class;| (%make-stack-frame caller))
+              (%throw '|java/lang/IllegalCallerException| "no caller frame")))))

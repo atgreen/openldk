@@ -474,7 +474,16 @@ stream."
           ("LineNumberTable"
            (read-buffer attributes-length))
           ("MethodParameters"
-           (read-buffer attributes-length))
+           ;; (name . access-flags) per parameter, the name NIL when the
+           ;; class file leaves it out.  Executable.getParameters0 reports
+           ;; these; javac writes them with -parameters.
+           (let ((count (bitio:read-one-byte bitio)))
+             (setf (gethash "MethodParameters" attributes)
+                   (loop repeat count
+                         collect (let ((name-index (read-u2)))
+                                   (cons (unless (zerop name-index)
+                                           (slot-value (aref constant-pool name-index) 'value))
+                                         (read-u2)))))))
           ("RuntimeInvisibleAnnotations"
            (read-buffer attributes-length))
           ("RuntimeInvisibleParameterAnnotations"
@@ -516,7 +525,15 @@ stream."
           ("ModuleMainClass"
            (read-buffer attributes-length))
           ("Record"
-           (read-buffer attributes-length))
+           ;; (name descriptor attributes) per record component, for
+           ;; Class.getRecordComponents0.
+           (let ((count (read-u2)))
+             (setf (gethash "Record" attributes)
+                   (loop repeat count
+                         collect (let* ((name (slot-value (aref constant-pool (read-u2)) 'value))
+                                        (descriptor (slot-value (aref constant-pool (read-u2)) 'value)))
+                                   (list name descriptor
+                                         (read-attributes bitio constant-pool class (read-u2))))))))
           ("PermittedSubclasses"
            (read-buffer attributes-length))
           ("RuntimeVisibleTypeAnnotations"

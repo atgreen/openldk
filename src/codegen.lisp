@@ -748,7 +748,13 @@ class is a self-reference to the class currently being compiled."
                              cc)))))
       (make-instance '<expression>
                      :insn insn
-                     :code (java-class ldk-class)
+                     ;; A class that isn't there (Spring's DefaultConversionService
+                     ;; references kotlin/text/Regex behind a KotlinDetector check)
+                     ;; throws NoClassDefFoundError only if the ldc executes.
+                     :code (if ldk-class
+                               (java-class ldk-class)
+                               `(%throw '|java/lang/NoClassDefFoundError|
+                                        ,(substitute #\. #\/ classname)))
                      :expression-type :REFERENCE))))
 
 (defmethod codegen ((insn ir-branch-target) context)

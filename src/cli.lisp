@@ -420,10 +420,9 @@ Java code (warmups)."
            *methods-being-compiled*)
   ;; Classpath entries carry their own locks and open container handles.
   (mapc #'%reset-classpath-entry-runtime-state *classpath*)
-  ;; So do java.util.zip.ZipFile objects the program opened itself, and the
+  ;; So do java.util.zip.ZipFile objects, the program's own and the
   ;; JarFiles JarURLConnection hands out.
   (%zipfile-reset-for-save)
-  (clrhash *jarfile-zips*)
   ;; Child processes the warmups started, and their pipes, belong to this
   ;; process.  ProcessHandleImpl's reaper thread pool lost its worker with
   ;; the other threads, yet would hand the next child's reaping to it, so
@@ -434,7 +433,6 @@ Java code (warmups)."
   (let ((process-handle (%get-ldk-class-by-bin-name "java/lang/ProcessHandleImpl" t)))
     (when (and process-handle (initialized-p process-handle))
       (%reset-class process-handle)))
-  (clrhash *zipentry-times*)
   ;; Files a Java program opened itself (FileInputStream, FileOutputStream,
   ;; RandomAccessFile) reopen when the image starts.
   (%record-file-streams-to-reopen)

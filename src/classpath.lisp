@@ -81,9 +81,35 @@ Caller must hold the entry's lock."))
     (unless zipfile
       (%reopen-entry cpe))))
 
+(defvar *zip-directories* (make-hash-table :test 'equal :synchronized t)
+  "Parsed jar central directories by file name: (write-date . entries).
+Each MAIN makes new classpath entries, and a saved image reopens its jars,
+so reading a directory again, in Lisp, is a good part of startup.")
+
+(defun %open-zipfile-cached (jarfile)
+  "Open JARFILE as a zip:zipfile, reusing its parsed central directory from
+*ZIP-DIRECTORIES* while the file is unchanged.  Entries refer to their
+zipfile's stream, so a reused directory's entries are copies on the new one."
+  (let* ((key (namestring (truename jarfile)))
+         (date (file-write-date key))
+         (cached (gethash key *zip-directories*)))
+    (if (and cached (eql date (car cached)))
+        (let ((stream (open jarfile :element-type '(unsigned-byte 8)))
+              (entries (make-hash-table :test #'equal :size (hash-table-count (cdr cached)))))
+          (maphash (lambda (name entry)
+                     (let ((copy (copy-structure entry)))
+                       (setf (zip::zipfile-entry-stream copy) stream
+                             (gethash name entries) copy)))
+                   (cdr cached))
+          (zip::make-zipfile :stream stream :entries entries))
+        (let ((zipfile (zip:open-zipfile jarfile)))
+          (setf (gethash key *zip-directories*)
+                (cons date (zip:zipfile-entries zipfile)))
+          zipfile))))
+
 (defmethod %reopen-entry ((cpe jar-classpath-entry))
   (with-slots (zipfile zipfile-entries jarfile) cpe
-    (setf zipfile (zip:open-zipfile jarfile))
+    (setf zipfile (%open-zipfile-cached jarfile))
     (setf zipfile-entries (zip:zipfile-entries zipfile))))
 
 (defmethod %ensure-entry-open ((cpe jmod-classpath-entry))
@@ -302,12 +328,25 @@ Returns a simple-vector indexed by attribute kind (1=module 2=parent 3=base
 (defun %jimage-open-stream (pathname)
   (open pathname :element-type '(unsigned-byte 8)))
 
+(defvar *jimage-indexes* (make-hash-table :test 'equal :synchronized t)
+  "Built jimage indexes by file name: (write-date index data-base).  Each MAIN
+makes new classpath entries, and building the index is a good part of a
+saved image's startup, so entries for the same unchanged file share one.")
+
 (defun load-jimage-index (cpe)
-  "Open the jimage file for CPE, verify its header, and build the resource index.
-Leaves the data stream open (positioned arbitrarily) for later resource reads."
+  "Open the jimage file for CPE, verify its header, and build the resource index,
+or take it from *JIMAGE-INDEXES*.  Leaves the data stream open (positioned
+arbitrarily) for later resource reads."
   (with-slots (imagefile stream index data-base) cpe
-    (let ((s (%jimage-open-stream imagefile)))
+    (let ((s (%jimage-open-stream imagefile))
+          (date (file-write-date imagefile)))
       (setf stream s)
+      (destructuring-bind (&optional cached-date cached-index cached-data-base)
+          (gethash (namestring imagefile) *jimage-indexes*)
+        (when (and cached-index (eql date cached-date))
+          (setf index cached-index
+                data-base cached-data-base)
+          (return-from load-jimage-index cpe)))
       (let ((header (make-array 28 :element-type '(unsigned-byte 8))))
         (read-sequence header s)
         (let ((magic (%jimage-u4-le header 0)))
@@ -351,7 +390,9 @@ Leaves the data stream open (positioned arbitrarily) for later resource reads."
                                 (+ data-base (aref attrs 5)) ; absolute file offset
                                 (aref attrs 6)               ; compressed size (0 = stored)
                                 (aref attrs 7))))))))         ; uncompressed size
-          (setf index ht)))))
+          (setf index ht)
+          (setf (gethash (namestring imagefile) *jimage-indexes*)
+                (list date ht data-base))))))
   cpe)
 
 (defun ensure-jimage-loaded (cpe)
@@ -523,20 +564,36 @@ jimage container at $JAVA_HOME/lib/modules directly."
       (when (uiop:file-exists-p fqn)
         (flexi-streams:make-in-memory-input-stream (read-file-into-byte-vector fqn))))))
 
+(defun %absolute-file-name (name)
+  "NAME, a file name, made absolute against the current directory, without
+. and .. segments, as a JVM's resource URLs have it (URL.toURI rejects a
+relative file: URL as not hierarchical)."
+  (let ((segments nil))
+    (dolist (segment (split-sequence:split-sequence
+                      #\/ (if (starts-with? "/" name)
+                               name
+                               (concatenate 'string (namestring (uiop:getcwd)) "/" name))))
+      (cond ((or (string= segment "") (string= segment ".")))
+            ((string= segment "..") (pop segments))
+            (t (push segment segments))))
+    (format nil "/~{~A~^/~}~:[~;/~]" (reverse segments) (ends-with? "/" name))))
+
 (defmethod get-resource-url ((cpe jar-classpath-entry) resource-name)
   "Return a jar: URL string for a resource if it exists in this JAR, or NIL."
   (with-slots (jarfile zipfile-entries lock) cpe
     (bt:with-lock-held (lock)
       (%ensure-entry-open cpe)
       (when (gethash resource-name zipfile-entries)
-        (format nil "jar:file:~A!/~A" jarfile resource-name)))))
+        (format nil "jar:file:~A!/~A" (%absolute-file-name jarfile) resource-name)))))
 
 (defmethod get-resource-url ((cpe dir-classpath-entry) resource-name)
   "Return a file: URL string for a resource if it exists in this directory, or NIL."
   (with-slots (dir) cpe
     (let ((fqn (format nil "~A~A~A" dir (uiop:directory-separator-for-host) resource-name)))
-      (when (uiop:file-exists-p fqn)
-        (format nil "file:~A" fqn)))))
+      ;; A package directory is a resource too: Spring's classpath scanning
+      ;; starts from getResources("com/example/").
+      (when (or (uiop:file-exists-p fqn) (uiop:directory-exists-p fqn))
+        (format nil "file:~A" (%absolute-file-name fqn))))))
 
 (defun %reset-classpath-entry-runtime-state (cpe)
   "Give CPE a fresh lock and drop its cached container handle.  Called

@@ -186,6 +186,16 @@ make clojure
 echo '(map inc [1 2 3])' | ./clojure
 ```
 
+### Example: Spring Boot
+
+`make bench-spring-boot` builds two images of a small Spring Boot
+application and times them against HotSpot and a GraalVM native image (see
+`bench/spring-boot/README.md`).  Both use `:reset-classes nil`.  One warms up
+`BootApp` and starts Boot from scratch on every run (4.3 s); the other keeps
+the context its first warmup started, so a run only executes the
+application's `CommandLineRunner`s (66 ms, against 64 ms for the native
+image).
+
 ### Example: `javacl`
 
 `javacl`, built by `make`, is the original warm image and predates

@@ -222,6 +222,12 @@ check: openldk testsuite/mauve/gnu/testlet/config.class
 check-regression: openldk
 	testsuite/check-regression.sh
 
+# Spring Boot startup on HotSpot, as a GraalVM native image and from OpenLDK
+# images, timed side by side.  Downloads Maven and GraalVM into .cache/bench
+# when they are missing.  See bench/spring-boot/README.md.
+bench-spring-boot: openldk
+	bench/spring-boot/run.sh
+
 SRCDIR := $(shell pwd)/testsuite/mauve
 BUILDDIR := $(shell pwd)
 

@@ -42,7 +42,19 @@ public class JdkWarmup {
         }
         try (JarFile file = new JarFile(jar)) {
             file.getJarEntry("a/b.txt");
+            file.entries().hasMoreElements();
+            file.getInputStream(file.getJarEntry("a/b.txt")).readAllBytes();
         }
+        // A thread's ThreadLocalMap grows, rehashing and expunging stale
+        // entries, once it holds a dozen or so locals; a program's main
+        // thread gets there, but the thread building the image already has.
+        Thread thread = new Thread(() -> {
+            for (int i = 0; i < 40; i++) {
+                new ThreadLocal<Integer>().set(i);
+            }
+        });
+        thread.start();
+        thread.join();
         Files.readAllLines(jar.toPath(), java.nio.charset.StandardCharsets.ISO_8859_1);
         jar.delete();
     }

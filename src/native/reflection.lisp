@@ -179,20 +179,6 @@
               (slot-value static-holder field-sym)))))))
 
 
-;; Generic type methods - return non-generic types until full generics support is implemented.
-;; These must be defmethod without class specializer since java/lang/reflect/Method
-;; doesn't exist at compile time. The native-override-p check prevents the bytecode
-;; versions from being compiled, so these are the only definitions.
-(defmethod |getGenericReturnType()Ljava/lang/reflect/Type;| (method)
-  "Return the return type. Generic type information is not yet supported."
-  (slot-value method '|returnType|))
-
-(defmethod |getGenericParameterTypes()[Ljava/lang/reflect/Type;| (method)
-  "Return the parameter types. Generic type information is not yet supported."
-  (let ((pt (slot-value method '|parameterTypes|)))
-    (or pt (make-java-array :component-class (%get-java-class-by-fq-name "java.lang.Class")
-                            :size 0))))
-
 ;; java.lang.Class.getGenericSignature0() is a private native returning the
 ;; class's generic-signature string (the class-file Signature attribute), or
 ;; null when the class is not generic.  Generic reflection needs it: a field's
@@ -648,10 +634,86 @@ initialize the declaring class, as the JVM does before reflective access."
 ;; vmProperties() returns String[] of key-value pairs (like -D properties).
 
 
-;; Executable.getParameters0() returns the MethodParameters attribute's
-;; parameters.  OpenLDK doesn't keep that attribute; null makes
-;; Executable.getParameters() synthesize them (arg0, arg1, ...), as a JVM
-;; does for a class compiled without -parameters.
+;; The descriptor of the type a java.lang.Class stands for: I, [J,
+;; Ljava/lang/String;.
+(defun %class-descriptor (java-class)
+  (let ((name (lstring (slot-value java-class '|name|))))
+    (cond
+      ((char= (char name 0) #\[) (substitute #\/ #\. name))
+      ((string= name "int") "I")
+      ((string= name "long") "J")
+      ((string= name "boolean") "Z")
+      ((string= name "byte") "B")
+      ((string= name "short") "S")
+      ((string= name "char") "C")
+      ((string= name "float") "F")
+      ((string= name "double") "D")
+      ((string= name "void") "V")
+      (t (format nil "L~A;" (substitute #\/ #\. name))))))
+
+(defun %executable-method (executable)
+  "The class-file method a java.lang.reflect.Method or Constructor
+reflects."
+  (let* ((lclass (get-ldk-class-for-java-class (slot-value executable '|clazz|)))
+         (name (if (slot-exists-p executable '|name|)
+                   (lstring (slot-value executable '|name|))
+                   "<init>"))
+         (parameters (format nil "(~{~A~})"
+                             (map 'list #'%class-descriptor
+                                  (java-array-data (slot-value executable '|parameterTypes|))))))
+    (when lclass
+      (find-if (lambda (method)
+                 (and (string= (name method) name)
+                      (starts-with? parameters (descriptor method))))
+               (methods lclass)))))
+
+;; Executable.getParameters0() returns the parameters the MethodParameters
+;; attribute names, or null for a method without one (compiled without
+;; -parameters), which makes Executable.getParameters() synthesize arg0,
+;; arg1, ... as a JVM does.
 (defmethod |getParameters0()[Ljava/lang/reflect/Parameter;| (this)
-  (declare (ignore this))
-  nil)
+  (let* ((method (%executable-method this))
+         (parameters (and method (gethash "MethodParameters" (attributes method)))))
+    (when parameters
+      (make-java-array
+       :component-class (%get-java-class-by-bin-name "java/lang/reflect/Parameter")
+       :initial-contents
+       (loop for (name . access-flags) in parameters
+             for index from 0
+             collect (let ((parameter (%make-java-instance "java/lang/reflect/Parameter")))
+                       (|<init>(Ljava/lang/String;ILjava/lang/reflect/Executable;I)V|
+                        parameter (and name (ijstring name)) access-flags this index)
+                       parameter))))))
+
+(defun %record-components (java-class)
+  (let ((lclass (and (eq 0 (|isArray()Z| java-class))
+                     (eq 0 (|isPrimitive()Z| java-class))
+                     (get-ldk-class-for-java-class java-class))))
+    (and lclass
+         (hash-table-p (attributes lclass))
+         (gethash "Record" (attributes lclass)))))
+
+(defmethod |isRecord0()Z| ((this |java/lang/Class|))
+  (if (%record-components this) 1 0))
+
+;; A RecordComponent per component of the Record attribute, its accessor
+;; the record's public no-argument method of the component's name.
+(defmethod |getRecordComponents0()[Ljava/lang/reflect/RecordComponent;| ((this |java/lang/Class|))
+  (classload "java/lang/reflect/RecordComponent")
+  (let ((*descriptor-loader* (%class-java-loader this))
+        (no-classes (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Class"))))
+    (make-java-array
+     :component-class (%get-java-class-by-bin-name "java/lang/reflect/RecordComponent")
+     :initial-contents
+     (loop for (name descriptor attributes) in (%record-components this)
+           collect (let ((component (%make-java-instance "java/lang/reflect/RecordComponent"))
+                         (signature (gethash "Signature" attributes)))
+                     (setf (slot-value component '|clazz|) this
+                           (slot-value component '|name|) (ijstring name)
+                           (slot-value component '|type$|) (%bin-type-name-to-class descriptor)
+                           (slot-value component '|accessor|)
+                           (|getDeclaredMethod(Ljava/lang/String;[Ljava/lang/Class;)Ljava/lang/reflect/Method;|
+                            this (ijstring name) no-classes)
+                           (slot-value component '|signature|) (and signature (ijstring signature))
+                           (slot-value component '|annotations|) (gethash "RuntimeVisibleAnnotations" attributes))
+                     component)))))
