@@ -573,8 +573,76 @@ JDK classes always keep their state."
                             :save-runtime-options t
                             :toplevel #'app-main-wrapper))
 
+(defun %initialized-classes ()
+  "A hash set of the LDK classes initialized so far."
+  (let ((set (make-hash-table :test #'eq)))
+    (maphash (lambda (bin-name class)
+               (declare (ignore bin-name))
+               (when (initialized-p class)
+                 (setf (gethash class set) t)))
+             *ldk-classes-by-bin-name*)
+    set))
+
+(defparameter *per-run-state-classes*
+  '("java/security/" "sun/security/" "javax/crypto/"
+    "java/util/UUID" "java/util/Random" "java/util/SplittableRandom"
+    "java/util/concurrent/ThreadLocalRandom"
+    "java/io/File$TempDirectory" "java/nio/file/TempFileHelper"
+    "java/util/TimeZone" "sun/util/calendar/")
+  "Prefixes of the JDK classes whose static state belongs to a run, not
+the build: random seeds, security providers, temporary file names and the
+default time zone.  %WARM-UP-JDK resets those it initialized.")
+
+(defun %per-run-state-class-p (bin-name)
+  (some (lambda (prefix) (eql 0 (search prefix bin-name))) *per-run-state-classes*))
+
+(defun %warm-up-jdk ()
+  "Compile and run src/JdkWarmup.java, so the JDK code it calls is compiled
+into the image, then reset the classes in *PER-RUN-STATE-CLASSES* it
+initialized: SecureRandom's seed, the default time zone and the like are
+a run's, not the build's.  Other JDK classes keep their state, as in every
+image -- resetting them all would rerun one-time initializers
+(java.lang.invoke's).  A user.timezone property it set goes too (System's
+properties outlive the reset; the runtime refreshes only those it sets).
+Skipped, with a note, without a javac."
+  (let* ((java-home (lstring (|java/lang/System.getProperty(Ljava/lang/String;)Ljava/lang/String;|
+                              (jstring "java.home"))))
+         (javac (merge-pathnames "bin/javac" (uiop:ensure-directory-pathname java-home)))
+         (source (asdf:system-relative-pathname :openldk "src/JdkWarmup.java")))
+    (unless (and (uiop:file-exists-p javac) (uiop:file-exists-p source))
+      (format *error-output* "~&;; No javac in ~A: not warming up the JDK~%" java-home)
+      (return-from %warm-up-jdk))
+    (let ((directory (merge-pathnames (format nil "openldk-warmup-~D/" (sb-posix:getpid))
+                                      (uiop:temporary-directory))))
+      (ensure-directories-exist directory)
+      (unwind-protect
+          (progn
+            (uiop:run-program (list (namestring javac) "--release" "25"
+                                    "-d" (namestring directory) (namestring source))
+                              :output *error-output* :error-output *error-output*)
+            (let ((before (%initialized-classes))
+                  (timezone (|java/lang/System.getProperty(Ljava/lang/String;)Ljava/lang/String;|
+                             (jstring "user.timezone")))
+                  (count 0))
+              (format *error-output* "~&;; WARMUP openldk.warmup.JdkWarmup~%")
+              (%run-warmup "openldk.warmup.JdkWarmup" nil (namestring directory))
+              (maphash (lambda (bin-name class)
+                         (when (and (initialized-p class) (not (gethash class before))
+                                    (%per-run-state-class-p bin-name))
+                           (%reset-class class)
+                           (format *error-output* "~&;;   reset ~A~%" bin-name)
+                           (incf count)))
+                       *ldk-classes-by-bin-name*)
+              (unless timezone
+                (|java/lang/System.clearProperty(Ljava/lang/String;)Ljava/lang/String;|
+                 (jstring "user.timezone")))
+              (format *error-output* "~&;; Reset ~D JDK classes the warmup initialized~%" count)))
+        (uiop:delete-directory-tree directory :validate t :if-does-not-exist :ignore)))))
+
 (defun make-image (&optional (output-path "openldk"))
   (initialize)
+  (%warm-up-jdk)
+  (%reset-runtime-for-save)
   ;; Clear all monitor state to prevent deadlocks in the saved image.
   (clrhash *monitors*)
   ;; Clear stale thread mappings — after image restore the Lisp thread objects are different.
