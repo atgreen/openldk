@@ -870,64 +870,84 @@ primitive type. ARGS must line up with the descriptor's declared parameters
 that linkTo*/%invoke-from-member-name resolves the target symbol once per call
 site instead of on every invocation.")
 
+(defvar *member-plans* (make-hash-table :test 'equal :synchronized t)
+  "(class name type flags) -> invocation plan: the plans of MemberNames
+naming the same member, which code creates afresh again and again (Scala's
+compiler made 39,000 for 344 members in one compilation).")
+
+(defun %member-name-slot (member-name slot)
+  (when (and (slot-exists-p member-name slot) (slot-boundp member-name slot))
+    (slot-value member-name slot)))
+
+(defun %member-name-key (member-name)
+  "The key of the member MEMBER-NAME names in *MEMBER-PLANS*, or NIL."
+  (let ((clazz (%member-name-slot member-name '|clazz|))
+        (name (%member-name-slot member-name '|name|)))
+    (when (and clazz name)
+      (list clazz (lstring name)
+            (%member-name-slot member-name '|type$|)
+            (%member-name-slot member-name '|flags|)))))
+
 (defun %resolve-member-name (member-name)
   "Resolve MEMBER-NAME to a cached invocation plan (kind a b):
    (:constructor class-symbol init-symbol)
    (:static      fn-symbol   descriptor)
    (:instance    fn-symbol   descriptor)
-The plan depends only on the (stable) MemberName, so it is memoized."
+The plan depends only on the (stable) MemberName, so it is memoized, by
+the MemberName and by the member it names."
   (or (gethash member-name *member-name-invoke-cache*)
       (setf (gethash member-name *member-name-invoke-cache*)
-            (let* ((clazz (when (and (slot-exists-p member-name '|clazz|)
-                                     (slot-boundp member-name '|clazz|))
-                            (slot-value member-name '|clazz|)))
-                   (name (when (and (slot-exists-p member-name '|name|)
-                                    (slot-boundp member-name '|name|))
-                           (slot-value member-name '|name|)))
-                   (type (when (and (slot-exists-p member-name '|type$|)
-                                    (slot-boundp member-name '|type$|))
-                           (slot-value member-name '|type$|)))
-                   (flags (when (and (slot-exists-p member-name '|flags|)
-                                     (slot-boundp member-name '|flags|))
-                            (slot-value member-name '|flags|))))
-              (unless (and clazz name)
-                (internal-error "linkTo*: incomplete MemberName ~A" member-name))
-              (let* ((class-name (substitute #\/ #\. (lstring (slot-value clazz '|name|))))
-                     (method-name (lstring name))
-                     ;; type is a String descriptor or a MethodType
-                     (method-type (if (and type (typep type '|java/lang/String|))
-                                      (lstring type)
-                                      (when type
-                                        (let ((rtype (slot-value type '|rtype|))
-                                              (ptypes (when (slot-exists-p type '|ptypes|)
-                                                        (slot-value type '|ptypes|))))
-                                          (%build-method-descriptor rtype ptypes)))))
-                     ;; REF_invokeVirtual=5 Static=6 Special=7 newInvokeSpecial=8
-                     (ref-kind (ash (logand flags #x0F000000) -24)))
-                (cond
-                  ((= ref-kind 8)       ; constructor
-                   (classload class-name)
-                   (let* ((pkg (class-package class-name))
-                          (lisp-class-name (intern class-name pkg))
-                          ;; <init> is void; normalise any return type to V
-                          (desc (cond
-                                  ((null method-type) "()V")
-                                  ((position #\) method-type)
-                                   (format nil "~AV" (subseq method-type 0 (1+ (position #\) method-type)))))
-                                  (t (format nil "~AV" method-type))))
-                          (init-method-name (format nil "<init>~A" (subseq desc 0 (1+ (position #\) desc)))))
-                          (lisp-init-name (intern init-method-name :openldk)))
-                     (list :constructor lisp-class-name lisp-init-name)))
-                  ((= ref-kind 6)       ; static: name is class.method(desc) in the loader package
-                   (let* ((java-loader (slot-value clazz '|classLoader|))
-                          (ldk-loader (get-ldk-loader-for-java-loader java-loader))
-                          (pkg (class-package class-name ldk-loader))
-                          (full-method-sig (format nil "~A.~A~A" class-name method-name method-type)))
-                     (list :static (static-method-symbol (lispize-method-name full-method-sig) pkg) method-type)))
-                  (t                    ; virtual/special/interface: GF named by method+descriptor
-                   (list :instance
-                         (intern (lispize-method-name (format nil "~A~A" method-name method-type)) :openldk)
-                         method-type))))))))
+            (let ((key (%member-name-key member-name)))
+              (or (and key (gethash key *member-plans*))
+                  (let ((plan (%compute-member-name-plan member-name)))
+                    (when key
+                      (setf (gethash key *member-plans*) plan))
+                    plan))))))
+
+(defun %compute-member-name-plan (member-name)
+  "The invocation plan, as %RESOLVE-MEMBER-NAME returns, for MEMBER-NAME."
+  (let ((clazz (%member-name-slot member-name '|clazz|))
+        (name (%member-name-slot member-name '|name|))
+        (type (%member-name-slot member-name '|type$|))
+        (flags (%member-name-slot member-name '|flags|)))
+    (unless (and clazz name)
+      (internal-error "linkTo*: incomplete MemberName ~A" member-name))
+    (let* ((class-name (substitute #\/ #\. (lstring (slot-value clazz '|name|))))
+           (method-name (lstring name))
+           ;; type is a String descriptor or a MethodType
+           (method-type (if (and type (typep type '|java/lang/String|))
+                            (lstring type)
+                            (when type
+                              (let ((rtype (slot-value type '|rtype|))
+                                    (ptypes (when (slot-exists-p type '|ptypes|)
+                                              (slot-value type '|ptypes|))))
+                                (%build-method-descriptor rtype ptypes)))))
+           ;; REF_invokeVirtual=5 Static=6 Special=7 newInvokeSpecial=8
+           (ref-kind (ash (logand flags #x0F000000) -24)))
+      (cond
+        ((= ref-kind 8)       ; constructor
+         (classload class-name)
+         (let* ((pkg (class-package class-name))
+                (lisp-class-name (intern class-name pkg))
+                ;; <init> is void; normalise any return type to V
+                (desc (cond
+                        ((null method-type) "()V")
+                        ((position #\) method-type)
+                         (format nil "~AV" (subseq method-type 0 (1+ (position #\) method-type)))))
+                        (t (format nil "~AV" method-type))))
+                (init-method-name (format nil "<init>~A" (subseq desc 0 (1+ (position #\) desc)))))
+                (lisp-init-name (intern init-method-name :openldk)))
+           (list :constructor lisp-class-name lisp-init-name)))
+        ((= ref-kind 6)       ; static: name is class.method(desc) in the loader package
+         (let* ((java-loader (slot-value clazz '|classLoader|))
+                (ldk-loader (get-ldk-loader-for-java-loader java-loader))
+                (pkg (class-package class-name ldk-loader))
+                (full-method-sig (format nil "~A.~A~A" class-name method-name method-type)))
+           (list :static (static-method-symbol (lispize-method-name full-method-sig) pkg) method-type)))
+        (t                    ; virtual/special/interface: GF named by method+descriptor
+         (list :instance
+               (intern (lispize-method-name (format nil "~A~A" method-name method-type)) :openldk)
+               method-type))))))
 
 (defun %invoke-from-member-name (member-name &rest args)
   "Invoke a method described by a MemberName with the given ARGS. Core of
