@@ -146,10 +146,22 @@ haven't run for +FASL-CACHE-UNUSED-DAYS+."
            (uiop:delete-directory-tree dir :validate t)))))))
 
 (defun %fasl-cache-start ()
-  "Turn the cache on, as the environment says, for a run of a saved image;
-a build's warmups, which run without, leave no entries behind."
+  "Turn the cache on, as the environment says, for a run of a saved image."
   (%fasl-cache-configure)
   (pushnew '%fasl-cache-report sb-ext:*exit-hooks*))
+
+(defun %fasl-cache-start-build ()
+  "Turn the cache on for an image build's warmups, so that the images
+built from the same sources share the methods they compile."
+  (%fasl-cache-configure))
+
+(defun %fasl-cache-stop-build ()
+  "Report and turn off the cache before an image is saved: a run of the
+image configures it afresh."
+  (%fasl-cache-report)
+  (setf *fasl-cache-directory* nil)
+  (loop for tail on (cdr *fasl-cache-stats*) by #'cddr
+        do (setf (car tail) 0)))
 
 (defun %fasl-cache-report ()
   "Print the cache's counts to stderr when LDK_CODE_CACHE_STATS is set."
@@ -313,6 +325,24 @@ LOAD-TIME-VALUE form that makes it.  Signals UNCACHEABLE when one can't be."
                         :external-format :utf-8))))
     (merge-pathnames (format nil "~A/~A.fasl" (subseq key 0 2) key) *fasl-cache-directory*)))
 
+;; SBCL compiles code EVAL makes into immobile space until it fills, then
+;; into dynamic space, but loads a FASL's code into the one space
+;; *COMPILE-FILE-TO-MEMORY-SPACE* names, failing when it is immobile space
+;; and that is full.  An image's warmed-up methods fill much of it.
+(defparameter +fasl-cache-text-space-limit+ 0.9
+  "The fraction of immobile (text) space past which cached code loads
+into dynamic space instead.")
+
+(defun %fasl-cache-load-file (path)
+  "Load the cached FASL at PATH, its code where EVAL would put it."
+  (let ((sb-c:*compile-file-to-memory-space*
+          (if (< (- (sb-sys:sap-int sb-vm:*text-space-free-pointer*) sb-vm:text-space-start)
+                 (* +fasl-cache-text-space-limit+ sb-vm:text-space-size))
+              :immobile
+              :dynamic)))
+    (handler-bind ((warning #'muffle-warning))
+      (load path :verbose nil :print nil))))
+
 (defun %fasl-cache-load (class method &optional source-hash)
   "Install METHOD of CLASS from the cache, returning true; or return NIL
 when it has no entry, or a stale one, which is deleted.  In verify mode,
@@ -328,8 +358,7 @@ with SOURCE-HASH the hash of its code now, just compare; see
                     (let ((*fasl-cache-loader* (slot-value class 'ldk-loader))
                           (*fasl-cache-expected-source* source-hash)
                           (*compile-dependencies* nil))
-                      (handler-bind ((warning #'muffle-warning))
-                        (load path :verbose nil :print nil))
+                      (%fasl-cache-load-file path)
                       :loaded)
                   (error (c)
                     (format *error-output* "~&;; FASL-CACHE-ERROR loading ~A: ~A~%" path c)
@@ -419,8 +448,7 @@ when it can't be cached."
             (*compile-dependencies* nil))
         (handler-case
             (eq t (catch 'fasl-cache-stale
-                    (handler-bind ((warning #'muffle-warning))
-                      (load path :verbose nil :print nil))
+                    (%fasl-cache-load-file path)
                     t))
           (error (c)
             (format *error-output* "~&;; FASL-CACHE-ERROR loading ~A: ~A~%" path c)

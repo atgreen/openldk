@@ -504,6 +504,7 @@ OpenLDK systems it holds.")
 calling INIT, which typically starts a language and evaluates some code so
 its Java methods are compiled into the image.  A language that takes
 minutes to start (Clojure) is then ready in under a second."
+  (openldk::%fasl-cache-start-build)
   (when init (cl:funcall init))
   ;; JDK code programs run once (SecureRandom, time zones, String.format...)
   ;; compiled into the image too, its per-run state reset; see
