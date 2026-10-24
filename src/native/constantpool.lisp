@@ -100,11 +100,11 @@
    (pos   :initform 0     :accessor stream-pos)))
 
 (defmethod trivial-gray-streams:stream-read-byte ((stream byte-array-input-stream))
-  ;; Reads the next byte or returns (values NIL T) on EOF
+  ;; Reads the next byte, or returns :EOF at the end, as the Gray protocol asks
   (with-slots (array start end pos) stream
     (let ((index (+ start pos)))
       (if (>= index end)
-          (values nil t)  ; indicates EOF
+          :eof
           (prog1 (%signed-to-unsigned-byte (jaref array index))
             (incf pos))))))
 

@@ -7,6 +7,7 @@
   "Entry point for the pre-dumped javac image. Runs com.sun.tools.javac.Main."
   ;; Match Java FP semantics
   (sb-int:set-floating-point-modes :traps nil)
+  (openldk::%fasl-cache-start)
   ;; Refresh process-dependent system properties baked in at image-build
   ;; time; relative paths would otherwise resolve against the BUILD
   ;; directory's cwd.  Must happen before any NIO use (the default
