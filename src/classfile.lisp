@@ -320,6 +320,7 @@ lambda over Jackson 2 classes behind a check that they are present."
     attributes
     java-class
     method-name-table  ; lazy hash set of lispized name+descriptor strings
+    content-hash       ; MD5 of the classfile, hex, for the FASL cache
     ldk-loader)))  ; <ldk-class-loader> that loaded this class
 
 (defclass/std <inner-class> ()
@@ -691,11 +692,23 @@ lone surrogates and other BMP characters map to one character each."
                    (t (emit b) (incf i))))))
     (coerce out 'string)))
 
+(defun %read-all-octets (stream)
+  "The rest of binary STREAM's contents, as an octet vector."
+  (let ((out (fast-io:make-output-buffer))
+        (buffer (make-array 65536 :element-type '(unsigned-byte 8))))
+    (loop for end = (read-sequence buffer stream)
+          while (plusp end)
+          do (fast-io:fast-write-sequence buffer out 0 end))
+    (fast-io:finish-output-buffer out)))
+
 (defun read-classfile (fin)
   "Parse a classfile from binary input stream FIN and return a <class>."
-  (let ((class (make-instance '<class>)))
+  (let* ((class (make-instance '<class>))
+         (octets (%read-all-octets fin)))
+    ;; The FASL cache keys compiled methods by their class's content.
+    (setf (slot-value class 'content-hash) (%md5-hex octets))
     (with-slots (methods fields super interfaces) class
-      (fast-io:with-fast-input (fin-fast nil fin)
+      (fast-io:with-fast-input (fin-fast octets)
         (let ((bitio (bitio:make-bitio fin-fast #'fast-io:fast-read-byte #'wrap-fast-read-sequence)))
           (flet ((read-u1 () (bitio:read-one-byte bitio)))
             (bitio:read-integer bitio :unsignedp nil :byte-endian :be) ;; magic bytes

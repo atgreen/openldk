@@ -96,6 +96,7 @@
                (:file "src/zip")
                (:file "src/reflection")
                (:file "src/optimizer")
+               (:file "src/fasl-cache")
                (:file "src/aot")
                (:file "src/openldk")
                (:file "src/cli"))
@@ -109,7 +110,7 @@
                :cl-store :trivial-backtrace :fset :bordeaux-threads
                :float-features :local-time :closer-mop :slynk
                :file-attributes :trivial-garbage :precise-time
-               :trivial-gray-streams :cl-murmurhash)
+               :trivial-gray-streams :cl-murmurhash :sb-md5)
   :build-operation "program-op"
   :build-pathname "openldk"
   :entry-point "openldk:make-image"

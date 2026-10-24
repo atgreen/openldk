@@ -412,6 +412,23 @@ loaders, whose classes are not in the global or app loader tables."
                   (bordeaux-threads:make-recursive-lock
                    (format nil "classload-~A" classname)))))))
 
+;;; The FASL cache's record of the classes a method's compilation looks at
+;;; (see fasl-cache.lisp).
+
+(defvar *compile-dependencies* nil
+  "While a method compiles for the FASL cache, a hash table whose keys are
+the binary names of the classes the compiler looked up.")
+
+(defun %md5-hex (octets)
+  "The MD5 digest of OCTETS, in hex."
+  (format nil "~(~{~2,'0x~}~)" (coerce (sb-md5:md5sum-sequence octets) 'list)))
+
+(declaim (inline %note-class-dependency))
+(defun %note-class-dependency (bin-name)
+  "Record that the compilation in progress looked up the class BIN-NAME."
+  (when *compile-dependencies*
+    (setf (gethash bin-name *compile-dependencies*) t)))
+
 (defun %get-java-class-by-bin-name (bin-name &optional fail-ok loader)
   "Look up a Java class by its binary name BIN-NAME.
    When FAIL-OK is non-NIL, return NIL instead of asserting.
@@ -425,6 +442,7 @@ loaders, whose classes are not in the global or app loader tables."
                     (t (%char-data-string (java-array-data bin-name))))))
     (assert (stringp bin-name))
     (assert (not (find #\. bin-name)))
+    (%note-class-dependency bin-name)
     (let ((result (if loader
                       ;; Search with parent delegation
                       (%lookup-class-with-delegation loader bin-name 'java-classes-by-bin-name)
@@ -447,6 +465,7 @@ loaders, whose classes are not in the global or app loader tables."
                    (t (%char-data-string (java-array-data fq-name))))))
     (assert (stringp fq-name))
     (assert (not (find #\/ fq-name)))
+    (%note-class-dependency (substitute #\/ #\. fq-name))
     (let ((result (if loader
                       (%lookup-class-with-delegation loader fq-name 'java-classes-by-fq-name)
                       (gethash fq-name *java-classes-by-fq-name*))))
@@ -467,6 +486,7 @@ loaders, whose classes are not in the global or app loader tables."
                     (t (%char-data-string (java-array-data bin-name))))))
     (assert (stringp bin-name))
     (assert (not (find #\. bin-name)))
+    (%note-class-dependency bin-name)
     (let ((result (if loader
                       (%lookup-class-with-delegation loader bin-name 'ldk-classes-by-bin-name)
                       (gethash bin-name *ldk-classes-by-bin-name*))))
@@ -486,6 +506,7 @@ loaders, whose classes are not in the global or app loader tables."
                         (internal-error "fq-name is NIL in %get-ldk-class-by-fq-name")))
                    (t (%char-data-string (java-array-data fq-name))))))
     (assert (stringp fq-name))
+    (%note-class-dependency (substitute #\/ #\. fq-name))
     (let ((result (if loader
                       (%lookup-class-with-delegation loader fq-name 'ldk-classes-by-fq-name)
                       (gethash fq-name *ldk-classes-by-fq-name*))))
