@@ -1263,12 +1263,15 @@ SBCL's evaluator runs it in less time than compiling it would take."
          (loop for pc from 0 below (length next)
                never (some (lambda (target) (<= target pc)) (aref next pc))))))
 
-(defun %install-method-definition (class method method-key definition-code length)
+(defun %install-method-definition (class method method-key definition-code length
+                                   &key evaluator)
   "Evaluate DEFINITION-CODE to install METHOD's compiled function, working
 around SBCL native-compiler limits on very large method bodies: interpret
 huge bytecode outright, and fall back to interpretation when native
 compilation fails silently (leaving the self-compiling stub in place).
-A straight-line <clinit> is interpreted too: it runs once."
+A straight-line <clinit> is interpreted too: it runs once.
+EVALUATOR, when given, is tried before compiling: a function that installs
+the method another way (through the FASL cache) and returns true if it did."
   (handler-case
       ;; Very large bytecode (e.g. 1000+ element array initializers)
       ;; can cause SBCL's native compiler to hang or abort.  Use the
@@ -1291,6 +1294,7 @@ A straight-line <clinit> is interpreted too: it runs once."
         ((> length 5000)
          (let ((sb-ext:*evaluator-mode* :interpret))
            (%eval definition-code)))
+        ((and evaluator (funcall evaluator)))
         (t (%eval definition-code)))
     (error (c)
       (format *error-output* "~&;; COMPILE-ERROR in ~A: ~A~%" method-key c)
@@ -1328,6 +1332,8 @@ A straight-line <clinit> is interpreted too: it runs once."
             (format *error-output*
                     "~&;; COMPILE-FALLBACK: native compilation failed silently for ~A, retrying interpreted~%"
                     method-key)
+            (when evaluator
+              (ignore-errors (delete-file (%fasl-cache-path class method))))
             (force-output *error-output*)
             (handler-case
                 (let ((sb-ext:*evaluator-mode* :interpret))
@@ -1434,16 +1440,29 @@ classes with the same name."
                      (when *debug-bytecode*
                        (format t "~&; COMPILING ~A~%" method-key))
                      (setf (fn-name *context*) (%method-fn-name class method))
-                     (let* ((ir-code (setf (ir-code *context*)
-                                           (%transpile-with-stack-hints method-key code length)))
-                            (blocks-after-dce (%optimize-method-blocks ir-code))
-                            (definition-code (%build-method-definition class method blocks-after-dce
-                                                                       parameter-hints max-locals)))
-                       (if *aot-dir*
-                           (%write-aot-method class-name
-                                              (lispize-method-name (format nil "~A~A" (name method) (descriptor method)))
-                                              definition-code)
-                           (%install-method-definition class method method-key definition-code length))
+                     (let ((cacheable (%fasl-cache-eligible-p class method length)))
+                       (unless (and cacheable
+                                    (not *fasl-cache-verify*)
+                                    (%fasl-cache-load class method))
+                         (let* ((dependencies (and cacheable (make-hash-table :test #'equal)))
+                                (definition-code
+                                  (let ((*compile-dependencies* dependencies))
+                                    (%build-method-definition
+                                     class method
+                                     (%optimize-method-blocks
+                                      (setf (ir-code *context*)
+                                            (%transpile-with-stack-hints method-key code length)))
+                                     parameter-hints max-locals))))
+                           (if *aot-dir*
+                               (%write-aot-method class-name
+                                                  (lispize-method-name (format nil "~A~A" (name method) (descriptor method)))
+                                                  definition-code)
+                               (%install-method-definition
+                                class method method-key definition-code length
+                                :evaluator (and cacheable
+                                                (lambda ()
+                                                  (%fasl-cache-install class method definition-code
+                                                                       dependencies)))))))
                        (when (or *debug-compile* *debug-codegen*)
                          (format t "; COMPILING ~A.~A (~Dms)~%"
                                  class-name
@@ -2140,6 +2159,7 @@ the class being compiled when there is one, as the JVM resolves references."
   (let ((classname (coerce classname 'string)))
     (assert (not (find #\. classname)))
     (assert (> (length classname) 0))
+    (%note-class-dependency classname)
     (cond
       ;; During warm-up (before main initializes loaders), use global tables
       ((not *boot-ldk-class-loader*)

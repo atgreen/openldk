@@ -162,6 +162,19 @@ typed operands SBCL compiles it to a single machine add.
 bad array indexes into Java's `NullPointerException` and
 `ArrayIndexOutOfBoundsException`.
 
+### The code cache
+
+`openldk` keeps the methods it compiles in a cache, `code/` in the
+download cache directory, so later runs load them instead of compiling
+them again: the second run of a program typically starts two to three
+times faster.  An entry is used only while the classes its code was
+compiled against are unchanged, and each build of OpenLDK has entries of
+its own.  Set `LDK_CODE_CACHE=off` to turn the cache off, or to a
+directory to keep it there; `LDK_CODE_CACHE_STATS=1` prints what the
+cache did when the program exits.  With `LDK_CODE_CACHE_VERIFY=1`, every
+method is compiled anyway and any cache entry whose code differs from
+the compiler's is reported, a check on the cache itself.
+
 ## Hacking
 
 ### Testing

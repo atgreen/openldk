@@ -219,6 +219,7 @@ files resolve against it."
   (%use-process-directory)
   ;; Disable floating-point traps to match Java semantics (NaN/Infinity instead of errors)
   (sb-int:set-floating-point-modes :traps nil)
+  (%fasl-cache-start)
   ;; Parse Java-style command line arguments
   (multiple-value-bind (mainclass args classpath dump-dir aot)
       (%parse-java-args)
@@ -260,6 +261,7 @@ files resolve against it."
    CLI -cp overrides the baked classpath; a CLI mainclass overrides the default."
   (%use-process-directory)
   (sb-int:set-floating-point-modes :traps nil)
+  (%fasl-cache-start)
   (multiple-value-bind (cli-mainclass args cli-classpath dump-dir aot)
       (%parse-java-args)
     (let ((mainclass (or cli-mainclass *default-mainclass*))

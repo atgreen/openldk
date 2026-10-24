@@ -298,3 +298,23 @@ nothing behind when it refuses."
            (openldk::%unsafe-fill-memory (sb-sys:sap-int sap) 2 -1)
            (is (equal '(#xFF #xFF 0 0) (bytes))))
       (sb-alien:free-alien mem))))
+
+(test fasl-cache-externalize
+  ;; Code the FASL cache can write as it is comes back unchanged; a NaN,
+  ;; which can't be printed readably, is made at load time from its bits;
+  ;; and a user loader's package, which the next run won't have, makes the
+  ;; code uncacheable.
+  (let ((code '(defun f (x) (if (eql x 1.5d0) '(a "b" #\c #(1 2)) (list x :k)))))
+    (is (equal code (openldk::%externalize-definition code)))
+    ;; EQUALP, which compares vectors by their elements.
+    (is (equalp code (let ((*package* (find-package :openldk)))
+                      (read-from-string (openldk::%print-definition code))))))
+  (let* ((nan (float-features:bits-double-float #x7FF8000000000000))
+         (ext (openldk::%externalize-definition `(foo ,nan))))
+    (is (eq 'load-time-value (first (second ext))))
+    (is (float-features:float-nan-p (eval (second (second ext))))))
+  (let ((package (or (find-package "OPENLDK.L999") (make-package "OPENLDK.L999" :use nil))))
+    (unwind-protect
+         (signals openldk::uncacheable
+           (openldk::%externalize-definition `(foo ,(intern "BAR" package))))
+      (delete-package package))))
