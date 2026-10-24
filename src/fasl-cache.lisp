@@ -263,12 +263,29 @@ SOURCE-HASH differs from the compiler's now."
     (error 'uncacheable :what class))
   `(%fasl-cache-class ,(name class)))
 
+;; A MethodType is made again from its descriptor, as INVOKEDYNAMIC's is
+;; made when compiling: its classes resolve through the loader of the class
+;; being compiled, which is the one loading the FASL.
+(defun %method-type-form (method-type)
+  (let ((rtype (slot-value method-type '|rtype|))
+        (ptypes (coerce (java-array-data (slot-value method-type '|ptypes|)) 'list)))
+    (dolist (type (cons rtype ptypes))
+      (let ((class (get-ldk-class-for-java-class type)))
+        (when class (%class-form class))))
+    `(|java/lang/invoke/MethodType.fromMethodDescriptorString(Ljava/lang/String;Ljava/lang/ClassLoader;)Ljava/lang/invoke/MethodType;|
+      (jstring ,(%build-method-descriptor rtype (slot-value method-type '|ptypes|)))
+      (%context-java-loader))))
+
 (defun %construction-form (x)
   "Code that makes X, which holds objects a FASL can't, at load time."
   (cond ((%externalizable-p x) `',x)
         ((consp x) `(cons ,(%construction-form (car x)) ,(%construction-form (cdr x))))
         ((typep x '(and vector (not string)))
          `(vector ,@(map 'list #'%construction-form x)))
+        ;; A class Java code defines, so not one to name before it runs.
+        ((let ((method-type (find-class '|java/lang/invoke/MethodType| nil)))
+           (and method-type (typep x method-type)))
+         (%method-type-form x))
         (t (typecase x
              (double-float `(float-features:bits-double-float ,(float-features:double-float-bits x)))
              (single-float `(float-features:bits-single-float ,(float-features:single-float-bits x)))
