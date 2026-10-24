@@ -240,20 +240,31 @@ or THIS."
             this)
         this)))
 
+(defun %nest-members (this)
+  "What HotSpot's getNestMembers0 returns for the class THIS: its nest
+host, then each class the host's NestMembers attribute names, loaded by
+the host's loader, that loads."
+  (let* ((host (%nest-host this))
+         (host-ldk-class (get-ldk-class-for-java-class host))
+         (loader (and (slot-exists-p host '|classLoader|) (slot-value host '|classLoader|)))
+         (members (loop for name in (and host-ldk-class (nest-members host-ldk-class))
+                        for member = (handler-case
+                                         (let ((ldk-class (classload name loader)))
+                                           (and ldk-class (java-class ldk-class)))
+                                       (error () nil))
+                        when (and member (not (eq member host)))
+                          collect member)))
+    (make-java-array
+     :component-class (%get-java-class-by-bin-name "java/lang/Class")
+     :initial-contents (cons host members))))
+
 (defmethod |getNestMembers()[Ljava/lang/Class;| ((this |java/lang/Class|))
-  "Return an array of nest member classes.  Returns singleton array of self if no NestMembers."
-  (let* ((bin-name (substitute #\/ #\. (lstring (slot-value this '|name|))))
-         (ldk-class (%get-ldk-class-by-bin-name bin-name t)))
-    (if (and ldk-class (nest-members ldk-class))
-        (make-java-array
-         :component-class (%get-java-class-by-bin-name "java/lang/Class")
-         :initial-contents (mapcar (lambda (member-name)
-                                     (or (%get-java-class-by-bin-name member-name t)
-                                         this))
-                                   (nest-members ldk-class)))
-        (make-java-array
-         :component-class (%get-java-class-by-bin-name "java/lang/Class")
-         :initial-contents (list this)))))
+  (%nest-members this))
+
+;; The JIT-compiled Class.getNestMembers replaces the method above and calls
+;; this native.
+(defmethod |getNestMembers0()[Ljava/lang/Class;| ((this |java/lang/Class|))
+  (%nest-members this))
 
 (defmethod |isNestmateOf(Ljava/lang/Class;)Z| ((this |java/lang/Class|) other)
   "Return true (1) if this class and OTHER share the same nest host."

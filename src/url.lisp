@@ -154,7 +154,18 @@ target does not exist, or :FALLTHROUGH for other protocols."
            ((uiop:file-exists-p path)
             (make-instance '<resource-input-stream>
                            :lisp-stream (flexi-streams:make-in-memory-input-stream
-                                         (read-file-into-byte-vector path)))))))
+                                         (read-file-into-byte-vector path))))
+           ;; A directory reads as its entries' names, sorted, one a line,
+           ;; as a JVM's FileURLConnection lists it.
+           ((uiop:directory-exists-p path)
+            (let ((names (sort (append (mapcar #'file-namestring (uiop:directory-files path))
+                                       (mapcar (lambda (d) (car (last (pathname-directory d))))
+                                               (uiop:subdirectories path)))
+                               #'string<)))
+              (make-instance '<resource-input-stream>
+                             :lisp-stream (flexi-streams:make-in-memory-input-stream
+                                           (flexi-streams:string-to-octets
+                                            (format nil "~{~A~%~}" names) :external-format :utf-8))))))))
       ;; Handle jrt: URLs (JDK jimage resources: jrt:/<module>/<resource>)
       ((starts-with? "jrt:" url-string)
        (let* ((rest (subseq url-string 4))            ; drop "jrt:"

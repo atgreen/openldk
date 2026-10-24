@@ -162,26 +162,6 @@
          (pkg (%java-class-package class)))
     (make-instance (intern bin-name pkg))))
 
-(defmethod |getLocalHostName()Ljava/lang/String;| ((inet4 |java/net/Inet4AddressImpl|))
-  (jstring (uiop:hostname)))
-
-(defmethod |getLocalHostName()Ljava/lang/String;| ((inet4 |java/net/Inet4AddressImpl|))
-  (jstring (uiop:hostname)))
-
-(defmethod |lookupAllHostAddr(Ljava/lang/String;)[Ljava/net/InetAddress;| ((inet4 |java/net/Inet4AddressImpl|) hostname)
-  (let (;; FIXME (hostent (sb-bsd-sockets:get-host-by-name (lstring hostname)))
-        (inet4addr (%make-java-instance "java/net/Inet4Address")))
-    (|<init>(Ljava/lang/String;[B)V| inet4addr hostname (make-java-array
-                                                        :component-class (%get-java-class-by-fq-name "byte")
-                                                        :initial-contents (coerce (mapcar #'parse-integer (uiop:split-string "127.0.0.1" :separator '(#\.))) 'vector)))
-    (make-java-array
-     :component-class (%get-java-class-by-fq-name "byte")
-     :initial-contents (coerce (list inet4addr) 'vector))))
-
-#|
-(sb-bsd-sockets:host-ent-addresses (sb-bsd-sockets:get-host-by-name "fedora"))
-|#
-
 (defun |java/net/Inet4Address.init()V| ()
   nil)
 

@@ -583,7 +583,12 @@ relative file: URL as not hierarchical)."
   (with-slots (jarfile zipfile-entries lock) cpe
     (bt:with-lock-held (lock)
       (%ensure-entry-open cpe)
-      (when (gethash resource-name zipfile-entries)
+      ;; A directory's entry ends in /, and a JVM's lookup finds it without
+      ;; one too (ZipFile.getEntry): the webjars locator checks for
+      ;; META-INF/resources/webjars/NAME/VERSION.
+      (when (or (gethash resource-name zipfile-entries)
+                (and (not (ends-with? "/" resource-name))
+                     (gethash (concatenate 'string resource-name "/") zipfile-entries)))
         (format nil "jar:file:~A!/~A" (%absolute-file-name jarfile) resource-name)))))
 
 (defmethod get-resource-url ((cpe dir-classpath-entry) resource-name)

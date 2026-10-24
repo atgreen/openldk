@@ -572,8 +572,13 @@ stream."
                                          (read-attributes bitio constant-pool class (read-u2))))))))
           ("PermittedSubclasses"
            (read-buffer attributes-length))
+          ;; Kept, as RuntimeVisibleAnnotations is, for the reflective
+          ;; getAnnotated* methods (Spring reads JSpecify's @Nullable so).
           ("RuntimeVisibleTypeAnnotations"
-           (read-buffer attributes-length))
+           (setf (gethash "RuntimeVisibleTypeAnnotations" attributes)
+                 (make-java-array :component-class
+                                  (or (%get-java-class-by-bin-name "byte" t) :early-byte-placeholder)
+                                  :initial-contents (read-buffer attributes-length))))
           ("RuntimeInvisibleTypeAnnotations"
            (read-buffer attributes-length))
           ;; The JVM ignores attributes it doesn't know, such as Scala's

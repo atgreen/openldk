@@ -62,6 +62,44 @@
     (when (and lclass (attributes lclass))
       (gethash "RuntimeVisibleAnnotations" (attributes lclass)))))
 
+;;; Type annotations: the RuntimeVisibleTypeAnnotations attribute of a
+;;; class, method or field, NIL (none) when it has none.
+
+(defmethod |getRawTypeAnnotations()[B| ((class |java/lang/Class|))
+  (let ((lclass (get-ldk-class-for-java-class class)))
+    (when (and lclass (attributes lclass))
+      (gethash "RuntimeVisibleTypeAnnotations" (attributes lclass)))))
+
+(defun %member-type-annotations (java-class name descriptor-prefix)
+  "The RuntimeVisibleTypeAnnotations of the member of JAVA-CLASS named NAME
+whose descriptor starts with DESCRIPTOR-PREFIX, or NIL."
+  (let* ((lclass (get-ldk-class-for-java-class java-class))
+         (member (and lclass
+                      (find-if (lambda (m)
+                                 (and (string= (name m) name)
+                                      (eql 0 (search descriptor-prefix (descriptor m)))))
+                               (if (string= descriptor-prefix "(" :end1 (min 1 (length descriptor-prefix)))
+                                   (methods lclass)
+                                   (fields lclass))))))
+    (and member (attributes member)
+         (gethash "RuntimeVisibleTypeAnnotations" (attributes member)))))
+
+(defmethod |getTypeAnnotationBytes0()[B| (member)
+  "Executable's and Field's native.  Unspecialized: java.lang.reflect's
+classes aren't CLOS classes until they load (see Field.get in
+reflection.lisp)."
+  (if (slot-exists-p member '|parameterTypes|)
+      (%member-type-annotations (slot-value member '|clazz|)
+                                (if (slot-exists-p member '|returnType|)
+                                    (lstring (slot-value member '|name|))
+                                    "<init>")
+                                (format nil "(~{~A~})"
+                                        (map 'list #'%class->descriptor-string
+                                             (java-array-data (slot-value member '|parameterTypes|)))))
+      (%member-type-annotations (slot-value member '|clazz|)
+                                (lstring (slot-value member '|name|))
+                                (%class->descriptor-string (slot-value member '|type$|)))))
+
 (defun |java/awt/image/ColorModel.initIDs()V| ()
   nil)
 
@@ -121,7 +159,9 @@
         1 0)))
 
 (defun |sun/nio/ch/IOUtil.iovMax()I| ()
-  0)
+  "Linux's IOV_MAX.  With 0, IOUtil's scattering and gathering transfers
+move nothing."
+  1024)
 
 (defun |sun/nio/ch/IOUtil.writevMax()J| ()
   "Maximum number of bytes writev(2) can transfer in one call.  We gather
@@ -135,13 +175,15 @@ in Lisp, so any generous cap works; Linux IOV_MAX * page-ish value."
   nil)
 
 (defun |sun/nio/ch/NativeThread.current()J| ()
-  -1)
+  0)
 
 (defun |sun/nio/ch/NativeThread.current0()J| ()
   "JDK 21+ native behind NativeThread.current().  Self-contained: the Java
 current() wrapper calls current0(), so delegating back would recurse once
-the wrapper is JIT-compiled over the Lisp current() stub."
-  -1)
+the wrapper is JIT-compiled over the Lisp current() stub.  0 means this
+platform can't signal native threads; -1 is the JDK's token for a virtual
+thread, which would send blocking socket I/O to the virtual-thread poller."
+  0)
 
 (defun |sun/nio/ch/NativeThread.signal(J)V| (thread-id)
   "Signal a native thread blocked in an I/O operation. No-op in single-threaded OpenLDK."

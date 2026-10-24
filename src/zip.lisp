@@ -103,6 +103,7 @@ of the JavaUtilZipFileAccess bridge: JarFile.entries() goes through it."
 
 (defun %zipfile-open (zip-file name)
   "Open the zip file at path NAME (a Java string) for ZIP-FILE."
+  (%check-not-directory name)
   (setf (gethash zip-file *zipfile-state*)
         (cons name (zip:open-zipfile (lstring name)))))
 
@@ -147,8 +148,15 @@ entry ZE in ZIP-FILE."
         entry)))
 
 (defmethod |getEntry(Ljava/lang/String;)Ljava/util/zip/ZipEntry;| ((this |java/util/zip/ZipFile|) name)
-  (when-let (ze (zip:get-zipfile-entry (lstring name) (%zipfile-zip this)))
-    (%make-zip-entry this name ze)))
+  "NAME's entry, or the directory entry NAME/, as the JDK's ZipFile finds."
+  (let* ((zip (%zipfile-zip this))
+         (lisp-name (lstring name))
+         (directory-name (concatenate 'string lisp-name "/")))
+    (if-let (ze (zip:get-zipfile-entry lisp-name zip))
+      (%make-zip-entry this name ze)
+      (when-let (ze (and (not (ends-with? "/" lisp-name))
+                         (zip:get-zipfile-entry directory-name zip)))
+        (%make-zip-entry this (jstring directory-name) ze)))))
 
 (defun %zipfile-entry-list (zip-file)
   "A java.util.ArrayList of ZIP-FILE's entries."
