@@ -102,14 +102,11 @@ methods by their signature, as in |java/lang/Thread.start0()V| or |foo(I)V|."
   "Run BODY with internal Lisp conditions converted to Java throwables.
 When ARRAYS is true, also convert array index errors.  Establish this inside
 every scope a Java catch clause protects, not merely around a method body.
-Each handler is a one-line lambda calling a global function (in
-codegen.lisp), so each use gives SBCL little to compile.  Naming the
-functions directly, as #'%TYPE-ERROR->JAVA, made method entry measurably
-slower."
+One handler, a one-line lambda calling a global function that tells the
+conditions apart (in codegen.lisp): SBCL compiles each lambda in every
+method that uses this, and one for each condition type took a third of a
+small method's compile time.  Naming the functions directly, as
+#'%TYPE-ERROR->JAVA, made method entry measurably slower."
   `(handler-bind
-       (,@(when arrays
-            '((sb-int:invalid-array-index-error (lambda (e) (%array-index-error->java e)))))
-        (sb-sys:memory-fault-error (lambda (e) (%memory-fault->java e)))
-        (type-error (lambda (e) (%type-error->java e)))
-        (undefined-function (lambda (e) (%undefined-function->java e))))
+       ((error (lambda (e) (,(if arrays '%lisp-error->java/arrays '%lisp-error->java) e))))
      ,@body))

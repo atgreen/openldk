@@ -277,6 +277,22 @@ code calls this rather than inlining the construction at every site."
     (when (%java-method-name-p name)
       (error (%lisp-condition (%make-unsatisfied-link-error name))))))
 
+(defun %lisp-error->java (e)
+  "Signal the Java throwable that E, a Lisp error signalled in Java code,
+stands for, or decline: the handler WITH-JAVA-CONDITIONS establishes."
+  (typecase e
+    (sb-sys:memory-fault-error (%memory-fault->java e))
+    (type-error (%type-error->java e))
+    (undefined-function (%undefined-function->java e))))
+
+(defun %lisp-error->java/arrays (e)
+  "%LISP-ERROR->JAVA, with an array index error an
+ArrayIndexOutOfBoundsException rather than, as a TYPE-ERROR, a
+NullPointerException."
+  (if (typep e 'sb-int:invalid-array-index-error)
+      (%array-index-error->java e)
+      (%lisp-error->java e)))
+
 (defmethod codegen ((insn ir-aastore) context)
   (with-slots (arrayref index value) insn
     (make-instance '<expression>
