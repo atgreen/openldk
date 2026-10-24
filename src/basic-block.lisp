@@ -302,33 +302,59 @@ Combined with global substitutions during codegen for this block only.")
                 for end-block = (gethash (end-pc ete) block-by-address)
                 for handler = (gethash (handler-pc ete) block-by-address)
                 do (push end-block (exception-end-blocks start-block))
-                do (push (list (end-pc ete) i (catch-type ete) handler)
+                do (push (list (end-pc ete) i (catch-type ete) handler i)
                          (gethash start-block tuples-by-block)))
           ;; A range that contains another entry's handler protects that
           ;; handler's code too.  Handler blocks are emitted outside every
-          ;; try's HANDLER-CASE, so give such a handler block the entry
-          ;; itself -- what javac does by splitting the range at the handler
-          ;; (see MERGE-EXCEPTION-ENTRIES).  Kawa doesn't split: its guard
-          ;; and with-exception-handler compile to an outer range covering an
-          ;; inner catch block, whose exception the outer catch must see.
-          (loop for i from 0 below (length exception-table)
-                for ete = (aref exception-table i)
-                for handler = (gethash (handler-pc ete) block-by-address)
-                do (loop for other across exception-table
-                         for inner-handler-pc = (handler-pc other)
-                         for inner-handler = (gethash inner-handler-pc block-by-address)
-                         when (and inner-handler
-                                   (< (start-pc ete) inner-handler-pc (end-pc ete))
-                                   (/= inner-handler-pc (handler-pc ete))
-                                   (not (find-if (lambda (tp)
-                                                   (member (second tp)
-                                                           (list i (+ i (length exception-table)))))
-                                                 (gethash inner-handler tuples-by-block))))
-                           ;; After the block's own entries, which belong to
-                           ;; trys nested inside this range.
-                           do (push (list (end-pc ete) (+ i (length exception-table))
-                                          (catch-type ete) handler)
-                                    (gethash inner-handler tuples-by-block))))
+          ;; try's HANDLER-CASE, so give the blocks of such a handler's code
+          ;; the entry themselves -- what javac does by splitting the range
+          ;; at the handler (see MERGE-EXCEPTION-ENTRIES).  Kawa doesn't
+          ;; split: its guard and with-exception-handler compile to an outer
+          ;; range covering an inner catch block, whose exception the outer
+          ;; catch must see.  The handler's code is every block it reaches
+          ;; without leaving the range, less those the range's own body
+          ;; reaches (emitted inside its HANDLER-CASE already): for
+          ;; try-with-resources under a catch, the inner catch-all closes the
+          ;; resource in several blocks and rethrows from the last.
+          (labels ((block-pc (block)
+                     (address (first (code block))))
+                   (reachable (from start end)
+                     "The blocks reachable from FROM by normal flow within [START, END)."
+                     (let ((seen nil)
+                           (work (list from)))
+                       (loop while work
+                             do (let ((block (pop work)))
+                                  (unless (member block seen)
+                                    (push block seen)
+                                    (fset:do-set (next (successors block))
+                                      (when (and (<= start (block-pc next)) (< (block-pc next) end))
+                                        (push next work))))))
+                       seen)))
+            (loop for i from 0 below (length exception-table)
+                  for ete = (aref exception-table i)
+                  for handler = (gethash (handler-pc ete) block-by-address)
+                  for body = nil
+                  do (loop for other across exception-table
+                           for inner-handler-pc = (handler-pc other)
+                           for inner-handler = (gethash inner-handler-pc block-by-address)
+                           when (and inner-handler
+                                     (< (start-pc ete) inner-handler-pc (end-pc ete))
+                                     (/= inner-handler-pc (handler-pc ete)))
+                             do (unless body
+                                  (setf body (reachable (gethash (start-pc ete) block-by-address)
+                                                        (start-pc ete) (end-pc ete))))
+                                (dolist (block (reachable inner-handler (start-pc ete) (end-pc ete)))
+                                  (unless (or (and (not (eq block inner-handler)) (member block body))
+                                              (eq block handler)
+                                              (find i (gethash block tuples-by-block) :key #'fifth))
+                                    ;; After the block's own entries, which belong to
+                                    ;; trys nested inside this range, and innermost
+                                    ;; range first: MERGE-EXCEPTION-ENTRIES sorted the
+                                    ;; table by start, outermost first.
+                                    (push (list (end-pc ete)
+                                                (+ (length exception-table) (- (end-pc ete) (start-pc ete)))
+                                                (catch-type ete) handler i)
+                                          (gethash block tuples-by-block)))))))
           (maphash
            (lambda (start-block tuples)
              (setf (try-catch start-block)
