@@ -624,63 +624,79 @@ get the same unified var-numbers."
                       new-insn)))
               ir-code))))
 
-(defun %get-constant-int (ir context)
-  "If IR is or becomes an IR-INT-LITERAL in CONTEXT, return its integer value."
-  (let ((ir (or (gethash ir (single-assignment-table context))
-                ir)))
-    (cond
-     ((typep ir 'ir-int-literal)
-      (value ir))
-     (t
-      nil))))
+(defun %literal-definitions (code-array)
+  "Hash table from each stack variable that CODE-ARRAY assigns exactly once,
+and to a literal, to that literal: the constants javac pushes for array
+stores.  SINGLE-ASSIGNMENT-TABLE is only filled in later, by copy
+propagation."
+  (let ((definitions (make-hash-table :test #'eq))
+        (counts (make-hash-table :test #'eq)))
+    (loop for insn across code-array
+          when (typep insn 'ir-assign)
+            do (let ((lvalue (slot-value insn 'lvalue)))
+                 (incf (gethash lvalue counts 0))
+                 (when (and (typep lvalue '<stack-variable>)
+                            (= 1 (length (var-numbers lvalue)))
+                            (typep (slot-value insn 'rvalue) 'ir-literal))
+                   (setf (gethash lvalue definitions) (slot-value insn 'rvalue)))))
+    (maphash (lambda (variable count)
+               (when (> count 1) (remhash variable definitions)))
+             counts)
+    definitions))
 
 (defun initialize-arrays (ir-code context)
-  (let ((code-array (coerce ir-code 'vector))
-        (changed nil))
-    (loop for i below (length ir-code)
-          for insn = (aref code-array i)
-          when (and (typep insn 'ir-assign)
-                    (let ((rvalue (slot-value insn 'rvalue)))
-                      (and (typep rvalue 'ir-new-array)
-                           (%get-constant-int (size rvalue) context))))
-            do (let* ((rvalue (slot-value insn 'rvalue))
-                      (component-class (component-class rvalue))
-                      (init-element
-                        (case (atype rvalue)
-                          ;; Determine the initial element based on the array type
-                          (4 0)        ; Byte
-                          (5 #\Null)   ; Character
-                          (6 0.0)      ; Single-precision float
-                          (7 0.0d0)    ; Double-precision float
-                          ((8 9 10 11) 0) ; Byte/Short/Int/Long (default to 0)
-                          (t nil))))   ; Default to nil for unknown types
-                 (let* ((pc (1+ i))
-                        (ir-values (loop for array-index from 0 below (%get-constant-int (size rvalue) context)
-                                         collect (progn
-                                                   (loop until (not (typep (aref code-array pc) 'ir-nop))
-                                                         do (incf pc))
-                                                   (let ((insn (aref code-array pc)))
-                                                     (incf pc)
-                                                     (if (typep insn 'ir-xastore)
-                                                         (value insn)
-                                                         (return nil))))))
-                        (array (cond
-                                 ((zerop (%get-constant-int (size rvalue) context))
-                                  #())
-                                 (ir-values
-                                  ;; Keep IR nodes (will codegen later)
-                                  (loop for nop-pc from (1+ i) below pc
-                                        do (setf (aref code-array nop-pc) (make-instance 'ir-nop :address (address (aref code-array nop-pc)))))
-                                  (setf changed t)
-                                  ir-values)
-                                 (t
-                                  ;; Pattern didn't match - use default initialization
-                                  (make-array (%get-constant-int (size rvalue) context)
-                                              :initial-element init-element)))))
-                   (setf (slot-value insn 'rvalue)
-                         (make-instance 'ir-array-literal
-                                        :address (address insn)
-                                        :component-class component-class
-                                        :value array)))
-                 (assert (typep (aref code-array (1- i)) 'ir-nop))))
+  "IR-CODE with each constant-size array that the code after it fills with
+literals, element by element in index order (javac's array initializer),
+made an IR-ARRAY-LITERAL, and the stores that filled it NOPs.
+Returns the new code and whether it changed."
+  (declare (ignore context))
+  (let* ((code-array (coerce ir-code 'vector))
+         (definitions (%literal-definitions code-array))
+         (changed nil))
+    (flet ((literal (ir)
+             (or (gethash ir definitions) ir))
+           (constant-int (ir)
+             (let ((ir (or (gethash ir definitions) ir)))
+               (and (typep ir 'ir-int-literal) (value ir)))))
+      (loop for i below (length code-array)
+            for insn = (aref code-array i)
+            for size = (and (typep insn 'ir-assign)
+                            (typep (slot-value insn 'rvalue) 'ir-new-array)
+                            (constant-int (size (slot-value insn 'rvalue))))
+            when (and size (plusp size))
+              do (let* ((array-variable (slot-value insn 'lvalue))
+                        (pc (1+ i))
+                        (values
+                          (loop for array-index from 0 below size
+                                collect (progn
+                                          ;; Skip the store's index and value pushes.
+                                          (loop while (and (< pc (length code-array))
+                                                           (let ((next (aref code-array pc)))
+                                                             (or (typep next 'ir-nop)
+                                                                 (and (typep next 'ir-assign)
+                                                                      (gethash (slot-value next 'lvalue) definitions)))))
+                                                do (incf pc))
+                                          (let ((store (and (< pc (length code-array))
+                                                            (aref code-array pc))))
+                                            (incf pc)
+                                            ;; A store of a literal into this array, at the next index.
+                                            (if (and (typep store 'ir-xastore)
+                                                     (eq (arrayref store) array-variable)
+                                                     (eql (constant-int (index store)) array-index)
+                                                     (typep (literal (value store)) 'ir-literal))
+                                                (literal (value store))
+                                                (return nil)))))))
+                   (when values
+                     ;; Only the stores: dead store elimination removes the
+                     ;; pushes, unless something else reads them.
+                     (loop for nop-pc from (1+ i) below pc
+                           when (typep (aref code-array nop-pc) 'ir-xastore)
+                             do (setf (aref code-array nop-pc)
+                                      (make-instance 'ir-nop :address (address (aref code-array nop-pc)))))
+                     (setf (slot-value insn 'rvalue)
+                           (make-instance 'ir-array-literal
+                                          :address (address insn)
+                                          :component-class (component-class (slot-value insn 'rvalue))
+                                          :value values))
+                     (setf changed t)))))
     (values (coerce code-array 'list) changed)))
