@@ -625,7 +625,7 @@ take the method's arguments followed by the MemberName."
                    :insn insn
                    :code (let* ((loader (slot-value context 'ldk-loader))
                                 ;; Ensure class is loaded before package lookup
-                                (_ (%resolve-class-in-context class))
+                                (resolved (%resolve-class-in-context class))
                                 (declaring-class (or (%find-declaring-class class method-name loader) class))
                                 (pkg (class-package declaring-class loader))
                                 (full-name (format nil "~A.~A" declaring-class method-name))
@@ -641,7 +641,14 @@ take the method's arguments followed by the MemberName."
                                         (t
                                          (cons method-sym
                                                (reverse (mapcar (lambda (a) (code (codegen a context))) args)))))))
-                           call)
+                           (if resolved
+                               call
+                               ;; A class that isn't there: the call throws
+                               ;; NoClassDefFoundError when it runs, after its
+                               ;; arguments, which the JVM has already pushed.
+                               `(progn ,@(rest call)
+                                       (%throw '|java/lang/NoClassDefFoundError|
+                                               ,(substitute #\. #\/ class)))))
                    :expression-type return-type)))
 
 (defun %codegen-array-load (insn element-type jtype context)
@@ -1850,6 +1857,17 @@ boolean prints true/false and char prints the character rather than an int."
         ;; Fast path for LambdaMetafactory.  altMetafactory (serializable
         ;; lambdas, such as Comparator.comparing's) takes the same first three
         ;; static arguments, then flags, marker interfaces and bridges.
+        ;; A lambda for an interface that isn't there throws
+        ;; NoClassDefFoundError when it is made, after its captured arguments.
+        ((and (or (search "LambdaMetafactory.metafactory" bootstrap-method-name)
+                  (search "LambdaMetafactory.altMetafactory" bootstrap-method-name))
+              interface-type-name
+              (not (%resolve-class-in-context interface-type-name)))
+         (make-instance '<expression>
+                        :insn insn
+                        :code `(progn ,@(mapcar (lambda (a) (code (codegen a context))) dynamic-args)
+                                      (%throw '|java/lang/NoClassDefFoundError|
+                                              ,(substitute #\. #\/ interface-type-name)))))
         ((or (search "LambdaMetafactory.metafactory" bootstrap-method-name)
              (search "LambdaMetafactory.altMetafactory" bootstrap-method-name))
          (make-instance '<expression>
@@ -1889,9 +1907,17 @@ boolean prints true/false and char prints the character rather than an int."
                    :insn insn
                    :code (let* ((class (ir-class-class class)))
                            (if class
-                               (let ((pkg (class-package (slot-value class 'name))))
-                                 (list 'unless (list 'initialized-p class)
-                                       (list (intern (format nil "%clinit-~A" (slot-value class 'name)) pkg))))
+                               (let* ((pkg (class-package (slot-value class 'name)))
+                                      (clinit (intern (format nil "%clinit-~A" (slot-value class 'name)) pkg)))
+                                 ;; A class that isn't there (a stub, see EMIT of
+                                 ;; CONSTANT-CLASS-REFERENCE) has no initializer:
+                                 ;; using it throws NoClassDefFoundError, when
+                                 ;; the instruction runs, as a JVM's does.
+                                 `(unless (initialized-p ,class)
+                                    (if (fboundp ',clinit)
+                                        (,clinit)
+                                        (%throw '|java/lang/NoClassDefFoundError|
+                                                ,(substitute #\. #\/ (slot-value class 'name))))))
                                nil)))))
 
 (defmethod codegen ((insn ir-local-variable) context)
