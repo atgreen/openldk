@@ -781,6 +781,7 @@ MethodHandles.classData().")
           ;; Emit and evaluate the class definition
           (let ((code (emit-<class> class ldk-loader)))
             (%eval code))
+          (%install-method-stubs class ldk-loader)
 
           ;; Load super and interfaces (using this loader for resolution)
           (let ((super (slot-value class 'super))
