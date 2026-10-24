@@ -708,10 +708,11 @@ elimination.  Returns the optimized block list."
 (defun %wrap-method-body (static-p fn-sym impl-sym class-spec args body-forms)
   "Build the installable definition form for a compiled method body.
 Static methods become a DEFUN.  Instance methods put BODY-FORMS in a
-plain DEFUN on IMPL-SYM and install a one-line DEFMETHOD trampoline:
-PCL's DEFMETHOD expansion walks the entire body (sb-walker) looking for
-call-next-method, which is quadratic on large generated bodies and pure
-waste since compiled Java methods never use it."
+plain DEFUN on IMPL-SYM and install a method calling it: a closure (see
+%INSTALL-TRAMPOLINE), or for a plain generic function a one-line
+DEFMETHOD.  PCL's DEFMETHOD expansion walks the entire body (sb-walker)
+looking for call-next-method, which is quadratic on large generated
+bodies and pure waste since compiled Java methods never use it."
   (let ((this-sym (intern "this" :openldk)))
     (if static-p
         `(defun ,fn-sym ,args ,@body-forms)
@@ -720,9 +721,17 @@ waste since compiled Java methods never use it."
              ;; Generated code returns via (return-from <method-name> ...),
              ;; matching the block DEFMETHOD used to establish.
              (block ,fn-sym ,@body-forms))
-           (defmethod ,fn-sym ((,this-sym ,class-spec) ,@args)
-             (,impl-sym ,this-sym ,@args))
-           (%note-method-body ',fn-sym ',class-spec ',impl-sym)))))
+           ,@(if (typep (and (fboundp fn-sym) (fdefinition fn-sym)) 'java-generic-function)
+                 ;; It calls the body directly (see
+                 ;; %COMPUTE-JAVA-EFFECTIVE-METHOD), so the trampoline
+                 ;; needn't be fast.
+                 `((%install-trampoline ',fn-sym ',class-spec ',impl-sym ,(length args)))
+                 ;; A plain generic function -- a hand-written native's, as
+                 ;; hashCode's is -- calls the method's function, and PCL
+                 ;; calls a compiled DEFMETHOD's fastest.
+                 `((defmethod ,fn-sym ((,this-sym ,class-spec) ,@args)
+                     (,impl-sym ,this-sym ,@args))
+                   (%note-method-body ',fn-sym ',class-spec ',impl-sym)))))))
 
 ;;; Declaring method variables' types (see the note on typed variables in
 ;;; codegen.lisp).

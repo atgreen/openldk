@@ -54,8 +54,8 @@
   (:metaclass sb-mop:funcallable-standard-class))
 
 (defvar *method-bodies* (make-hash-table :test 'eq :weakness :key :synchronized t)
-  "A compiled Java method's DEFMETHOD trampoline -> the function holding its
-body, which the trampoline calls (see %WRAP-METHOD-BODY).")
+  "A compiled Java method's trampoline method -> the function holding its
+body, which the trampoline calls (see %INSTALL-TRAMPOLINE).")
 
 (defun %note-method-body (gf-symbol class-symbol body-symbol)
   "Record that GF-SYMBOL's primary method on CLASS-SYMBOL is a trampoline
@@ -69,6 +69,28 @@ calling BODY-SYMBOL."
                                (sb-mop:generic-function-methods gf)))))
     (when method
       (setf (gethash method *method-bodies*) (fdefinition body-symbol)))))
+
+(defun %install-trampoline (gf-symbol class-symbol impl-symbol nargs)
+  "Make GF-SYMBOL's primary method on CLASS-SYMBOL call IMPL-SYMBOL, a
+compiled Java method's body, with the receiver and NARGS more arguments,
+and record it in *METHOD-BODIES*.  The method's function is a closure:
+a DEFMETHOD would be compiled, which took a third of a small method's
+compile time."
+  (%ensure-java-gf gf-symbol (1+ nargs))
+  (let* ((gf (fdefinition gf-symbol))
+         (method (make-instance (sb-mop:generic-function-method-class gf)
+                                :qualifiers nil
+                                :lambda-list (cons (intern "this" :openldk)
+                                                   (loop for i from 1 upto nargs
+                                                         collect (intern (format nil "arg~A" i) :openldk)))
+                                :specializers (cons (find-class class-symbol)
+                                                    (make-list nargs :initial-element (find-class t)))
+                                :function (lambda (args next-methods)
+                                            (declare (ignore next-methods))
+                                            (apply impl-symbol args)))))
+    (add-method gf method)
+    (setf (gethash method *method-bodies*) (fdefinition impl-symbol))
+    method))
 
 (defun %compute-java-effective-method (gf class)
   "Compute an effective method function, called with GF's arguments, for GF
