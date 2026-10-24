@@ -439,6 +439,7 @@ process already uses stays lost."
 kill other threads, drop process-local handles, and give every lock a fresh
 mutex.  Call this last, right before saving, after any build-time runs of
 Java code (warmups)."
+  (%fasl-cache-stop-build)
   ;; Native memory Java code allocated (Unsafe.allocateMemory: direct
   ;; buffers NIO caches, for one) is malloc'd, outside the saved heap, but
   ;; the Java objects holding its addresses are saved: keep the contents,
@@ -649,6 +650,7 @@ reset the application's own classes, and save.
                       main must be written to reuse it.
 JDK classes always keep their state."
   (initialize)
+  (%fasl-cache-start-build)
   (let ((cp (or classpath (uiop:getenv "CLASSPATH") ".")))
     (setf *default-mainclass* default-mainclass
           *default-classpath* cp)
@@ -741,6 +743,7 @@ resetting its classpath.  Skipped, with a note, without a javac."
 
 (defun make-image (&optional (output-path "openldk"))
   (initialize)
+  (%fasl-cache-start-build)
   (%warm-up-jdk)
   (%reset-runtime-for-save)
   ;; Clear all monitor state to prevent deadlocks in the saved image.

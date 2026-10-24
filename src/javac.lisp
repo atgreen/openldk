@@ -275,6 +275,7 @@
   "Build an executable image that jumps straight into javac."
   (let ((cp (default-javac-classpath)))
     (openldk::initialize)
+    (openldk::%fasl-cache-start-build)
     ;; Set classpath inside the image so warmup uses it.
     (when cp
       (setf openldk::*classpath*
