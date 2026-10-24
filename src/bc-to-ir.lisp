@@ -1605,11 +1605,16 @@ are ordinary declared methods and use normal dispatch.")
                                      (slot-value name-and-type 'name-index))
                                'value))
                  (method-type
-                   (let ((mt (|java/lang/invoke/MethodType.fromMethodDescriptorString(Ljava/lang/String;Ljava/lang/ClassLoader;)Ljava/lang/invoke/MethodType;|
-                              (jstring (emit (aref constant-pool (slot-value name-and-type 'type-descriptor-index)) constant-pool))
-                              (%context-java-loader))))
-                     (make-instance 'ir-object-literal
-                                    :value mt)))
+                   ;; A type in the call site's descriptor may be missing (a
+                   ;; lambda for an interface that isn't there): see
+                   ;; %EMIT-OR-MISSING-CLASS.
+                   (%emit-or-missing-class
+                    (lambda ()
+                      (let ((mt (|java/lang/invoke/MethodType.fromMethodDescriptorString(Ljava/lang/String;Ljava/lang/ClassLoader;)Ljava/lang/invoke/MethodType;|
+                                 (jstring (emit (aref constant-pool (slot-value name-and-type 'type-descriptor-index)) constant-pool))
+                                 (%context-java-loader))))
+                        (make-instance 'ir-object-literal
+                                       :value mt)))))
                  (descriptor
                    (slot-value (aref constant-pool
                                      (slot-value name-and-type 'type-descriptor-index))
@@ -1803,7 +1808,16 @@ are ordinary declared methods and use normal dispatch.")
           (list (make-instance 'ir-assign
                                :address pc-start
                                :lvalue var
-                               :rvalue (make-instance 'ir-new-array :address pc-start :component-class (java-class (ir-class-class class)) :size size))))))))
+                               :rvalue (make-instance 'ir-new-array :address pc-start
+                                                                    :component-class (%component-class-form (ir-class-class class))
+                                                                    :size size))))))))
+
+(defun %component-class-form (class)
+  "The java.lang.Class of CLASS, an array's component; or, if CLASS isn't
+there (a stub with none), a form that throws NoClassDefFoundError when the
+array is made."
+  (or (ignore-errors (java-class class))
+      `(%throw '|java/lang/NoClassDefFoundError| ,(substitute #\. #\/ (name class)))))
 
 (define-bytecode-transpiler :MULTIANEWARRAY (context code)
   (with-slots (pc class) context

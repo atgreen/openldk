@@ -79,7 +79,33 @@
 
 (define-print-object/std constant-method-handle)
 
+(defun %emit-or-missing-class (emit-function)
+  "The IR EMIT-FUNCTION returns for a constant; or, if a class the constant
+names isn't there, IR that throws NoClassDefFoundError when the constant is
+used.  A JVM resolves a method handle or method type constant only when an
+instruction uses it: Spring Data's SpringDataWebConfiguration creates a
+lambda over Jackson 2 classes behind a check that they are present."
+  (handler-case (funcall emit-function)
+    (|condition-java/lang/Throwable| (c)
+      (let* ((thrown (and (slot-boundp c '|objref|) (slot-value c '|objref|)))
+             (class-name (and thrown (symbol-name (class-name (class-of thrown))))))
+        ;; MethodType.fromMethodDescriptorString reports a missing class as
+        ;; a TypeNotPresentException.
+        (if (member class-name '("java/lang/ClassNotFoundException" "java/lang/NoClassDefFoundError"
+                                 "java/lang/TypeNotPresentException")
+                    :test #'equal)
+            (make-instance 'ir-object-literal
+                           :value `(%throw '|java/lang/NoClassDefFoundError|
+                                           ,(let ((message (if (slot-exists-p thrown '|typeName|)
+                                                               (slot-value thrown '|typeName|)
+                                                               (slot-value thrown '|detailMessage|))))
+                                              (and message (substitute #\. #\/ (lstring message))))))
+            (error c))))))
+
 (defmethod emit ((cmh constant-method-handle) cp)
+  (%emit-or-missing-class (lambda () (%emit-method-handle cmh cp))))
+
+(defun %emit-method-handle (cmh cp)
   (assert (classload "java/lang/invoke/MethodHandles$Lookup"))
   (let* ((ref-kind (reference-kind cmh))
          (m (aref cp (reference-index cmh)))
@@ -89,7 +115,10 @@
          (nat-index (if (typep m 'constant-field-reference)
                         (name-and-type-descriptor-index m)
                         (method-descriptor-index m)))
-         (refc (java-class (ir-class-class (emit (aref cp (class-index m)) cp))))
+         (refc (let ((class (ir-class-class (emit (aref cp (class-index m)) cp))))
+                 ;; A class that isn't there is a stub with no java.lang.Class.
+                 (or (ignore-errors (java-class class))
+                     (%throw '|java/lang/NoClassDefFoundError| (substitute #\. #\/ (name class))))))
          (name (jstring (emit-name (aref cp nat-index) cp)))
          ;; Only method-kind handles have a MethodType; a field descriptor (e.g. "I")
          ;; is not a valid method descriptor, so skip it for field kinds (1-4).
@@ -143,14 +172,16 @@
 
 (defmethod emit ((cmt constant-method-type) cp)
   (assert (classload "java/lang/invoke/MethodType"))
-  (let ((descriptor (emit (aref cp (descriptor-index cmt)) cp)))
-    (let ((mt (|java/lang/invoke/MethodType.methodType(Ljava/lang/Class;[Ljava/lang/Class;)Ljava/lang/invoke/MethodType;|
-               (%get-return-type descriptor)
-               (make-java-array
-                :component-class (%get-java-class-by-bin-name "java/lang/Class")
-                :initial-contents (%get-parameter-types descriptor)))))
-    (make-instance 'ir-object-literal
-                   :value mt))))
+  (%emit-or-missing-class
+   (lambda ()
+     (let ((descriptor (emit (aref cp (descriptor-index cmt)) cp)))
+       (let ((mt (|java/lang/invoke/MethodType.methodType(Ljava/lang/Class;[Ljava/lang/Class;)Ljava/lang/invoke/MethodType;|
+                  (%get-return-type descriptor)
+                  (make-java-array
+                   :component-class (%get-java-class-by-bin-name "java/lang/Class")
+                   :initial-contents (%get-parameter-types descriptor)))))
+         (make-instance 'ir-object-literal
+                        :value mt))))))
 
 (defclass/std constant-field-reference ()
   ((class-index
