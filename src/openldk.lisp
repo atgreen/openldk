@@ -1167,19 +1167,44 @@ entry/exit as required."
                                                            collect (list (intern (format nil "local-~A" (incf i)) :openldk))))))
                                     synchronized-lisp-code)))))))))
 
+(defun %straight-line-clinit-p (method)
+  "True when METHOD, being compiled in *CONTEXT*, is a <clinit> with no
+backward branch: code that runs once, in time bounded by its size, so
+SBCL's evaluator runs it in less time than compiling it would take."
+  (and (string= (slot-value method 'name) "<clinit>")
+       (let ((next (next-insn-list *context*)))
+         (loop for pc from 0 below (length next)
+               never (some (lambda (target) (<= target pc)) (aref next pc))))))
+
 (defun %install-method-definition (class method method-key definition-code length)
   "Evaluate DEFINITION-CODE to install METHOD's compiled function, working
 around SBCL native-compiler limits on very large method bodies: interpret
 huge bytecode outright, and fall back to interpretation when native
-compilation fails silently (leaving the self-compiling stub in place)."
+compilation fails silently (leaving the self-compiling stub in place).
+A straight-line <clinit> is interpreted too: it runs once."
   (handler-case
       ;; Very large bytecode (e.g. 1000+ element array initializers)
       ;; can cause SBCL's native compiler to hang or abort.  Use the
       ;; interpreter directly for those methods.
-      (if (> length 5000)
-          (let ((sb-ext:*evaluator-mode* :interpret))
-            (eval definition-code))
-          (%eval definition-code))
+      ;; Through %EVAL every way, which muffles the redefinition warning
+      ;; replacing the stub signals: some callers treat a warning as a failure.
+      (cond
+        ((and (%straight-line-clinit-p method)
+              (eq (first definition-code) 'defun)
+              (null (third definition-code)))
+         ;; Interpret the body, called from a compiled function of the
+         ;; method's name: an interpreted function has no frame of its own
+         ;; in a backtrace, where getCallerClass and stack traces look.
+         (destructuring-bind (name lambda-list &rest body) (rest definition-code)
+           (declare (ignore lambda-list))
+           (let ((body-function (let ((sb-ext:*evaluator-mode* :interpret))
+                                  (%eval `(lambda () (block ,name ,@body))))))
+             ;; Not a tail call, which would leave no frame either.
+             (%eval `(defun ,name () (funcall ,body-function) nil)))))
+        ((> length 5000)
+         (let ((sb-ext:*evaluator-mode* :interpret))
+           (%eval definition-code)))
+        (t (%eval definition-code)))
     (error (c)
       (format *error-output* "~&;; COMPILE-ERROR in ~A: ~A~%" method-key c)
       (force-output *error-output*)
