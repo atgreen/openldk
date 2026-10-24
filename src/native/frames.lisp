@@ -104,7 +104,11 @@ for the Java caller."
       (:symbol
        (let ((n (symbol-name head)))
          (or (and (>= (length n) 8) (string-equal n "%clinit-" :end1 8))
-             (search "Reflection.getCallerClass" n))))
+             (search "Reflection.getCallerClass" n)
+             ;; The evaluator running an interpreted method's body, between
+             ;; the method's own frame and its callees'.
+             (eq (symbol-package head) (find-package "SB-EVAL"))
+             (eq head 'sb-int:simple-eval-in-lexenv))))
       (:labels-clinit t)
       (t nil))))
 
