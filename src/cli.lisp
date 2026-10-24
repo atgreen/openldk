@@ -201,8 +201,22 @@ which are relative to JARFILE's directory."
                           when (plusp (length entry))
                             collect (namestring (merge-pathnames entry directory)))))))
 
+(defun %use-process-directory ()
+  "Resolve relative Lisp pathnames against the process's working directory.
+A saved image keeps *DEFAULT-PATHNAME-DEFAULTS* from the build, so natives
+that resolve a relative Java path (a classpath entry like target/classes,
+say) would look in the directory the image was built in.  java.io.File's
+file system, made at build time, keeps its user.dir too: relative Java
+files resolve against it."
+  (setf *default-pathname-defaults* (uiop:getcwd))
+  (let* ((file (%static-storage "java/io/File"))
+         (fs (and file (slot-exists-p file '|FS|) (slot-value file '|FS|))))
+    (when (and fs (slot-exists-p fs '|userDir|))
+      (setf (slot-value fs '|userDir|) (jstring (%current-directory-string))))))
+
 (defun main-wrapper ()
   "Main entry point into OpenLDK. Process command line errors here."
+  (%use-process-directory)
   ;; Disable floating-point traps to match Java semantics (NaN/Infinity instead of errors)
   (sb-int:set-floating-point-modes :traps nil)
   ;; Parse Java-style command line arguments
@@ -244,6 +258,7 @@ which are relative to JARFILE's directory."
   "Generic entry point for pre-dumped app images.
    Uses *default-mainclass* and *default-classpath* baked at build time.
    CLI -cp overrides the baked classpath; a CLI mainclass overrides the default."
+  (%use-process-directory)
   (sb-int:set-floating-point-modes :traps nil)
   (multiple-value-bind (cli-mainclass args cli-classpath dump-dir aot)
       (%parse-java-args)

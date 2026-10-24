@@ -856,27 +856,50 @@ valid() work.  Tolerate a raw stream in fd for robustness."
         (slot-value fd '|fd|)
         fd)))
 
+(defun %throw-file-open-error (filename reason)
+  "Throw the FileNotFoundException the JDK's file opens throw: FILENAME (a
+Java string) and, in parentheses, REASON."
+  (let ((fnf (%make-java-instance "java/io/FileNotFoundException")))
+    (|<init>(Ljava/lang/String;)V| fnf (jstring (format nil "~A (~A)" (lstring filename) reason)))
+    (error (%lisp-condition fnf))))
+
+(defun %check-not-directory (filename)
+  "Throw FileNotFoundException if FILENAME (a Java string) names a
+directory: Lisp's OPEN opens one, and the first read fails."
+  (when (handler-case (sb-posix:s-isdir (sb-posix:stat-mode (sb-posix:stat (lstring filename))))
+          (sb-posix:syscall-error () nil))
+    (%throw-file-open-error filename "Is a directory")))
+
+(defmacro %with-file-open-errors ((filename) &body body)
+  "Run BODY, which opens FILENAME, turning a failure into the JDK's
+FileNotFoundException."
+  `(progn
+     (%check-not-directory ,filename)
+     (handler-case (progn ,@body)
+       (sb-ext:file-does-not-exist ()
+         (%throw-file-open-error ,filename "No such file or directory"))
+       (file-error (e)
+         (%throw-file-open-error ,filename
+                                (let ((errno (and (typep e 'sb-int:simple-file-error)
+                                                  (find-if #'integerp (simple-condition-format-arguments e)))))
+                                  (if errno (sb-int:strerror errno) "Permission denied")))))))
+
 (defmethod |open0(Ljava/lang/String;I)V| ((fis |java/io/RandomAccessFile|) filename mode)
-  (handler-case
-      (let ((stream (open (lstring filename)
-                          :element-type '(unsigned-byte 8)
-                          :direction (ecase mode
-                                       (1 :input)
-                                       (2 :io))))
-            (fd (slot-value fis '|fd|)))
-        ;; Store the stream inside the FileDescriptor (the RAF constructor set
-        ;; fis.fd = new FileDescriptor()) so valid()/getFD() see a real fd.
-        (if (typep fd '|java/io/FileDescriptor|)
-            (setf (slot-value fd '|fd|) stream)
-            (let ((newfd (%make-java-instance "java/io/FileDescriptor")))
-              (setf (slot-value newfd '|fd|) stream)
-              (setf (slot-value fis '|fd|) newfd)))
-        stream)
-    ((or sb-ext:file-does-not-exist sb-int:simple-file-error) (e)
-      (declare (ignore e))
-      (let ((fnf (%make-java-instance "java/io/FileNotFoundException")))
-        (|<init>(Ljava/lang/String;)V| fnf filename)
-        (error (%lisp-condition fnf))))))
+  (%with-file-open-errors (filename)
+    (let ((stream (open (lstring filename)
+                        :element-type '(unsigned-byte 8)
+                        :direction (ecase mode
+                                     (1 :input)
+                                     (2 :io))))
+          (fd (slot-value fis '|fd|)))
+      ;; Store the stream inside the FileDescriptor (the RAF constructor set
+      ;; fis.fd = new FileDescriptor()) so valid()/getFD() see a real fd.
+      (if (typep fd '|java/io/FileDescriptor|)
+          (setf (slot-value fd '|fd|) stream)
+          (let ((newfd (%make-java-instance "java/io/FileDescriptor")))
+            (setf (slot-value newfd '|fd|) stream)
+            (setf (slot-value fis '|fd|) newfd)))
+      stream)))
 
 (defmethod |length0()J| ((raf |java/io/RandomAccessFile|))
   ;; Flush buffered writes so file-length reflects them.
@@ -914,21 +937,16 @@ valid() work.  Tolerate a raw stream in fd for robustness."
     bytes-read))
 
 (defmethod |open0(Ljava/lang/String;)V| ((fis |java/io/FileInputStream|) filename)
-  (handler-case
-      (let ((stream (open (lstring filename)
-                          :element-type '(unsigned-byte 8)
-                          :direction :input))
-            (fd (slot-value fis '|fd|)))
-        ;; Store the Lisp stream inside the FileDescriptor's fd slot
-        ;; (like FileOutputStream does), so fd.valid() works in JDK 17.
-        (if (and fd (slot-exists-p fd '|fd|))
-            (setf (slot-value fd '|fd|) stream)
-            (setf (slot-value fis '|fd|) stream)))
-    ((or sb-ext:file-does-not-exist sb-int:simple-file-error) (e)
-      (declare (ignore e))
-      (let ((fnf (%make-java-instance "java/io/FileNotFoundException")))
-        (|<init>(Ljava/lang/String;)V| fnf filename)
-        (error (%lisp-condition fnf))))))
+  (%with-file-open-errors (filename)
+    (let ((stream (open (lstring filename)
+                        :element-type '(unsigned-byte 8)
+                        :direction :input))
+          (fd (slot-value fis '|fd|)))
+      ;; Store the Lisp stream inside the FileDescriptor's fd slot
+      ;; (like FileOutputStream does), so fd.valid() works in JDK 17.
+      (if (and fd (slot-exists-p fd '|fd|))
+          (setf (slot-value fd '|fd|) stream)
+          (setf (slot-value fis '|fd|) stream)))))
 
 ;; File descriptors OpenLDK hands to Java as plain integers -- the pipes to a
 ;; child process (see process.lisp) -- and their Lisp streams.  Java keeps
@@ -1069,23 +1087,18 @@ its FileDescriptor's fd (or its own fd slot), resolved by %RESOLVE-FD."
       ((streamp fd) (force-output fd)))))
 
 (defmethod |open0(Ljava/lang/String;Z)V| ((fos |java/io/FileOutputStream|) filename append?)
-  (handler-case
-      (let* ((stream (open (lstring filename)
-                           :element-type '(unsigned-byte 8)
-                           :direction :output
-                           :if-does-not-exist :create
-                           :if-exists (if (and append? (not (zerop append?))) :append :supersede)))
-             (fd (slot-value fos '|fd|)))
-        ;; FileOutputStream stores a FileDescriptor; stash the stream in its fd
-        ;; slot when available, otherwise keep it directly.
-        (if (and fd (slot-exists-p fd '|fd|))
-            (setf (slot-value fd '|fd|) stream)
-            (setf (slot-value fos '|fd|) stream)))
-    ((or sb-ext:file-does-not-exist sb-int:simple-file-error) (e)
-      (declare (ignore e))
-      (let ((fnf (%make-java-instance "java/io/FileNotFoundException")))
-        (|<init>(Ljava/lang/String;)V| fnf filename)
-        (error (%lisp-condition fnf))))))
+  (%with-file-open-errors (filename)
+    (let* ((stream (open (lstring filename)
+                         :element-type '(unsigned-byte 8)
+                         :direction :output
+                         :if-does-not-exist :create
+                         :if-exists (if (and append? (not (zerop append?))) :append :supersede)))
+           (fd (slot-value fos '|fd|)))
+      ;; FileOutputStream stores a FileDescriptor; stash the stream in its fd
+      ;; slot when available, otherwise keep it directly.
+      (if (and fd (slot-exists-p fd '|fd|))
+          (setf (slot-value fd '|fd|) stream)
+          (setf (slot-value fos '|fd|) stream)))))
 
 (defmethod |close0()V| (this)
   "Native close for file streams."
