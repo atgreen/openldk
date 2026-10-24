@@ -2176,6 +2176,33 @@ Used to consult block-local substitutions in addition to global ones.")
                        :insn insn
                        :code (intern (format nil "s{~{~A~^,~}}" (sort (copy-list (slot-value insn 'var-numbers)) #'<)) :openldk)))))
 
+;;; Flat exception regions.  Nesting each try range's code in its own
+;;; HANDLER-CASE costs SBCL time quadratic in the number of ranges (a
+;;; 165-range enum switch map took 5s to compile).  In flat mode a method's
+;;; blocks share one TAGBODY, each block's tag records in %REGION which
+;;; exception-table entries cover the block's address, and one HANDLER-BIND
+;;; per method dispatches on it: %BUILD-METHOD-DEFINITION wraps the body.
+
+(defvar *flat-try-regions* nil
+  "In flat mode, a hash table from a list of covering exception-table
+entries' (catch-type . handler-pc) to its region number; otherwise NIL.")
+
+(defun %block-try-region (basic-block)
+  "BASIC-BLOCK's region number in flat mode: the exception-table entries
+covering its address, in table order, which is the JVM's catch precedence.
+-1 when none do."
+  (let* ((address (floor (address basic-block)))
+         (entries (loop for (start-pc end-pc catch-type handler-pc) in (source-exception-table *context*)
+                        ;; As MERGE-EXCEPTION-ENTRIES does, ignore a range
+                        ;; that starts at its own handler.
+                        when (and (<= start-pc address) (< address end-pc)
+                                  (/= start-pc handler-pc))
+                          collect (cons catch-type handler-pc))))
+    (if entries
+        (or (gethash entries *flat-try-regions*)
+            (setf (gethash entries *flat-try-regions*) (hash-table-count *flat-try-regions*)))
+        -1)))
+
 (defmethod codegen-block ((basic-block <basic-block>) dominator-block)
   "Generate Lisp code for a basic block, handling exception scopes and control flow."
 
@@ -2183,15 +2210,20 @@ Used to consult block-local substitutions in addition to global ones.")
     ;;  (when (or handler-start (fset:contains? (dominators basic-block) dominator-block))
     (when (fset:contains? (dominators basic-block) dominator-block)
       (unless (find basic-block (car (emitted-block-scopes *context*)))
-        (when (try-catch basic-block)
+        ;; In flat mode every tag is visible to every GO, so one scope holds
+        ;; all emitted blocks and none is emitted twice.
+        (when (and (try-catch basic-block) (not *flat-try-regions*))
           (push basic-block (first (emitted-block-scopes *context*)))
           (push (list) (emitted-block-scopes *context*)))
         (let* ((stop-emitting-blocks? nil)
                (lisp-code
                  ;; Bind *current-block* so codegen can access local substitutions
                  (let ((*current-block* basic-block))
-                   (cons (intern (format nil "branch-target-~A" (address (car (slot-value basic-block 'code)))))
-                         (loop for insn in (slot-value basic-block 'code)
+                   (list* (intern (format nil "branch-target-~A" (address (car (slot-value basic-block 'code)))))
+                         (append
+                          (when *flat-try-regions*
+                            (list `(setf %region ,(%block-try-region basic-block))))
+                          (loop for insn in (slot-value basic-block 'code)
                                do (when (and *debug-codegen* (slot-value insn 'dead-p))
                                     (format t "; Skipping dead instruction: ~A~%" (type-of insn)))
                                when (not (slot-value insn 'dead-p))  ; Skip dead instructions
@@ -2200,7 +2232,7 @@ Used to consult block-local substitutions in addition to global ones.")
                                             (setf stop-emitting-blocks? t))
                                           (if expr
                                               (list (trace-insn insn (code expr)))
-                                              nil)))))))
+                                              nil))))))))
           (push basic-block (first (emitted-block-scopes *context*)))
           (pop (slot-value *context* 'blocks))
 
@@ -2243,8 +2275,18 @@ Used to consult block-local substitutions in addition to global ones.")
           ;; Handle exception handlers (try-catch)
           (let ((try-catch-handlers (try-catch basic-block))
                 (ctx-pkg (context-package *context*)))
+            (when (and try-catch-handlers (not *flat-try-regions*))
+              (pop (emitted-block-scopes *context*)))
+            (when (and try-catch-handlers *flat-try-regions*)
+              ;; The range's code runs straight on to its end, as it would
+              ;; off the end of the HANDLER-CASE below.
+              (when-let ((end-block (first (exception-end-blocks basic-block))))
+                (setf lisp-code
+                      (append lisp-code
+                              (list (list 'go (intern (format nil "branch-target-~A"
+                                                              (address (car (code end-block))))))))))
+              (setf try-catch-handlers nil))
             (when try-catch-handlers
-              (pop (emitted-block-scopes *context*))
               ;; Compute a GO to the try-end block to prevent fall-through
               ;; after the HANDLER-CASE (JVM semantics: normal completion
               ;; of a try block continues at the end-pc).

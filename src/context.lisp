@@ -55,6 +55,10 @@
     :doc "An array of lists of possible next instruction offsets for
  the corresponding instruction in BYTECODE.")
    (exception-table)
+   (source-exception-table
+    :doc "The exception table's entries as (start-pc end-pc catch-type
+handler-pc), in the class file's order, which is the JVM's catch precedence:
+EXCEPTION-TABLE is merged and sorted by start-pc.")
    (block-address-table
     :doc "A hashtable mapping addresses to blocks")
    (fn-name)
