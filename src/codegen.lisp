@@ -186,7 +186,15 @@ implements IR node INSN, generating operand code recursively."))
                         :insn insn
                         :code `(make-java-array :component-class ,(component-class insn)
                                                 :element-type ',(%component-element-type (component-class insn))
-                                                :initial-contents (vector ,@codegenned-values))
+                                                :initial-contents
+                                                ,(if (every (lambda (v) (or (null v) (and (atom v) (not (symbolp v)))))
+                                                            codegenned-values)
+                                                     ;; All constants (numbers, characters, Java
+                                                     ;; strings, null): a literal, which SBCL needn't
+                                                     ;; compile element by element, copied since
+                                                     ;; Java code may store into the array.
+                                                     `(copy-seq ',(coerce codegenned-values 'vector))
+                                                     `(vector ,@codegenned-values)))
                         :expression-type (slot-value insn 'type)))))))
 
 (defmethod codegen ((insn ir-int-literal) context)
