@@ -2328,14 +2328,13 @@ loader package (OPENLDK.SYSTEM for classes loaded during warm-up)."
 
 (defun %await-nondaemon-java-threads ()
   "Wait for all non-daemon Java threads (other than the current one) to
-complete.  Interactive applications can disable the default safety
-timeout with LDK_THREAD_WAIT_SECONDS=0."
+complete, as a JVM does.  LDK_THREAD_WAIT_SECONDS=N gives up after N
+seconds instead."
   (let ((current-lisp-thread (bordeaux-threads:current-thread))
         (deadline
           (let* ((setting (uiop:getenv "LDK_THREAD_WAIT_SECONDS"))
-                 (seconds (if setting
-                              (parse-integer setting :junk-allowed t)
-                              30)))
+                 (seconds (and setting
+                               (parse-integer setting :junk-allowed t))))
             (when (and seconds (plusp seconds))
               (+ (get-internal-real-time)
                  (* seconds internal-time-units-per-second))))))
