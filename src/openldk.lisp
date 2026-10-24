@@ -1045,6 +1045,82 @@ already made a non-null Java object."
                  thereis (%assigns-p (car tail) variable)
                  while (consp (cdr tail))))))
 
+(defun %codegen-method-blocks (blocks)
+  "The statements of a method's TAGBODY: each of BLOCKS' code."
+  (mapcan (lambda (x) (if (listp x) x (list x)))
+          (loop for block in blocks
+                for code = (codegen-block block block)
+                when code
+                  collect code)))
+
+(defun %flat-try-body (statements regions)
+  "STATEMENTS, a method's flat TAGBODY (see *FLAT-TRY-REGIONS*), wrapped in
+the one handler that dispatches on %REGION: a Java throwable signalled in a
+region that catches it is kept in CONDITION-CACHE, unwinds to %ATTEMPT,
+and re-enters the TAGBODY through a jump table to its handler.  Locals
+live outside, so they keep their values, as the JVM's do.  Returns NIL
+when STATEMENTS can't be flat: some tag twice, or a handler not emitted."
+  (let ((tags (remove-if-not #'symbolp statements))
+        (handlers (make-hash-table)))
+    (unless (= (length tags) (length (remove-duplicates tags)))
+      (return-from %flat-try-body nil))
+    (maphash (lambda (entries region)
+               (declare (ignore region))
+               (loop for (nil . handler-pc) in entries
+                     for block = (gethash handler-pc (block-address-table *context*))
+                     for tag = (and block (intern (format nil "branch-target-~A" (address block))))
+                     unless (and tag (member tag tags))
+                       do (return-from %flat-try-body nil)
+                     do (setf (gethash handler-pc handlers) block)))
+             regions)
+    (let ((condition (intern "%condition" :openldk)))
+      `((let ((%region -1) (%resume -1))
+          (declare (fixnum %region %resume))
+          (tagbody
+           %retry
+             (block %attempt
+               (handler-bind
+                   ((|condition-java/lang/Throwable|
+                      (lambda (,condition)
+                        (let ((handler
+                                (case %region
+                                  ,@(loop for entries being the hash-keys of regions using (hash-value region)
+                                          collect `(,region
+                                                    (typecase ,condition
+                                                      ,@(loop for (catch-type . handler-pc) in entries
+                                                              when (> (length catch-type) 0)
+                                                                do (%resolve-class-in-context catch-type)
+                                                              collect `(,(intern (format nil "condition-~A"
+                                                                                         (if (> (length catch-type) 0)
+                                                                                             catch-type
+                                                                                             "java/lang/Throwable"))
+                                                                                 :openldk)
+                                                                        ,handler-pc)))))
+                                  (t nil))))
+                          (when handler
+                            (when *debug-exceptions*
+                              (format *error-output* "~&Caught Java exception in ~A.~A~%"
+                                      ,(slot-value (slot-value *context* 'class) 'name)
+                                      ,(fn-name *context*))
+                              (%print-java-stack-trace (slot-value ,condition '|objref|)
+                                                       :stream *error-output*))
+                            (setf |condition-cache| ,condition
+                                  %resume handler)
+                            (return-from %attempt))))))
+                 (openldk::with-java-conditions
+                     (:arrays ,(and (needs-array-bounds-check *context*) t))
+                   (tagbody
+                      (case %resume
+                        ,@(loop for handler-pc being the hash-keys of handlers using (hash-value block)
+                                collect `(,handler-pc
+                                          (setf %resume -1)
+                                          ,@(%handler-entry-flag block)
+                                          (go ,(intern (format nil "branch-target-~A" (address block)))))))
+                      ,@statements)))
+               (go %done))
+             (go %retry)
+           %done))))))
+
 (defun %build-method-definition (class method blocks-after-dce parameter-hints max-locals)
   "Build the complete DEFUN/DEFMETHOD form for METHOD from its optimized
 BLOCKS-AFTER-DCE: generate each block's code, then wrap it with debug
@@ -1052,13 +1128,15 @@ tracing, the NPE/array-bounds handler-binds, and ACC_SYNCHRONIZED monitor
 entry/exit as required."
   (let* ((lisp-code
            (%fold-stack-variables
-            (list (list 'block nil
-                        (append (list 'tagbody)
-                                (mapcan (lambda (x) (if (listp x) x (list x)))
-                                        (loop for block in blocks-after-dce
-                                              for code = (codegen-block block block)
-                                              when code
-                                                collect code)))))
+            (list (list* 'block nil
+                         (or (and (plusp (length (exception-table *context*)))
+                                  (let ((*flat-try-regions* (make-hash-table :test #'equal)))
+                                    (%flat-try-body (%codegen-method-blocks blocks-after-dce)
+                                                    *flat-try-regions*)))
+                             ;; Nested HANDLER-CASEs, as before flat regions.
+                             (progn
+                               (setf (emitted-block-scopes *context*) (list (list)))
+                               (list (cons 'tagbody (%codegen-method-blocks blocks-after-dce)))))))
             (unless (compact-p *context*)
               (%variable-categories (variable-sources *context*)))))
          (lisp-code

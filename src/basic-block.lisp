@@ -166,7 +166,11 @@ Combined with global substitutions during codegen for this block only.")
     ;; The start of the method...
     (setf (gethash 0 block-starts) t)
 
-    ;; Merge exception ranges where possible
+    ;; Merge exception ranges where possible, keeping them as they were for
+    ;; flat regions (see %BLOCK-TRY-REGION).  Merging changes end-pcs in place.
+    (setf (source-exception-table *context*)
+          (loop for ete across (or (exception-table *context*) #())
+                collect (list (start-pc ete) (end-pc ete) (catch-type ete) (handler-pc ete))))
     (setf (exception-table *context*) (merge-exception-entries (exception-table *context*)))
 
     ;; Handle all of the exception table entries
