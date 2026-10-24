@@ -252,7 +252,9 @@ files resolve against it."
                        (sb-debug:print-backtrace :count 60 :stream *error-output*))))
                   (uiop:quit 1))))
       (main mainclass args :classpath classpath :dump-dir dump-dir :aot aot))
-    ;; Force exit — daemon threads may be blocked in wait() and won't terminate
+    ;; Force exit — daemon threads may be blocked in wait() and won't terminate.
+    ;; An aborting exit runs no exit hooks, so report the cache's counts here.
+    (%fasl-cache-report)
     (sb-ext:exit :code 0 :abort t)))
 
 (defun app-main-wrapper ()
