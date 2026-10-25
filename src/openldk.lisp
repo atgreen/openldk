@@ -323,7 +323,9 @@ Returns a cons (method-fn . next-methods)."
   (let* ((class-list (cons owner-class
                            (make-list (max 0 (1- nargs))
                                       :initial-element (find-class 't))))
-         (methods (closer-mop:compute-applicable-methods-using-classes gf class-list)))
+         (methods (if (typep gf 'java-generic-function)
+                      (%java-applicable-methods gf owner-class class-list)
+                      (closer-mop:compute-applicable-methods-using-classes gf class-list))))
     (unless methods
       (return-from %compute-invoke-special-entry nil))
     (let ((method (or (find owner-class methods

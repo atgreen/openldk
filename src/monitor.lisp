@@ -68,18 +68,30 @@ TIMEOUT seconds when given.  Returns NIL on a timeout."
 
 (defvar *monitors* (make-hash-table :weakness :key :synchronized t))
 
+(defvar *last-monitor* (cons nil nil)
+  "(object . monitor) of the last %GET-MONITOR, replaced whole so threads
+never see one object's monitor for another's.  A lookup in the weak
+table takes its lock, a sixth of an uncontended synchronized call.")
+
 (defun %get-monitor (object)
   "Return (and cache) the monitor object associated with OBJECT.
 Monitors for unreferenced objects are automatically reclaimed by the GC
 via the weak hash table."
-  (or (gethash object *monitors*)
-      ;; Double-checked locking: re-check under the hash table lock to
-      ;; avoid creating duplicate monitors for the same object.
-      (sb-ext:with-locked-hash-table (*monitors*)
-        (or (gethash object *monitors*)
-            (let ((monitor (make-instance '<java-monitor>)))
-              (setf (gethash object *monitors*) monitor)
-              monitor)))))
+  (let ((last *last-monitor*))
+    (if (eq (car last) object)
+        (cdr last)
+        (let ((monitor
+                (or (gethash object *monitors*)
+                    ;; Double-checked locking: re-check under the hash table
+                    ;; lock to avoid creating duplicate monitors for the
+                    ;; same object.
+                    (sb-ext:with-locked-hash-table (*monitors*)
+                      (or (gethash object *monitors*)
+                          (let ((monitor (make-instance '<java-monitor>)))
+                            (setf (gethash object *monitors*) monitor)
+                            monitor))))))
+          (setf *last-monitor* (cons object monitor))
+          monitor))))
 
 (defun monitor-enter (object)
   "Enter the monitor for OBJECT, acquiring its mutex.
