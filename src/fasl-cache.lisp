@@ -415,15 +415,28 @@ with SOURCE-HASH the hash of its code now, just compare; see
                                (sb-ext:atomic-incf (car *fasl-cache-temp-counter*)))
                  :type type :defaults path))
 
-(defun %fasl-cache-compile (class method definition-code dependencies)
+(defun %call-site-gf-forms (call-site-gfs)
+  "Forms that re-create the virtual-call-site generic functions CALL-SITE-GFS
+records, for a cached FASL to run on load: codegen made them as a side
+effect this FASL's LOAD does not repeat (see *COMPILE-CALL-SITE-GFS*).
+Sorted by name so the FASL's text is reproducible."
+  (when call-site-gfs
+    (loop for (symbol . nargs) in (sort (loop for sym being the hash-keys of call-site-gfs
+                                                using (hash-value n)
+                                              collect (cons sym n))
+                                        #'string< :key (lambda (x) (symbol-name (car x))))
+          collect `(%ensure-java-gf ',symbol ,nargs))))
+
+(defun %fasl-cache-compile (class method definition-code dependencies call-site-gfs)
   "Compile DEFINITION-CODE, METHOD of CLASS's, to a cached FASL whose LOAD
-checks DEPENDENCIES first, and return the FASL's path; or return NIL when
-it can't be cached."
+checks DEPENDENCIES first and ensures CALL-SITE-GFS, and return the FASL's
+path; or return NIL when it can't be cached."
   (handler-case
       (let* ((loader (slot-value class 'ldk-loader))
              (text (%print-definition (%externalize-definition definition-code)))
              (source-hash (%md5-hex (sb-ext:string-to-octets text :external-format :utf-8)))
              (deps (%recorded-dependencies dependencies loader))
+             (gf-forms (%call-site-gf-forms call-site-gfs))
              (path (%fasl-cache-path class method)))
         (cond
           (*fasl-cache-verify*
@@ -442,6 +455,9 @@ it can't be cached."
                           (format out "(in-package :openldk)~%")
                           (prin1 `(%fasl-cache-validate ',deps ,source-hash) out)
                           (terpri out)
+                          (dolist (form gf-forms)
+                            (prin1 form out)
+                            (terpri out))
                           (write-string text out)
                           (terpri out))))
                     (multiple-value-bind (output warnings-p failure-p)
@@ -470,11 +486,11 @@ it can't be cached."
               (name class) (slot-value method 'name) (slot-value method 'descriptor) c)
       nil)))
 
-(defun %fasl-cache-install (class method definition-code dependencies)
+(defun %fasl-cache-install (class method definition-code dependencies call-site-gfs)
   "Install METHOD of CLASS by compiling DEFINITION-CODE to a cached FASL
 and loading it, returning true; or return NIL, having installed nothing,
 when it can't be cached."
-  (let ((path (%fasl-cache-compile class method definition-code dependencies)))
+  (let ((path (%fasl-cache-compile class method definition-code dependencies call-site-gfs)))
     (when path
       (let ((*fasl-cache-loader* (slot-value class 'ldk-loader))
             (*compile-dependencies* nil))

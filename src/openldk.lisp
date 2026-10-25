@@ -1485,8 +1485,10 @@ classes with the same name."
                                     (not *fasl-cache-verify*)
                                     (%fasl-cache-load class method))
                          (let* ((dependencies (and cacheable (make-hash-table :test #'equal)))
+                                (call-site-gfs (and cacheable (make-hash-table :test #'eq)))
                                 (definition-code
-                                  (let ((*compile-dependencies* dependencies))
+                                  (let ((*compile-dependencies* dependencies)
+                                        (*compile-call-site-gfs* call-site-gfs))
                                     (%build-method-definition
                                      class method
                                      (%optimize-method-blocks
@@ -1502,7 +1504,7 @@ classes with the same name."
                                 :evaluator (and cacheable
                                                 (lambda ()
                                                   (%fasl-cache-install class method definition-code
-                                                                       dependencies)))))))
+                                                                       dependencies call-site-gfs)))))))
                        (when (or *debug-compile* *debug-codegen*)
                          (format t "; COMPILING ~A.~A (~Dms)~%"
                                  class-name

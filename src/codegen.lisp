@@ -1547,7 +1547,12 @@ created if need be, so the call finds a function to forward from."
   (let ((symbol (intern (format nil "~A" method-name) :openldk)))
     (if (char= #\% (char (symbol-name symbol) 0))
         symbol
-        (%ensure-java-gf symbol nargs))))
+        (progn
+          ;; Ensuring the generic function here is a codegen-time side
+          ;; effect; a cached FASL loads without recompiling, so record
+          ;; it to re-ensure on load (see *COMPILE-CALL-SITE-GFS*).
+          (%note-call-site-gf symbol nargs)
+          (%ensure-java-gf symbol nargs)))))
 
 (defmethod codegen ((insn ir-call-virtual-method) context)
   (with-slots (method-name args) insn
