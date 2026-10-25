@@ -66,6 +66,22 @@ Running `make` produces two executables:
 - `openldk` - the JIT compiler and runtime for Java
 - `javacl` - Java's `javac` compiler transpiled to Lisp and dumped as an executable
 
+Each image reserves the SBCL heap it was built with, 32 GB by default.
+SBCL's startup grows with it, so `make DYNAMIC_SPACE_SIZE=4096` builds
+images with a 4 GB heap that start faster, when your programs fit.
+
+## Running
+
+`openldk` takes the same arguments as `java`:
+```
+$ ./openldk -cp classes:lib/foo.jar com.example.Main arg...
+$ ./openldk -jar app.jar arg...
+```
+`-D<name>=<value>` sets a system property, and `-version` and `-help` do
+what they do for `java`.  As on a JVM, `openldk` exits once `main` has
+returned and every non-daemon thread has ended;
+`LDK_THREAD_WAIT_SECONDS=N` stops waiting after N seconds.
+
 ## How it Works
 
 `openldk` reads class and jar files, and translates them into lisp
@@ -79,7 +95,7 @@ backtrace capabilities allow us check calling classes to support
 Java's security model.
 
 The first time we read a class definition, we generate a CLOS
-definition, with stubs for methods.
+definition, and install stubs for its methods.
 
 For example...
 
@@ -110,19 +126,7 @@ public class demo
    ((openldk::|x| :initform 0 :allocation :class)
     (openldk::|y| :initform 0 :allocation :class)))
  (defparameter openldk.app::|+static-demo+|
-   (make-instance 'openldk.app::|demo|))
- (progn
-  (openldk::%ensure-java-gf 'openldk::|<init>()V| 1)
-  (defmethod openldk::|<init>()V| ((openldk::|this| openldk.app::|demo|))
-    (openldk::%compile-method #<openldk::<class> demo> 1)
-    (openldk::invoke-special 'openldk::|<init>()V| 'openldk.app::|demo|
-                             (list openldk::|this|))))
- (defun openldk.app::|demo.add(II)I| (openldk::|arg1| openldk::|arg2|)
-   (openldk::%compile-method #<openldk::<class> demo> 2)
-   (openldk.app::|demo.add(II)I| openldk::|arg1| openldk::|arg2|))
- (defun openldk.app::|demo.main([Ljava/lang/String;)V| (openldk::|arg1|)
-   (openldk::%compile-method #<openldk::<class> demo> 3)
-   (openldk.app::|demo.main([Ljava/lang/String;)V| openldk::|arg1|)))
+   (make-instance 'openldk.app::|demo|)))
 ```
 
 Java fields become slots, with static fields allocated on the class
@@ -131,9 +135,11 @@ their full signature, so overloads stay distinct.  Instance methods are
 methods of a generic function shared by every class that defines that
 signature; static methods are plain functions.
 
-Note that the methods are all stubs that invoke the compiler and then
-call the method again, now compiled.  This is how we support
-incremental JIT compilation.
+Each method starts as a stub, a closure installed without running the
+compiler: `openldk.app::|demo.add(II)I|` is a function that compiles
+`add` and then calls the compiled definition, which has replaced it.
+This is how we support incremental JIT compilation: most methods of most
+classes are never called, and never compiled.
 
 When the `add` method is called, the compiler reads `add`'s bytecode
 and generates the following:
@@ -181,11 +187,11 @@ the compiler's is reported, a check on the cache itself.
 
 ### Testing
 
-See [cl-log4j](https://github.com/atgreen/cl-log4j) for an example of how
-to wrap a Java library for Common Lisp usage.
-
 Run `make check` to run through the
 [dejagnu](https://www.gnu.org/software/dejagnu/dejagnu)-based testsuite.
+`make check-regression` runs its core suites and fails if any test that
+passes in `testsuite/baseline.sum` no longer does: run it before sending
+a change.
 
 ### Debugging
 
@@ -238,9 +244,11 @@ OpenLDK can run non-trivial Java applications:
 - **Spring Boot** - [Spring Boot](https://spring.io/projects/spring-boot)
   4 applications run, including
   [Spring PetClinic](https://github.com/spring-projects/spring-petclinic)
-  serving its pages from embedded Tomcat, with Hibernate and H2.  Started
-  cold, Boot takes minutes, nearly all of it first-use compilation; a
-  snapshot image starts a Boot application in about 80 ms (see below).
+  serving its pages from embedded Tomcat, with Hibernate and H2.  The
+  sample application in `bench/spring-boot` starts in about two minutes
+  cold, nearly all of it first-use compilation, and in about 35 seconds
+  once the code cache holds its methods; a snapshot image starts it in
+  about 80 ms (see below).
 - **Quarkus** - [Quarkus](https://quarkus.io/) applications run, and start
   in about 70 ms from a snapshot image.
 
@@ -304,11 +312,13 @@ it, in Lisp code.  `make sbcl-<language>` builds an SBCL with a language
 started, and `make sbcl-polyglot` one with all of them.  See
 [docs/INTEROP.md](docs/INTEROP.md).
 
-The code is not optimized.  Even with heavy optimization, OpenLDK's
-performance will not be competitive to modern Java implementations.
-It is not meant to be competitive.  OpenLDK is meant to fill the gap
+OpenLDK compiles Java to typed Lisp that SBCL compiles at `(speed 3)`,
+and caches what it compiles, but it is not competitive with modern Java
+implementations, and is not meant to be: HotSpot starts the Spring Boot
+sample above in about three seconds.  OpenLDK is meant to fill the gap
 for when you want to code in Common Lisp, but you need that one Java
-library.
+library.  See [cl-log4j](https://github.com/atgreen/cl-log4j) for an
+example of wrapping a Java library for Common Lisp.
 
 Here's an incomplete list of what's not implemented:
 - bytecode verification
@@ -319,6 +329,4 @@ Author and License
 OpenLDK was written by [Anthony
 Green](https://github.com/atgreen), and is distributed under the terms
 of the GNU General Public License, Version 3, modified by the
-"CLASSPATH" exception to the GPL.  See
-[COPYING](https://github.com/atgreen/OpenLDK/blob/main/COPYING)
-for details.
+"CLASSPATH" exception to the GPL.  See [COPYING](COPYING) for details.
