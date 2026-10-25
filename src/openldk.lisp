@@ -2397,6 +2397,23 @@ the class being compiled when there is one, as the JVM resolves references."
       (when (find #\u LDK_DEBUG) (setf *debug-unmuffle* t))
       (when (find #\p LDK_DEBUG) (setf *debug-propagation* t)))))
 
+(defun %ensure-system-loader-packages ()
+  "Ensure the system ClassLoader's `packages` map exists.  ClassLoader.<init>
+initializes `packages` (a ConcurrentHashMap getDefinedPackage reads) inline,
+but when that constructor aborts on the registerAsParallelCapable
+InternalError %INITIALIZE-SYSTEM-PHASE1 swallows, the field is left null and
+every getPackage/getDefinedPackage on the loader throws NullPointerException.
+In the polyglot image that broke Kawa's symbol resolution (gnu.bytecode's
+getContextPackage) and Scala's engine startup alike.  Run on every start,
+build and restart, so a dumped image whose loader lost the map recovers it."
+  (when (and *boot-class-loader*
+             (slot-exists-p *boot-class-loader* '|packages|)
+             (null (slot-value *boot-class-loader* '|packages|)))
+    (classload "java/util/concurrent/ConcurrentHashMap")
+    (let ((map (%make-java-instance "java/util/concurrent/ConcurrentHashMap")))
+      (|<init>()V| map)
+      (setf (slot-value *boot-class-loader* '|packages|) map))))
+
 (defun %main-runtime-setup (classpath dump-dir aot)
   "Per-run setup shared by every MAIN invocation: Java FP semantics, the
 VM start-time stamp, SIGQUIT handler, class loaders, debug flags, system
@@ -2437,6 +2454,7 @@ properties, and *CLASSPATH* construction."
   ;; classes' loader, as on a JVM.
   (when *boot-class-loader*
     (setf (gethash *boot-class-loader* *java-to-ldk-loaders*) *app-ldk-class-loader*))
+  (%ensure-system-loader-packages)
   (%parse-ldk-debug-flags)
   ;; Enable DCE via environment variable LDK_DCE=1 (or any non-empty value)
   (let ((LDK_DCE (uiop:getenv "LDK_DCE")))
