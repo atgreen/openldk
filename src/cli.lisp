@@ -473,6 +473,7 @@ Java code (warmups)."
   (clrhash *class-load-locks*)
   (setf *class-load-locks-lock* (bt:make-lock "class-load-locks"))
   (clrhash *monitors*)
+  (setf *last-monitor* (cons nil nil))
   (setf *method-compilation-lock* (bt:make-lock "method-compilation-lock"))
   (setf *method-compilation-cv* (bt:make-condition-variable :name "method-compilation-cv"))
   (setf *identity-hash-counter-lock* (bt:make-lock "identity-hash-lock"))
@@ -748,6 +749,7 @@ resetting its classpath.  Skipped, with a note, without a javac."
   (%reset-runtime-for-save)
   ;; Clear all monitor state to prevent deadlocks in the saved image.
   (clrhash *monitors*)
+  (setf *last-monitor* (cons nil nil))
   ;; Clear stale thread mappings — after image restore the Lisp thread objects are different.
   (clrhash *lisp-to-java-threads*)
   (setf *current-thread* nil)
@@ -780,6 +782,7 @@ resetting its classpath.  Skipped, with a note, without a javac."
            (discover-jmod-classpath-entries))))
   ;; Clear all monitor state to prevent deadlocks in the saved image.
   (clrhash *monitors*)
+  (setf *last-monitor* (cons nil nil))
   ;; Clear stale thread mappings — after image restore the Lisp thread objects are different.
   (clrhash *lisp-to-java-threads*)
   (setf *current-thread* nil)

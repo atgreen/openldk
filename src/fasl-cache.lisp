@@ -350,36 +350,51 @@ LOAD-TIME-VALUE form that makes it.  Signals UNCACHEABLE when one can't be."
   "The fraction of immobile (text) space past which cached code loads
 into dynamic space instead.")
 
-(defun %fasl-cache-load-file (path)
-  "Load the cached FASL at PATH, its code where EVAL would put it."
+(defun %fasl-cache-load-file (path &optional stream)
+  "Load the cached FASL at PATH, from STREAM when given (open on it), its
+code where EVAL would put it."
   (let ((sb-c:*compile-file-to-memory-space*
           (if (< (- (sb-sys:sap-int sb-vm:*text-space-free-pointer*) sb-vm:text-space-start)
                  (* +fasl-cache-text-space-limit+ sb-vm:text-space-size))
               :immobile
               :dynamic)))
     (handler-bind ((warning #'muffle-warning))
-      (load path :verbose nil :print nil))))
+      (load (or stream path) :verbose nil :print nil))))
+
+(defun %fasl-cache-open (path)
+  "An input stream on the cached FASL at PATH, or NIL when there is none.
+PROBE-FILE, and LOAD and OPEN of a pathname, resolve every directory of
+it, 40 microseconds each time on a cache path, which thousands of cached
+methods took seconds to pay."
+  (let ((fd (sb-unix:unix-open (sb-ext:native-namestring path) sb-unix:o_rdonly 0)))
+    (when fd
+      (sb-sys:make-fd-stream fd :input t :element-type '(unsigned-byte 8)
+                                :buffering :full :file (sb-ext:native-namestring path)
+                                :name path :auto-close t))))
 
 (defun %fasl-cache-load (class method &optional source-hash)
   "Install METHOD of CLASS from the cache, returning true; or return NIL
 when it has no entry, or a stale one, which is deleted.  In verify mode,
 with SOURCE-HASH the hash of its code now, just compare; see
 %FASL-CACHE-VALIDATE."
-  (let ((path (%fasl-cache-path class method)))
-    (unless (probe-file path)
+  (let* ((path (%fasl-cache-path class method))
+         (stream (%fasl-cache-open path)))
+    (unless stream
       (unless source-hash (%fasl-cache-count :misses)))
-    (when (probe-file path)
+    (when stream
       (let ((outcome
-              (catch 'fasl-cache-stale
-                (handler-case
-                    (let ((*fasl-cache-loader* (slot-value class 'ldk-loader))
-                          (*fasl-cache-expected-source* source-hash)
-                          (*compile-dependencies* nil))
-                      (%fasl-cache-load-file path)
-                      :loaded)
-                  (error (c)
-                    (format *error-output* "~&;; FASL-CACHE-ERROR loading ~A: ~A~%" path c)
-                    :stale)))))
+              (unwind-protect
+                   (catch 'fasl-cache-stale
+                     (handler-case
+                         (let ((*fasl-cache-loader* (slot-value class 'ldk-loader))
+                               (*fasl-cache-expected-source* source-hash)
+                               (*compile-dependencies* nil))
+                           (%fasl-cache-load-file path stream)
+                           :loaded)
+                       (error (c)
+                         (format *error-output* "~&;; FASL-CACHE-ERROR loading ~A: ~A~%" path c)
+                         :stale)))
+                (close stream))))
         (case outcome
           (:loaded (%fasl-cache-count :hits) t)
           (:mismatch

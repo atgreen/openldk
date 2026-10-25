@@ -321,7 +321,10 @@ and Lisp-level plumbing (frames with no Java-method name)."
   (declare (ignore dummy))
   (let ((backtrace (remove-if-not
                     #'%java-frame-p
-                    (loop for rest on (sb-debug:list-backtrace)
+                    ;; Only a frame's receiver is ever looked at (its
+                    ;; class, and whether it is THIS); collecting every
+                    ;; argument of every frame was a third of a throw.
+                    (loop for rest on (sb-debug:list-backtrace :argument-limit 1)
                           unless (%throwable-construction-frame-p (car rest) this)
                             return rest))))
     (setf (slot-value this '|backtrace|) backtrace)

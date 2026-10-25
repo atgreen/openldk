@@ -53,6 +53,9 @@
    ;; that keep an entry of their own (INVOKE-SPECIAL-AT) see it is stale.
    (invoke-special-version :initform 0 :type fixnum
                            :accessor java-gf-invoke-special-version)
+   ;; First specializer -> its methods, for %JAVA-APPLICABLE-METHODS: NIL
+   ;; until built, or :COMPLEX for methods it can't serve.
+   (method-index :initform nil :accessor java-gf-method-index)
    (cache-lock :initform (bordeaux-threads:make-lock "java-gf-cache")
                :reader java-gf-cache-lock))
   (:metaclass sb-mop:funcallable-standard-class))
@@ -96,6 +99,47 @@ compile time."
     (setf (gethash method *method-bodies*) (fdefinition impl-symbol))
     method))
 
+(defun %simple-java-method-p (method)
+  "Does METHOD dispatch on its first argument's class alone, as a primary
+or :AROUND method?"
+  (let ((specializers (sb-mop:method-specializers method)))
+    (and (member (method-qualifiers method) '(() (:around)) :test #'equal)
+         (typep (first specializers) 'class)
+         (every (lambda (s) (eq s (find-class t))) (rest specializers)))))
+
+(defun %index-java-method (index method)
+  "Add METHOD to INDEX, a METHOD-INDEX table, returning INDEX, or :COMPLEX."
+  (if (%simple-java-method-p method)
+      (progn (push method (gethash (first (sb-mop:method-specializers method)) index))
+             index)
+      :complex))
+
+(defun %java-gf-method-index (gf)
+  "GF's METHOD-INDEX, built if need be.  Call with its cache lock held."
+  (or (java-gf-method-index gf)
+      (setf (java-gf-method-index gf)
+            (let ((index (make-hash-table :test 'eq)))
+              (dolist (method (sb-mop:generic-function-methods gf) index)
+                (when (eq (%index-java-method index method) :complex)
+                  (return :complex)))))))
+
+(defun %java-applicable-methods (gf class class-list)
+  "COMPUTE-APPLICABLE-METHODS-USING-CLASSES of GF and CLASS-LIST, whose
+first element is CLASS and the rest T: GF's methods on CLASS and its
+superclasses, most specific first.  PCL's tests every method of GF, and
+toString() or <init>() have thousands; this looks up the few classes
+CLASS inherits from."
+  (let ((index (bordeaux-threads:with-lock-held ((java-gf-cache-lock gf))
+                 (%java-gf-method-index gf))))
+    (if (eq index :complex)
+        (closer-mop:compute-applicable-methods-using-classes gf class-list)
+        (progn
+          (unless (sb-mop:class-finalized-p class)
+            (sb-mop:finalize-inheritance class))
+          (bordeaux-threads:with-lock-held ((java-gf-cache-lock gf))
+            (loop for c in (sb-mop:class-precedence-list class)
+                  append (gethash c index)))))))
+
 (defun %compute-java-effective-method (gf class)
   "Compute an effective method function, called with GF's arguments, for GF
 dispatching on CLASS.
@@ -108,7 +152,7 @@ may still be a bare stub that a later classload fleshes out)."
                           (make-list (max 0 (1- nargs))
                                      :initial-element (find-class 't)))))
     (multiple-value-bind (methods definitive-p)
-        (closer-mop:compute-applicable-methods-using-classes gf class-list)
+        (%java-applicable-methods gf class class-list)
       (declare (ignore definitive-p))
       (if (null methods)
           ;; No applicable methods — signal no-applicable-method
@@ -178,9 +222,20 @@ applicable-method set.  Non-class specializers flush everything."
            (incf (java-gf-invoke-special-version gf))))))))
 
 (defmethod sb-mop:add-method :after ((gf java-generic-function) method)
+  (bordeaux-threads:with-lock-held ((java-gf-cache-lock gf))
+    (let ((index (java-gf-method-index gf)))
+      (when (hash-table-p index)
+        (setf (java-gf-method-index gf) (%index-java-method index method)))))
   (%invalidate-java-gf-cache gf (first (sb-mop:method-specializers method))))
 
 (defmethod sb-mop:remove-method :after ((gf java-generic-function) method)
+  (bordeaux-threads:with-lock-held ((java-gf-cache-lock gf))
+    (let ((index (java-gf-method-index gf)))
+      (if (hash-table-p index)
+          (let ((specializer (first (sb-mop:method-specializers method))))
+            (setf (gethash specializer index) (remove method (gethash specializer index))))
+          ;; A complex method may have been the one removed: rebuild.
+          (setf (java-gf-method-index gf) nil))))
   (%invalidate-java-gf-cache gf (first (sb-mop:method-specializers method))))
 
 (defmethod closer-mop:compute-discriminating-function ((gf java-generic-function))
