@@ -296,10 +296,20 @@ the throwable's own construction (fillInStackTrace, its <init> chain)
 and Lisp-level plumbing (frames with no Java-method name)."
   (let* ((head (%frame-head frame))
          (kind (%frame-head-kind head)))
-    (flet ((construction-method-p (method-name)
+    (flet ((construction-method-p (method-name &optional class-name)
              (or (eql 0 (search "fillInStackTrace" method-name))
                  (and (eql 0 (search "<init>" method-name))
-                      (eq (cadr frame) throwable)))))
+                      (let ((receiver (cadr frame)))
+                        (if (typep receiver '|java/lang/Object|)
+                            (eq receiver throwable)
+                            ;; Compiled at speed 3, a constructor's frame
+                            ;; may not keep its receiver: go by its class,
+                            ;; one THROWABLE is an instance of.
+                            (and class-name
+                                 (find class-name
+                                       (sb-mop:class-precedence-list (class-of throwable))
+                                       :key (lambda (c) (symbol-name (class-name c)))
+                                       :test #'string=))))))))
       (case kind
         (:method
          (let ((m (cadr head)))
@@ -311,7 +321,7 @@ and Lisp-level plumbing (frames with no Java-method name)."
                         n))
                 (dot (position #\. jn)))
            (if dot
-               (construction-method-p (subseq jn (1+ dot)))
+               (construction-method-p (subseq jn (1+ dot)) (subseq jn 0 dot))
                ;; Pure Lisp frame at the leading edge — plumbing.
                t)))
         (:lambda nil)
@@ -324,7 +334,9 @@ and Lisp-level plumbing (frames with no Java-method name)."
                     ;; Only a frame's receiver is ever looked at (its
                     ;; class, and whether it is THIS); collecting every
                     ;; argument of every frame was a third of a throw.
-                    (loop for rest on (sb-debug:list-backtrace :argument-limit 1)
+                    ;; The limit counts a method frame's two hidden
+                    ;; arguments, which come before the receiver.
+                    (loop for rest on (sb-debug:list-backtrace :argument-limit 3)
                           unless (%throwable-construction-frame-p (car rest) this)
                             return rest))))
     (setf (slot-value this '|backtrace|) backtrace)
