@@ -235,8 +235,65 @@ OpenLDK can run non-trivial Java applications:
   Kotlin to class files that run the same as `kotlinc`'s.
 - **Groovy** - [Groovy](https://groovy-lang.org/) 4 runs scripts, with
   closures, metaclasses and invokedynamic, and `@CompileStatic` classes.
+- **Spring Boot** - [Spring Boot](https://spring.io/projects/spring-boot)
+  4 applications run, including
+  [Spring PetClinic](https://github.com/spring-projects/spring-petclinic)
+  serving its pages from embedded Tomcat, with Hibernate and H2.  Started
+  cold, Boot takes minutes, nearly all of it first-use compilation; a
+  snapshot image starts a Boot application in about 80 ms (see below).
+- **Quarkus** - [Quarkus](https://quarkus.io/) applications run, and start
+  in about 70 ms from a snapshot image.
 
 The warm images are described in [docs/IMAGES.md](docs/IMAGES.md).
+
+### Starting Spring Boot in a fraction of a second
+
+A GraalVM native image starts Spring Boot quickly by compiling it ahead of
+time.  OpenLDK gets there differently: it starts Boot once, at build time,
+and saves the running application, much as a CRaC checkpoint does.  Give
+the application a main class that starts Boot the first time and only
+reruns the application's work after that:
+
+```java
+public class Snapshot {
+    static ConfigurableApplicationContext ctx;
+
+    public static void main(String[] args) throws Exception {
+        if (ctx == null) {
+            ctx = SpringApplication.run(MyApp.class, args);
+        } else {
+            for (CommandLineRunner runner : ctx.getBeansOfType(CommandLineRunner.class).values())
+                runner.run(args);
+        }
+    }
+}
+```
+
+Then warm it up twice and save it with `:reset-classes nil`, so the
+started context stays in the image:
+
+```lisp
+(openldk::dump-warm-image "myapp" "com.example.Snapshot"
+                          :classpath (uiop:getenv "CLASSPATH")
+                          :warmups (list nil nil)
+                          :reset-classes nil)
+```
+
+Set `CLASSPATH` to the application's classes followed by every jar it
+needs, one by one: OpenLDK doesn't expand `lib/*`.  Then load OpenLDK into
+an SBCL with a large heap and run this, as
+[docs/IMAGES.md](docs/IMAGES.md) shows.  The first warmup starts Boot and
+the second compiles the runners' code; running `./myapp` then skips Boot's
+startup entirely.  Threads don't survive in an image, so this suits
+command-line applications.  A web server such as Tomcat has to start its
+threads again on each run.
+
+`make bench-spring-boot` builds this for a sample application and times it
+against HotSpot, a JDK AOT cache and a GraalVM native image.  On the
+development host the snapshot started in 82 ms, against 72 ms for the
+native image and 3.4 s for `java -jar`.  See
+[bench/spring-boot/README.md](bench/spring-boot/README.md), and
+`make bench-quarkus` for Quarkus.
 
 Clojure, Kawa, JScheme, Scala, Kotlin, Groovy and ABCL can also be used
 from Lisp, in the same process: each `openldk/<language>` system evaluates
