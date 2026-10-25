@@ -9,6 +9,7 @@
 #   GRAALVM_HOME  a GraalVM for JDK 25; downloaded into .cache/bench if unset
 #   MVN           Maven; `mvn` on PATH, or downloaded into .cache/bench
 #   RUNS          timed runs per variant (default 20)
+#   HEAP_MB       dynamic space baked into the OpenLDK images (default 32768)
 #   SKIP_NATIVE   set to skip the GraalVM native image
 #   SKIP_OPENLDK  set to skip the OpenLDK images
 #
@@ -20,6 +21,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CACHE="$ROOT/.cache/bench"
 RUNS="${RUNS:-20}"
+# SBCL reserves this much dynamic space, and save-lisp-and-die bakes it into
+# the image, where it cannot be overridden.  Startup scales with it (~43ms at
+# 2048 vs ~81ms at 32768 for a bare SBCL), but the benchmark apps want room to
+# run, so reserve generously by default; lower HEAP_MB to measure startup cost.
+HEAP_MB="${HEAP_MB:-32768}"
 
 MAVEN_VERSION=3.9.11
 GRAALVM_TAG=graal-25.4.4.1.1
@@ -90,7 +96,7 @@ openldk_images() {
         log "Building the OpenLDK $name image"
         (cd "$ROOT" &&
          BENCH_IMAGE="$TARGET/openldk-$name" BENCH_MAIN="$main" BENCH_RESET="$reset" CLASSPATH="$classpath" \
-         sbcl --dynamic-space-size 32768 --disable-debugger \
+         sbcl --dynamic-space-size "$HEAP_MB" --disable-debugger \
               --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))" \
               --load "$ROOT/bench/build-image.lisp" > "$TARGET/openldk-$name.log" 2>&1) &
         pids+=($!); names+=("$name")

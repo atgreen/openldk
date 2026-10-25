@@ -7,6 +7,14 @@ JAVAC ?= javac --release 25
 
 XDG_CACHE_HOME ?= $(CURDIR)/.cache
 
+# Dynamic space reserved by SBCL, in MB.  save-lisp-and-die bakes this into
+# every image we dump (:save-runtime-options t), so it cannot be overridden on
+# the image's own command line -- and SBCL startup scales with it: a bare SBCL
+# starts in ~19ms at 512, ~43ms at 2048 and ~81ms at 32768.  Large enough here
+# for the JIT to compile big applications; lower it for an image whose Java
+# heap is modest and whose startup time matters (see bench/spring-boot).
+DYNAMIC_SPACE_SIZE ?= 32768
+
 # Let ASDF find this project's systems without a manual central-registry push.
 # The trailing ':' keeps the inherited (ocicl) source registry.
 CL_SOURCE_REGISTRY ?= $(CURDIR)//:
@@ -52,10 +60,10 @@ check-jdk:
 	@grep -qs '^JAVA_VERSION="25' "$(JAVA_HOME)/release" || { echo "error: JAVA_HOME=$(JAVA_HOME) is not a JDK 25 installation (OpenLDK requires JDK 25)"; exit 1; }
 
 openldk: src/*.lisp src/native/*.lisp *.asd Makefile | check-jdk
-	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))" --eval "(openldk::make-image)"
+	sbcl --dynamic-space-size $(DYNAMIC_SPACE_SIZE) --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))" --eval "(openldk::make-image)"
 
 javacl: src/*.lisp src/native/*.lisp *.asd Makefile | check-jdk
-	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"javacl\"))" --eval "(openldk::make-javac-image)"
+	sbcl --dynamic-space-size $(DYNAMIC_SPACE_SIZE) --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"javacl\"))" --eval "(openldk::make-javac-image)"
 
 $(KAWA_JAR):
 	mkdir -p lib
@@ -63,7 +71,7 @@ $(KAWA_JAR):
 
 # A warm image: Kawa's Java code is compiled at build time (see docs/IMAGES.md).
 kawa: src/*.lisp src/native/*.lisp *.asd Makefile lib/kawa/build-image.lisp $(KAWA_JAR) | check-jdk
-	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))" --load lib/kawa/build-image.lisp
+	sbcl --dynamic-space-size $(DYNAMIC_SPACE_SIZE) --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))" --load lib/kawa/build-image.lisp
 
 $(ABCL_JAR):
 	curl -sSfL $(ABCL_URL) | tar xzO abcl-bin-$(ABCL_VERSION)/abcl.jar > $@.tmp
@@ -75,7 +83,7 @@ $(ABCL_MAIN): lib/abcl/ABCLMain.java $(ABCL_JAR)
 
 # A warm image: ABCL's Java code is compiled at build time (see docs/IMAGES.md).
 abcl: src/*.lisp src/native/*.lisp *.asd Makefile lib/abcl/build-image.lisp $(ABCL_MAIN) | check-jdk
-	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))" --load lib/abcl/build-image.lisp
+	sbcl --dynamic-space-size $(DYNAMIC_SPACE_SIZE) --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))" --load lib/abcl/build-image.lisp
 
 lib/clojure/clojure-1.12.4.jar:
 	curl -sSfL -o $@.tmp $(MAVEN_URL)/org/clojure/clojure/1.12.4/clojure-1.12.4.jar
@@ -92,7 +100,7 @@ lib/clojure/core.specs.alpha-0.4.74.jar:
 # A warm image: clojure.core loaded and Clojure's Java code compiled at
 # build time (see docs/IMAGES.md).
 clojure: src/*.lisp src/native/*.lisp *.asd Makefile lib/clojure/build-image.lisp $(CLOJURE_JARS) | check-jdk
-	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))" --load lib/clojure/build-image.lisp
+	sbcl --dynamic-space-size $(DYNAMIC_SPACE_SIZE) --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))" --load lib/clojure/build-image.lisp
 
 lib/scala/scala-%-$(SCALA_VERSION).jar:
 	mkdir -p lib/scala
@@ -141,11 +149,11 @@ $(JSCHEME_MAIN): $(JSCHEME_SRC_JAR)
 
 # Tests for openldk/interop, the shared core (Java classes defined in Lisp, ...).
 check-interop: | check-jdk
-	sbcl --dynamic-space-size 32768 --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:test-system \"openldk/interop\"))"
+	sbcl --dynamic-space-size $(DYNAMIC_SPACE_SIZE) --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:test-system \"openldk/interop\"))"
 
 # Tests for openldk/jscheme, using JScheme from Lisp (see docs/INTEROP.md).
 check-jscheme: $(JSCHEME_MAIN) | check-jdk
-	sbcl --dynamic-space-size 32768 --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:test-system \"openldk/jscheme\"))"
+	sbcl --dynamic-space-size $(DYNAMIC_SPACE_SIZE) --non-interactive --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:test-system \"openldk/jscheme\"))"
 
 # Run openldk/LANGUAGE's tests in sbcl-LANGUAGE, where the language is
 # started.  The image's systems are left as they are: reloading OpenLDK into
@@ -185,33 +193,33 @@ check-abcl: sbcl-abcl
 
 # SBCLs with a language started, for using it from Lisp (see docs/INTEROP.md).
 sbcl-jscheme: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(JSCHEME_MAIN) | check-jdk
-	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/jscheme\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-jscheme\" :init (lambda () (jscheme:startup) (jscheme:eval-string \"(define (f n) (if (< n 2) 1 (* n (f (- n 1))))) (f 10) (map (lambda (x) (* x x)) (list 1 2 3))\")))"
+	sbcl --dynamic-space-size $(DYNAMIC_SPACE_SIZE) --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/jscheme\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-jscheme\" :init (lambda () (jscheme:startup) (jscheme:eval-string \"(define (f n) (if (< n 2) 1 (* n (f (- n 1))))) (f 10) (map (lambda (x) (* x x)) (list 1 2 3))\")))"
 
 sbcl-kawa: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(KAWA_JAR) | check-jdk
-	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/kawa\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-kawa\" :init (lambda () (kawa:startup) (kawa:eval-string \"(define (f n) (if (< n 2) 1 (* n (f (- n 1))))) (f 20) (map (lambda (x) (* x x)) (list 1 2 3)) (vector 1 2)\")))"
+	sbcl --dynamic-space-size $(DYNAMIC_SPACE_SIZE) --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/kawa\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-kawa\" :init (lambda () (kawa:startup) (kawa:eval-string \"(define (f n) (if (< n 2) 1 (* n (f (- n 1))))) (f 20) (map (lambda (x) (* x x)) (list 1 2 3)) (vector 1 2)\")))"
 
 # Every language started, in one SBCL (openldk/polyglot).
 sbcl-polyglot: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(KAWA_JAR) $(CLOJURE_JARS) $(JSCHEME_MAIN) $(SCALA_JARS) $(KOTLIN_JARS) $(GROOVY_JAR) $(ABCL_JAR) | check-jdk
-	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/polyglot\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-polyglot\" :init (lambda () (polyglot:warm-up (polyglot:startup))))"
+	sbcl --dynamic-space-size $(DYNAMIC_SPACE_SIZE) --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/polyglot\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-polyglot\" :init (lambda () (polyglot:warm-up (polyglot:startup))))"
 
 sbcl-abcl: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(ABCL_JAR) | check-jdk
-	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/abcl\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-abcl\" :init (lambda () (abcl:startup) (abcl:eval-string \"(defun f (n) (if (< n 2) 1 (* n (f (1- n))))) (f 20) (mapcar (lambda (x) (* x x)) (list 1 2 3)) (prin1-to-string (list 1 2.5 (quote sym))) (handler-case (error (quote type-error) :datum 1 :expected-type (quote string)) (error (e) (princ-to-string e))) (defclass pt () ((x :initarg :x))) (make-instance (quote pt) :x 1) (compile (quote f))\")))"
+	sbcl --dynamic-space-size $(DYNAMIC_SPACE_SIZE) --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/abcl\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-abcl\" :init (lambda () (abcl:startup) (abcl:eval-string \"(defun f (n) (if (< n 2) 1 (* n (f (1- n))))) (f 20) (mapcar (lambda (x) (* x x)) (list 1 2 3)) (prin1-to-string (list 1 2.5 (quote sym))) (handler-case (error (quote type-error) :datum 1 :expected-type (quote string)) (error (e) (princ-to-string e))) (defclass pt () ((x :initarg :x))) (make-instance (quote pt) :x 1) (compile (quote f))\")))"
 
 sbcl-clojure: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(CLOJURE_JARS) | check-jdk
-	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/clojure\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-clojure\" :init (lambda () (clojure:startup) (clojure:eval-string \"(defn f [n] (if (< n 2) 1 (*' n (f (dec n))))) (f 20) (mapv inc (range 5)) (into {} [[:a 1]]) (str 1 :k)\")))"
+	sbcl --dynamic-space-size $(DYNAMIC_SPACE_SIZE) --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/clojure\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-clojure\" :init (lambda () (clojure:startup) (clojure:eval-string \"(defn f [n] (if (< n 2) 1 (*' n (f (dec n))))) (f 20) (mapv inc (range 5)) (into {} [[:a 1]]) (str 1 :k)\")))"
 
 sbcl-scala: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(SCALA_JARS) | check-jdk
-	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/scala\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-scala\" :init (lambda () (scala:startup) (scala:eval \"def f(n: Int): BigInt = if (n < 2) 1 else n * f(n - 1); f(20); List(1, 2, 3).map(_ * 2).sum; Vector(1, 2); Map(1 -> 2); Some((1, 2))\")))"
+	sbcl --dynamic-space-size $(DYNAMIC_SPACE_SIZE) --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/scala\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-scala\" :init (lambda () (scala:startup) (scala:eval \"def f(n: Int): BigInt = if (n < 2) 1 else n * f(n - 1); f(20); List(1, 2, 3).map(_ * 2).sum; Vector(1, 2); Map(1 -> 2); Some((1, 2))\")))"
 
 sbcl-kotlin: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(KOTLIN_JARS) | check-jdk
-	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/kotlin\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-kotlin\" :init (lambda () (kotlin:startup) (kotlin:eval \"listOf(1, 2, 3).map { it * 2 }.sum()\") (kotlin:eval \"mapOf(1 to \\\"a\\\").entries.joinToString()\")))"
+	sbcl --dynamic-space-size $(DYNAMIC_SPACE_SIZE) --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/kotlin\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-kotlin\" :init (lambda () (kotlin:startup) (kotlin:eval \"listOf(1, 2, 3).map { it * 2 }.sum()\") (kotlin:eval \"mapOf(1 to \\\"a\\\").entries.joinToString()\")))"
 
 sbcl-groovy: src/*.lisp src/native/*.lisp interop/*.lisp *.asd Makefile $(GROOVY_JAR) | check-jdk
-	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/groovy\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-groovy\" :init (lambda () (groovy:startup) (groovy:eval \"def f(n) { n < 2 ? 1G : n * f(n - 1) }; f(20); [3, 1, 2].sort().collect { it * 2 }; [a: 1].collectEntries { k, v -> [k, v + 1] }\")))"
+	sbcl --dynamic-space-size $(DYNAMIC_SPACE_SIZE) --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"openldk/groovy\"))" --eval "(openldk.interop:dump-lisp-image \"sbcl-groovy\" :init (lambda () (groovy:startup) (groovy:eval \"def f(n) { n < 2 ? 1G : n * f(n - 1) }; f(20); [3, 1, 2].sort().collect { it * 2 }; [a: 1].collectEntries { k, v -> [k, v + 1] }\")))"
 
 # A warm image: JScheme's Java code is compiled at build time (see docs/IMAGES.md).
 jscheme: src/*.lisp src/native/*.lisp *.asd Makefile lib/jscheme/build-image.lisp $(JSCHEME_MAIN) lib/jscheme/r4rstest.scm | check-jdk
-	sbcl --dynamic-space-size 32768 --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))" --load lib/jscheme/build-image.lisp
+	sbcl --dynamic-space-size $(DYNAMIC_SPACE_SIZE) --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))" --load lib/jscheme/build-image.lisp
 
 check: openldk testsuite/mauve/gnu/testlet/config.class
 	(cd testsuite; runtest --tool openldk $(RUNTESTFLAGS))

@@ -53,7 +53,25 @@
               ;; LATIN1: each byte is a char code.  Java byte[] holds SIGNED
               ;; bytes, so mask to 0..255 before code-char (e.g. 'é'=233 is
               ;; stored as -23).
-              (map 'string (lambda (b) (code-char (logand b #xFF))) data)
+              ;;
+              ;; A typed loop, not (MAP 'STRING ...) with a closure per
+              ;; character: every Java string reaching Lisp comes through here,
+              ;; and reflection-heavy startup (Spring Boot) spent ~5% of its
+              ;; time in the generic version.  The result is a full character
+              ;; string, not a base string -- SBCL's BASE-CHAR stops at 127,
+              ;; and Latin-1 goes to 255.
+              (let* ((n (length data))
+                     (result (make-string n)))
+                (declare (type simple-string result))
+                (if (typep data '(simple-array (signed-byte 8) (*)))
+                    (locally
+                        (declare (type (simple-array (signed-byte 8) (*)) data)
+                                 (optimize (speed 3) (safety 0)))
+                      (dotimes (i n)
+                        (setf (schar result i) (code-char (logand (aref data i) #xFF)))))
+                    (dotimes (i n)
+                      (setf (schar result i) (code-char (logand (aref data i) #xFF)))))
+                result)
               ;; UTF16: pairs of bytes (little-endian), recombining
               ;; surrogate pairs into full codepoints
               (let* ((len (floor (length data) 2))
