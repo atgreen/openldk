@@ -44,7 +44,27 @@
    (condition-variable :std (bordeaux-threads:make-condition-variable))
    (owner)
    (recursion-count :std 0)
-   (wait-set :std nil)))
+   (wait-set :std nil)
+   ;; Threads asleep on CONDITION-VARIABLE, entering or in wait().  A
+   ;; broadcast is a futex syscall even with no one to wake, so releases
+   ;; skip it while this is zero.
+   (sleepers :std 0)))
+
+(defun %monitor-sleep (monitor &optional timeout)
+  "Wait on MONITOR's condition variable, its mutex held, for at most
+TIMEOUT seconds when given.  Returns NIL on a timeout."
+  (incf (sleepers monitor))
+  (unwind-protect
+       (if timeout
+           (bordeaux-threads:condition-wait (condition-variable monitor) (mutex monitor)
+                                            :timeout timeout)
+           (bordeaux-threads:condition-wait (condition-variable monitor) (mutex monitor)))
+    (decf (sleepers monitor))))
+
+(defun %monitor-wake (monitor)
+  "Wake every thread asleep on MONITOR, its mutex held."
+  (when (plusp (sleepers monitor))
+    (sb-thread:condition-broadcast (condition-variable monitor))))
 
 (defvar *monitors* (make-hash-table :weakness :key :synchronized t))
 
@@ -75,7 +95,7 @@ when running in a fiber, so no separate fiber code path is needed."
            (incf (recursion-count monitor)))
           (t
            (loop while (owner monitor)
-                 do (bordeaux-threads:condition-wait (condition-variable monitor) mutex))
+                 do (%monitor-sleep monitor))
            (setf (owner monitor) current-thread
                  (recursion-count monitor) 1)))))))
 
@@ -96,4 +116,4 @@ when running in a fiber, so no separate fiber code path is needed."
           ;; threads in Object.wait(), and a single wakeup can land on a
           ;; wait(), leaving a thread asleep at the door of a free monitor.
           ;; notify() and notifyAll() already broadcast here.
-          (sb-thread:condition-broadcast (condition-variable monitor)))))))
+          (%monitor-wake monitor))))))

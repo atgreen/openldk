@@ -47,7 +47,11 @@
 
 (defstruct (java-array (:constructor make-java-array-default))
   (component-class nil :type t)
-  (data #() :type vector))
+  (data #() :type vector)
+  ;; What %AASTORE's covariance check needs to know of the component
+  ;; class, computed at the first store: NIL until then, T when any value
+  ;; may be stored, a CLOS class any instance of which may be, or :SLOW.
+  (store-check nil :type t))
 
 (defun %primitive-element-type (name)
   "Lisp element type for an array whose component is the primitive type
@@ -240,14 +244,31 @@ ArrayStoreException during bootstrap."
              (typep value clos-class)
              (%native-type-castable-p value bin-name)))))))
 
+(defun %array-store-check (component)
+  "The STORE-CHECK of an array whose component Class is COMPONENT."
+  (if (typep component '|java/lang/Class|)
+      (let ((component-name (lstring (slot-value component '|name|))))
+        (cond
+          ((string= component-name "java.lang.Object") t)
+          ((char= (char component-name 0) #\[) :slow)
+          (t
+           (let* ((bin-name (substitute #\/ #\. component-name))
+                  (clos-class (find-class (intern bin-name (class-package bin-name)) nil)))
+             ;; A class not yet emitted may be later: check in full each time.
+             (or clos-class :slow)))))
+      t))
+
 (defun %aastore (array index value)
   "Reference-array store implementing the aastore bytecode: performs
 the JVM's covariance check, throwing ArrayStoreException when VALUE is
 not assignable to ARRAY's component type."
   (when (and array value)
-    (let ((component (%array-component-class array)))
-      (when (and (typep component '|java/lang/Class|)
-                 (not (%array-store-compatible-p component value)))
+    (let ((check (or (java-array-store-check array)
+                     (setf (java-array-store-check array)
+                           (%array-store-check (%array-component-class array))))))
+      (unless (or (eq check t)
+                  (and (not (eq check :slow)) (typep value check))
+                  (%array-store-compatible-p (%array-component-class array) value))
         (error (%lisp-condition (%make-throwable '|java/lang/ArrayStoreException|))))))
   (setf (jaref array index) value))
 

@@ -49,6 +49,10 @@
                    :accessor java-gf-dispatch-cache)
    (invoke-special-cache :initform (make-hash-table :test 'eq)
                          :accessor java-gf-invoke-special-cache)
+   ;; Bumped whenever INVOKE-SPECIAL-CACHE is cleared, so the call sites
+   ;; that keep an entry of their own (INVOKE-SPECIAL-AT) see it is stale.
+   (invoke-special-version :initform 0 :type fixnum
+                           :accessor java-gf-invoke-special-version)
    (cache-lock :initform (bordeaux-threads:make-lock "java-gf-cache")
                :reader java-gf-cache-lock))
   (:metaclass sb-mop:funcallable-standard-class))
@@ -147,17 +151,31 @@ SPECIALIZER: only receivers that are subtypes of it can see a different
 applicable-method set.  Non-class specializers flush everything."
   (let ((cache (java-gf-dispatch-cache gf))
         (special-cache (java-gf-invoke-special-cache gf)))
-    (bordeaux-threads:with-lock-held ((java-gf-cache-lock gf))
-      (if (typep specializer 'class)
-          (let (stale)
-            (maphash (lambda (k v)
-                       (declare (ignore v))
-                       (when (subtypep k specializer)
-                         (push k stale)))
-                     cache)
-            (dolist (k stale) (remhash k cache)))
-          (clrhash cache))
-      (clrhash special-cache))))
+    (flet ((remove-subtypes (table)
+             ;; Remove TABLE's entries for subtypes of SPECIALIZER; true if any.
+             (let (stale)
+               (maphash (lambda (k v)
+                          (declare (ignore v))
+                          (when (subtypep k specializer)
+                            (push k stale)))
+                        table)
+               (dolist (k stale) (remhash k table))
+               stale)))
+      (bordeaux-threads:with-lock-held ((java-gf-cache-lock gf))
+        (cond
+          ((typep specializer 'class)
+           (remove-subtypes cache)
+           ;; An invokespecial entry for an owner class sees only methods
+           ;; on it and its superclasses.  Every class loaded adds its
+           ;; constructors to <init>'s generic function, and flushing every
+           ;; entry for each made computing them a tenth of Spring Boot's
+           ;; startup.
+           (when (remove-subtypes special-cache)
+             (incf (java-gf-invoke-special-version gf))))
+          (t
+           (clrhash cache)
+           (clrhash special-cache)
+           (incf (java-gf-invoke-special-version gf))))))))
 
 (defmethod sb-mop:add-method :after ((gf java-generic-function) method)
   (%invalidate-java-gf-cache gf (first (sb-mop:method-specializers method))))
@@ -282,3 +300,47 @@ the runtime's classes are loaded."
                           (ignore-errors
                            (eval `(defmethod ,full ((this ,class-name) ,@params)
                                     (,short this ,@params)))))))))))))))))
+
+(defun %java-dispatchable-gf-p (gf)
+  "True when GF, a plain generic function, dispatches as a
+JAVA-GENERIC-FUNCTION would: on its first argument's class, through
+primary and :AROUND methods of required arguments only."
+  (and (typep gf 'standard-generic-function)
+       (not (typep gf 'java-generic-function))
+       (eq (sb-pcl::method-combination-type-name
+            (sb-mop:generic-function-method-combination gf))
+           'standard)
+       (let ((lambda-list (sb-mop:generic-function-lambda-list gf)))
+         (and lambda-list
+              (notany (lambda (p) (member p lambda-list-keywords)) lambda-list)))
+       (every (lambda (m)
+                (let ((specializers (sb-mop:method-specializers m)))
+                  (and (member (method-qualifiers m) '(() (:around)) :test #'equal)
+                       (typep (first specializers) 'class)
+                       (every (lambda (s) (eq s (find-class t))) (rest specializers)))))
+              (sb-mop:generic-function-methods gf))))
+
+(defun %adopt-standard-java-gfs ()
+  "Replace the plain generic functions of Java methods with JAVA-GENERIC-FUNCTIONs.
+A hand-written native's DEFMETHOD makes its generic function before the
+runtime's do, and so toString(), equals(), hashCode() and the like were
+plain: each class loaded added methods to them, and PCL recomputed their
+dispatch over thousands of methods -- 26 of Spring Boot's 65 seconds of
+startup.  Run once the natives are loaded."
+  (let ((openldk (find-package :openldk)))
+    (do-symbols (symbol openldk)
+      (when (and (eq (symbol-package symbol) openldk)
+                 (fboundp symbol)
+                 (find #\( (symbol-name symbol)))
+        (let ((gf (fdefinition symbol)))
+          (when (%java-dispatchable-gf-p gf)
+            ;; SBCL can't CHANGE-CLASS a generic function, so move its
+            ;; methods to a new one; callers find it through SYMBOL.
+            (let ((new (make-instance 'java-generic-function
+                                      :name symbol
+                                      :lambda-list (sb-mop:generic-function-lambda-list gf)
+                                      :method-class (sb-mop:generic-function-method-class gf))))
+              (dolist (method (sb-mop:generic-function-methods gf))
+                (remove-method gf method)
+                (add-method new method))
+              (setf (fdefinition symbol) new))))))))

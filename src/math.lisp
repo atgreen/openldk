@@ -262,6 +262,14 @@
   "Returns the square root of a value."
   (sqrt a))
 
+;; Math.sqrt and StrictMath.sqrt are Java code calling FdLibm's bit-by-bit
+;; square root, about 100 times slower than the hardware's.  IEEE 754
+;; rounds a square root correctly, so the two agree to the bit, as
+;; HotSpot's intrinsic does; a negative argument gives NaN, not a complex.
+(dolist (key '("java/lang/Math.sqrt(D)D" "java/lang/StrictMath.sqrt(D)D"))
+  (setf (gethash key *native-overrides*)
+        (lambda (a) (sb-kernel:%sqrt (coerce a 'double-float)))))
+
 (define-math-functions ("tan(D)" (a))
   "Returns the tangent of an angle in radians."
   (tan a))

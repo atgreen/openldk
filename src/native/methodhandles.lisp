@@ -207,7 +207,7 @@ so that SAM methods returning Object get proper boxed values."
     (if member
         (let ((result (apply #'%invoke-from-member-name member (append captures args))))
           (if box-return
-              (let ((ret-char (%get-return-type-char member)))
+              (let ((ret-char (fourth (%resolve-member-name member))))
                 (if ret-char
                     (%box-primitive-return result ret-char)
                     result))
