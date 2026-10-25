@@ -419,6 +419,20 @@ loaders, whose classes are not in the global or app loader tables."
   "While a method compiles for the FASL cache, a hash table whose keys are
 the binary names of the classes the compiler looked up.")
 
+(defvar *compile-call-site-gfs* nil
+  "While a method compiles for the FASL cache, a hash table mapping each
+virtual-call-site generic function symbol the code references to its
+argument count.  Codegen creates these generic functions as a side effect
+(see %CALL-SITE-GF); a cached FASL, loaded without recompiling, must
+recreate them itself, so they are recorded and re-ensured on load.")
+
+(declaim (inline %note-call-site-gf))
+(defun %note-call-site-gf (symbol nargs)
+  "Record that the compilation in progress calls the generic function
+SYMBOL with NARGS arguments."
+  (when *compile-call-site-gfs*
+    (setf (gethash symbol *compile-call-site-gfs*) nargs)))
+
 (defun %md5-hex (octets)
   "The MD5 digest of OCTETS, in hex."
   (format nil "~(~{~2,'0x~}~)" (coerce (sb-md5:md5sum-sequence octets) 'list)))

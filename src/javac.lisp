@@ -295,8 +295,13 @@
 			(sb-ext:with-timeout timeout
 			  ;; handler-bind so a Lisp-level arithmetic error is
 			  ;; backtraced at signal time, before unwinding.
+			  ;; Muffle compiler notes (e.g. "deleting unreachable code",
+			  ;; which speed 3 emits freely): they are CONDITIONs, not
+			  ;; ERRORs, so a HANDLER-CASE catching CONDITION would unwind
+			  ;; the whole warmup on one, leaving the dumped image cold.
 			  (handler-bind
-			      ((arithmetic-error
+			      ((sb-ext:compiler-note #'muffle-warning)
+			       (arithmetic-error
 				 (lambda (c)
 				   (format *error-output* "~&;; WARMUP (~A) arithmetic error at signal time: ~A~%" desc c)
 				   (sb-debug:print-backtrace :stream *error-output* :count 40)
@@ -304,7 +309,10 @@
 			    (openldk::main "com.sun.tools.javac.Main" args :classpath cp)))
 		      (sb-ext:timeout ()
 			(format *error-output* "~&;; WARMUP (~A) timed out after ~Ds~%" desc timeout))
-		      (condition (c)
+		      ;; ERROR, not CONDITION: a benign signalled condition must
+		      ;; not end the warmup.  Java exceptions are ERRORs (see
+		      ;; %RUN-WARMUP).
+		      (error (c)
 			(format *error-output* "~&;; WARMUP (~A) caught: ~A~%" desc c)
 			;; Java exceptions print their own traces; for Lisp-level
 			;; conditions a backtrace is the only clue to the origin.
