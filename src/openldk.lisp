@@ -2788,6 +2788,10 @@ lazy initialization via ClassSpecializer needs runtime ordering."
 properties, System.initPhase1, and class preloading.  PROPERTY-ALIST
 supplies additional system properties as (name . value) pairs."
   (assert (typep property-alist 'list))
+  ;; The policy JIT-compiled code is built with, which the images save.
+  ;; openldk.asd proclaims it around compiling OpenLDK itself, but an image
+  ;; built from already-compiled files would otherwise keep the default.
+  (proclaim '(optimize (speed 3) (safety 1) (debug 1)))
   (ensure-JAVA_HOME)
   ;; Allow build-time control of DCE via environment (since main isn't invoked during image build)
   (let ((LDK_DCE (uiop:getenv "LDK_DCE")))
