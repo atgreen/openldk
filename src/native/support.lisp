@@ -176,7 +176,6 @@ by %ensure-java-gf, else any fbound symbol in PACKAGE whose name extends NAME
 (defmethod |wait(J)V| ((this |java/lang/Object|) timeout)
   (let* ((monitor (%get-monitor this))
          (mutex (mutex monitor))
-         (cv (condition-variable monitor))
          (current-thread (current-thread-identity)))
     ;; SBCL's condition-wait and condition-notify auto-dispatch to fiber-aware
     ;; paths when running in a fiber, so no separate fiber code path is needed.
@@ -188,15 +187,15 @@ by %ensure-java-gf, else any fbound symbol in PACKAGE whose name extends NAME
         (setf (owner monitor) nil (recursion-count monitor) 0)
         ;; Broadcast, as monitor-exit does: a single wakeup could land on
         ;; another wait() rather than a thread entering.
-        (sb-thread:condition-broadcast cv)
+        (%monitor-wake monitor)
         (loop while (member current-thread (wait-set monitor))
               do (if (zerop timeout)
-                     (bordeaux-threads:condition-wait cv mutex)
-                     (unless (bordeaux-threads:condition-wait cv mutex :timeout (/ timeout 1000.0))
+                     (%monitor-sleep monitor)
+                     (unless (%monitor-sleep monitor (/ timeout 1000.0))
                        (setf (wait-set monitor) (remove current-thread (wait-set monitor)))
                        (return))))
         (loop while (owner monitor)
-              do (bordeaux-threads:condition-wait cv mutex))
+              do (%monitor-sleep monitor))
         (setf (owner monitor) current-thread (recursion-count monitor) saved-recursion)))))
 
 (defun |java/lang/ClassLoader.registerNatives()V| ()

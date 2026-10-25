@@ -732,9 +732,10 @@ take the method's arguments followed by the MemberName."
                                     (%throw '|java/lang/ClassCastException|))))
                              `(let ((objref ,(code (codegen (objref insn) context))))
                                 (when objref
-                                  (unless (or (not (find-class (quote ,(intern (slot-value insn 'classname) (class-package classname))) nil))
-                                              (typep objref (quote ,(intern (slot-value insn 'classname) (class-package classname))))
-                                              (%native-type-castable-p objref ,classname))
+                                  (unless (%checkcast-ok-p
+                                           (load-time-value
+                                            (make-class-site (quote ,(intern classname (class-package classname)))))
+                                           objref ,classname)
                                     (%throw '|java/lang/ClassCastException|))))))
                    :expression-type nil)))
 
@@ -1337,6 +1338,39 @@ interface TARGET-NAME (a binary name) or a subtype of it."
              :test #'string=))
     (t nil)))
 
+(defstruct (class-site (:constructor make-class-site (symbol)))
+  "A checkcast or instanceof site's class: SYMBOL names it, and CLASS
+caches FIND-CLASS of it once the class exists."
+  symbol (class nil))
+
+(declaim (inline %class-site-class))
+(defun %class-site-class (site)
+  (or (class-site-class site)
+      (setf (class-site-class site) (find-class (class-site-symbol site) nil))))
+
+(declaim (inline %instance-of-class-p))
+(defun %instance-of-class-p (object class)
+  "Is the CLOS instance OBJECT of CLASS or a subclass?  TYPEP with a class
+not known at compile time parses a type specifier on every call."
+  (let ((object-class (class-of object)))
+    (or (eq object-class class)
+        (and (member class (sb-mop:class-precedence-list object-class) :test #'eq) t))))
+
+(defun %instanceof-at (site obj target-class-name)
+  "instanceof of OBJ against SITE's class, named TARGET-CLASS-NAME.  Returns 1 or 0."
+  (let ((class (%class-site-class site)))
+    (if (and class (typep obj 'standard-object))
+        (if (%instance-of-class-p obj class) 1 0)
+        (%instanceof-check obj target-class-name (class-site-symbol site)))))
+
+(defun %checkcast-ok-p (site obj classname)
+  "May the non-null OBJ be cast to SITE's class, named CLASSNAME?  A class
+that isn't loaded lets anything through."
+  (let ((class (%class-site-class site)))
+    (cond ((null class) t)
+          ((typep obj 'standard-object) (%instance-of-class-p obj class))
+          (t (or (typep obj class) (%native-type-castable-p obj classname))))))
+
 ;; Helper function for instanceof check
 (defun %instanceof-check (obj target-class-name target-class)
   "Check instanceof. Returns 1 or 0.
@@ -1352,6 +1386,15 @@ interface TARGET-NAME (a binary name) or a subtype of it."
     ((not (find-class target-class nil)) 0)
     ((typep obj target-class) 1)
     (t 0)))
+
+(defun %instanceof-integer-at (site obj)
+  "instanceof of OBJ against SITE's integral wrapper class, which a plain
+Lisp integer is taken to be.  Returns 1 or 0."
+  (cond ((integerp obj) 1)
+        ((typep obj 'standard-object)
+         (let ((class (%class-site-class site)))
+           (if (and class (%instance-of-class-p obj class)) 1 0)))
+        (t (if (typep obj (class-site-symbol site)) 1 0))))
 
 ;; Helper for integer instanceof check
 (defun %instanceof-integer-check (obj target-class-name target-class)
@@ -1380,9 +1423,11 @@ interface TARGET-NAME (a binary name) or a subtype of it."
                              ((member cname '("java/lang/Integer" "java/lang/Long"
                                               "java/lang/Short" "java/lang/Byte")
                                       :test #'string=)
-                              `(%instanceof-integer-check ,obj ,cname (quote ,(intern cname pkg))))
+                              `(%instanceof-integer-at (load-time-value (make-class-site (quote ,(intern cname pkg))))
+                                                       ,obj))
                              (t
-                              `(%instanceof-check ,obj ,cname (quote ,(intern cname pkg))))))
+                              `(%instanceof-at (load-time-value (make-class-site (quote ,(intern cname pkg))))
+                                               ,obj ,cname))))
                    :expression-type :INTEGER)))
 
 ;; Signed views of raw 32/64-bit patterns (float bits in frames.lisp).
@@ -1664,13 +1709,24 @@ DYNAMIC-ARG-CODES) used to render boolean/char args the Java way."
     ;; string at runtime), so no further per-part conversion is needed.
     `(jstring (format nil "~{~A~}" (list ,@parts)))))
 
+(defun %java-float-string (val)
+  "Double.toString or Float.toString of VAL, the JDK's own: Lisp's ~F
+writes neither NaN, the infinities nor Java's exponents (1.0E10)."
+  (multiple-value-bind (fn class-name)
+      (if (typep val 'double-float)
+          (values '|java/lang/Double.toString(D)Ljava/lang/String;| "java/lang/Double")
+          (values '|java/lang/Float.toString(F)Ljava/lang/String;| "java/lang/Float"))
+    (unless (fboundp fn)
+      (%clinit (classload class-name)))
+    (lstring (funcall fn val))))
+
 (defun %to-java-string (val)
   "Convert a value to its Java string representation for StringConcatFactory."
   (cond
     ((null val) "null")
     ((typep val '|java/lang/String|) (lstring val))
     ((integerp val) (format nil "~D" val))
-    ((floatp val) (format nil "~F" val))
+    ((floatp val) (%java-float-string val))
     ((characterp val) (string val))
     ((typep val '|java/lang/Object|)
      (let ((str (|toString()Ljava/lang/String;| val)))
@@ -2091,8 +2147,10 @@ type."
            (arg-code (mapcar (lambda (a) (code (codegen a context))) args)))
       (make-instance '<expression>
                      :insn insn
-                     :code `(openldk::invoke-special ',method-symbol ',owner-symbol
-                                                     (list ,@arg-code))))))
+                     :code `(openldk::invoke-special-at
+                             (load-time-value
+                              (openldk::make-invoke-special-site ',method-symbol ',owner-symbol))
+                             (list ,@arg-code))))))
 
 (defun %resolve-field-slot (ref-class-name member-name)
   "Resolve a Fieldref (REF-CLASS-NAME, MEMBER-NAME) to its CLOS slot

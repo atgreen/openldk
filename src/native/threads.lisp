@@ -249,7 +249,6 @@ name is recorded in the Java thread already, so there is nothing to do."
 (defmethod |wait0(J)V| ((this |java/lang/Object|) timeout)
   (let* ((monitor (%get-monitor this))
          (mutex (mutex monitor))
-         (cv (condition-variable monitor))
          (current-thread (current-thread-identity)))
     (bordeaux-threads:with-lock-held (mutex)
       (unless (eq (owner monitor) current-thread)
@@ -259,15 +258,15 @@ name is recorded in the Java thread already, so there is nothing to do."
         (setf (owner monitor) nil (recursion-count monitor) 0)
         ;; Broadcast, as monitor-exit does: a single wakeup could land on
         ;; another wait() rather than a thread entering.
-        (sb-thread:condition-broadcast cv)
+        (%monitor-wake monitor)
         (loop while (member current-thread (wait-set monitor))
               do (if (zerop timeout)
-                     (bordeaux-threads:condition-wait cv mutex)
-                     (unless (bordeaux-threads:condition-wait cv mutex :timeout (/ timeout 1000.0))
+                     (%monitor-sleep monitor)
+                     (unless (%monitor-sleep monitor (/ timeout 1000.0))
                        (setf (wait-set monitor) (remove current-thread (wait-set monitor)))
                        (return))))
         (loop while (owner monitor)
-              do (bordeaux-threads:condition-wait cv mutex))
+              do (%monitor-sleep monitor))
         (setf (owner monitor) current-thread (recursion-count monitor) saved-recursion)))))
 
 ;;; JDK 21 VirtualThread — JVMTI notification stubs.

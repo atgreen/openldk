@@ -341,6 +341,44 @@ Returns a cons (method-fn . next-methods)."
              (next (rest tail)))
         (cons (closer-mop:method-function method) next)))))
 
+(defstruct (invoke-special-site (:constructor make-invoke-special-site
+                                    (method-symbol owner-symbol)))
+  "One invokespecial call site's cache of the entry INVOKE-SPECIAL finds:
+valid while the generic function is GF and its invoke-special version is
+VERSION."
+  method-symbol owner-symbol (gf nil) (version -1 :type fixnum) (entry nil))
+
+(defun invoke-special-at (site args)
+  "INVOKE-SPECIAL of SITE's method and owner on ARGS, without looking the
+generic function, owner class and entry up again while they're unchanged."
+  (let ((gf (symbol-function (invoke-special-site-method-symbol site))))
+    (if (and (eq gf (invoke-special-site-gf site))
+             (eql (java-gf-invoke-special-version gf) (invoke-special-site-version site)))
+        (let ((entry (invoke-special-site-entry site)))
+          (funcall (car entry) args (cdr entry)))
+        (let ((entry (and (typep gf 'java-generic-function)
+                          ;; Read the version first: an invalidation after
+                          ;; it leaves the site stale rather than wrong.
+                          (let* ((version (java-gf-invoke-special-version gf))
+                                 (owner-class (find-class (invoke-special-site-owner-symbol site)))
+                                 (entry (%compute-invoke-special-entry gf owner-class (length args))))
+                            (when entry
+                              ;; Recorded in GF's cache, whose invalidation
+                              ;; bumps the version only for entries it holds.
+                              (bordeaux-threads:with-lock-held ((java-gf-cache-lock gf))
+                                (setf (gethash owner-class (java-gf-invoke-special-cache gf)) entry))
+                              ;; ENTRY before GF and VERSION, which validate it.
+                              (setf (invoke-special-site-entry site) entry
+                                    (invoke-special-site-gf site) nil
+                                    (invoke-special-site-version site) version
+                                    (invoke-special-site-gf site) gf))
+                            entry))))
+          (if entry
+              (funcall (car entry) args (cdr entry))
+              (invoke-special (invoke-special-site-method-symbol site)
+                              (invoke-special-site-owner-symbol site)
+                              args))))))
+
 (defvar *invoke-special-cache* (make-hash-table :test 'eq :weakness :key :synchronized t)
   "Plain generic function -> owner class -> (methods . entry), INVOKE-SPECIAL's
 cache for generic functions that aren't JAVA-GENERIC-FUNCTIONs.")
@@ -2820,5 +2858,6 @@ supplies additional system properties as (name . value) pairs."
   ;; finalize their inheritance at runtime.
   (%preload-lambda-interfaces "finalizing")
   (%adopt-native-short-methods)
+  (%adopt-standard-java-gfs)
   (setf *debug-load* nil)
   (setf *debug-compile* nil))

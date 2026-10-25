@@ -834,6 +834,21 @@ otherwise return ARG unchanged."
       (slot-value arg '|value|)
       arg))
 
+(defun %descriptor-unbox-flags (descriptor)
+  "%DESCRIPTOR-PARAM-PRIM-FLAGS of DESCRIPTOR, or NIL when no parameter is
+primitive and nothing needs unboxing."
+  (and descriptor
+       (let ((flags (%descriptor-param-prim-flags descriptor)))
+         (and (some #'identity flags) flags))))
+
+(defun %unbox-args-for-flags (flags args)
+  "ARGS, each whose FLAGS entry (from %DESCRIPTOR-UNBOX-FLAGS) is true unboxed."
+  (if (null flags)
+      args
+      (loop for prim in flags
+            for arg in args
+            collect (if prim (%maybe-unbox arg) arg))))
+
 (defun %unbox-args-for-descriptor (descriptor args)
   "Unbox each element of ARGS whose corresponding parameter in DESCRIPTOR is a
 primitive type. ARGS must line up with the descriptor's declared parameters
@@ -868,21 +883,33 @@ compiler made 39,000 for 344 members in one compilation).")
             (%member-name-slot member-name '|type$|)
             (%member-name-slot member-name '|flags|)))))
 
+(defvar *last-member-plan* (cons nil nil)
+  "(MemberName . plan) of the last %RESOLVE-MEMBER-NAME, replaced whole so
+threads never see one's name with another's plan.  A loop calling one
+lambda finds its plan here, without the weak table's lock.")
+
 (defun %resolve-member-name (member-name)
-  "Resolve MEMBER-NAME to a cached invocation plan (kind a b):
-   (:constructor class-symbol init-symbol)
-   (:static      fn-symbol   descriptor)
-   (:instance    fn-symbol   descriptor)
-The plan depends only on the (stable) MemberName, so it is memoized, by
-the MemberName and by the member it names."
-  (or (gethash member-name *member-name-invoke-cache*)
-      (setf (gethash member-name *member-name-invoke-cache*)
-            (let ((key (%member-name-key member-name)))
-              (or (and key (gethash key *member-plans*))
-                  (let ((plan (%compute-member-name-plan member-name)))
-                    (when key
-                      (setf (gethash key *member-plans*) plan))
-                    plan))))))
+  "Resolve MEMBER-NAME to a cached invocation plan (kind a b ret-char):
+   (:constructor class-symbol init-symbol    nil)
+   (:static      fn-symbol    unbox-flags    ret-char)
+   (:instance    fn-symbol    unbox-flags    ret-char)
+UNBOX-FLAGS are %DESCRIPTOR-UNBOX-FLAGS of the descriptor, and RET-CHAR is
+%GET-RETURN-TYPE-CHAR of the MemberName.  The plan depends only on the
+(stable) MemberName, so it is memoized, by the MemberName and by the
+member it names."
+  (let ((last *last-member-plan*))
+    (if (eq (car last) member-name)
+        (cdr last)
+        (let ((plan (or (gethash member-name *member-name-invoke-cache*)
+                        (setf (gethash member-name *member-name-invoke-cache*)
+                              (let ((key (%member-name-key member-name)))
+                                (or (and key (gethash key *member-plans*))
+                                    (let ((plan (%compute-member-name-plan member-name)))
+                                      (when key
+                                        (setf (gethash key *member-plans*) plan))
+                                      plan)))))))
+          (setf *last-member-plan* (cons member-name plan))
+          plan))))
 
 (defun %compute-member-name-plan (member-name)
   "The invocation plan, as %RESOLVE-MEMBER-NAME returns, for MEMBER-NAME."
@@ -917,34 +944,38 @@ the MemberName and by the member it names."
                         (t (format nil "~AV" method-type))))
                 (init-method-name (format nil "<init>~A" (subseq desc 0 (1+ (position #\) desc)))))
                 (lisp-init-name (intern init-method-name :openldk)))
-           (list :constructor lisp-class-name lisp-init-name)))
+           (list :constructor lisp-class-name lisp-init-name nil)))
         ((= ref-kind 6)       ; static: name is class.method(desc) in the loader package
          (let* ((java-loader (slot-value clazz '|classLoader|))
                 (ldk-loader (get-ldk-loader-for-java-loader java-loader))
                 (pkg (class-package class-name ldk-loader))
                 (full-method-sig (format nil "~A.~A~A" class-name method-name method-type)))
-           (list :static (static-method-symbol (lispize-method-name full-method-sig) pkg) method-type)))
+           (list :static (static-method-symbol (lispize-method-name full-method-sig) pkg)
+                 (%descriptor-unbox-flags method-type)
+                 (%get-return-type-char member-name))))
         (t                    ; virtual/special/interface: GF named by method+descriptor
          (list :instance
                (intern (lispize-method-name (format nil "~A~A" method-name method-type)) :openldk)
-               method-type))))))
+               (%descriptor-unbox-flags method-type)
+               (%get-return-type-char member-name)))))))
 
 (defun %invoke-from-member-name (member-name &rest args)
   "Invoke a method described by a MemberName with the given ARGS. Core of
 linkToStatic/linkToVirtual/linkToSpecial; resolution is memoized per MemberName.
 Primitive-typed args are unboxed so method references adapted to functional
 interfaces (which pass boxed Object args) reach primitive-parameter methods."
-  (destructuring-bind (kind a b) (%resolve-member-name member-name)
+  (destructuring-bind (kind a b &optional ret-char) (%resolve-member-name member-name)
+    (declare (ignore ret-char))
     (ecase kind
       (:constructor                     ; a=class-symbol, b=init-symbol
        (let ((instance (make-instance a)))
          (apply b instance args)
          instance))
-      (:static                          ; a=fn-symbol, b=descriptor
-       (apply a (%unbox-args-for-descriptor b args)))
-      (:instance                        ; a=fn-symbol, b=descriptor; first arg is the receiver
-       (apply a (if args
+      (:static                          ; a=fn-symbol, b=unbox-flags
+       (apply a (%unbox-args-for-flags b args)))
+      (:instance                        ; a=fn-symbol, b=unbox-flags; first arg is the receiver
+       (apply a (if (and args b)
                     (cons (first args)
-                          (%unbox-args-for-descriptor b (rest args)))
+                          (%unbox-args-for-flags b (rest args)))
                     args))))))
 
