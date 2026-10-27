@@ -28,8 +28,10 @@ def main():
     options = parser.parse_args()
     BUILD.mkdir(parents=True, exist_ok=True)
     subprocess.run([str(JDK / 'bin/javac'), '-d', str(BUILD)]
-                   + [str(ROOT / 'test/zip' / name) for name in ['ZipMetadataProbe.java', 'ZipPayload.java', 'ZipCallback.java', 'ArrayLoaderProbe.java', 'ZipConcurrentProbe.java', 'BufferLoaderProbe.java']],
+                   + [str(ROOT / 'test/zip' / name) for name in ['ZipMetadataProbe.java', 'ZipPayload.java', 'ZipCallback.java', 'ArrayLoaderProbe.java', 'ZipConcurrentProbe.java', 'BufferLoaderProbe.java', 'JarManifestProbe.java']],
                    check=True, timeout=60)
+    with zipfile.ZipFile(BUILD / 'manifest.jar', 'w') as archive:
+        archive.writestr('META-INF/MANIFEST.MF', b'Manifest-Version: 1.0\r\n\r\n')
     for streamed in [False, True]:
         output = NonSeekable() if streamed else io.BytesIO()
         with zipfile.ZipFile(output, 'w') as archive:
@@ -67,6 +69,12 @@ def main():
                     raise RuntimeError(f'{args}\n{result.stdout}\n{result.stderr}')
                 print(f'{engine.name} streamed={streamed}: {result.stdout.strip()}', flush=True)
     for engine in [JDK / 'bin/java', options.runtime.resolve()]:
+        result = subprocess.run([str(engine), '-cp', str(BUILD), 'JarManifestProbe',
+                                 str(BUILD / 'manifest.jar')], cwd=ROOT,
+                                capture_output=True, text=True, timeout=180)
+        if result.returncode or 'JAR manifest cache identity and edits passed' not in result.stdout:
+            raise RuntimeError(f'{engine}:\n{result.stdout}\n{result.stderr}')
+        print(f'{engine.name}: {result.stdout.strip()}', flush=True)
         result = subprocess.run([str(engine), '-cp', str(BUILD), 'ArrayLoaderProbe',
                                  str(BUILD / 'False-False.jar')], cwd=ROOT,
                                 capture_output=True, text=True, timeout=180)

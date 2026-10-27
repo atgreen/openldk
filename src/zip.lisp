@@ -442,6 +442,9 @@ finds them: META-INF/*.SF, *.RSA, *.DSA, *.EC and SIG-*, not in subdirectories."
 ;; JarFile.getManifest finds the manifest through the same bridge (see
 ;; checkForSpecialAttributes above); read it from the zip here.
 (defmethod |getManifest()Ljava/util/jar/Manifest;| :around ((this |java/util/jar/JarFile|))
+  (when-let ((reference (slot-value this '|manRef|)))
+    (when-let ((manifest (|get()Ljava/lang/Object;| reference)))
+      (return-from |getManifest()Ljava/util/jar/Manifest;| manifest)))
   (let* ((zip (%zipfile-zip this))
          (entry (and zip (zip:get-zipfile-entry "META-INF/MANIFEST.MF" zip))))
     (when entry
@@ -452,4 +455,7 @@ finds them: META-INF/*.SF, *.RSA, *.DSA, *.EC and SIG-*, not in subdirectories."
         (|<init>([B)V| stream (make-java-array :component-class (%get-java-class-by-bin-name "byte")
                                                :initial-contents bytes))
         (|<init>(Ljava/io/InputStream;)V| manifest stream)
+        (let ((reference (%make-java-instance "java/lang/ref/SoftReference")))
+          (|<init>(Ljava/lang/Object;)V| reference manifest)
+          (setf (slot-value this '|manRef|) reference))
         manifest))))
