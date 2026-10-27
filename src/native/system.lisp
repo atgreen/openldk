@@ -1094,7 +1094,9 @@ its FileDescriptor's fd (or its own fd slot), resolved by %RESOLVE-FD."
     (cond
       ((eq fd 1) (force-output *standard-output*))
       ((eq fd 2) (force-output *error-output*))
-      ((streamp fd) (force-output fd)))))
+      ;; FileOutputStream inherits OutputStream's no-op flush, including after
+      ;; close.  Only flush our extra Lisp buffer while it is still open.
+      ((and (streamp fd) (open-stream-p fd)) (force-output fd)))))
 
 (defmethod |open0(Ljava/lang/String;Z)V| ((fos |java/io/FileOutputStream|) filename append?)
   (%with-file-open-errors (filename)

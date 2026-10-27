@@ -10,6 +10,16 @@ public class FileInputProbe {
         for (int i = 0; i < data.length; i++) data[i] = (byte) (i * 37);
         Files.write(path, data);
         try {
+            FileOutputStream output = new FileOutputStream(path.toFile(), true);
+            BufferedOutputStream buffered = new BufferedOutputStream(output);
+            DataOutputStream wrapper = new DataOutputStream(buffered);
+            wrapper.writeInt(42);
+            wrapper.close();
+            // Eclipse snapshot streams close explicitly inside try-with-resources.
+            output.flush();
+            buffered.flush();
+            wrapper.close();
+            Files.write(path, data);
             try (FileInputStream input = new FileInputStream(path.toFile())) {
                 if (!Arrays.equals(input.readNBytes(19), Arrays.copyOfRange(data, 0, 19)))
                     throw new AssertionError("Prefix read");
