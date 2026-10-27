@@ -67,7 +67,7 @@ def check_svg(name, engine, install):
                             cwd=ROOT, env=env, capture_output=True, text=True, timeout=180)
     log = BUILD / f'svg-{name}.log'
     log.write_text(result.stdout + result.stderr)
-    if result.returncode or 'SWT JSVG paths, alpha, gradient, and scaling passed' not in result.stdout:
+    if result.returncode or 'SWT JSVG paths, alpha, gradient, scaling, text, and blur passed' not in result.stdout:
         raise RuntimeError(f'{name}: SWT SVG check failed; see {log}')
     print(f'{name}: {result.stdout.strip()}', flush=True)
 

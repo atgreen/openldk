@@ -5,7 +5,8 @@ the compiled class through OpenLDK, captures the workbench, and requests a
 normal workbench shutdown. A process that merely remains alive does not pass.
 
 Current status: the HotSpot control passes. OpenLDK passes buffered-image,
-Java2D pixel-comparison, and standalone SWT JSVG rasterizer checks, including text glyphs. The full
+Java2D pixel-comparison, and standalone SWT JSVG rasterizer checks, including
+text glyphs and Gaussian blur. The full
 OpenLDK editor/save/build session remains under investigation; the workbench
 check is a completion target, rather than a claim that Eclipse works.
 

@@ -31,6 +31,15 @@ public class SVGProbe {
         for (int y = 0; y < letters.height; y++) for (int x = 0; x < letters.width; x++)
             if (letters.getAlpha(x, y) > 0) ink++;
         if (ink < 20) throw new AssertionError("SVG text glyphs were not rendered");
-        System.out.println("SWT JSVG paths, alpha, gradient, and scaling passed");
+        String blur = "<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'>"
+            + "<defs><filter id='b' x='0' y='0' width='24' height='24' filterUnits='userSpaceOnUse'>"
+            + "<feGaussianBlur stdDeviation='1'/></filter></defs>"
+            + "<rect x='8' y='8' width='8' height='8' fill='red' filter='url(#b)'/></svg>";
+        ImageData blurred = new JSVGRasterizer().rasterizeSVG(
+                new ByteArrayInputStream(blur.getBytes(StandardCharsets.UTF_8)), 100);
+        if (blurred.getAlpha(7, 12) < 10 || blurred.getAlpha(12, 12) < 180
+                || blurred.getAlpha(0, 0) != 0 || blurred.getAlpha(8, 12) >= 250)
+            throw new AssertionError("SVG Gaussian blur was not rendered");
+        System.out.println("SWT JSVG paths, alpha, gradient, scaling, text, and blur passed");
     }
 }

@@ -54,6 +54,9 @@
 
 (%define-graphics-id-initializers
  "java/awt/Font.initIDs()V"
+ "java/awt/image/Kernel.initIDs()V"
+ "sun/awt/image/ShortComponentRaster.initIDs()V"
+ "sun/awt/image/ImageRepresentation.initIDs()V"
  "sun/java2d/SurfaceData.initIDs()V"
  "sun/java2d/pipe/Region.initIDs()V"
  "sun/java2d/pipe/ShapeSpanIterator.initIDs()V"
@@ -182,3 +185,104 @@
     (%graphics-composite-rectangle
      (%graphics-surface-image destination) composite (slot-value graphics '|clipRegion|)
      x y width height (lambda (px py) (declare (ignore px py)) color) mask offset stride)))
+
+(defun %graphics-convolve-raster (source destination kernel edge)
+  "Convolve snapshotted raster samples, retaining translations and band precision."
+  (let* ((width (|getWidth()I| source))
+         (height (|getHeight()I| source))
+         (bands (|getNumBands()I| source))
+         (sx (|getMinX()I| source)) (sy (|getMinY()I| source))
+         (dx (|getMinX()I| destination)) (dy (|getMinY()I| destination))
+         (kw (|getWidth()I| kernel)) (kh (|getHeight()I| kernel))
+         (ox (|getXOrigin()I| kernel)) (oy (|getYOrigin()I| kernel))
+         (weights (java-array-data (|getKernelData([F)[F| kernel nil)))
+         (samples (java-array-data (|getPixels(IIII[D)[D| source sx sy width height nil)))
+         (output (make-java-array :component-class (%get-java-class-by-bin-name "double")
+                                  :size (* width height bands)))
+         (values (java-array-data output))
+         (model (|getSampleModel()Ljava/awt/image/SampleModel;| destination))
+         (data-type (|getDataType()I| model))
+         (floating (member data-type '(4 5)))
+         (signed-short (member data-type '(1 2))))
+    (unless (and (= width (|getWidth()I| destination))
+                 (= height (|getHeight()I| destination))
+                 (= bands (|getNumBands()I| destination)))
+      (%throw '|java/awt/image/ImagingOpException| "Incompatible convolution rasters"))
+    ;; JDK 25's software imaging backend filters ushort storage using signed
+    ;; 16-bit arithmetic, including signed saturation before storing the bits.
+    (when signed-short
+      (dotimes (i (length samples))
+        (when (>= (aref samples i) 32768d0) (decf (aref samples i) 65536d0))))
+    (dotimes (y height)
+      (dotimes (x width)
+        (let ((inside (and (<= (floor kw 2) x) (< x (- width (floor kw 2)))
+                           (<= (floor kh 2) y) (< y (- height (floor kh 2))))))
+          (dotimes (band bands)
+            (let* ((index (+ band (* bands (+ x (* y width)))))
+                   (sample (cond
+                             (inside
+                              (loop for ky below kh sum
+                                    (loop for kx below kw
+                                          for weight = (aref weights (+ kx (* ky kw)))
+                                          sum (* weight
+                                                 (aref samples (+ band (* bands (+ (- (+ x ox) kx)
+                                                                                  (* (- (+ y oy) ky) width)))))))))
+                             ((= edge 1) (aref samples index))
+                             (t 0d0))))
+              (setf (aref values index)
+                    (coerce (cond
+                              (floating sample)
+                              (signed-short (logand #xffff (max -32768 (min 32767 (floor sample)))))
+                              (t (max 0 (min (1- (ash 1 (|getSampleSize(I)I| model band))) (floor sample)))))
+                            'double-float)))))))
+    (|setPixels(IIII[D)V| destination dx dy width height output)
+    destination))
+
+(defun %graphics-image-copy (source destination)
+  "Copy a buffered image with Java color conversion and replacement compositing."
+  (let ((graphics (|createGraphics()Ljava/awt/Graphics2D;| destination)))
+    (unwind-protect
+         (progn
+           (|setComposite(Ljava/awt/Composite;)V| graphics
+            (%graphics-static "java/awt/AlphaComposite" '|Src|))
+           (|drawImage(Ljava/awt/Image;IILjava/awt/image/ImageObserver;)Z| graphics source 0 0 nil))
+      (|dispose()V| graphics)))
+  destination)
+
+(defun %graphics-convolve-image (operation source destination)
+  "Filter stored image channels like the JDK software imaging backend."
+  (unless destination
+    (setf destination (|createCompatibleDestImage(Ljava/awt/image/BufferedImage;Ljava/awt/image/ColorModel;)Ljava/awt/image/BufferedImage;|
+                       operation source nil)))
+  (let ((model (|getColorModel()Ljava/awt/image/ColorModel;| source)))
+    (when (eq model (|getColorModel()Ljava/awt/image/ColorModel;| destination))
+      (%graphics-convolve-raster (|getRaster()Ljava/awt/image/WritableRaster;| source)
+                                 (|getRaster()Ljava/awt/image/WritableRaster;| destination)
+                                 (|getKernel()Ljava/awt/image/Kernel;| operation)
+                                 (|getEdgeCondition()I| operation))
+      (return-from %graphics-convolve-image destination)))
+  (let ((output (|createCompatibleDestImage(Ljava/awt/image/BufferedImage;Ljava/awt/image/ColorModel;)Ljava/awt/image/BufferedImage;|
+                  operation source nil)))
+    (%graphics-convolve-raster (|getRaster()Ljava/awt/image/WritableRaster;| source)
+                               (|getRaster()Ljava/awt/image/WritableRaster;| output)
+                               (|getKernel()Ljava/awt/image/Kernel;| operation)
+                               (|getEdgeCondition()I| operation))
+    (%graphics-image-copy output destination)))
+
+;; Supply the acceleration hook through CL rather than the JDK's mlib_image.
+;; Other image operators keep their ordinary Java fallback when available.
+(setf (gethash "sun/awt/image/ImagingLib.filter(Ljava/awt/image/BufferedImageOp;Ljava/awt/image/BufferedImage;Ljava/awt/image/BufferedImage;)Ljava/awt/image/BufferedImage;"
+               *native-overrides*) ; lint:suppress max-line-length
+      (lambda (operation source destination)
+        (when (and (find-class '|java/awt/image/ConvolveOp| nil) (typep operation '|java/awt/image/ConvolveOp|))
+          (%graphics-convolve-image operation source destination))))
+
+(setf (gethash "sun/awt/image/ImagingLib.filter(Ljava/awt/image/RasterOp;Ljava/awt/image/Raster;Ljava/awt/image/WritableRaster;)Ljava/awt/image/WritableRaster;"
+               *native-overrides*) ; lint:suppress max-line-length
+      (lambda (operation source destination)
+        (when (and (find-class '|java/awt/image/ConvolveOp| nil) (typep operation '|java/awt/image/ConvolveOp|))
+          (%graphics-convolve-raster source
+                                     (or destination (|createCompatibleDestRaster(Ljava/awt/image/Raster;)Ljava/awt/image/WritableRaster;|
+                                                      operation source))
+                                     (|getKernel()Ljava/awt/image/Kernel;| operation)
+                                     (|getEdgeCondition()I| operation)))))

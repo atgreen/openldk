@@ -6,6 +6,7 @@ import math
 import os
 from pathlib import Path
 import subprocess
+import struct
 
 ROOT = Path(__file__).resolve().parents[2]
 JDK = Path(os.environ['JAVA_HOME'])
@@ -27,6 +28,20 @@ def main():
                                 capture_output=True, text=True, timeout=120)
         (BUILD / (engine.name + '.log')).write_text(result.stdout + result.stderr)
         if result.returncode or MARKER not in result.stdout:
+            raise RuntimeError(f'{engine}:\n{result.stdout}\n{result.stderr}')
+        print(f'{engine.name}: {result.stdout.strip()}', flush=True)
+        result = subprocess.run([str(engine), '-Djava.awt.headless=true', '-cp', str(BUILD),
+                                 'ImageProducerProbe'], cwd=ROOT,
+                                capture_output=True, text=True, timeout=120)
+        (BUILD / (engine.name + '-producer.log')).write_text(result.stdout + result.stderr)
+        if result.returncode or 'Filtered image production, pixel grabbing, and toolkit representation passed' not in result.stdout:
+            raise RuntimeError(f'{engine}:\n{result.stdout}\n{result.stderr}')
+        print(f'{engine.name}: {result.stdout.strip()}', flush=True)
+        result = subprocess.run([str(engine), '-Djava.awt.headless=true', '-cp', str(BUILD),
+                                 'ConvolveProbe', str(BUILD / (engine.name + '.convolve'))], cwd=ROOT,
+                                capture_output=True, text=True, timeout=120)
+        (BUILD / (engine.name + '-convolve.log')).write_text(result.stdout + result.stderr)
+        if result.returncode or 'Convolution kernels, edges, alpha, grayscale, and rasters passed' not in result.stdout:
             raise RuntimeError(f'{engine}:\n{result.stdout}\n{result.stderr}')
         print(f'{engine.name}: {result.stdout.strip()}', flush=True)
         result = subprocess.run([str(engine), '-Djava.awt.headless=true', '-cp', str(BUILD),
@@ -65,6 +80,14 @@ def main():
             raise AssertionError(f'Rendered pixel differs at {x}, {y}: '
                                  f'{reference[index:index + 4].hex()} vs {actual[index:index + 4].hex()}')
     print('Graphics2D rendered pixels match JDK within alpha-compositing rounding', flush=True)
+    reference = (BUILD / 'java.convolve').read_bytes()
+    actual = (BUILD / (options.runtime.name + '.convolve')).read_bytes()
+    if len(reference) != 47880 or len(actual) != len(reference):
+        raise AssertionError('Incomplete convolution sample data')
+    for index, (r, a) in enumerate(zip(struct.iter_unpack('>i', reference), struct.iter_unpack('>i', actual))):
+        if abs(r[0] - a[0]) > 2:
+            raise AssertionError(f'Convolution sample {index} differs: {r[0]} vs {a[0]}')
+    print('Convolution samples match JDK within integer-kernel rounding', flush=True)
 
 
 if __name__ == '__main__':

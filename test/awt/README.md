@@ -10,6 +10,13 @@ of premultiplied color rounding and one alpha level. OpenLDK uses the JDK's
 Java drawing pipelines with CL alpha compositing; it does not load HotSpot
 Java2D libraries. Font glyph advances, outlines, and bounds are checked
 against the JDK.
+Convolution checks compare 11,970 samples from RGB, straight/premultiplied
+alpha, byte-gray, and ushort-gray images and grayscale rasters. They cover
+asymmetric, even-sized, sharpening, and blur kernels with both edge modes,
+allowing two sample levels for native integer-kernel rounding. The CL loops
+retain JDK 25's signed 16-bit convolution behavior for ushort storage.
+Filtered image production, pixel grabbing, and Toolkit image materialization
+are checked separately; these are used by SVG filter pipelines.
 Native span iterators for arbitrary clips, complex text shaping, and
 display-backed AWT surfaces still require support.
 
