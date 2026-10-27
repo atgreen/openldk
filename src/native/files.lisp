@@ -100,6 +100,14 @@ reflection.lisp)."
                                 (lstring (slot-value member '|name|))
                                 (%class->descriptor-string (slot-value member '|type$|)))))
 
+(defun |java/awt/image/BufferedImage.initIDs()V| ()
+  "No-op field-ID caching: buffered images keep their state in Java/CLOS slots."
+  nil)
+
+(defun |java/awt/image/SinglePixelPackedSampleModel.initIDs()V| ()
+  "No-op field-ID caching for the Java packed-pixel sample model."
+  nil)
+
 (defun |java/awt/image/ColorModel.initIDs()V| ()
   nil)
 
