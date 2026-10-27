@@ -1370,17 +1370,18 @@ implementation therefore lives in %java-thread-sleep."
         (|<init>()V| exc)
         (error (%lisp-condition exc))))
     ;; Only this operation accepts asynchronous InterruptedException delivery.
-    (let ((*java-thread-sleeping* t))
+    (let ((*java-thread-sleeping* t)
+          (*java-thread-blocking-state* (list #xe1 nil nil)))
       (when (and current-java-thread (gethash current-java-thread *thread-interrupted*))
         (%clear-java-thread-interrupt current-java-thread)
         (let ((*java-thread-sleeping* nil)) (%throw '|java/lang/InterruptedException|)))
-    ;; Sleep — use fiber-sleep when in fiber context
-    #+sb-fiber
-    (if (in-fiber-p)
-        (uiop:symbol-call :sb-thread :fiber-sleep (/ milliseconds 1000.0))
-        (sleep (/ milliseconds 1000.0)))
-    #-sb-fiber
-    (sleep (/ milliseconds 1000.0)))
+      ;; Sleep — use fiber-sleep when in fiber context
+      #+sb-fiber
+      (if (in-fiber-p)
+          (uiop:symbol-call :sb-thread :fiber-sleep (/ milliseconds 1000.0))
+          (sleep (/ milliseconds 1000.0)))
+      #-sb-fiber
+      (sleep (/ milliseconds 1000.0)))
     ;; Check if interrupted after sleeping
     (when (and current-java-thread
                (gethash current-java-thread *thread-interrupted*))

@@ -379,6 +379,8 @@ loaders, whose classes are not in the global or app loader tables."
   "Java Thread -> (monitor identity) while inside Object.wait.")
 (defvar *java-thread-sleeping* nil
   "Thread-local permission to deliver InterruptedException into native sleep.")
+(defvar *java-thread-blocking-state* nil
+  "Thread-local (JVMTI-state lock-object monitor) for management snapshots.")
 
 ;; Identity hash code support: each object gets a unique, stable hash
 ;; (Java's identityHashCode semantics). Uses a weak EQ hash table so

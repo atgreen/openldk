@@ -903,7 +903,8 @@ runs out (LockSupport.park)."
     (sb-thread:with-mutex ((park-state-mutex state))
       (unless (or (park-state-permit state)
                   (gethash java-thread *thread-interrupted*))
-        (let ((timeout (%park-timeout is-absolute time)))
+        (let ((timeout (%park-timeout is-absolute time))
+              (*java-thread-blocking-state* (list (if (zerop time) #x291 #x2a1) nil nil)))
           (when (or (null timeout) (plusp timeout))
             (setf (park-state-parked state) t)
             (unwind-protect

@@ -92,6 +92,90 @@
   "Return the currently registered live Java threads."
   (|java/lang/Thread.getThreads()[Ljava/lang/Thread;|))
 
+(defun %managed-thread-carrier (thread)
+  "The live Lisp thread carrying the platform Java THREAD, if any."
+  (let ((carrier (or (gethash thread *java-threads*)
+                     (loop for carrier being the hash-keys of *lisp-to-java-threads*
+                             using (hash-value java-thread)
+                           when (eq thread java-thread) return carrier))))
+    (when (and carrier (bt:thread-alive-p carrier)) carrier)))
+
+(defun %managed-thread-snapshot (thread max-depth)
+  "Capture (state lock owner frames) on THREAD's carrier at an interrupt point.
+Only collect Lisp data there: loading classes or constructing Java objects in
+the sampled thread could deadlock against the requesting thread's class locks."
+  (when-let ((carrier (%managed-thread-carrier thread)))
+    (let ((snapshot nil)
+          (ready (sb-thread:make-semaphore :count 0)))
+      (flet ((capture ()
+               (let* ((blocking *java-thread-blocking-state*)
+                      (monitor (third blocking))
+                      (owner (and monitor (owner monitor)))
+                      (frames (unless (zerop max-depth)
+                                (serapeum:filter #'%java-frame-p (%safe-list-backtrace)))))
+                 (setf snapshot
+                       (list (or (first blocking) 4) (second blocking)
+                             (and owner (gethash owner *lisp-to-java-threads*))
+                             (if (and (plusp max-depth) (< max-depth (length frames)))
+                                 (serapeum:take max-depth frames) frames))))
+               (sb-thread:signal-semaphore ready)))
+        (if (eq carrier (bt:current-thread))
+            (capture)
+            (handler-case
+                (progn
+                  (sb-thread:interrupt-thread carrier #'capture)
+                  ;; Foreign code can defer interrupts indefinitely. An
+                  ;; unavailable stack is allowed; never stall the monitor.
+                  (sb-thread:wait-on-semaphore ready :timeout 0.25))
+              (sb-thread:interrupt-thread-error () nil))))
+      (when (%managed-thread-carrier thread)
+        (or snapshot (list 4 nil nil nil))))))
+
+(defun %managed-thread-info (thread max-depth)
+  "Build a JDK ThreadInfo from a live platform thread's actual snapshot."
+  (when-let ((snapshot (%managed-thread-snapshot thread max-depth)))
+    (destructuring-bind (state lock owner frames) snapshot
+      (let ((info (%make-java-instance "java/lang/management/ThreadInfo"))
+            (trace (make-java-array
+                    :component-class (%get-java-class-by-bin-name "java/lang/StackTraceElement")
+                    :initial-contents
+                    (mapcar (lambda (frame)
+                              (%fill-stack-trace-element
+                               (%make-java-instance "java/lang/StackTraceElement") frame))
+                            frames))))
+        (|<init>(Ljava/lang/Thread;ILjava/lang/Object;Ljava/lang/Thread;JJJJ[Ljava/lang/StackTraceElement;)V|
+         info thread state lock owner 0 -1 0 -1 trace)
+        info))))
+
+(defun %managed-thread-infos (ids max-depth)
+  "ThreadInfo array preserving IDS order, with NIL for absent/dead threads."
+  (%clinit (classload "java/lang/management/ThreadInfo"))
+  (let* ((threads (java-array-data (|java/lang/Thread.getThreads()[Ljava/lang/Thread;|)))
+         (by-id (make-hash-table :test #'eql)))
+    (map nil (lambda (thread) (setf (gethash (|threadId()J| thread) by-id) thread)) threads)
+    (make-java-array
+     :component-class (%get-java-class-by-bin-name "java/lang/management/ThreadInfo")
+     :initial-contents
+     (map 'vector (lambda (id)
+                    (when-let ((thread (gethash id by-id)))
+                      (%managed-thread-info thread max-depth)))
+          (if ids (java-array-data ids)
+              (map 'vector (lambda (thread) (|threadId()J| thread)) threads))))))
+
+(defun |sun/management/ThreadImpl.getThreadInfo1([JI[Ljava/lang/management/ThreadInfo;)V|
+    (ids max-depth infos)
+  "Fill the caller's ThreadInfo array with bounded stack snapshots."
+  (replace (java-array-data infos)
+           (java-array-data (%managed-thread-infos ids max-depth)))
+  nil)
+
+(defun |sun/management/ThreadImpl.dumpThreads0([JZZI)[Ljava/lang/management/ThreadInfo;|
+    (ids locked-monitors locked-synchronizers max-depth)
+  "Dump selected or all live platform threads, with their Java stack frames."
+  ;; The Java wrapper checks the optional monitor/synchronizer support flags.
+  (declare (ignore locked-monitors locked-synchronizers))
+  (%managed-thread-infos ids max-depth))
+
 (defmacro %define-vm-management-natives (&rest specs)
   "Define VMManagementImpl's instance natives: each spec is (NAME VALUE-FORM)."
   `(progn
@@ -117,7 +201,7 @@
  ("getVmArguments0()" (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/String")
                                        :size 0))
  ("getStartupTime()" (or *vm-start-time-millis* 0))
- ("getUptime0()" (if *vm-start-time-millis*
+ ("getUptime0()J" (if *vm-start-time-millis*
                      (- (|java/lang/System.currentTimeMillis()J|) *vm-start-time-millis*)
                      0))
  ("getAvailableProcessors()" (%available-processor-count))

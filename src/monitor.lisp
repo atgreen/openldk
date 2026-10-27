@@ -115,8 +115,10 @@ when running in a fiber, so no separate fiber code path is needed."
           ((eq (owner monitor) current-thread)
            (incf (recursion-count monitor)))
           (t
-           (loop while (owner monitor)
-                 do (%monitor-sleep monitor))
+           (when (owner monitor)
+             (let ((*java-thread-blocking-state* (list #x401 object monitor)))
+               (loop while (owner monitor)
+                     do (%monitor-sleep monitor))))
            (setf (owner monitor) current-thread
                  (recursion-count monitor) 1)))))))
 
