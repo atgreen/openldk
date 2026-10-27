@@ -3,7 +3,6 @@
 """Launch the Eclipse SDK under Xvfb and exercise a real Java editing/build session."""
 import argparse
 import contextlib
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -11,61 +10,44 @@ import select
 import shlex
 import shutil
 import subprocess
-import tarfile
 import tempfile
 import time
-import urllib.request
+from sdk import ensure_sdk
 
 ROOT = Path(__file__).resolve().parents[2]
 BUILD = ROOT / '.cache/eclipse'
 SOURCE = ROOT / 'test/eclipse'
 JDK = Path(os.environ['JAVA_HOME'])
-URL = ('https://archive.eclipse.org/eclipse/downloads/drops4/R-4.41-202608281142/'
-       'eclipse-SDK-4.41-linux-gtk-x86_64.tar.gz')
-SHA512 = ('503f757a096256f719139db67e2537478542585844876e0d68f702ca51dbc1a0282d3'
-          'a5fa5023d77c1013c1b35a90525cc02aeed1af17ced26bde293da46d2cf')
 MARKER = 'PASS: workbench, Java editor, save, error diagnostics, corrected build'
 
 
-def prepare():
-    BUILD.mkdir(parents=True, exist_ok=True)
-    archive = BUILD / 'eclipse-sdk.tar.gz'
-    if not archive.exists():
-        temporary = archive.with_suffix('.part')
-        with urllib.request.urlopen(URL, timeout=60) as source, temporary.open('wb') as target:
-            shutil.copyfileobj(source, target)
-        temporary.replace(archive)
-    with archive.open('rb') as stream:
-        if hashlib.file_digest(stream, 'sha512').hexdigest() != SHA512:
-            raise RuntimeError('Eclipse SDK checksum mismatch')
-    install = BUILD / 'eclipse'
-    if not install.exists():
-        with tarfile.open(archive) as source:
-            source.extractall(BUILD, filter='data')
-    bundle = BUILD / 'check-smoke-bundle'
+def prepare(install=None, download=True, build=BUILD):
+    build.mkdir(parents=True, exist_ok=True)
+    install = ensure_sdk(install or BUILD / 'eclipse', download=download)
+    bundle = build / 'check-smoke-bundle'
     bundle.mkdir(exist_ok=True)
     classpath = os.pathsep.join(str(path) for path in (install / 'plugins').glob('*.jar'))
     subprocess.run([str(JDK / 'bin/javac'), '--release', '21', '-cp', classpath,
                     '-d', str(bundle), str(SOURCE / 'SmokeTest.java')], check=True, timeout=60)
-    svg_classes = BUILD / 'svg-check'
+    svg_classes = build / 'svg-check'
     svg_classes.mkdir(exist_ok=True)
     subprocess.run([str(JDK / 'bin/javac'), '--release', '21', '-cp', classpath,
                     '-d', str(svg_classes), str(SOURCE / 'SVGProbe.java')], check=True, timeout=60)
-    jar = BUILD / 'check-smoke-test.jar'
+    jar = build / 'check-smoke-test.jar'
     subprocess.run([str(JDK / 'bin/jar'), '--create', '--file', str(jar), '--manifest',
                     str(SOURCE / 'MANIFEST.MF'), '-C', str(bundle), '.',
                     '-C', str(SOURCE), 'plugin.xml'], check=True, timeout=60)
     return install, jar
 
 
-def check_svg(name, engine, install):
-    classpath = os.pathsep.join([str(BUILD / 'svg-check')]
+def check_svg(name, engine, install, build=BUILD):
+    classpath = os.pathsep.join([str(build / 'svg-check')]
                                + [str(p) for p in (install / 'plugins').glob('*.jar')])
     env = dict(os.environ)
     env.pop('LDK_DEBUG', None)
     result = subprocess.run(engine + ['-Djava.awt.headless=true', '-cp', classpath, 'SVGProbe'],
                             cwd=ROOT, env=env, capture_output=True, text=True, timeout=180)
-    log = BUILD / f'svg-{name}.log'
+    log = build / f'svg-{name}.log'
     log.write_text(result.stdout + result.stderr)
     if result.returncode or 'SWT JSVG paths, alpha, gradient, scaling, text, blur, and clips passed' not in result.stdout:
         raise RuntimeError(f'{name}: SWT SVG check failed; see {log}')
@@ -106,8 +88,8 @@ def display(run):
         stop(server)
 
 
-def check(name, engine, install, bundle, timeout, runtime):
-    runs = BUILD / 'runs'
+def check(name, engine, install, bundle, timeout, runtime, build=BUILD):
+    runs = build / 'runs'
     runs.mkdir(exist_ok=True)
     run = Path(tempfile.mkdtemp(prefix=name + '-', dir=runs))
     configuration = run / 'configuration'

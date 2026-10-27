@@ -82,6 +82,9 @@ what they do for `java`.  As on a JVM, `openldk` exits once `main` has
 returned and every non-daemon thread has ended;
 `LDK_THREAD_WAIT_SECONDS=N` stops waiting after N seconds.
 
+To launch Eclipse on OpenLDK, optionally download the SDK, or repeat the
+headless editor/build check, see [the Eclipse runner](test/eclipse/README.md).
+
 ### JNI libraries
 
 OpenLDK can load ordinary third-party JNI libraries alongside its existing
