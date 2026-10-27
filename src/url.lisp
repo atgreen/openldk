@@ -102,8 +102,9 @@
 (defmethod |findResource(Ljava/lang/String;)Ljava/net/URL;| :around ((loader |java/net/URLClassLoader|) name)
   "Find a resource by NAME using our native classpath implementation."
   (let ((resource-name (lstring name)))
-    (or (when-let (url-string (get-resource-url-on-classpath resource-name))
-          (%make-url-from-string url-string))
+    (or (when (eq loader *boot-class-loader*)
+          (when-let (url-string (get-resource-url-on-classpath resource-name))
+            (%make-url-from-string url-string)))
         (call-next-method))))
 
 ;; URLClassLoader.findClass must use its own URLClassPath. Falling back to

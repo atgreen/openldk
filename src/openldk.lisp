@@ -1950,6 +1950,12 @@ without running the compiler, since most methods are never called."
   "Search for class in this loader and all parent loaders sharing the same package."
   (%lookup-class-with-delegation ldk-loader classname 'ldk-classes-by-bin-name))
 
+(defun %publish-class-globally-p (classname loader)
+  "Keep boot/app definitions in compatibility tables when a child shadows them."
+  (or (not (%user-ldk-loader-p loader))
+      (let ((existing (gethash classname *ldk-classes-by-bin-name*)))
+        (or (null existing) (%defined-by-user-loader-p existing 'ldk-classes-by-bin-name)))))
+
 (defun %classload-from-stream (classname classfile-stream class-loader ldk-loader)
   "Load a class from a stream. CLASS-LOADER is the java.lang.ClassLoader object.
    LDK-LOADER is the <ldk-class-loader> to use for this class."
@@ -1965,7 +1971,8 @@ without running the compiler, since most methods are never called."
           (when existing-ldk-class
             (return-from %classload-from-stream existing-ldk-class))))))
   (unwind-protect
-       (let* ((pkg (loader-package ldk-loader))
+       (let* ((publish-globally (%publish-class-globally-p classname ldk-loader))
+              (pkg (loader-package ldk-loader))
               (classname-symbol (intern classname pkg))
               (fq-classname (cl-ppcre:regex-replace-all "\\.anonymous-class"
                                                         (substitute #\. #\/ classname)
@@ -1981,8 +1988,9 @@ without running the compiler, since most methods are never called."
                   (setf (gethash fq-classname (slot-value ldk-loader 'ldk-classes-by-fq-name)) c)
                   ;; Also store in global tables for backward compatibility
                   ;; This allows lookups without a specific loader to find dynamically loaded classes
-                  (setf (gethash classname *ldk-classes-by-bin-name*) c)
-                  (setf (gethash fq-classname *ldk-classes-by-fq-name*) c)
+                  (when publish-globally
+                    (setf (gethash classname *ldk-classes-by-bin-name*) c)
+                    (setf (gethash fq-classname *ldk-classes-by-fq-name*) c))
                   c))
               ;; Resolve through the defining loader, which may be the only
               ;; one that can find them.
@@ -1997,10 +2005,11 @@ without running the compiler, since most methods are never called."
          (when (and (slot-value class 'super) (null super))
            (remhash classname (slot-value ldk-loader 'ldk-classes-by-bin-name))
            (remhash fq-classname (slot-value ldk-loader 'ldk-classes-by-fq-name))
-           (remhash classname *ldk-classes-by-bin-name*)
-           (remhash fq-classname *ldk-classes-by-fq-name*)
+           (when publish-globally
+             (remhash classname *ldk-classes-by-bin-name*)
+             (remhash fq-classname *ldk-classes-by-fq-name*))
            (return-from %classload-from-stream nil))
-         (let ((klass (or (%get-java-class-by-bin-name classname t ldk-loader)
+         (let ((klass (or (gethash classname (slot-value ldk-loader 'java-classes-by-bin-name))
                           (let ((klass (%make-java-instance "java/lang/Class"))
                                 (cname (jstring fq-classname)))
                             (with-slots (|name| |classLoader|) klass
@@ -2038,8 +2047,9 @@ without running the compiler, since most methods are never called."
            (setf (gethash classname (slot-value ldk-loader 'java-classes-by-bin-name)) klass)
            (setf (gethash fq-classname (slot-value ldk-loader 'java-classes-by-fq-name)) klass)
            ;; Also store in global tables for backward compatibility
-           (setf (gethash classname *java-classes-by-bin-name*) klass)
-           (setf (gethash fq-classname *java-classes-by-fq-name*) klass))
+           (when publish-globally
+             (setf (gethash classname *java-classes-by-bin-name*) klass)
+             (setf (gethash fq-classname *java-classes-by-fq-name*) klass)))
 
          (let ((code (emit-<class> class ldk-loader)))
            ;; In AOT mode, also write the class definitions out

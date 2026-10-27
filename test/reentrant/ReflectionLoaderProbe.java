@@ -5,6 +5,16 @@ import java.net.*;
 import java.nio.file.*;
 
 public class ReflectionLoaderProbe {
+    static class ChildFirst extends URLClassLoader {
+        ChildFirst(URL url) { super(new URL[]{url}); }
+        @Override protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+            if (!name.equals("StaticFieldPayload")) return super.loadClass(name, resolve);
+            Class<?> result = findLoadedClass(name);
+            if (result == null) result = findClass(name);
+            if (resolve) resolveClass(result);
+            return result;
+        }
+    }
     public static void main(String[] args) throws Throwable {
         StaticFieldPayload.value = 9;
         try (URLClassLoader loader = new URLClassLoader(new URL[]{Path.of(args[0]).toUri().toURL()}, null)) {
@@ -30,6 +40,18 @@ public class ReflectionLoaderProbe {
             var factory = (java.util.function.Supplier<?>) target.getMethod("factory").invoke(null);
             if (factory.get().getClass() != target)
                 throw new AssertionError("Constructor method reference crossed defining loaders");
+        }
+        ClassLoader parent = StaticFieldPayload.class.getClassLoader();
+        try (ChildFirst child = new ChildFirst(Path.of(args[0]).toUri().toURL())) {
+            Class<?> target = child.loadClass("StaticFieldPayload");
+            if (target == StaticFieldPayload.class || target.getClassLoader() != child
+                    || StaticFieldPayload.class.getClassLoader() != parent)
+                throw new AssertionError("Child definition reused or modified parent Class");
+            if (target.getConstructor().newInstance().getClass() != target)
+                throw new AssertionError("Child instance Class identity");
+            target.getField("value").setInt(null, 88);
+            if (StaticFieldPayload.value != 9 || target.getField("value").getInt(null) != 88)
+                throw new AssertionError("Child shadowing changed parent storage");
         }
         System.out.println("Reflection and method-handle static fields preserve defining loaders");
     }

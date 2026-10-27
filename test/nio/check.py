@@ -33,6 +33,13 @@ def main():
     path = BUILD / 'locked.bin'
     path.write_bytes(bytes(64))
     for engine in [JDK / 'bin/java', options.runtime.resolve()]:
+        for probe, marker in [('ResourceLookupProbe', 'URL loader own-resource lookup and system resource lookup passed'),
+                              ('JrtFileSystemProbe', 'Target-JDK JRT filesystem, class bytes, and module listing passed')]:
+            result = subprocess.run([str(engine), '-cp', str(BUILD), probe], cwd=ROOT,
+                                    capture_output=True, text=True, timeout=180)
+            if result.returncode or marker not in result.stdout:
+                raise RuntimeError(f'{engine}:\n{result.stdout}\n{result.stderr}')
+            print(f'{engine.name}: {result.stdout.strip()}', flush=True)
         result = subprocess.run([str(engine), '-cp', str(BUILD), 'FileTransferProbe',
                                  str(BUILD / 'transfer-source.bin')], cwd=ROOT,
                                 capture_output=True, text=True, timeout=180)
