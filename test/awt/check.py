@@ -27,6 +27,13 @@ def main():
         if result.returncode or MARKER not in result.stdout:
             raise RuntimeError(f'{engine}:\n{result.stdout}\n{result.stderr}')
         print(f'{engine.name}: {result.stdout.strip()}', flush=True)
+        result = subprocess.run([str(engine), '-Djava.awt.headless=true', '-cp', str(BUILD),
+                                 'FontProbe', 'discover'], cwd=ROOT,
+                                capture_output=True, text=True, timeout=120)
+        (BUILD / (engine.name + '-fonts.log')).write_text(result.stdout + result.stderr)
+        if result.returncode or 'Font family discovery passed' not in result.stdout:
+            raise RuntimeError(f'{engine}:\n{result.stdout}\n{result.stderr}')
+        print(f'{engine.name}: {result.stdout.strip()}', flush=True)
         pixels = BUILD / (engine.name + '.pixels')
         result = subprocess.run([str(engine), '-Djava.awt.headless=true', '-cp', str(BUILD),
                                  'GraphicsProbe', str(pixels)], cwd=ROOT,
