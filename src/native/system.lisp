@@ -907,7 +907,7 @@ FileNotFoundException."
 
 (defmethod |open0(Ljava/lang/String;I)V| ((fis |java/io/RandomAccessFile|) filename mode)
   (%with-file-open-errors (filename)
-    (let ((stream (open (lstring filename)
+    (let ((stream (open (sb-ext:parse-native-namestring (lstring filename))
                         :element-type '(unsigned-byte 8)
                         :direction (if (logtest mode 2) :io :input)
                         :if-exists :overwrite
@@ -959,7 +959,7 @@ FileNotFoundException."
 
 (defmethod |open0(Ljava/lang/String;)V| ((fis |java/io/FileInputStream|) filename)
   (%with-file-open-errors (filename)
-    (let ((stream (open (lstring filename)
+    (let ((stream (open (sb-ext:parse-native-namestring (lstring filename))
                         :element-type '(unsigned-byte 8)
                         :direction :input))
           (fd (slot-value fis '|fd|)))
@@ -1098,7 +1098,7 @@ its FileDescriptor's fd (or its own fd slot), resolved by %RESOLVE-FD."
 
 (defmethod |open0(Ljava/lang/String;Z)V| ((fos |java/io/FileOutputStream|) filename append?)
   (%with-file-open-errors (filename)
-    (let* ((stream (open (lstring filename)
+    (let* ((stream (open (sb-ext:parse-native-namestring (lstring filename))
                          :element-type '(unsigned-byte 8)
                          :direction :output
                          :if-does-not-exist :create
