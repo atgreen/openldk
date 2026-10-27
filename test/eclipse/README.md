@@ -4,11 +4,10 @@ program and checks JDT's diagnostics, corrects the program, builds it, runs
 the compiled class through OpenLDK, captures the workbench, and requests a
 normal workbench shutdown. A process that merely remains alive does not pass.
 
-Current status: the HotSpot control passes. OpenLDK runs SWT and reaches
-workbench construction, but the full Eclipse check does not yet pass.
-SVG icon rendering currently reaches unsupported Java2D native methods;
-Eclipse can then overflow its stack while formatting the resulting error.
-The test remains a completion target, rather than a claim that Eclipse works.
+Current status: the HotSpot control passes. OpenLDK passes buffered-image,
+Java2D pixel-comparison, and standalone SWT JSVG rasterizer checks. The full
+OpenLDK editor/save/build session remains under investigation; the workbench
+check is a completion target, rather than a claim that Eclipse works.
 
 Requires Linux x86_64, GTK 3, fonts, Xvfb with its keyboard compiler/data,
 Python 3.12 or newer, and `JAVA_HOME` pointing to a full JDK 25.
@@ -18,10 +17,13 @@ make check-eclipse
 ```
 
 The runner downloads the official Eclipse SDK archive (276 MiB) and verifies
-its SHA-512. It runs the same extension on HotSpot as a control and OpenLDK.
+its SHA-512. It first checks SWT JSVG rasterization, then runs the same workbench
+extension on HotSpot as a control and OpenLDK.
 It uses separate, fresh configurations and workspaces and does not modify
 the SDK's plug-ins. The bundled SWT JNI libraries are loaded by OpenLDK's
 ordinary JNI bridge; the native Eclipse JVM launcher is bypassed.
+Both engines use `-Djava.awt.headless=true` for offscreen Java2D icon
+rendering. SWT still creates its GTK workbench on the virtual display.
 The OpenLDK run records its loaded native libraries and checks that SWT
 is loaded without using native libraries from `JAVA_HOME`.
 

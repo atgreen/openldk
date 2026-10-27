@@ -47,11 +47,29 @@ def prepare():
     classpath = os.pathsep.join(str(path) for path in (install / 'plugins').glob('*.jar'))
     subprocess.run([str(JDK / 'bin/javac'), '--release', '21', '-cp', classpath,
                     '-d', str(bundle), str(SOURCE / 'SmokeTest.java')], check=True, timeout=60)
+    svg_classes = BUILD / 'svg-check'
+    svg_classes.mkdir(exist_ok=True)
+    subprocess.run([str(JDK / 'bin/javac'), '--release', '21', '-cp', classpath,
+                    '-d', str(svg_classes), str(SOURCE / 'SVGProbe.java')], check=True, timeout=60)
     jar = BUILD / 'check-smoke-test.jar'
     subprocess.run([str(JDK / 'bin/jar'), '--create', '--file', str(jar), '--manifest',
                     str(SOURCE / 'MANIFEST.MF'), '-C', str(bundle), '.',
                     '-C', str(SOURCE), 'plugin.xml'], check=True, timeout=60)
     return install, jar
+
+
+def check_svg(name, engine, install):
+    classpath = os.pathsep.join([str(BUILD / 'svg-check')]
+                               + [str(p) for p in (install / 'plugins').glob('*.jar')])
+    env = dict(os.environ)
+    env.pop('LDK_DEBUG', None)
+    result = subprocess.run(engine + ['-Djava.awt.headless=true', '-cp', classpath, 'SVGProbe'],
+                            cwd=ROOT, env=env, capture_output=True, text=True, timeout=180)
+    log = BUILD / f'svg-{name}.log'
+    log.write_text(result.stdout + result.stderr)
+    if result.returncode or 'SWT JSVG paths, alpha, gradient, and scaling passed' not in result.stdout:
+        raise RuntimeError(f'{name}: SWT SVG check failed; see {log}')
+    print(f'{name}: {result.stdout.strip()}', flush=True)
 
 
 def stop(process):
@@ -100,7 +118,7 @@ def check(name, engine, install, bundle, timeout, runtime):
     close = run / 'close-request'
     workspace = run / 'workspace'
     launcher = next((install / 'plugins').glob('org.eclipse.equinox.launcher_*.jar'))
-    command = engine + [f'-Dopenldk.eclipse.result={result}', f'-Dopenldk.eclipse.close={close}',
+    command = engine + ['-Djava.awt.headless=true', f'-Dopenldk.eclipse.result={result}', f'-Dopenldk.eclipse.close={close}',
                         '-jar', str(launcher), '-nosplash', '-consoleLog',
                         '-install', str(install), '-configuration', str(configuration),
                         '-data', str(workspace)]
@@ -159,6 +177,7 @@ def main():
     for name, engine in engines:
         if options.engine not in ['both', name]:
             continue
+        check_svg(name, engine, install)
         results[name] = check(name, engine, install, bundle, options.timeout, options.runtime)
         latest.write_text(json.dumps(results, indent=2) + '\n')
 

@@ -105,6 +105,7 @@
                (:file "src/native/process")
                (:file "src/native/net")
                (:file "src/native/ordering")
+               (:file "src/native/graphics")
                (:file "src/native/references")
                (:file "src/zlib-native")
                (:file "src/url")
