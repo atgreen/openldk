@@ -9,6 +9,10 @@ public class ReflectionLoaderProbe {
         StaticFieldPayload.value = 9;
         try (URLClassLoader loader = new URLClassLoader(new URL[]{Path.of(args[0]).toUri().toURL()}, null)) {
             Class<?> target = loader.loadClass("StaticFieldPayload");
+            Object matrix = Array.newInstance(target, 2, 3);
+            Class<?> matrixComponent = matrix.getClass().getComponentType().getComponentType();
+            if (matrixComponent != target || Array.getLength(Array.get(matrix, 0)) != 3)
+                throw new AssertionError("Reflective array crossed defining loaders");
             Field field = target.getField("value");
             if (field.getInt(null) != 41) throw new AssertionError("Reflection used another loader's storage");
             field.setInt(null, 73);

@@ -1603,10 +1603,33 @@ present.  Consumed by Thread.getState()/start()/getThreadGroup()."
     (when *debug-trace*
       (incf *call-nesting-level* -1))))
 
+(defun %reflect-new-array (class dimensions)
+  "Allocate reflection arrays using the actual component Class and loader."
+  (unless class (%throw '|java/lang/NullPointerException|))
+  (let* ((name (lstring (slot-value class '|name|)))
+         (rank (+ (length dimensions) (or (position-if-not (lambda (c) (char= c #\[)) name) 0))))
+    (when (or (null dimensions) (> rank 255) (string= name "void"))
+      (%throw '|java/lang/IllegalArgumentException|))
+    ;; Validate all dimensions even when an outer dimension is zero.
+    (when (some #'minusp dimensions) (%throw '|java/lang/NegativeArraySizeException|))
+    (let ((components (list class)))
+      (dotimes (i (1- (length dimensions)))
+        (push (|getClass()Ljava/lang/Class;| (make-java-array :component-class (car components)))
+              components))
+      (labels ((allocate (types sizes)
+                 (if (cdr sizes)
+                     (make-java-array :component-class (car types) :size (car sizes)
+                                      :initial-contents (loop repeat (car sizes)
+                                                              collect (allocate (cdr types) (cdr sizes))))
+                     (make-java-array :component-class (car types) :size (car sizes)))))
+        (allocate components dimensions)))))
+
 (defun |java/lang/reflect/Array.newArray(Ljava/lang/Class;I)Ljava/lang/Object;| (class size)
-  (make-java-array :size size
-                   :component-class class
-                   :initial-element nil))
+  (%reflect-new-array class (list size)))
+
+(defun |java/lang/reflect/Array.multiNewArray(Ljava/lang/Class;[I)Ljava/lang/Object;| (class dimensions)
+  (unless dimensions (%throw '|java/lang/NullPointerException|))
+  (%reflect-new-array class (coerce (java-array-data dimensions) 'list)))
 
 (defmethod |findLoadedClass0(Ljava/lang/String;)Ljava/lang/Class;| ((loader |java/lang/ClassLoader|) name)
   "Return the class NAME if LOADER already loaded it (its own map only --

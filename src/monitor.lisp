@@ -55,10 +55,14 @@
 TIMEOUT seconds when given.  Returns NIL on a timeout."
   (incf (sleepers monitor))
   (unwind-protect
-       (if timeout
-           (bordeaux-threads:condition-wait (condition-variable monitor) (mutex monitor)
-                                            :timeout timeout)
-           (bordeaux-threads:condition-wait (condition-variable monitor) (mutex monitor)))
+       ;; Java permits Long.MAX_VALUE milliseconds. SBCL cannot represent
+       ;; that deadline, so wake periodically and let the caller recompute it.
+       (let ((interval (and timeout (min timeout 86400))))
+         (or (if interval
+                 (bordeaux-threads:condition-wait (condition-variable monitor) (mutex monitor)
+                                                  :timeout interval)
+                 (bordeaux-threads:condition-wait (condition-variable monitor) (mutex monitor)))
+             (and timeout (> timeout interval))))
     (decf (sleepers monitor))))
 
 (defun %monitor-wake (monitor)
