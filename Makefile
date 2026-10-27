@@ -306,3 +306,15 @@ check-reference-image: | check-jdk
 	  --eval '(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))' \
 	  --load test/reference-image.lisp && \
 	"$$image_test_dir/reference-image"
+
+# Preserve font scalers and native glyph caches across a saved-image restart.
+.PHONY: check-font-image
+check-font-image: | check-jdk
+	@font_image_dir=$$(mktemp -d); \
+	trap 'rm -rf "$$font_image_dir"' EXIT; \
+	$(JAVAC) -d "$$font_image_dir" test/FontImage.java && \
+	LDK_FONT_IMAGE_DIR="$$font_image_dir" \
+	  sbcl --dynamic-space-size $(DYNAMIC_SPACE_SIZE) --disable-debugger \
+	  --eval '(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))' \
+	  --load test/font-image.lisp && \
+	"$$font_image_dir/font-image"

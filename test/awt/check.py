@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 """Compare Java buffered-image operations with the JDK without native AWT libraries."""
 import argparse
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -19,6 +20,7 @@ def main():
     BUILD.mkdir(parents=True, exist_ok=True)
     subprocess.run([str(JDK / 'bin/javac'), '-d', str(BUILD),
                     *[str(p) for p in (ROOT / 'test/awt').glob('*.java')]], check=True, timeout=60)
+    font_metrics = []
     for engine in [JDK / 'bin/java', options.runtime.resolve()]:
         result = subprocess.run([str(engine), '-Djava.awt.headless=true', '-cp',
                                  str(BUILD), 'BufferedImageProbe'], cwd=ROOT,
@@ -28,12 +30,17 @@ def main():
             raise RuntimeError(f'{engine}:\n{result.stdout}\n{result.stderr}')
         print(f'{engine.name}: {result.stdout.strip()}', flush=True)
         result = subprocess.run([str(engine), '-Djava.awt.headless=true', '-cp', str(BUILD),
-                                 'FontProbe', 'discover'], cwd=ROOT,
+                                 'FontProbe'], cwd=ROOT,
                                 capture_output=True, text=True, timeout=120)
         (BUILD / (engine.name + '-fonts.log')).write_text(result.stdout + result.stderr)
-        if result.returncode or 'Font family discovery passed' not in result.stdout:
+        if result.returncode or 'Font glyph advances and outlines passed' not in result.stdout:
             raise RuntimeError(f'{engine}:\n{result.stdout}\n{result.stderr}')
         print(f'{engine.name}: {result.stdout.strip()}', flush=True)
+        metric_line = next(line for line in result.stdout.splitlines() if line.startswith('FONT_METRICS '))
+        metrics = [float(value) for value in metric_line.split()[1:]]
+        if len(metrics) != 5 or not all(math.isfinite(value) for value in metrics):
+            raise AssertionError(f'Invalid font metrics: {metrics}')
+        font_metrics.append(metrics)
         pixels = BUILD / (engine.name + '.pixels')
         result = subprocess.run([str(engine), '-Djava.awt.headless=true', '-cp', str(BUILD),
                                  'GraphicsProbe', str(pixels)], cwd=ROOT,
@@ -42,6 +49,8 @@ def main():
         if result.returncode or 'Graphics2D image transfer passed' not in result.stdout:
             raise RuntimeError(f'{engine}:\n{result.stdout}\n{result.stderr}')
         print(f'{engine.name}: {result.stdout.strip()}', flush=True)
+    if any(abs(a - b) > .5 for a, b in zip(*font_metrics)):
+        raise AssertionError(f'Font advance or outline bounds differ: {font_metrics}')
     reference = (BUILD / 'java.pixels').read_bytes()
     actual = (BUILD / (options.runtime.name + '.pixels')).read_bytes()
     if len(reference) != 80 * 64 * 4 or len(actual) != len(reference):

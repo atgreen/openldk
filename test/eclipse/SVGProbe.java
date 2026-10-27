@@ -23,6 +23,14 @@ public class SVGProbe {
                 new ByteArrayInputStream(svg.getBytes(StandardCharsets.UTF_8)), 48, 40);
         if (scaled.width != 48 || scaled.height != 40 || scaled.getAlpha(10, 10) != 255)
             throw new AssertionError("scaled SVG");
+        String text = "<svg xmlns='http://www.w3.org/2000/svg' width='32' height='20'>"
+            + "<text x='1' y='15' font-family='sans-serif' font-size='14'>Ab</text></svg>";
+        ImageData letters = new JSVGRasterizer().rasterizeSVG(
+                new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8)), 100);
+        int ink = 0;
+        for (int y = 0; y < letters.height; y++) for (int x = 0; x < letters.width; x++)
+            if (letters.getAlpha(x, y) > 0) ink++;
+        if (ink < 20) throw new AssertionError("SVG text glyphs were not rendered");
         System.out.println("SWT JSVG paths, alpha, gradient, and scaling passed");
     }
 }

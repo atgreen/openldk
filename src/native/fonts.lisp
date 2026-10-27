@@ -180,6 +180,7 @@
 
 (defun %reset-fontconfig-for-image ()
   "Reinitialize Fontconfig's process-local default config after image restart."
-  (setf *fontconfig-loaded* nil))
+  (setf *fontconfig-loaded* nil
+        *fontconfig-lock* (bordeaux-threads:make-recursive-lock "Fontconfig")))
 
 (pushnew '%reset-fontconfig-for-image sb-ext:*save-hooks*)

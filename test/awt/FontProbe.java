@@ -19,6 +19,9 @@ public class FontProbe {
         if (glyphs.getNumGlyphs() != 2 || glyphs.getGlyphPosition(2).getX() <= 0
                 || glyphs.getOutline().getBounds2D().getWidth() <= 0)
             throw new AssertionError("glyph advances or outlines");
+        var bounds = glyphs.getOutline().getBounds2D();
+        System.out.println("FONT_METRICS " + glyphs.getGlyphPosition(2).getX() + " "
+                + bounds.getX() + " " + bounds.getY() + " " + bounds.getWidth() + " " + bounds.getHeight());
         System.out.println("Font glyph advances and outlines passed");
     }
 }
