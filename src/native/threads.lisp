@@ -272,17 +272,22 @@ name is recorded in the Java thread already, so there is nothing to do."
           (setf interrupted t)
           (let ((saved-recursion (recursion-count monitor)))
             (push identity (wait-set monitor))
+            (setf (gethash thread *java-thread-waits*) (list monitor identity))
             (setf (owner monitor) nil (recursion-count monitor) 0)
             (%monitor-wake monitor)
             (unwind-protect
                  (handler-case
-                     (loop while (member identity (wait-set monitor))
+                     (progn
+                       (loop while (and (member identity (wait-set monitor))
+                                        (not (gethash thread *thread-interrupted*)))
                            for remaining = (and deadline (/ (- deadline (get-internal-real-time))
                                                             internal-time-units-per-second))
                            do (when (and remaining (<= remaining 0)) (return))
                               (unless (%monitor-sleep monitor remaining) (return)))
+                       (when (gethash thread *thread-interrupted*) (setf interrupted t)))
                    (|condition-java/lang/InterruptedException| () (setf interrupted t)))
               (setf (wait-set monitor) (remove identity (wait-set monitor)))
+              (remhash thread *java-thread-waits*)
               (loop while (owner monitor)
                     do (handler-case (%monitor-sleep monitor)
                          (|condition-java/lang/InterruptedException| () (setf interrupted t))))

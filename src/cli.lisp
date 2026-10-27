@@ -470,6 +470,7 @@ Java code (warmups)."
   (clrhash *class-load-locks*)
   (setf *class-load-locks-lock* (bt:make-lock "class-load-locks"))
   (clrhash *monitors*)
+  (clrhash *java-thread-waits*)
   (setf *last-monitor* (cons nil nil))
   (setf *method-compilation-lock* (bt:make-lock "method-compilation-lock"))
   (setf *method-compilation-cv* (bt:make-condition-variable :name "method-compilation-cv"))

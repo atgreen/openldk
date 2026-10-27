@@ -1369,13 +1369,18 @@ implementation therefore lives in %java-thread-sleep."
       (let ((exc (%make-java-instance "java/lang/InterruptedException")))
         (|<init>()V| exc)
         (error (%lisp-condition exc))))
+    ;; Only this operation accepts asynchronous InterruptedException delivery.
+    (let ((*java-thread-sleeping* t))
+      (when (and current-java-thread (gethash current-java-thread *thread-interrupted*))
+        (%clear-java-thread-interrupt current-java-thread)
+        (let ((*java-thread-sleeping* nil)) (%throw '|java/lang/InterruptedException|)))
     ;; Sleep — use fiber-sleep when in fiber context
     #+sb-fiber
     (if (in-fiber-p)
         (uiop:symbol-call :sb-thread :fiber-sleep (/ milliseconds 1000.0))
         (sleep (/ milliseconds 1000.0)))
     #-sb-fiber
-    (sleep (/ milliseconds 1000.0))
+    (sleep (/ milliseconds 1000.0)))
     ;; Check if interrupted after sleeping
     (when (and current-java-thread
                (gethash current-java-thread *thread-interrupted*))
@@ -1494,6 +1499,12 @@ present.  Consumed by Thread.getState()/start()/getThreadGroup()."
   "Interrupt the thread by signaling the underlying Lisp thread (or fiber)."
   ;; The interrupted status is maintained in the *thread-interrupted* hash table.
   (setf (gethash thread *thread-interrupted*) t)
+  ;; Remove the waiter synchronously so notify() cannot consume its wakeup.
+  (when-let ((waiting (gethash thread *java-thread-waits*)))
+    (let ((monitor (first waiting)) (identity (second waiting)))
+      (bt:with-lock-held ((mutex monitor))
+        (setf (wait-set monitor) (remove identity (wait-set monitor)))
+        (%monitor-wake monitor))))
   ;; If the thread has a fiber, set its park permit to wake it.
   #+sb-fiber
   (let ((fiber (gethash thread *java-to-fibers*)))
@@ -1505,17 +1516,20 @@ present.  Consumed by Thread.getState()/start()/getThreadGroup()."
   (when (%unpark-java-thread thread)
     (return-from |interrupt0()V|))
   ;; If the thread has an associated Lisp thread, interrupt it.
-  (let ((lisp-thread (gethash thread *java-threads*)))
+  (let ((lisp-thread (or (gethash thread *java-threads*)
+                        (loop for carrier being the hash-keys of *lisp-to-java-threads*
+                                using (hash-value java-thread)
+                              when (eq java-thread thread) return carrier))))
     (when (and lisp-thread (bt:thread-alive-p lisp-thread))
       ;; Interrupt the Lisp thread to wake it from blocking operations
       (handler-case (bordeaux-threads:interrupt-thread
        lisp-thread
        (lambda ()
          ;; Check if interrupted flag is set and throw InterruptedException
-         (when (gethash thread *thread-interrupted*)
-           (let ((exc (%make-java-instance "java/lang/InterruptedException")))
-             (|<init>()V| exc)
-             (error (%lisp-condition exc))))))
+         (when (and *java-thread-sleeping* (gethash thread *thread-interrupted*))
+           (let ((*java-thread-sleeping* nil))
+             (%clear-java-thread-interrupt thread)
+             (%throw '|java/lang/InterruptedException|)))))
         (sb-thread:interrupt-thread-error () nil)))))
 
 (defun %java-notify (objref)

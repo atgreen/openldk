@@ -63,7 +63,12 @@ TIMEOUT seconds when given.  Returns NIL on a timeout."
                                                   :timeout interval)
                  (bordeaux-threads:condition-wait (condition-variable monitor) (mutex monitor)))
              (and timeout (> timeout interval))))
-    (decf (sleepers monitor))))
+    (let ((*java-thread-sleeping* nil))
+      (sb-sys:without-interrupts
+        ;; CONDITION-WAIT may unwind before restoring its mutex.
+        (unless (sb-thread:holding-mutex-p (mutex monitor))
+          (bordeaux-threads:acquire-lock (mutex monitor)))
+        (decf (sleepers monitor))))))
 
 (defun %monitor-wake (monitor)
   "Wake every thread asleep on MONITOR, its mutex held."

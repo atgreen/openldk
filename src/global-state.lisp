@@ -375,6 +375,11 @@ loaders, whose classes are not in the global or app loader tables."
 (defvar *thread-interrupted* (make-hash-table :test #'eq :synchronized t)
   "Hash table tracking interrupted status for each Java Thread object.")
 
+(defvar *java-thread-waits* (make-hash-table :test #'eq :synchronized t)
+  "Java Thread -> (monitor identity) while inside Object.wait.")
+(defvar *java-thread-sleeping* nil
+  "Thread-local permission to deliver InterruptedException into native sleep.")
+
 ;; Identity hash code support: each object gets a unique, stable hash
 ;; (Java's identityHashCode semantics). Uses a weak EQ hash table so
 ;; objects can still be GC'd.
