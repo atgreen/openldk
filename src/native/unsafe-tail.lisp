@@ -229,9 +229,16 @@ op's value arguments (expected/new/delta as applicable)."
           ((equal nm "short") 16) ((equal nm "byte") 8)
           (t nil))))
 
-(defun %varhandle-invoke (category vh args)
+(defun %varhandle-invoke (category vh args &optional access-mode)
   (let ((name (%vh-classname vh)))
     (cond
+      ((or (search "IndirectVarHandle" name) (search "SegmentVarHandle" name))
+       ;; Let the JDK's adapter compose filters and bound coordinates. The
+       ;; resulting handle expects the direct target as its leading argument.
+       (let* ((mode (|java/lang/invoke/VarHandle$AccessMode.valueFromMethodName(Ljava/lang/String;)Ljava/lang/invoke/VarHandle$AccessMode;|
+                     (jstring access-mode)))
+              (handle (|getMethodHandle(I)Ljava/lang/invoke/MethodHandle;| vh (|ordinal()I| mode))))
+         (%mh-invoke handle (cons (|asDirect()Ljava/lang/invoke/VarHandle;| vh) args))))
       ;; byte-array view (VarHandleByteArrayAs*$ArrayHandle): check BEFORE the
       ;; array-element view, since its class name also contains "$Array".  Only
       ;; get/set are meaningful, matching the prior byte-view support.
@@ -284,11 +291,11 @@ op's value arguments (expected/new/delta as applicable)."
                  (:getxor "getAndBitwiseXor" "getAndBitwiseXorAcquire" "getAndBitwiseXorRelease")))
   (destructuring-bind (category &rest ops) entry
     (dolist (op ops)
-      (let ((cat category))
+      (let ((cat category) (access-mode op))
         (setf (symbol-function (intern (format nil "%VARHANDLE-OP-~A" op) :openldk))
               (lambda (vh &rest args)
                 ;; The dispatcher otherwise erases the access mode to CATEGORY.
                 ;; Conservatively order plain modes too, preserving atomicity
                 ;; of byte-array views and interoperability with volatile fields.
                 (with-java-memory-ordering
-                  (%varhandle-invoke cat vh args))))))))
+                  (%varhandle-invoke cat vh args access-mode))))))))

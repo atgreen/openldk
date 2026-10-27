@@ -19,6 +19,10 @@ public class ReflectionLoaderProbe {
             setter.invokeExact(82);
             if (field.getInt(null) != 82 || StaticFieldPayload.value != 9)
                 throw new AssertionError("Static field storage crossed defining loaders");
+            Class<?> child = loader.loadClass("StaticFieldPayload$Inherited");
+            MethodHandle inherited = lookup.findStatic(child, "compute", MethodType.methodType(int.class));
+            if ((int) inherited.invokeExact() != 83)
+                throw new AssertionError("Inherited static method crossed defining loaders");
             var factory = (java.util.function.Supplier<?>) target.getMethod("factory").invoke(null);
             if (factory.get().getClass() != target)
                 throw new AssertionError("Constructor method reference crossed defining loaders");

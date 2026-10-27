@@ -894,7 +894,7 @@ lambda finds its plan here, without the weak table's lock.")
 (defun %resolve-member-name (member-name)
   "Resolve MEMBER-NAME to a cached invocation plan (kind a b ret-char):
    (:constructor class-symbol init-symbol    nil)
-   (:static      fn-symbol    unbox-flags    ret-char)
+   (:static      fn-symbol    unbox-flags    ret-char declaring-class)
    (:instance    fn-symbol    unbox-flags    ret-char)
 UNBOX-FLAGS are %DESCRIPTOR-UNBOX-FLAGS of the descriptor, and RET-CHAR is
 %GET-RETURN-TYPE-CHAR of the MemberName.  The plan depends only on the
@@ -947,13 +947,14 @@ member it names."
                 (lisp-init-name (intern init-method-name :openldk)))
            (list :constructor ldk-class lisp-init-name nil (%descriptor-unbox-flags desc))))
         ((= ref-kind 6)       ; static: name is class.method(desc) in the loader package
-         (let* ((java-loader (slot-value clazz '|classLoader|))
-                (ldk-loader (get-ldk-loader-for-java-loader java-loader))
-                (pkg (class-package class-name ldk-loader))
-                (full-method-sig (format nil "~A.~A~A" class-name method-name method-type)))
+         (let* ((owner (get-ldk-class-for-java-class clazz))
+                (signature (format nil "~A~A" method-name method-type))
+                (declaring (or (%find-declaring-class owner signature) owner))
+                (pkg (ldk-class-package declaring))
+                (full-method-sig (format nil "~A.~A" (name declaring) signature)))
            (list :static (static-method-symbol (lispize-method-name full-method-sig) pkg)
                  (%descriptor-unbox-flags method-type)
-                 (%get-return-type-char member-name))))
+                 (%get-return-type-char member-name) declaring)))
         (t                    ; virtual/special/interface: GF named by method+descriptor
          (list :instance
                (intern (lispize-method-name (format nil "~A~A" method-name method-type)) :openldk)
@@ -965,15 +966,16 @@ member it names."
 linkToStatic/linkToVirtual/linkToSpecial; resolution is memoized per MemberName.
 Primitive-typed args are unboxed so method references adapted to functional
 interfaces (which pass boxed Object args) reach primitive-parameter methods."
-  (destructuring-bind (kind a b &optional ret-char constructor-unbox-flags) (%resolve-member-name member-name)
+  (destructuring-bind (kind a b &optional ret-char extra) (%resolve-member-name member-name)
     (declare (ignore ret-char))
     (ecase kind
       (:constructor                     ; a=class metadata, b=init-symbol
        (%clinit a)
        (let ((instance (make-instance (intern (name a) (ldk-class-package a)))))
-         (apply b instance (%unbox-args-for-flags constructor-unbox-flags args))
+         (apply b instance (%unbox-args-for-flags extra args))
          instance))
       (:static                          ; a=fn-symbol, b=unbox-flags
+       (when extra (%clinit extra))
        (apply a (%unbox-args-for-flags b args)))
       (:instance                        ; a=fn-symbol, b=unbox-flags; first arg is the receiver
        (apply a (if (and args b)

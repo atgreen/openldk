@@ -25,7 +25,8 @@ def main():
         if result.returncode or 'Reentrant class loading, arithmetic, exception handlers, and monitors passed' not in result.stdout:
             raise RuntimeError(f'{engine}:\n{result.stdout}\n{result.stderr}')
         print(f'{engine.name}: {result.stdout.strip()}', flush=True)
-        for probe, marker in [('InterfaceInitProbe', 'Inherited interface constant initialized before use'),
+        for probe, marker in [('StaticMethodProbe', 'Inherited static method handles initialize only their declaring class'),
+                              ('InterfaceInitProbe', 'Inherited interface constant initialized before use'),
                               ('PrimitiveMapperProbe', 'Primitive SAM return unboxing, widening, null, and type checks passed')]:
             result = subprocess.run([str(engine), '-cp', str(BUILD), probe],
                                     cwd=ROOT, capture_output=True, text=True, timeout=120)
