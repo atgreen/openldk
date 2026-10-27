@@ -33,6 +33,12 @@ def main():
     path = BUILD / 'locked.bin'
     path.write_bytes(bytes(64))
     for engine in [JDK / 'bin/java', options.runtime.resolve()]:
+        result = subprocess.run([str(engine), '-cp', str(BUILD), 'FileTransferProbe',
+                                 str(BUILD / 'transfer-source.bin')], cwd=ROOT,
+                                capture_output=True, text=True, timeout=180)
+        if result.returncode or 'File transfers, buffered prefixes, positions, partial EOF, and stream copies passed' not in result.stdout:
+            raise RuntimeError(f'{engine}:\n{result.stdout}\n{result.stderr}')
+        print(f'{engine.name}: {result.stdout.strip()}', flush=True)
         result = subprocess.run([str(engine), '-cp', str(BUILD), 'MemoryLayoutProbe'],
                                 cwd=ROOT, capture_output=True, text=True, timeout=120)
         if result.returncode or 'Memory-layout VarHandles' not in result.stdout:

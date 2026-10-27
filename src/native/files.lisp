@@ -237,7 +237,14 @@ channel (FileInputStream.getChannel) reads that stream's descriptor."
                    (slot-value fd '|fd|)
                    fd)))
     (if (typep value 'sb-sys:fd-stream)
-        (sb-sys:fd-stream-fd value)
+        (progn
+          ;; Lisp input may have read ahead, and output may still be buffered.
+          ;; A channel shares this descriptor and must start at Java's logical
+          ;; stream position rather than the OS position behind those buffers.
+          (when (open-stream-p value)
+            (when-let ((position (ignore-errors (file-position value))))
+              (file-position value position)))
+          (sb-sys:fd-stream-fd value))
         value)))
 
 (defun |sun/nio/ch/FileDispatcherImpl.init()| ()
@@ -411,6 +418,29 @@ end of file, and an IOException on failure."
 
 (defun |sun/nio/ch/FileDispatcherImpl.init0()V| ()
   nil)
+
+(sb-alien:define-alien-routine ("sendfile" %file-sendfile) sb-alien:long
+  (destination sb-alien:int) (source sb-alien:int)
+  (position (* sb-alien:long)) (count sb-alien:unsigned-long))
+
+(defun |sun/nio/ch/FileDispatcherImpl.transferTo0(Ljava/io/FileDescriptor;JJLjava/io/FileDescriptor;Z)J|
+    (source position count destination socket)
+  "Transfer positioned source bytes with Linux sendfile and JDK I/O statuses."
+  (declare (ignore socket))
+  (let ((stream (slot-value destination '|fd|)))
+    (when (and (streamp stream) (open-stream-p stream) (output-stream-p stream))
+      (force-output stream)))
+  (sb-alien:with-alien ((offset sb-alien:long position))
+    (let ((result (%file-sendfile (%raw-fd destination) (%raw-fd source)
+                                 (sb-alien:addr offset) (min count #x7ffff000))))
+      (if (not (minusp result)) result
+          (let ((errno (sb-alien:get-errno)))
+            (cond
+              ((= errno sb-posix:eintr) -3)
+              ((= errno sb-posix:eagain) -2)
+              ;; Let FileChannel's Java buffer path handle unsupported pairs.
+              ((member errno (list sb-posix:einval sb-posix:enosys sb-posix:exdev sb-posix:eopnotsupp)) -6)
+              (t (%throw '|java/io/IOException| (sb-int:strerror errno)))))))))
 
 
 (defun |sun/nio/ch/UnixFileDispatcherImpl.read0(Ljava/io/FileDescriptor;JI)I| (fd ptr length)
