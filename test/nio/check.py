@@ -28,11 +28,16 @@ def main():
     options = parser.parse_args()
     BUILD.mkdir(parents=True, exist_ok=True)
     subprocess.run([str(JDK / 'bin/javac'), '-d', str(BUILD), str(ROOT / 'test/nio/FileLockProbe.java'),
-                    str(ROOT / 'test/nio/FileInputProbe.java')],
+                    str(ROOT / 'test/nio/FileInputProbe.java'), str(ROOT / 'test/nio/BufferScalarProbe.java')],
                    check=True, timeout=60)
     path = BUILD / 'locked.bin'
     path.write_bytes(bytes(64))
     for engine in [JDK / 'bin/java', options.runtime.resolve()]:
+        result = subprocess.run([str(engine), '-cp', str(BUILD), 'BufferScalarProbe'],
+                                cwd=ROOT, capture_output=True, text=True, timeout=120)
+        if result.returncode or 'ByteBuffer unaligned scalar access' not in result.stdout:
+            raise RuntimeError(f'{engine}:\n{result.stdout}\n{result.stderr}')
+        print(f'{engine.name}: {result.stdout.strip()}', flush=True)
         result = subprocess.run([str(engine), '-cp', str(BUILD), 'FileInputProbe', str(BUILD / 'bulk-read.bin')],
                                 cwd=ROOT, capture_output=True, text=True, timeout=180)
         if result.returncode or 'FileInputStream bulk reads' not in result.stdout:

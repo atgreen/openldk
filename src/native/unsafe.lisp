@@ -465,36 +465,33 @@ the storage object does not (yet) exist."
   nil)
 
 (defmacro %define-internal-unsafe-scalar-accessors (stem descriptor kind)
-  ;; OpenLDK's Lisp entry-point names contain only the JVM parameter
-  ;; descriptor.  The return descriptor is deliberately not part of the
-  ;; symbol (matching every other native method in this file).
-  (let ((get (intern (format nil "get~A(Ljava/lang/Object;J)"
-                             stem) :openldk))
-        (put (intern (format nil "put~A(Ljava/lang/Object;J~A)"
-                             stem descriptor) :openldk))
-        (get-volatile
-          (intern (format nil "get~AVolatile(Ljava/lang/Object;J)"
-                          stem) :openldk))
-        (put-volatile
-          (intern (format nil "put~AVolatile(Ljava/lang/Object;J~A)"
-                          stem descriptor) :openldk)))
-    `(progn
-       (defmethod ,get ((unsafe |jdk/internal/misc/Unsafe|) object offset)
-         (declare (ignore unsafe))
-         (%unsafe-get-scalar object offset ,kind))
-       (defmethod ,put ((unsafe |jdk/internal/misc/Unsafe|) object offset value)
-         (declare (ignore unsafe))
-         (%unsafe-put-scalar object offset value ,kind))
-       (defmethod ,get-volatile
-           ((unsafe |jdk/internal/misc/Unsafe|) object offset)
-         (declare (ignore unsafe))
-         (with-java-memory-ordering
-           (%unsafe-get-scalar object offset ,kind)))
-       (defmethod ,put-volatile
-           ((unsafe |jdk/internal/misc/Unsafe|) object offset value)
-         (declare (ignore unsafe))
-         (with-java-memory-ordering
-           (%unsafe-put-scalar object offset value ,kind))))))
+  "Define short and full Java scalar accessors on the internal Unsafe class."
+  ;; Full names need their own specializers: an inherited sun.misc native
+  ;; with a full descriptor would otherwise shadow the internal short name.
+  `(progn
+     ,@(loop for full-p in '(nil t)
+             for result = (if full-p descriptor "")
+             for void = (if full-p "V" "")
+             append
+             (list
+              `(defmethod ,(intern (format nil "get~A(Ljava/lang/Object;J)~A" stem result) :openldk)
+                   ((unsafe |jdk/internal/misc/Unsafe|) object offset)
+                 (declare (ignore unsafe))
+                 (%unsafe-get-scalar object offset ,kind))
+              `(defmethod ,(intern (format nil "put~A(Ljava/lang/Object;J~A)~A" stem descriptor void) :openldk)
+                   ((unsafe |jdk/internal/misc/Unsafe|) object offset value)
+                 (declare (ignore unsafe))
+                 (%unsafe-put-scalar object offset value ,kind))
+              `(defmethod ,(intern (format nil "get~AVolatile(Ljava/lang/Object;J)~A" stem result) :openldk)
+                   ((unsafe |jdk/internal/misc/Unsafe|) object offset)
+                 (declare (ignore unsafe))
+                 (with-java-memory-ordering
+                   (%unsafe-get-scalar object offset ,kind)))
+              `(defmethod ,(intern (format nil "put~AVolatile(Ljava/lang/Object;J~A)~A" stem descriptor void) :openldk)
+                   ((unsafe |jdk/internal/misc/Unsafe|) object offset value)
+                 (declare (ignore unsafe))
+                 (with-java-memory-ordering
+                   (%unsafe-put-scalar object offset value ,kind)))))))
 
 (%define-internal-unsafe-scalar-accessors "Boolean" "Z" :boolean)
 (%define-internal-unsafe-scalar-accessors "Byte" "B" :byte)
