@@ -25,7 +25,8 @@ def main():
         if result.returncode or 'Reentrant class loading, arithmetic, exception handlers, and monitors passed' not in result.stdout:
             raise RuntimeError(f'{engine}:\n{result.stdout}\n{result.stderr}')
         print(f'{engine.name}: {result.stdout.strip()}', flush=True)
-        for probe, marker in [('StaticMethodProbe', 'Inherited static method handles initialize only their declaring class'),
+        for probe, marker in [('PrivateDispatchProbe', 'Private class, nestmate, and interface calls preserve declaring methods'),
+                              ('StaticMethodProbe', 'Inherited static method handles initialize only their declaring class'),
                               ('ReflectionArrayProbe', 'Reflective multidimensional arrays, defaults, identity, and validation passed'),
                               ('WaitTimeoutProbe', 'Long.MAX_VALUE monitor wait and notification passed'),
                               ('InterruptDeliveryProbe', 'Interrupt delivery, main-thread waits, monitor ownership, and notification accounting passed'),

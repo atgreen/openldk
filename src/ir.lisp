@@ -446,6 +446,7 @@ against zero or null)."))
 
 (defclass/std ir-call-virtual-method (ir-call)
   ((method-name)
+   (reference-class :std nil)
    (args)))
 
 (defclass/std ir-call-dynamic-method (ir-call)

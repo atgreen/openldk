@@ -566,8 +566,8 @@ keyword, (:COPY . VARIABLE), or NIL for a value of unknown type."
                             (unimplemented "IR-CALL-DYNAMIC codegen")))))
 
 (defun %class-method-name-table (ldk-class)
-  "Hash set of LDK-CLASS's own methods' lispized name+descriptor
-strings, built on first use.  A class's method vector never changes
+  "Map LDK-CLASS's own lispized name+descriptor strings to method metadata,
+built on first use.  A class's method vector never changes
 after load, so the table is cached on the <class> object."
   (or (method-name-table ldk-class)
       (setf (method-name-table ldk-class)
@@ -576,7 +576,7 @@ after load, so the table is cached on the <class> object."
                          (setf (gethash (lispize-method-name
                                          (format nil "~A~A" (name method) (descriptor method)))
                                         table)
-                                t))
+                                method))
                    (or (methods ldk-class) #()))
               table))))
 
@@ -1579,18 +1579,36 @@ created if need be, so the call finds a function to forward from."
           (%note-call-site-gf symbol nargs)
           (%ensure-java-gf symbol nargs)))))
 
+(defun %private-call-owner (reference-class method-name)
+  "The defining class when a virtual call resolves to a private method.
+JVMS 5.4.6 selects that method independently of the receiver's class."
+  (when reference-class
+    (let* ((resolved (%resolve-class-in-context reference-class))
+           (declaring (and resolved (%find-declaring-class resolved method-name)))
+           (method (and declaring (gethash method-name (%class-method-name-table declaring)))))
+      (when (and method (logbitp 1 (access-flags method)))
+        (intern (name declaring) (ldk-class-package declaring))))))
+
 (defmethod codegen ((insn ir-call-virtual-method) context)
-  (with-slots (method-name args) insn
+  (with-slots (method-name reference-class args) insn
     ;; Virtual method dispatch uses :openldk package for generic function names
     ;; Instance methods are defined as CLOS generic functions in :openldk for cross-loader dispatch
     (make-instance '<expression>
                    :insn insn
                    :code (let* ((nargs (length args))
+                                (private-owner (%private-call-owner reference-class method-name))
                                 (receiver-code (code (codegen (car args) context)))
                                 (null-checked-receiver `(%receiver ,receiver-code))
                                 (call (cond
                                         ((eq nargs 0)
                                          (internal-error "virtual call ~A has no receiver argument" method-name))
+                                        (private-owner
+                                         `(invoke-special-at
+                                           (load-time-value
+                                            (make-invoke-special-site
+                                             ',(%call-site-gf method-name nargs) ',private-owner))
+                                           (list ,null-checked-receiver
+                                                 ,@(mapcar (lambda (a) (code (codegen a context))) (cdr args)))))
                                         ((eq nargs 1)
                                          (list (%call-site-gf method-name nargs) null-checked-receiver))
                                         (t

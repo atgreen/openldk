@@ -1469,6 +1469,7 @@ are ordinary declared methods and use normal dispatch.")
                          (t
                           (make-instance 'ir-call-virtual-method
                                          :address pc-start
+                                         :reference-class class-name
                                          :return-type return-type
                                          :method-name (lispize-method-name (emit method-reference constant-pool))
                                          :args args)))))
