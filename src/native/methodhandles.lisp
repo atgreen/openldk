@@ -198,7 +198,39 @@ or one of #\\Z #\\B #\\S #\\I #\\J #\\F #\\D #\\C for primitives."
            (setf (slot-value b '|value|) value) b))
     (t value)))
 
-(defun %lambda-invoke (mh captures args &key box-return)
+(defun %lambda-primitive-return (value target-type source-type)
+  "Adapt an implementation result to a primitive SAM return type."
+  (let ((primitive
+          (if (and source-type (find source-type "ZBSIJFDC"))
+              value
+              (progn
+                (unless value (%throw '|java/lang/NullPointerException|))
+                (cond
+                  ((eql target-type #\Z)
+                   (unless (%java-class-p value "java/lang/Boolean")
+                     (%throw '|java/lang/ClassCastException|))
+                   (%maybe-unbox value))
+                  ((eql target-type #\C)
+                   (unless (%java-class-p value "java/lang/Character")
+                     (%throw '|java/lang/ClassCastException|))
+                   (%maybe-unbox value))
+                  ((%java-class-p value "java/lang/Number")
+                   (funcall (ecase target-type
+                              (#\B '|byteValue()B|) (#\S '|shortValue()S|)
+                              (#\I '|intValue()I|) (#\J '|longValue()J|)
+                              (#\F '|floatValue()F|) (#\D '|doubleValue()D|)) value))
+                  ((and (find target-type "IJFD") (%java-class-p value "java/lang/Character"))
+                   (%maybe-unbox value))
+                  ((numberp value) value)
+                  (t (%throw '|java/lang/ClassCastException|)))))))
+    (when (characterp primitive) (setf primitive (char-code primitive)))
+    (case target-type
+      ((#\Z #\B #\S #\C #\I) (%as-int primitive))
+      (#\J (%as-long primitive))
+      (#\F (%as-float primitive))
+      (#\D (%as-double primitive)))))
+
+(defun %lambda-invoke (mh captures args &key box-return primitive-return)
   "Common invoke logic for lambda implementations.
 When BOX-RETURN is true, boxes primitive return values to their wrapper types
 so that SAM methods returning Object get proper boxed values."
@@ -206,15 +238,17 @@ so that SAM methods returning Object get proper boxed values."
                   (slot-value mh '|member|))))
     (if member
         (let ((result (apply #'%invoke-from-member-name member (append captures args))))
-          (if box-return
-              (let ((ret-char (fourth (%resolve-member-name member))))
-                (if ret-char
-                    (%box-primitive-return result ret-char)
-                    result))
-              result))
+          (cond
+            (primitive-return
+             (%lambda-primitive-return result primitive-return (fourth (%resolve-member-name member))))
+            (box-return
+             (let ((ret-char (fourth (%resolve-member-name member))))
+               (if ret-char (%box-primitive-return result ret-char) result)))
+            (t result)))
         (let ((args-array (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Object")
                                            :initial-contents (coerce (append captures args) 'vector))))
-          (|invokeWithArguments([Ljava/lang/Object;)Ljava/lang/Object;| mh args-array)))))
+          (let ((result (|invokeWithArguments([Ljava/lang/Object;)Ljava/lang/Object;| mh args-array)))
+            (if primitive-return (%lambda-primitive-return result primitive-return nil) result))))))
 
 ;; Supplier implementation (for get() with no args)
 (defclass/std |openldk/LambdaSupplier| (|java/lang/Object| |java/util/function/Supplier|)
@@ -230,15 +264,15 @@ so that SAM methods returning Object get proper boxed values."
    (captures)))
 
 (defmethod |test(Ljava/lang/Object;)Z| ((this |openldk/LambdaPredicate|) obj)
-  (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list obj)))
+  (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list obj) :primitive-return #\Z))
 
 ;; IntPredicate/LongPredicate/DoublePredicate bridge methods
 (defmethod |test(I)Z| ((this |openldk/LambdaPredicate|) int-val)
-  (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list int-val)))
+  (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list int-val) :primitive-return #\Z))
 (defmethod |test(J)Z| ((this |openldk/LambdaPredicate|) long-val)
-  (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list long-val)))
+  (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list long-val) :primitive-return #\Z))
 (defmethod |test(D)Z| ((this |openldk/LambdaPredicate|) double-val)
-  (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list double-val)))
+  (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list double-val) :primitive-return #\Z))
 
 ;; BiPredicate implementation (for test(Object, Object))
 (defclass/std |openldk/LambdaBiPredicate| (|java/lang/Object| |java/util/function/BiPredicate|)
@@ -246,7 +280,7 @@ so that SAM methods returning Object get proper boxed values."
    (captures)))
 
 (defmethod |test(Ljava/lang/Object;Ljava/lang/Object;)Z| ((this |openldk/LambdaBiPredicate|) a b)
-  (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list a b)))
+  (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list a b) :primitive-return #\Z))
 
 ;; Function implementation (for apply(Object))
 (defclass/std |openldk/LambdaFunction| (|java/lang/Object| |java/util/function/Function|)
@@ -301,21 +335,21 @@ so that SAM methods returning Object get proper boxed values."
 (defmethod |apply(Ljava/lang/Object;Ljava/lang/Object;)| ((this |openldk/LambdaBinaryOperator|) a b)
   (%lambda-invoke (slot-value this 'target) (slot-value this 'captures) (list a b) :box-return t))
 
-(defvar *dynamic-lambda-classes* (make-hash-table :test #'equal)
+(defvar *dynamic-lambda-classes* (make-hash-table :test #'equal :synchronized t)
   "Cache of dynamically created lambda classes keyed by SAM method lispized name.")
 
-(defun %interface-class-symbol (interface-name)
+(defun %interface-class-symbol (interface-name &optional loader)
   "The CLOS class name of the interface INTERFACE-NAME (binary form), loading
 it, in its loader's package (OPENLDK.APP for the application's classes), or
 NIL."
   (handler-case
-      (let* ((ldk-class (classload interface-name))
+      (let* ((ldk-class (%resolve-class interface-name loader))
              (sym (and ldk-class
                        (find-symbol (name ldk-class) (ldk-class-package ldk-class)))))
         (and sym (find-class sym nil) sym))
     (condition () nil)))
 
-(defun %ensure-dynamic-lambda-class (method-str sam-method-type &optional interface-type-name markers)
+(defun %ensure-dynamic-lambda-class (method-str sam-method-type &optional interface-type-name markers loader)
   "Get or create a dynamic lambda class for the given SAM method name and type.
 INTERFACE-TYPE-NAME is the binary name of the functional interface (e.g.
 \"com/sun/tools/javac/util/JavacMessages$ResourceBundleHelper\") so that
@@ -334,30 +368,31 @@ Returns the class symbol."
                           desc)
                         "()Ljava/lang/Object;"))
          (lispized-name (lispize-method-name (format nil "~A~A" method-str descriptor)))
-         ;; The interface method returns a reference: box a primitive result.
-         (box-return (let ((return-type (subseq descriptor (1+ (position #\) descriptor)))))
-                       (and (plusp (length return-type))
-                            (find (char return-type 0) "L["))))
+         (return-type (char descriptor (1+ (position #\) descriptor))))
+         (box-return (and (find return-type "L[") t))
+         (primitive-return (and (find return-type "ZBSIJFDC") return-type))
          ;; Use interface name as cache key when available for proper CHECKCAST
-         (class-name-str (format nil "~A~{+~A~}"
+         (class-name-str (format nil "~A~{+~A~}_L~D"
                                  (if interface-type-name
                                      (format nil "openldk/DynamicLambda_~A" (substitute #\_ #\/ interface-type-name))
                                      (format nil "openldk/DynamicLambda_~A_~A" method-str param-count))
-                                 (mapcar (lambda (marker) (substitute #\_ #\/ marker)) markers)))
-         (cached (gethash class-name-str *dynamic-lambda-classes*)))
+                                 (mapcar (lambda (marker) (substitute #\_ #\/ marker)) markers)
+                                 (if loader (slot-value loader 'id) 0)))
+         (interface-sym (when interface-type-name
+                          (%interface-class-symbol interface-type-name loader)))
+         (marker-syms (remove nil (mapcar (lambda (name) (%interface-class-symbol name loader)) markers)))
+         (cache-key (list class-name-str interface-sym marker-syms))
+         (cached (gethash cache-key *dynamic-lambda-classes*)))
     (if cached
         ;; Ensure the method is defined for this specific lispized name
         (let ((method-sym (intern lispized-name :openldk)))
           (unless (and (fboundp method-sym)
                        (typep (fdefinition method-sym) 'generic-function))
-            (%define-lambda-method method-sym cached param-count box-return))
+            (%define-lambda-method method-sym cached param-count box-return primitive-return))
           cached)
         ;; Create new dynamic lambda class, extending the interface if known
         (let* ((class-sym (intern class-name-str :openldk))
                (method-sym (intern lispized-name :openldk))
-               (interface-sym (when interface-type-name
-                                (%interface-class-symbol interface-type-name)))
-               (marker-syms (remove nil (mapcar #'%interface-class-symbol markers)))
                (superclasses (append (list '|java/lang/Object|)
                                      (when interface-sym (list interface-sym))
                                      marker-syms)))
@@ -365,11 +400,11 @@ Returns the class symbol."
           (eval `(defclass/std ,class-sym ,superclasses
                    ((target) (captures))))
           ;; Define the dispatch method
-          (%define-lambda-method method-sym class-sym param-count box-return)
-          (setf (gethash class-name-str *dynamic-lambda-classes*) class-sym)
+          (%define-lambda-method method-sym class-sym param-count box-return primitive-return)
+          (setf (gethash cache-key *dynamic-lambda-classes*) class-sym)
           class-sym))))
 
-(defun %define-lambda-method (method-sym class-sym param-count &optional box-return)
+(defun %define-lambda-method (method-sym class-sym param-count &optional box-return primitive-return)
   "Define a lambda dispatch method METHOD-SYM on CLASS-SYM with PARAM-COUNT
 parameters.  BOX-RETURN boxes a primitive the implementation returns, for an
 interface method returning a reference (Kotlin's Function1.invoke)."
@@ -385,7 +420,8 @@ interface method returning a reference (Kotlin's Function1.invoke)."
              (%lambda-invoke (slot-value |this| 'target)
                              (slot-value |this| 'captures)
                              (list ,@params)
-                             :box-return ,box-return)))))
+                             :box-return ,box-return
+                             :primitive-return ,primitive-return)))))
 
 (defun %prebuilt-lambda-class (method-str sam-param-count interface-type-name)
   "Return the prebuilt openldk/Lambda* class for METHOD-STR when it
@@ -435,7 +471,7 @@ classes and bridges) ask a lambda to implement."
     (nreverse markers)))
 
 (defun %lambda-metafactory (impl-handle captures &optional (method-name "get") sam-method-type
-                                                           interface-type-name alt-args)
+                                                           interface-type-name alt-args caller)
   "Construct a functional interface implementation for Java lambdas.
 METHOD-NAME is the interface method name (get, test, apply, accept, etc.).
 CAPTURES is a list of pre-bound values for captured variables.
@@ -444,7 +480,8 @@ used to determine the correct arity (e.g. Consumer vs BiConsumer).
 INTERFACE-TYPE-NAME is the binary name of the target functional interface.
 ALT-ARGS are altMetafactory's static arguments after the first three: the
 lambda also implements the marker interfaces they name (Serializable)."
-  (let* ((markers (and alt-args (%alt-metafactory-markers alt-args)))
+  (let* ((loader (and caller (ldk-loader (get-ldk-class-for-java-class caller))))
+         (markers (and alt-args (%alt-metafactory-markers alt-args)))
          (method-str (if (stringp method-name) method-name (lstring method-name)))
          (sam-param-count (if (and sam-method-type
                                    (slot-exists-p sam-method-type '|ptypes|)
@@ -471,7 +508,7 @@ lambda also implements the marker interfaces they name (Serializable)."
                         (unless (or markers (and interface-type-name sam-has-primitive-param))
                           (%prebuilt-lambda-class method-str sam-param-count interface-type-name))
                         (%ensure-dynamic-lambda-class method-str sam-method-type interface-type-name
-                                                      markers)))
+                                                      markers loader)))
          (instance (make-instance lambda-class)))
     (setf (slot-value instance 'target) impl-handle)
     (setf (slot-value instance 'captures) captures)

@@ -49,7 +49,21 @@ ABCL_JAR = lib/abcl/abcl.jar
 ABCL_URL = https://abcl.org/releases/$(ABCL_VERSION)/abcl-bin-$(ABCL_VERSION).tar.gz
 ABCL_MAIN = lib/abcl/org/armedbear/lisp/ABCLMain.class
 
-all: openldk javacl
+all: jni openldk javacl
+
+JNI_OS = $(shell uname -s | tr A-Z a-z)
+JNI_BRIDGE = libopenldk-jni.so
+.PHONY: jni
+jni: $(JNI_BRIDGE)
+
+.cache/jni/table.inc: src/jni/generate.py $(JAVA_HOME)/include/jni.h | check-jdk
+	mkdir -p .cache/jni
+	python3 $< "$(JAVA_HOME)/include/jni.h" $@
+
+$(JNI_BRIDGE): src/jni/bridge.c .cache/jni/table.inc
+	$(CC) $(CPPFLAGS) $(CFLAGS) -std=c11 -D_GNU_SOURCE -fPIC -shared -Wall -Wextra -Werror \
+	  -I"$(JAVA_HOME)/include" -I"$(JAVA_HOME)/include/$(JNI_OS)" -I.cache/jni \
+	  $< $(LDFLAGS) -lffi -ldl -o $@
 
 # Fail fast when JAVA_HOME is not a JDK 25 (e.g. the environment exports an
 # older JDK) instead of erroring deep inside the Lisp build.  Order-only
@@ -252,3 +266,43 @@ testsuite/mauve/gnu/testlet/config.class: testsuite/mauve/gnu/testlet/config.jav
 
 clean:
 	-rm -rf openldk .*~ *~
+
+# Exercise weak references created before SAVE-LISP-AND-DIE, including restored
+# locks, the reference delivery service, and collection of core-backed objects.
+.PHONY: check-verifier
+check-verifier: openldk | check-jdk
+	python3 test/verifier/check.py
+
+.PHONY: check-jni check-jni-zstd
+check-jni: openldk jni | check-jdk
+	python3 test/jni/check.py
+
+check-jni-zstd: openldk jni | check-jdk
+	python3 test/jni/check.py --zstd
+
+.PHONY: check-zip check-nio check-modules check-reentrant check-eclipse
+check-zip: openldk | check-jdk
+	python3 test/zip/check.py
+
+check-nio: openldk | check-jdk
+	python3 test/nio/check.py
+
+check-modules: openldk | check-jdk
+	python3 test/modules/check.py
+
+check-reentrant: openldk | check-jdk
+	python3 test/reentrant/check.py
+
+check-eclipse: openldk jni | check-jdk
+	python3 test/eclipse/check.py
+
+.PHONY: check-reference-image
+check-reference-image: | check-jdk
+	@image_test_dir=$$(mktemp -d); \
+	trap 'rm -rf "$$image_test_dir"' EXIT; \
+	$(JAVAC) -d "$$image_test_dir" test/ReferenceImage.java && \
+	LDK_REFERENCE_IMAGE_DIR="$$image_test_dir" \
+	  sbcl --dynamic-space-size $(DYNAMIC_SPACE_SIZE) --disable-debugger \
+	  --eval '(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))' \
+	  --load test/reference-image.lisp && \
+	"$$image_test_dir/reference-image"

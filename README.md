@@ -82,6 +82,36 @@ what they do for `java`.  As on a JVM, `openldk` exits once `main` has
 returned and every non-daemon thread has ended;
 `LDK_THREAD_WAIT_SECONDS=N` stops waiting after N seconds.
 
+### JNI libraries
+
+OpenLDK can load ordinary third-party JNI libraries alongside its existing
+Common Lisp native implementations. Build the bridge with `make jni` (also
+included in `make`). This requires a C compiler, Python 3, JDK 25 headers, and
+the libffi development package. The current bridge targets 64-bit little-endian
+Linux and uses the platform C ABI.
+
+Java code can use `System.load("/absolute/path/libexample.so")`, or
+`System.loadLibrary("example")` with `-Djava.library.path=/path/to/libraries`.
+The bridge is loaded lazily from `libopenldk-jni.so` in the build directory;
+set `OPENLDK_JNI_BRIDGE` to its absolute path when relocating an executable.
+It uses standard JNI headers and does not load HotSpot's JDK libraries.
+Existing Lisp native implementations retain precedence.
+
+The implementation supports native symbol lookup and registration, loader
+ownership, initialization hooks, local/global/weak references, object creation,
+Java callbacks, fields, reflection, exceptions, strings, primitive/object arrays,
+direct buffers, monitors, and native-thread attachment. Strings and primitive
+arrays use native copies with release/copy-back semantics. A native thread keeps
+its Java identity across callbacks, including daemon status and monitor ownership.
+
+JNI libraries remain loaded for the process lifetime; class-loader unloading and
+`JNI_OnUnload` are not implemented. Creating or destroying a standalone JVM via
+the Invocation API is not supported. Saved images must load JNI libraries after
+restart: saving with loaded JNI libraries is rejected because arbitrary native
+library state cannot be preserved in an SBCL image. JNI compatibility is tested
+with the included C/C++ probes and zstd-jni; it is not a claim of complete JNI
+conformance for every library.
+
 ## How it Works
 
 `openldk` reads class and jar files, and translates them into lisp
@@ -191,7 +221,13 @@ Run `make check` to run through the
 [dejagnu](https://www.gnu.org/software/dejagnu/dejagnu)-based testsuite.
 `make check-regression` runs its core suites and fails if any test that
 passes in `testsuite/baseline.sum` no longer does: run it before sending
-a change.
+a change. `make check-reference-image` checks collection and queue delivery
+of references created before saving an application image.
+`make check-verifier` compares generated valid and malformed classfiles with
+HotSpot, checking both acceptance and Java verification exceptions.
+`make check-jni` builds C/C++ JNI libraries and runs identical integration probes
+on HotSpot and OpenLDK. `make check-jni-zstd` also downloads a checksum-pinned
+zstd-jni release and tests byte-array and direct-buffer compression round trips.
 
 ### Debugging
 
@@ -320,8 +356,24 @@ for when you want to code in Common Lisp, but you need that one Java
 library.  See [cl-log4j](https://github.com/atgreen/cl-log4j) for an
 example of wrapping a Java library for Common Lisp.
 
+Volatile fields and ordered Unsafe/VarHandle accesses use a conservative
+shared synchronization protocol. Scoped Value caches are isolated per Java
+thread. Weak, soft, and phantom references use SBCL weak pointers; a reference
+processor delivers collected references to Java queues and Cleaner callbacks.
+Soft references currently use an eager-clearing policy, rather than retaining
+referents according to memory pressure.
+
+Classfiles undergo structural checks before loading. Methods in classfile
+versions 50 through 69 also undergo stack-map and bytecode type checking before
+initialization or compilation, including operand/local types, control flow,
+exception handlers, and uninitialized constructor objects. This is a partial
+verifier: legacy type inference for older classfiles and complete JVM access
+and linking constraints remain unimplemented. It is not yet a complete security
+boundary for untrusted classfiles.
+
 Here's an incomplete list of what's not implemented:
-- bytecode verification
+- complete JVM bytecode verification
+- Java finalization and object resurrection
 
 Author and License
 -------------------

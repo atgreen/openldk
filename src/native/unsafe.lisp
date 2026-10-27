@@ -298,8 +298,7 @@ or NIL if no field is registered there."
         ;; An offset is a hash of its field, so check the entry is this one's.
         (if (and cached (eq (car cached) field))
             (cdr cached)
-            (let ((key (intern (mangle-field-name (lstring (slot-value field '|name|)))
-                               :openldk)))
+            (let ((key (%field-object-slot field)))
               (setf (gethash offset *unsafe-slot-keys*) (cons field key))
               key))))))
 
@@ -489,11 +488,13 @@ the storage object does not (yet) exist."
        (defmethod ,get-volatile
            ((unsafe |jdk/internal/misc/Unsafe|) object offset)
          (declare (ignore unsafe))
-         (%unsafe-get-scalar object offset ,kind))
+         (with-java-memory-ordering
+           (%unsafe-get-scalar object offset ,kind)))
        (defmethod ,put-volatile
            ((unsafe |jdk/internal/misc/Unsafe|) object offset value)
          (declare (ignore unsafe))
-         (%unsafe-put-scalar object offset value ,kind)))))
+         (with-java-memory-ordering
+           (%unsafe-put-scalar object offset value ,kind))))))
 
 (%define-internal-unsafe-scalar-accessors "Boolean" "Z" :boolean)
 (%define-internal-unsafe-scalar-accessors "Byte" "B" :byte)
@@ -623,7 +624,7 @@ the storage object does not (yet) exist."
 
 (defmethod |fullFence()V| ((unsafe |jdk/internal/misc/Unsafe|))
   (declare (ignore unsafe))
-  nil)
+  (sb-thread:barrier (:memory)))
 
 (defmethod |arrayIndexScale0(Ljava/lang/Class;)I| ((unsafe |jdk/internal/misc/Unsafe|) array)
   (declare (ignore unsafe))
@@ -658,14 +659,72 @@ the storage object does not (yet) exist."
 ;; Override both NativeBuffers.copyCStringToNativeBuffer and
 ;; UnixNativeDispatcher.copyToNativeBuffer to properly allocate native memory.
 
+(defvar *native-allocation-lock* (bt:make-lock "Native allocations"))
+(defvar *native-allocation-next-address* #x600000000000)
+(defvar *native-allocation-free-blocks* nil)
+(defvar *native-memory-page-size* 4096)
+
+(defun %native-allocation-size (size)
+  (* *native-memory-page-size* (ceiling (max 1 size) *native-memory-page-size*)))
+
+(defun %allocate-unsafe-memory (size)
+  "Allocate owned native pages outside libc's heap, at image-stable addresses."
+  (when (minusp size) (%throw '|java/lang/IllegalArgumentException| "Negative native allocation"))
+  (when (zerop size) (return-from %allocate-unsafe-memory 0))
+  (let* ((length (%native-allocation-size size))
+         (address
+           (bt:with-lock-held (*native-allocation-lock*)
+             (loop
+               for free = (find-if (lambda (block) (>= (cdr block) length)) *native-allocation-free-blocks*)
+               for address = (if free (car free) *native-allocation-next-address*)
+               do (if free
+                      (progn
+                        (setf *native-allocation-free-blocks* (delete free *native-allocation-free-blocks* :test #'eq))
+                        (when (> (cdr free) length)
+                          (push (cons (+ address length) (- (cdr free) length)) *native-allocation-free-blocks*)))
+                      (incf *native-allocation-next-address* length))
+                  (when (> (+ address length) #x700000000000) (return nil))
+                  (handler-case
+                      (let ((memory (sb-posix:mmap (sb-sys:int-sap address) length
+                                                   (logior sb-posix:prot-read sb-posix:prot-write)
+                                                   ;; Linux MAP_FIXED_NOREPLACE never overwrites
+                                                   ;; a mapping owned by the runtime or a JNI library.
+                                                   (logior sb-posix:map-private sb-posix:map-anon #x100000) -1 0)))
+                        (unless (= (sb-sys:sap-int memory) address)
+                          (sb-posix:munmap memory length)
+                          (return nil))
+                        (setf (gethash address *unsafe-memory-table*) (cons memory size))
+                        (return address))
+                    (sb-posix:syscall-error (condition)
+                      (unless (= (sb-posix:syscall-errno condition) sb-posix:eexist) (return nil))))))))
+    (or address (%throw '|java/lang/OutOfMemoryError| "Cannot allocate native memory"))))
+
+(defun %free-unsafe-entry (entry)
+  "Release an owned mapping or a legacy alien allocation; ENTRY's lock is held."
+  (cond
+    ((typep (car entry) 'sb-sys:system-area-pointer)
+     (handler-case
+         (progn
+           (sb-posix:munmap (car entry) (%native-allocation-size (cdr entry)))
+           (push (cons (sb-sys:sap-int (car entry)) (%native-allocation-size (cdr entry)))
+                 *native-allocation-free-blocks*))
+       (sb-posix:syscall-error () nil)))
+    ((typep (car entry) 'sb-alien:alien)
+     (ignore-errors (sb-alien:free-alien (car entry))))))
+
+(defun %free-unsafe-memory (address)
+  "Remove ADDRESS before making its region available for reuse."
+  (bt:with-lock-held (*native-allocation-lock*)
+    (when-let ((entry (gethash address *unsafe-memory-table*)))
+      (remhash address *unsafe-memory-table*)
+      (%free-unsafe-entry entry))))
+
 (defun %make-native-buffer-from-bytes (byte-array)
   "Create a NativeBuffer with properly allocated native memory from a Java byte array."
   (let* ((data (java-array-data byte-array))
          (len (length data))
-         (mem (sb-alien:make-alien sb-alien:char (1+ len)))
-         (ptr (sb-sys:sap-int (sb-alien:alien-sap mem)))
-         (sap (sb-alien:alien-sap mem)))
-    (setf (gethash ptr *unsafe-memory-table*) (cons mem (1+ len)))
+         (ptr (%allocate-unsafe-memory (1+ len)))
+         (sap (sb-sys:int-sap ptr)))
     ;; Copy bytes to native memory.  Java bytes are signed; SAP-REF-8 stores
     ;; unsigned, so mask (a UTF-8 path byte >= #x80 is stored negative).
     (loop for i below len
@@ -698,27 +757,16 @@ the storage object does not (yet) exist."
       (lambda (this)
         (let ((address (slot-value this '|address|)))
           (when (/= address 0)
-            (when-let ((entry (gethash address *unsafe-memory-table*)))
-              (%free-unsafe-entry entry)
-              (remhash address *unsafe-memory-table*))
+            (%free-unsafe-memory address)
             (setf (slot-value this '|address|) 0)))))
 
-(defun %free-unsafe-entry (entry)
-  "Free the memory of the *UNSAFE-MEMORY-TABLE* ENTRY, (alien . size); a
-block restored after an image restart (:restored . size) is never freed."
-  (when (typep (car entry) 'sb-alien:alien)
-    (ignore-errors (sb-alien:free-alien (car entry)))))
-
 (defmethod |allocateMemory0(J)J| ((unsafe |jdk/internal/misc/Unsafe|) size)
-  (let* ((mem (sb-alien:make-alien sb-alien:char size))
-         (ptr (sb-sys:sap-int (sb-alien:alien-sap mem))))
-    (setf (gethash ptr *unsafe-memory-table*) (cons mem size))
-    ptr))
+  (declare (ignore unsafe))
+  (%allocate-unsafe-memory size))
 
 (defmethod |freeMemory0(J)V| ((unsafe |jdk/internal/misc/Unsafe|) address)
-  (when-let (entry (gethash address *unsafe-memory-table*))
-    (%free-unsafe-entry entry)
-    (remhash address *unsafe-memory-table*)))
+  (declare (ignore unsafe))
+  (%free-unsafe-memory address))
 
 (defmethod |putLong0(JJ)| ((unsafe |jdk/internal/misc/Unsafe|) address value)
   (setf (sb-sys:signed-sap-ref-64 (sb-sys:int-sap address) 0) value))
@@ -763,25 +811,17 @@ block restored after an image restart (:restored . size) is never freed."
                                                (+ source-offset i))))))))
 
 (defmethod |reallocateMemory0(JJ)J| ((unsafe |jdk/internal/misc/Unsafe|) address new-size)
-  (if (zerop address)
-      ;; Zero address means fresh allocation (realloc(NULL, size) == malloc(size))
-      (|allocateMemory0(J)J| unsafe new-size)
-      ;; Allocate new block, copy old data, free old block
-      (let* ((new-mem (sb-alien:make-alien sb-alien:char new-size))
-             (new-ptr (sb-sys:sap-int (sb-alien:alien-sap new-mem)))
-             (new-sap (sb-alien:alien-sap new-mem))
-             (old-entry (gethash address *unsafe-memory-table*)))
-        (when old-entry
-          (let* ((old-size (cdr old-entry))
-                 (old-sap (sb-sys:int-sap address))
-                 (copy-size (min old-size new-size)))
-            (loop for i below copy-size
-                  do (setf (sb-sys:sap-ref-8 new-sap i)
-                           (sb-sys:sap-ref-8 old-sap i)))
-            (%free-unsafe-entry old-entry)
-            (remhash address *unsafe-memory-table*)))
-        (setf (gethash new-ptr *unsafe-memory-table*) (cons new-mem new-size))
-        new-ptr)))
+  (declare (ignore unsafe))
+  (when (zerop new-size)
+    (%free-unsafe-memory address)
+    (return-from |reallocateMemory0(JJ)J| 0))
+  (let ((new-address (%allocate-unsafe-memory new-size)))
+    (when-let ((entry (gethash address *unsafe-memory-table*)))
+      (dotimes (index (min (cdr entry) new-size))
+        (setf (sb-sys:sap-ref-8 (sb-sys:int-sap new-address) index)
+              (sb-sys:sap-ref-8 (sb-sys:int-sap address) index)))
+      (%free-unsafe-memory address))
+    new-address))
 
 (defun %unsafe-fill-memory (address size byte)
   "Fill SIZE bytes of native memory at ADDRESS with BYTE.  BYTE is a Java
@@ -847,16 +887,16 @@ runs out (LockSupport.park)."
   (declare (ignore unsafe))
   #+sb-fiber
   (when (in-fiber-p)
-    (let ((fiber (sb-thread:current-fiber)))
+    (let ((fiber (uiop:symbol-call :sb-thread :current-fiber)))
       ;; Check and consume permit
       (when (gethash fiber *fiber-park-flags*)
         (remhash fiber *fiber-park-flags*)
         (return-from |park(ZJ)V|))
       ;; Park with predicate: wake when permit is set
       (if (> time 0)
-          (sb-thread:fiber-park (lambda () (gethash fiber *fiber-park-flags*))
+          (uiop:symbol-call :sb-thread :fiber-park (lambda () (gethash fiber *fiber-park-flags*))
                                 :timeout (/ time 1000000000.0d0))
-          (sb-thread:fiber-park (lambda () (gethash fiber *fiber-park-flags*))))
+          (uiop:symbol-call :sb-thread :fiber-park (lambda () (gethash fiber *fiber-park-flags*))))
       ;; Consume permit after waking
       (remhash fiber *fiber-park-flags*))
     (return-from |park(ZJ)V|))
@@ -1116,22 +1156,24 @@ other name the JVM answers null, and a made-up Package for it misleads
 callers (Kawa resolved unknown names as java.lang.Package objects).
 The runtime image is the jimage or, in a JDK that has them, the jmods.
 Without either on the classpath, every name is reported, as before."
-  (when (%runtime-image-package-p (substitute #\/ #\. (lstring name)))
-    (jstring "jrt:/java.base")))
+  (let ((package (substitute #\/ #\. (lstring name))))
+    (when (%runtime-image-package-p package)
+      (let ((module (gethash package *runtime-package-modules*)))
+        (jstring (if module
+                     (format nil "jrt:/~A" (lstring (slot-value module '|name|)))
+                     "jrt:/java.base"))))))
 
 ;; JDK 9+: BootLoader native — associate unnamed module with boot loader (no-op)
 (defun |jdk/internal/loader/BootLoader.setBootLoaderUnnamedModule0(Ljava/lang/Module;)V| (module)
   (declare (ignore module))
   nil)
 
-;; JDK 9+: Module.defineModule0 registers a module (name, packages, openness)
-;; with the VM's module graph.  OpenLDK runs everything as one unnamed module
-;; and enforces no module boundaries, so registration is a no-op.  Reached via
-;; java.lang.reflect.Proxy, which defines a dynamic module for each proxy class.
+;; The Java module implementation owns descriptors, reads, and exports;
+;; native registration associates its boot modules with our Class objects.
 (defun |java/lang/Module.defineModule0(Ljava/lang/Module;ZLjava/lang/String;Ljava/lang/String;[Ljava/lang/Object;)V|
     (module is-open version location packages)
-  (declare (ignore module is-open version location packages))
-  nil)
+  (declare (ignore is-open version location))
+  (%register-boot-module module packages))
 
 ;; The remaining Module graph natives (reads/exports edges) are likewise no-ops:
 ;; OpenLDK enforces no module boundaries, so all reads/exports already succeed.
@@ -1151,16 +1193,14 @@ Without either on the classpath, every name is reported, as before."
   (declare (ignore from pkg))
   nil)
 
-;; BootLoader$PackageHelper.findModule resolves a package location back to its
-;; java.base Module via ModuleLayer.boot().findModule(name).  OpenLDK only runs
-;; System.initPhase1 (VM.initLevel 1), so the boot module layer is never built
-;; and ModuleLayer.boot() is null -- Modules.findLoadedModule then NPEs.  Return
-;; null (module not found), which routes definePackage() down its manifest/URL
-;; fallback (BuiltinClassLoader.defineOrCheckPackage) to produce a module-less
-;; Package -- enough for Class.getPackage() to work on java.* classes.
+;; Resolve a runtime package location without recursively bootstrapping the
+;; module layer while its own classes are still being loaded.
 (setf (gethash "jdk/internal/loader/BootLoader$PackageHelper.findModule(Ljava/lang/String;)Ljava/lang/Module;"
                *native-overrides*)
-      (lambda (location) (declare (ignore location)) nil))
+      (lambda (location)
+        (let ((path (and location (lstring location))))
+          (when (and path (starts-with? "jrt:/" path))
+            (gethash (subseq path 5) *boot-modules*)))))
 
 ;; Return our boot-class-loader for getSystemClassLoader() so it's never nil
 (defun |java/lang/ClassLoader.getSystemClassLoader()Ljava/lang/ClassLoader;| ()
@@ -1173,11 +1213,6 @@ Without either on the classpath, every name is reported, as before."
   1)
 (setf (gethash "java/lang/ClassLoader.registerAsParallelCapable()Z" *native-overrides*)
       #'|java/lang/ClassLoader.registerAsParallelCapable()Z|)
-
-;; JDK 16+: Reference.refersTo0 — native method for weak reference checking
-;; Used by ThreadLocalMap.getEntry() to match WeakReference keys.
-(defmethod |refersTo0(Ljava/lang/Object;)Z| ((this |java/lang/ref/Reference|) obj)
-  (if (eq (slot-value this '|referent|) obj) 1 0))
 
 ;; JDK 9+: Reflection.getClassAccessFlags — return class modifiers
 (defun |jdk/internal/reflect/Reflection.getClassAccessFlags(Ljava/lang/Class;)I| (java-class)
@@ -1199,12 +1234,7 @@ Without either on the classpath, every name is reported, as before."
 ;; Delegates to the same logic as findBootstrapClass.
 (defmethod |findBootstrapClassOrNull(Ljava/lang/String;)Ljava/lang/Class;| (this name)
   (declare (ignore this))
-  (handler-case
-      (let ((ldk-class (classload (substitute #\/ #\. (lstring name)))))
-        (java-class ldk-class))
-    (condition (c)
-      (declare (ignore c))
-      nil)))
+  (%find-bootstrap-class name))
 
 ;; JDK 9+: createOrGetClassLoaderValueMap — called via JavaLangAccess interface.
 ;; Returns (and lazily creates) the ConcurrentHashMap on ClassLoader.classLoaderValueMap.

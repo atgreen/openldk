@@ -235,6 +235,66 @@ channel (FileInputStream.getChannel) reads that stream's descriptor."
 (defun |sun/nio/ch/FileDispatcherImpl.init()| ()
   nil)
 
+(defun %file-input-native-fd (input)
+  "INPUT's OS descriptor, rejecting closed or invalid FileInputStreams."
+  (let ((handle (%stream-fd input)))
+    (cond
+      ((typep handle 'sb-sys:fd-stream)
+       (unless (open-stream-p handle) (%throw '|java/io/IOException| "Stream Closed"))
+       (sb-sys:fd-stream-fd handle))
+      ((and (integerp handle) (not (minusp handle))) handle)
+      (t (%throw '|java/io/IOException| "Invalid file descriptor")))))
+
+(defmethod |isRegularFile0(Ljava/io/FileDescriptor;)Z| ((input |java/io/FileInputStream|) descriptor)
+  "Test the open descriptor's file type for JDK bulk-read optimizations."
+  (declare (ignore descriptor))
+  (handler-case
+      (if (sb-posix:s-isreg (sb-posix:stat-mode (sb-posix:fstat (%file-input-native-fd input)))) 1 0)
+    (sb-posix:syscall-error () (%throw '|java/io/IOException| "Could not stat input file"))))
+
+(defmethod |length0()J| ((input |java/io/FileInputStream|))
+  "Return the size of INPUT's open file."
+  (handler-case
+      (sb-posix:stat-size (sb-posix:fstat (%file-input-native-fd input)))
+    (sb-posix:syscall-error () (%throw '|java/io/IOException| "Could not determine input length"))))
+
+(defun %file-input-position (input &optional (position nil position-p))
+  "Query or set INPUT's logical position, accounting for Lisp read buffering."
+  (let ((fd (%file-input-native-fd input))
+        (handle (%stream-fd input)))
+    (when (and position-p (not (<= 0 position #x7fffffffffffffff)))
+      (%throw '|java/io/IOException| "Invalid input position"))
+    (handler-case
+        (if (typep handle 'sb-sys:fd-stream)
+            (progn
+              (when (and position-p (not (file-position handle position)))
+                (%throw '|java/io/IOException| "Could not seek input file"))
+              (or (file-position handle) (%throw '|java/io/IOException| "Input is not seekable")))
+            (sb-posix:lseek fd (if position-p position 0)
+                            (if position-p sb-posix:seek-set sb-posix:seek-cur)))
+      (sb-posix:syscall-error () (%throw '|java/io/IOException| "Could not seek input file"))
+      (stream-error () (%throw '|java/io/IOException| "Could not seek input stream")))))
+
+(defmethod |position0()J| ((input |java/io/FileInputStream|))
+  "Return INPUT's current logical read position."
+  (%file-input-position input))
+
+(defmethod |skip0(J)J| ((input |java/io/FileInputStream|) count)
+  "Seek a regular file forward or backward, including beyond EOF."
+  (let* ((before (%file-input-position input))
+         (after (if (eql count :end) (|length0()J| input) (+ before count))))
+    (%file-input-position input after)
+    (- after before)))
+
+(defun |sun/nio/ch/FileKey.init(Ljava/io/FileDescriptor;[J)V| (fd info)
+  "Identify FD's file by device and inode for NIO's shared lock table."
+  (handler-case
+      (let ((stat (sb-posix:fstat (%raw-fd fd))))
+        (setf (jaref info 0) (sb-posix:stat-dev stat)
+              (jaref info 1) (sb-posix:stat-ino stat)))
+    (sb-posix:syscall-error ()
+      (error (%lisp-condition (%make-throwable '|java/io/IOException|))))))
+
 (defun |sun/nio/ch/FileDispatcherImpl.size0(Ljava/io/FileDescriptor;)J| (fd)
   "Return the size of the file associated with FD."
   (let ((real-fd (%raw-fd fd)))
@@ -289,6 +349,22 @@ channel (FileInputStream.getChannel) reads that stream's descriptor."
       (sb-posix:syscall-error ()
         (error (%lisp-condition (%make-throwable '|java/io/IOException|)))))))
 
+(defmethod |sync0()V| ((descriptor |java/io/FileDescriptor|))
+  "Flush Lisp output buffers and synchronize the descriptor with stable storage."
+  (handler-case
+      (let ((stream (slot-value descriptor '|fd|)))
+        (when (typep stream 'sb-sys:fd-stream)
+          (unless (open-stream-p stream)
+            (%throw '|java/io/SyncFailedException| "Closed file descriptor"))
+          (when (output-stream-p stream) (finish-output stream)))
+        (let ((fd (%raw-fd descriptor)))
+          (unless (and (integerp fd) (not (minusp fd)))
+            (%throw '|java/io/SyncFailedException| "Invalid file descriptor"))
+          (sb-posix:fsync fd)))
+    (sb-posix:syscall-error () (%throw '|java/io/SyncFailedException| "Could not synchronize file"))
+    (stream-error () (%throw '|java/io/SyncFailedException| "Could not flush file")))
+  nil)
+
 (defun |sun/nio/ch/FileDispatcherImpl.write0(Ljava/io/FileDescriptor;JI)I| (fd ptr length)
   "Write LENGTH bytes from native buffer at PTR to file descriptor FD."
   (let ((real-fd (%raw-fd fd))
@@ -327,7 +403,6 @@ end of file, and an IOException on failure."
 
 (defun |sun/nio/ch/FileDispatcherImpl.init0()V| ()
   nil)
-
 
 
 (defun |sun/nio/ch/UnixFileDispatcherImpl.read0(Ljava/io/FileDescriptor;JI)I| (fd ptr length)
@@ -457,14 +532,31 @@ serves the MappedByteBuffer as is."
       (sb-posix:syscall-error () 0))))
 
 (defun |sun/nio/ch/UnixFileDispatcherImpl.lock0(Ljava/io/FileDescriptor;ZJJZ)I| (fd blocking pos size shared)
-  "File locking — single-process runtime, report success."
-  (declare (ignore fd blocking pos size shared))
-  0)
+  "Acquire a POSIX byte-range lock, preserving NIO's result codes."
+  (let ((lock (make-instance 'sb-posix:flock
+                            :type (if (zerop shared) sb-posix:f-wrlck sb-posix:f-rdlck)
+                            :whence sb-posix:seek-set :start pos :len size)))
+    (handler-case
+        (progn
+          (sb-posix:fcntl (%raw-fd fd)
+                          (if (zerop blocking) sb-posix:f-setlk sb-posix:f-setlkw)
+                          lock)
+          0)
+      (sb-posix:syscall-error (condition)
+        (let ((errno (sb-posix:syscall-errno condition)))
+          (cond
+            ((or (= errno sb-posix:eagain) (= errno sb-posix:eacces)) -1)
+            ((= errno sb-posix:eintr) 2)
+            (t (error (%lisp-condition (%make-throwable '|java/io/IOException|))))))))))
 
 (defun |sun/nio/ch/UnixFileDispatcherImpl.release0(Ljava/io/FileDescriptor;JJ)V| (fd pos size)
-  "Release a file lock — no-op."
-  (declare (ignore fd pos size))
-  nil)
+  "Release the POSIX byte-range lock held on FD."
+  (handler-case
+      (sb-posix:fcntl (%raw-fd fd) sb-posix:f-setlk
+                      (make-instance 'sb-posix:flock :type sb-posix:f-unlck
+                                     :whence sb-posix:seek-set :start pos :len size))
+    (sb-posix:syscall-error ()
+      (error (%lisp-condition (%make-throwable '|java/io/IOException|))))))
 
 (defun |sun/nio/ch/UnixFileDispatcherImpl.allocationGranularity0()J| ()
   4096)
@@ -996,4 +1088,3 @@ compiled Java readdir wrapper may overwrite the old readdir(J) symbol."
   (let* ((cp (constant-pool (ldk-class cp)))
          (i (slot-value (aref cp index) 'value)))
     i))
-

@@ -117,14 +117,14 @@ COMPACT-P slot of <context>).")
 #+sb-fiber
 (defun %dump-all-fiber-stacks (&key (stream *error-output*))
   "Dump state and backtraces for all fibers to STREAM."
-  (let ((fibers (sb-thread:list-all-fibers)))
+  (let ((fibers (uiop:symbol-call :sb-thread :list-all-fibers)))
     (when fibers
       (format stream "~&~%~80,,,'=@<~>~%")
       (format stream "Fiber dump (~D fiber~:P)~%" (length fibers))
       (format stream "~80,,,'=@<~>~%")
       (dolist (fiber fibers)
-        (let* ((state (sb-thread:fiber-state fiber))
-               (name (sb-thread:fiber-name fiber))
+        (let* ((state (uiop:symbol-call :sb-thread :fiber-state fiber))
+               (name (uiop:symbol-call :sb-thread :fiber-name fiber))
                (java-thread (gethash fiber *fiber-to-java-threads*)))
           (format stream "~&~%=== Fiber: ~A  state: ~A ===~%"
                   (or name fiber) state)
@@ -133,7 +133,7 @@ COMPACT-P slot of <context>).")
           (case state
             ((:suspended :created)
              (ignore-errors
-               (let ((bt (sb-thread:fiber-get-backtrace fiber)))
+               (let ((bt (uiop:symbol-call :sb-thread :fiber-get-backtrace fiber)))
                  (if bt
                      (loop for frame in bt
                            for i from 0
@@ -271,8 +271,7 @@ the forward pass)."
   (if *debug-unmuffle*
       (eval code) ; lint:suppress eval-usage
       (handler-bind
-          (#+ansi-cl
-           (style-warning (lambda (c)
+          ((style-warning (lambda (c)
                             (declare (ignore c))
                             (invoke-restart 'muffle-warning)))
            ;; Compiling a method replaces its stub.  When that happens while
@@ -280,8 +279,7 @@ the forward pass)."
            ;; Java), SBCL counts both DEFUNs as the file's and warns.
            (sb-int:duplicate-definition (lambda (c)
                                              (declare (ignore c))
-                                             (invoke-restart 'muffle-warning)))
-           )
+                                             (invoke-restart 'muffle-warning))))
         (eval code)))) ; lint:suppress eval-usage
 
 (defun lispize-method-name (name)
@@ -361,7 +359,8 @@ generic function, owner class and entry up again while they're unchanged."
         (let ((entry (and (typep gf 'java-generic-function)
                           ;; Read the version first: an invalidation after
                           ;; it leaves the site stale rather than wrong.
-                          (let* ((version (java-gf-invoke-special-version gf))
+                          (bordeaux-threads:with-recursive-lock-held ((java-gf-method-lock gf))
+                           (let* ((version (java-gf-invoke-special-version gf))
                                  (owner-class (find-class (invoke-special-site-owner-symbol site)))
                                  (entry (%compute-invoke-special-entry gf owner-class (length args))))
                             (when entry
@@ -374,7 +373,7 @@ generic function, owner class and entry up again while they're unchanged."
                                     (invoke-special-site-gf site) nil
                                     (invoke-special-site-version site) version
                                     (invoke-special-site-gf site) gf))
-                            entry))))
+                            entry)))))
           (if entry
               (funcall (car entry) args (cdr entry))
               (invoke-special (invoke-special-site-method-symbol site)
@@ -397,10 +396,11 @@ the normal call-next-method chain for the owner's superclasses."
       (let* ((cache (java-gf-invoke-special-cache gf))
              (entry (gethash owner-class cache)))
         (unless entry
-          (setf entry (%compute-invoke-special-entry gf owner-class (length args)))
-          (when entry
-            (bordeaux-threads:with-lock-held ((java-gf-cache-lock gf))
-              (setf (gethash owner-class cache) entry))))
+          (bordeaux-threads:with-recursive-lock-held ((java-gf-method-lock gf))
+            (setf entry (%compute-invoke-special-entry gf owner-class (length args)))
+            (when entry
+              (bordeaux-threads:with-lock-held ((java-gf-cache-lock gf))
+                (setf (gethash owner-class cache) entry)))))
         (when entry
           (return-from invoke-special
             (funcall (car entry) args (cdr entry))))))
@@ -1438,6 +1438,7 @@ classes with the same name."
                       (if (%user-ldk-loader-p loader)
                           (cons loader method-key)
                           method-key))))
+    (%verify-class-for-java class)
     ;; Skip bytecode compilation for methods with native overrides.
     ;; Replace the stub with the native function so the stub doesn't loop.
     (when (%install-native-override class method method-key)
@@ -1516,6 +1517,11 @@ classes with the same name."
              (error (c)
                ;; Compilation failed (IR translation, codegen, or eval error).
                (format *error-output* "~&;; JIT-ERROR in ~A: ~A~%" method-key c)
+               (when (typep c '|condition-java/lang/Throwable|)
+                 (let ((throwable (slot-value c '|objref|)))
+                   (format *error-output* ";; ~A: ~A~%"
+                           (class-name (class-of throwable))
+                           (lstring (slot-value throwable '|detailMessage|)))))
                (force-output *error-output*)
                (%install-jit-error-stub class method method-key)
                (setf compilation-completed t)))
@@ -1598,11 +1604,13 @@ naming what the <clinit> threw."
     (error (%lisp-condition ncdfe))))
 
 (defun %clinit (class)
-  (let ((class (gethash (name class) *ldk-classes-by-bin-name*)))
+  (%verify-class-for-java class)
+  (let ()
     (assert
      (or class (internal-error "Can't find ~A" class)))
     (labels ((clinit (class)
-               (let ((super-class (gethash (slot-value class 'super) *ldk-classes-by-bin-name*)))
+               (let ((super-class (and (super class)
+                                       (%resolve-class (super class) (ldk-loader class)))))
                  (when (and super-class (not (initialized-p super-class)))
                    (clinit super-class)))
                (let ((<clinit>-method (find-if
@@ -1789,16 +1797,15 @@ name declared somewhere in CLASS's superclass chain (distinct fields in
 the JVM -- javac's synthetic this$0 outer references do this routinely)."
   (and (zerop (logand 8 (slot-value field 'access-flags)))   ; instance field
        (let ((field-name (slot-value field 'name)))
-         (loop with cname = (slot-value class 'super)
-               while cname
-               for super-class = (find-class-in-loader-hierarchy cname ldk-loader)
+         (loop for super-class = (and (super class) (%resolve-class (super class) ldk-loader))
+                 then (and (super super-class)
+                           (%resolve-class (super super-class) (ldk-loader super-class)))
                while super-class
                when (find-if (lambda (sf)
                                (and (string= (slot-value sf 'name) field-name)
                                     (zerop (logand 8 (slot-value sf 'access-flags)))))
                              (fields super-class))
-                 return t
-               do (setf cname (slot-value super-class 'super))))))
+                 return t))))
 
 (defun %field-slot-symbol (class field ldk-loader)
   "CLOS slot symbol for FIELD of CLASS: the plain mangled name, or a
@@ -1807,8 +1814,7 @@ shadows a superclass field and needs its own storage."
   (let ((mangled (mangle-field-name (slot-value field 'name))))
     (if (%field-shadows-super-p class field ldk-loader)
         (let ((sym (intern (format nil "~A$~A" mangled (slot-value class 'name)) :openldk)))
-          (setf (gethash (format nil "~A.~A" (slot-value class 'name) (slot-value field 'name))
-                         *field-shadow-slots*)
+          (setf (gethash (cons class (slot-value field 'name)) *field-shadow-slots*)
                 sym)
           sym)
         (intern mangled :openldk))))
@@ -1866,12 +1872,25 @@ shadows a superclass field and needs its own storage."
   "Lazy-compilation stub methods installed by %INSTALL-METHOD-STUBS, so
 %INSTALL-METHOD-DEFINITION can tell whether compiling replaced one.")
 
+(defun %reentrant-method-compilation-p (class-ref method-index)
+  "True if this thread is already compiling the method its stub is entering."
+  (let* ((class (if (stringp class-ref) (%get-ldk-class-by-bin-name class-ref) class-ref))
+         (method (aref (methods class) (1- method-index)))
+         (name (format nil "~A.~A~A" (name class) (name method) (descriptor method)))
+         (loader (ldk-loader class))
+         (key (if (%user-ldk-loader-p loader) (cons loader name) name)))
+    (bt:with-lock-held (*method-compilation-lock*)
+      (eq (gethash key *methods-being-compiled*) (bt:current-thread)))))
+
 (defun %static-method-stub (class-ref method-index fn-symbol)
   "A static method's lazy stub: compile method METHOD-INDEX of CLASS-REF,
 which replaces FN-SYMBOL's definition, then call the new definition."
   (lambda (&rest args)
-    (%compile-method class-ref method-index)
-    (apply fn-symbol args)))
+    (if (%reentrant-method-compilation-p class-ref method-index)
+        (%execute-verified-bytecode class-ref method-index nil args)
+        (progn
+          (%compile-method class-ref method-index)
+          (apply fn-symbol args)))))
 
 (defun %instance-method-stub (gf class-ref method-index method-symbol class-symbol param-count)
   "A standard method on GF specialized on CLASS-SYMBOL whose function compiles
@@ -1886,8 +1905,11 @@ the new one."
                                                    (make-list param-count :initial-element (find-class t)))
                                :function (lambda (args next-methods)
                                            (declare (ignore next-methods))
-                                           (%compile-method class-ref method-index)
-                                           (invoke-special method-symbol class-symbol args)))))
+                                           (if (%reentrant-method-compilation-p class-ref method-index)
+                                               (%execute-verified-bytecode class-ref method-index (first args) (rest args))
+                                               (progn
+                                                 (%compile-method class-ref method-index)
+                                                 (invoke-special method-symbol class-symbol args)))))))
     (setf (gethash method *method-stubs*) t)
     method))
 
@@ -1896,6 +1918,7 @@ the new one."
 bytecode to compile: a function for a static method, a method on its
 generic function for an instance method.  The stubs are closures, made
 without running the compiler, since most methods are never called."
+  (%install-jni-method-stubs class ldk-loader)
   (unless (equal (name class) "java/util/zip/ZipFile")
     (let ((pkg (loader-package ldk-loader))
           (class-ref (%stub-class-reference class))
@@ -1925,11 +1948,7 @@ without running the compiler, since most methods are never called."
 
 (defun find-class-in-loader-hierarchy (classname ldk-loader)
   "Search for class in this loader and all parent loaders sharing the same package."
-  (when ldk-loader
-    (or (gethash classname (slot-value ldk-loader 'ldk-classes-by-bin-name))
-        (let ((parent (slot-value ldk-loader 'parent-loader)))
-          (when parent
-            (find-class-in-loader-hierarchy classname parent))))))
+  (%lookup-class-with-delegation ldk-loader classname 'ldk-classes-by-bin-name))
 
 (defun %classload-from-stream (classname classfile-stream class-loader ldk-loader)
   "Load a class from a stream. CLASS-LOADER is the java.lang.ClassLoader object.
@@ -1952,7 +1971,9 @@ without running the compiler, since most methods are never called."
                                                         (substitute #\. #\/ classname)
                                                         "/anonymous-class"))
               (class
-                (let ((c (read-classfile classfile-stream)))
+                (let ((c (handler-case (read-classfile classfile-stream)
+                           (bytecode-verification-error (condition)
+                             (%throw-verification-error condition)))))
                   (setf (name c) classname)
                   (setf (slot-value c 'ldk-loader) ldk-loader)
                   ;; Store in loader's hash tables
@@ -1984,16 +2005,9 @@ without running the compiler, since most methods are never called."
                                 (cname (jstring fq-classname)))
                             (with-slots (|name| |classLoader|) klass
                               (setf |name| cname)
-                              (setf |classLoader| class-loader))
-                            ;; JDK 9+: set unnamed module so Class.getModule() is non-null.
-                            ;; The application's classes are in their loader's.
-                            (when (and *unnamed-module* (slot-exists-p klass '|module|))
-                              (setf (slot-value klass '|module|)
-                                    (or (and (eq ldk-loader *app-ldk-class-loader*)
-                                             *boot-class-loader*
-                                             (slot-exists-p *boot-class-loader* '|unnamedModule|)
-                                             (slot-value *boot-class-loader* '|unnamedModule|))
-                                        *unnamed-module*)))
+                              (setf |classLoader| (or class-loader
+                                                     (and (eq ldk-loader *app-ldk-class-loader*)
+                                                          (java-loader ldk-loader)))))
                             klass))))
            (setf (java-class class) klass)
            ;; JDK 25: Class.getModifiers(), isInterface() and isEnum() read the
@@ -2017,6 +2031,9 @@ without running the compiler, since most methods are never called."
            (setf (slot-value klass '|classLoader|)
                  (or class-loader
                      (and (eq ldk-loader *app-ldk-class-loader*) *boot-class-loader*)))
+           (when (and *unnamed-module* (slot-exists-p klass '|module|))
+             (setf (slot-value klass '|module|)
+                   (%defining-class-module classname ldk-loader (slot-value klass '|classLoader|))))
            ;; Store in loader's java-class hash tables
            (setf (gethash classname (slot-value ldk-loader 'java-classes-by-bin-name)) klass)
            (setf (gethash fq-classname (slot-value ldk-loader 'java-classes-by-fq-name)) klass)
@@ -2152,14 +2169,9 @@ parent could also provide."
                                                                       (ldk-loader class))))))))))
 
 (defun %resolve-class (classname ldk-loader)
-  "Resolve CLASSNAME as referenced from a class defined by LDK-LOADER, and
-return its <class>, or NIL if it cannot be found.  Looks in LDK-LOADER's
-tables and its parents', then the JDK and the classpath, and finally, for
-a user-defined class loader, asks the Java loader itself with loadClass.
-That last step finds classes a loader only defines on demand from
-findClass, as ABCL's MemoryClassLoader does.  A loader that overrides
-loadClass (child-first) is asked before the classpath, since it may define
-its own class of a name the classpath also has."
+  "Resolve CLASSNAME through its defining LDK-LOADER, or return NIL.
+A user loader's loadClass implements its complete delegation policy; the
+application classpath must not be searched on that loader's behalf."
   (let* ((classname (coerce classname 'string))
          (java-loader (and ldk-loader (slot-value ldk-loader 'java-loader)))
          (askable (and java-loader
@@ -2179,14 +2191,13 @@ its own class of a name the classpath also has."
                          (when java-class
                            (get-ldk-class-for-java-class java-class)))
                      (|condition-java/lang/ClassNotFoundException| () nil)))))))
-      (or (and ldk-loader
-               (%get-ldk-class-by-bin-name classname t ldk-loader))
-          (and askable
-               (%overrides-load-class-p java-loader)
-               (ask-java-loader))
-          (%classload-system classname)
-          (and askable
-               (ask-java-loader))))))
+      (if askable
+          ;; Only this loader's own definitions may bypass its delegation
+          ;; policy. A null-parent loader must not see the app classpath.
+          (or (gethash classname (slot-value ldk-loader 'ldk-classes-by-bin-name))
+              (ask-java-loader))
+          (or (and ldk-loader (%get-ldk-class-by-bin-name classname t ldk-loader))
+              (%classload-system classname))))))
 
 (defun %resolve-class-in-context (classname)
   "Resolve CLASSNAME for the method being compiled: through the loader of
@@ -2331,7 +2342,7 @@ the class being compiled when there is one, as the JVM resolves references."
                                (matches "Library/Java/JavaVirtualMachines/*/Contents/Home/")
                                (matches "Library/Java/JavaVirtualMachines/*/Contents/Home/" home))))))))
 
-(defun ensure-JAVA_HOME ()
+(defun ensure-java-home ()
   (let* ((JAVA_HOME (uiop:getenvp "JAVA_HOME"))
          (major (and JAVA_HOME (%java-home-major-version JAVA_HOME))))
     ;; No JDK 25 given: use an installed one, or else download our own,
@@ -2426,7 +2437,7 @@ properties, and *CLASSPATH* construction."
   ;; Stamp the VM start time (RuntimeMXBean.getStartTime) on first entry.
   (unless *vm-start-time-millis*
     (setf *vm-start-time-millis* (|java/lang/System.currentTimeMillis()J|)))
-  (ensure-JAVA_HOME)
+  (ensure-java-home)
   ;; Install SIGQUIT handler for debugging hangs (send kill -3 to dump all stacks)
   (install-sigquit-handler)
   (install-dump-watchdog)
@@ -2533,11 +2544,11 @@ seconds instead."
               (loop for java-thread being the hash-values of *fiber-to-java-threads*
                     when (and (not (%thread-daemon-p java-thread))
                               (let ((fiber (gethash java-thread *java-to-fibers*)))
-                                (and fiber (sb-thread:fiber-alive-p fiber))))
+                                (and fiber (uiop:symbol-call :sb-thread :fiber-alive-p fiber))))
                       collect java-thread))
             #-sb-fiber
             (fiber-threads nil))
-        (let ((java-threads (append platform-threads fiber-threads)))
+        (let ((java-threads (append platform-threads fiber-threads (%jni-nondaemon-threads))))
           (cond
             ((null java-threads)
              ;; No sleep first: every non-daemon thread has ended, so what
@@ -2558,6 +2569,8 @@ seconds instead."
    DUMP-DIR: The directory into which internal debug info is dumped.
    AOT: Ahead-of-time compilation directory (generate Lisp source files)."
   (%main-runtime-setup classpath dump-dir aot)
+  (when (plusp (hash-table-count *java-references*))
+    (%ensure-java-reference-processor))
   (if *aot-dir*
       (%run-aot-main mainclass aot)
       (let* ((class (classload (substitute #\/ #\. mainclass)))
@@ -2852,7 +2865,7 @@ supplies additional system properties as (name . value) pairs."
   ;; openldk.asd proclaims it around compiling OpenLDK itself, but an image
   ;; built from already-compiled files would otherwise keep the default.
   (proclaim '(optimize (speed 3) (safety 1) (debug 1)))
-  (ensure-JAVA_HOME)
+  (ensure-java-home)
   ;; Allow build-time control of DCE via environment (since main isn't invoked during image build)
   (let ((LDK_DCE (uiop:getenv "LDK_DCE")))
     (when (and LDK_DCE (plusp (length LDK_DCE)))

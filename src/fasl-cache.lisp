@@ -131,13 +131,13 @@ code, and the runtime functions it calls, are those of one build."
                     dir)
                 (error () nil)))))))
 
-(defparameter +fasl-cache-unused-days+ 14
+(defparameter *fasl-cache-unused-days* 14
   "Other builds' cache directories untouched this many days are deleted.")
 
 (defun %fasl-cache-prune (root current)
   "Delete the directories under ROOT of builds other than CURRENT's that
-haven't run for +FASL-CACHE-UNUSED-DAYS+."
-  (let ((cutoff (- (get-universal-time) (* +fasl-cache-unused-days+ 24 60 60))))
+haven't run for *FASL-CACHE-UNUSED-DAYS*."
+  (let ((cutoff (- (get-universal-time) (* *fasl-cache-unused-days* 24 60 60))))
     (dolist (dir (uiop:subdirectories root))
       (unless (equal (namestring dir) (namestring current))
         (ignore-errors
@@ -175,7 +175,7 @@ image configures it afresh."
   ((what :initarg :what :reader uncacheable-what))
   (:report (lambda (c s) (format s "can't cache code holding ~A" (uncacheable-what c)))))
 
-(defparameter +primitive-class-names+
+(defparameter *primitive-class-names*
   '("boolean" "byte" "char" "short" "int" "long" "float" "double" "void"))
 
 (defun %dependency-fingerprint (bin-name loader &optional resolve)
@@ -203,7 +203,7 @@ the compiler would.  Signals UNCACHEABLE for a user loader's class."
   (sort (loop for name being the hash-keys of dependencies
               unless (or (zerop (length name))
                          (char= (char name 0) #\[)
-                         (member name +primitive-class-names+ :test #'string=))
+                         (member name *primitive-class-names* :test #'string=))
                 collect (cons name (%dependency-fingerprint name loader)))
         #'string< :key #'car))
 
@@ -346,7 +346,7 @@ LOAD-TIME-VALUE form that makes it.  Signals UNCACHEABLE when one can't be."
 ;; into dynamic space, but loads a FASL's code into the one space
 ;; *COMPILE-FILE-TO-MEMORY-SPACE* names, failing when it is immobile space
 ;; and that is full.  An image's warmed-up methods fill much of it.
-(defparameter +fasl-cache-text-space-limit+ 0.9
+(defparameter *fasl-cache-text-space-limit* 0.9
   "The fraction of immobile (text) space past which cached code loads
 into dynamic space instead.")
 
@@ -355,7 +355,7 @@ into dynamic space instead.")
 code where EVAL would put it."
   (let ((sb-c:*compile-file-to-memory-space*
           (if (< (- (sb-sys:sap-int sb-vm:*text-space-free-pointer*) sb-vm:text-space-start)
-                 (* +fasl-cache-text-space-limit+ sb-vm:text-space-size))
+                 (* *fasl-cache-text-space-limit* sb-vm:text-space-size))
               :immobile
               :dynamic)))
     (handler-bind ((warning #'muffle-warning))

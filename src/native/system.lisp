@@ -45,7 +45,7 @@
 ;;; SystemProps$Raw.platformProperties/vmProperties (JDK 9+) and the
 ;;; legacy System.initProperties.
 
-(defparameter +java-identity-properties+
+(defparameter *java-identity-properties*
   '(("java.specification.version" . "25")
     ("java.specification.name" . "Java Platform API Specification")
     ("java.specification.vendor" . "Oracle Corporation")
@@ -69,7 +69,7 @@
     ("log4j2.disable.jmx" . "true"))
   "Static java.* identity strings shared by all property providers.")
 
-(defparameter +encoding-properties+
+(defparameter *encoding-properties*
   '(("file.encoding" . "UTF-8")
     ("file.encoding.pkg" . "sun.io")
     ("native.encoding" . "UTF-8")
@@ -189,8 +189,8 @@
 
 (defun |jdk/internal/util/SystemProps$Raw.vmProperties()[Ljava/lang/String;| ()
   "Return String[] of key-value pairs for JDK 25 VM properties."
-  (let* ((pairs (append +java-identity-properties+
-                        +encoding-properties+
+  (let* ((pairs (append *java-identity-properties*
+                        *encoding-properties*
                         (%vm-dynamic-properties)))
          ;; Flatten to alternating key-value string array
          (flat (loop for (k . v) in pairs
@@ -202,8 +202,8 @@
                      :initial-contents arr)))
 
 (defun |java/lang/System.initProperties(Ljava/util/Properties;)| (props)
-  (dolist (prop (append +java-identity-properties+
-                        +encoding-properties+
+  (dolist (prop (append *java-identity-properties*
+                        *encoding-properties*
                         (%vm-dynamic-properties)
                         `(("user.home" . ,(uiop:getenv "HOME"))
                           ("user.dir" . ,(%current-directory-string))
@@ -641,7 +641,7 @@ name after its package, $ and all."
         nil
         t)))
 
-(defvar *unsafe-memory-table* (make-hash-table))
+(defvar *unsafe-memory-table* (make-hash-table :synchronized t))
 
 
 (defun |java/lang/System.mapLibraryName(Ljava/lang/String;)Ljava/lang/String;| (library-name)
@@ -666,8 +666,10 @@ name after its package, $ and all."
   "The binary name the class file in BYTES (from OFFSET, LENGTH long)
 declares: defineClass's for a null name, as the JVM takes it (the Scala
 REPL defines its classes so)."
-  (name (read-classfile (make-instance 'byte-array-input-stream
-                                       :array bytes :start offset :end (+ offset length)))))
+  (handler-case
+      (name (read-classfile (make-instance 'byte-array-input-stream
+                                         :array bytes :start offset :end (+ offset length))))
+    (bytecode-verification-error (condition) (%throw-verification-error condition))))
 
 (defun |java/lang/ClassLoader.defineClass1(Ljava/lang/ClassLoader;Ljava/lang/String;[BIILjava/security/ProtectionDomain;Ljava/lang/String;)Ljava/lang/Class;|
     (loader name bytes offset len pd source)
@@ -689,6 +691,18 @@ REPL defines its classes so)."
     (when pd
       (setf (gethash (java-class result) *protection-domains*) pd))
     (java-class result)))
+
+(defun |java/lang/ClassLoader.defineClass2(Ljava/lang/ClassLoader;Ljava/lang/String;Ljava/nio/ByteBuffer;IILjava/security/ProtectionDomain;Ljava/lang/String;)Ljava/lang/Class;|
+    (loader name buffer offset length protection-domain source)
+  "Define from a direct ByteBuffer without changing its position or limit."
+  (unless (and (not (minusp offset)) (not (minusp length))
+               (<= (+ offset length) (|limit()I| buffer)))
+    (%throw '|java/lang/IndexOutOfBoundsException|))
+  (let ((bytes (make-java-array :component-class (%get-java-class-by-bin-name "byte") :size length)))
+    (dotimes (index length)
+      (setf (jaref bytes index) (|get(I)B| buffer (+ offset index))))
+    (|java/lang/ClassLoader.defineClass1(Ljava/lang/ClassLoader;Ljava/lang/String;[BIILjava/security/ProtectionDomain;Ljava/lang/String;)Ljava/lang/Class;|
+     loader name bytes 0 length protection-domain source)))
 
 (defvar *hidden-class-data* (make-hash-table :test #'eq)
   "Maps a hidden class's java.lang.Class object to the classData passed to
@@ -771,6 +785,8 @@ MethodHandles.classData().")
           (with-slots (|name| |classLoader|) klass
             (setf |name| cname)
             (setf |classLoader| loader))
+          (when (and *unnamed-module* (slot-exists-p klass '|module|))
+            (setf (slot-value klass '|module|) (%defining-class-module classname ldk-loader loader)))
           (setf (java-class class) klass)
           (setf (gethash classname (slot-value ldk-loader 'java-classes-by-bin-name)) klass)
           (setf (gethash fq-classname (slot-value ldk-loader 'java-classes-by-fq-name)) klass)
@@ -831,7 +847,8 @@ MethodHandles.classData().")
            (ignore native-h))
   1)
 
-(defmethod |notifyAll()V| ((objref |java/lang/Object|))
+(defun %java-notify-all (objref)
+  "Notify all waiters on any Java object representation, including arrays."
   (let* ((monitor (%get-monitor objref))
          (mutex (mutex monitor))
          (cv (condition-variable monitor))
@@ -842,6 +859,9 @@ MethodHandles.classData().")
       (when (wait-set monitor)
         (setf (wait-set monitor) nil)
         (sb-thread:condition-broadcast cv)))))
+
+(defmethod |notifyAll()V| ((object |java/lang/Object|)) (%java-notify-all object))
+(defmethod |notifyAll()V| ((object java-array)) (%java-notify-all object))
 
 (defun |sun/misc/URLClassPath.getLookupCacheURLs(Ljava/lang/ClassLoader;)| (class-loader)
   (declare (ignore class-loader))
@@ -889,9 +909,9 @@ FileNotFoundException."
   (%with-file-open-errors (filename)
     (let ((stream (open (lstring filename)
                         :element-type '(unsigned-byte 8)
-                        :direction (ecase mode
-                                     (1 :input)
-                                     (2 :io))))
+                        :direction (if (logtest mode 2) :io :input)
+                        :if-exists :overwrite
+                        :if-does-not-exist (if (logtest mode 2) :create :error)))
           (fd (slot-value fis '|fd|)))
       ;; Store the stream inside the FileDescriptor (the RAF constructor set
       ;; fis.fd = new FileDescriptor()) so valid()/getFD() see a real fd.
@@ -935,7 +955,7 @@ FileNotFoundException."
           while byte
           do (setf (jaref byte-array i) (if (> byte 127) (- byte 256) byte))
              (incf bytes-read))  ; Count bytes read
-    bytes-read))
+    (if (and (zerop bytes-read) (plusp length)) -1 bytes-read)))
 
 (defmethod |open0(Ljava/lang/String;)V| ((fis |java/io/FileInputStream|) filename)
   (%with-file-open-errors (filename)
@@ -969,17 +989,6 @@ its FileDescriptor's fd (or its own fd slot), resolved by %RESOLVE-FD."
     (%resolve-fd (if (and file-descriptor (slot-exists-p file-descriptor '|fd|))
                      (slot-value file-descriptor '|fd|)
                      file-descriptor))))
-
-(defmethod |skip0(J)J| ((fis |java/io/FileInputStream|) n)
-  (let* ((in-stream (%stream-fd fis))
-         (bytes-read 0))
-    (when (eq n :END)
-      (setf n 999999999999))
-    (loop for i from 0 below n
-          for byte = (read-byte in-stream nil nil)
-          while byte
-          do (incf bytes-read))
-    bytes-read))
 
 (defmethod |readBytes([BII)I| ((fis |java/io/FileInputStream|) byte-array offset length)
   (let* ((fd (%stream-fd fis))
@@ -1334,7 +1343,8 @@ a directory that can be read, as the JDK's native answers."
   nil)
 
 (defmethod |java/lang/System.gc()V| ()
-  (trivial-garbage:gc))
+  ;; Match Runtime.gc, including references retained across image restore.
+  (sb-ext:gc :gen 7))
 
 (defun |java/lang/Thread.sleep(J)V| (milliseconds)
   "Legacy public native sleep(J) — newer JDKs compile this as bytecode
@@ -1353,14 +1363,14 @@ implementation therefore lives in %java-thread-sleep."
     (when (and current-java-thread
                (gethash current-java-thread *thread-interrupted*))
       ;; Clear interrupt flag and throw InterruptedException
-      (setf (gethash current-java-thread *thread-interrupted*) nil)
+      (%clear-java-thread-interrupt current-java-thread)
       (let ((exc (%make-java-instance "java/lang/InterruptedException")))
         (|<init>()V| exc)
         (error (%lisp-condition exc))))
     ;; Sleep — use fiber-sleep when in fiber context
     #+sb-fiber
     (if (in-fiber-p)
-        (sb-thread:fiber-sleep (/ milliseconds 1000.0))
+        (uiop:symbol-call :sb-thread :fiber-sleep (/ milliseconds 1000.0))
         (sleep (/ milliseconds 1000.0)))
     #-sb-fiber
     (sleep (/ milliseconds 1000.0))
@@ -1368,14 +1378,14 @@ implementation therefore lives in %java-thread-sleep."
     (when (and current-java-thread
                (gethash current-java-thread *thread-interrupted*))
       ;; Clear interrupt flag and throw InterruptedException
-      (setf (gethash current-java-thread *thread-interrupted*) nil)
+      (%clear-java-thread-interrupt current-java-thread)
       (let ((exc (%make-java-instance "java/lang/InterruptedException")))
         (|<init>()V| exc)
         (error (%lisp-condition exc))))))
 
 (defun %string-to-signed-byte-array (string)
   "Encode STRING as a Java byte[] using the platform encoding.  OpenLDK
-pins sun.jnu.encoding/native.encoding to UTF-8 (+encoding-properties+),
+pins sun.jnu.encoding/native.encoding to UTF-8 (*encoding-properties*),
 so UTF-8 here matches what Java code reads from those properties.
 Java byte[] data stores signed bytes, so octets are converted."
   (make-java-array
@@ -1413,7 +1423,7 @@ Java byte[] data stores signed bytes, so octets are converted."
 (defun |java/lang/Thread.yield()V| ()
   #+sb-fiber
   (when (in-fiber-p)
-    (sb-thread:fiber-yield)
+    (uiop:symbol-call :sb-thread :fiber-yield)
     (return-from |java/lang/Thread.yield()V|))
   ;; Platform thread: actually yield the OS thread; a no-op busy-spins j.u.c
   ;; spin-then-yield backoff loops.  See Thread.yield0 in native/threads.lisp.
@@ -1446,33 +1456,34 @@ present.  Consumed by Thread.getState()/start()/getThreadGroup()."
          (lisp-thread
           (bordeaux-threads:make-thread
            (lambda ()
-             ;; Register this Lisp thread with the Java Thread
-             (setf (gethash (bordeaux-threads:current-thread) *lisp-to-java-threads*) thread)
-             (unwind-protect
-                  ;; Call the Thread's run() method
-                  (handler-case
-                      (handler-bind
-                          ((error
-                             (lambda (e)
-                               (when debug-codegen
-                                 (format *error-output*
-                                         "~&Error signalled in ~A: ~A~%" thread e)
-                                 (sb-debug:print-backtrace
-                                  :stream *error-output* :count 60)))))
-                        (|run()V| thread))
-                    (error (e)
-                      (format *error-output* "~&Thread ~A terminated with error: ~A~%" thread e)))
-               ;; On termination: mark not-alive (eetop=0) and wake any thread
-               ;; blocked in Thread.join(), which does `while (isAlive()) wait(0)`
-               ;; on this Thread object -- the JVM notifies join waiters here.
-               (when (slot-exists-p thread '|eetop|)
-                 (setf (slot-value thread '|eetop|) 0))
-               (%set-thread-status thread 2) ; TERMINATED
-               (ignore-errors
-                (monitor-enter thread)
-                (unwind-protect
-                     (|notifyAll()V| thread)
-                  (monitor-exit thread)))))
+             (let ((*scoped-value-cache* nil))
+               ;; Register this Lisp thread with the Java Thread
+               (setf (gethash (bordeaux-threads:current-thread) *lisp-to-java-threads*) thread)
+               (unwind-protect
+                    ;; Call the Thread's run() method
+                    (handler-case
+                        (handler-bind
+                            ((error
+                               (lambda (e)
+                                 (when debug-codegen
+                                   (format *error-output*
+                                           "~&Error signalled in ~A: ~A~%" thread e)
+                                   (sb-debug:print-backtrace
+                                    :stream *error-output* :count 60)))))
+                          (|run()V| thread))
+                      (error (e)
+                        (format *error-output* "~&Thread ~A terminated with error: ~A~%" thread e)))
+                 ;; On termination: mark not-alive (eetop=0) and wake any thread
+                 ;; blocked in Thread.join(), which does `while (isAlive()) wait(0)`
+                 ;; on this Thread object -- the JVM notifies join waiters here.
+                 (when (slot-exists-p thread '|eetop|)
+                   (setf (slot-value thread '|eetop|) 0))
+                 (%set-thread-status thread 2) ; TERMINATED
+                 (ignore-errors
+                  (monitor-enter thread)
+                  (unwind-protect
+                       (|notifyAll()V| thread)
+                    (monitor-exit thread))))))
            :name (format nil "Java-Thread-~A" (slot-value thread '|name|)))))
     ;; Store the Lisp thread in our mapping
     (setf (gethash thread *java-threads*) lisp-thread)))
@@ -1493,18 +1504,20 @@ present.  Consumed by Thread.getState()/start()/getThreadGroup()."
     (return-from |interrupt0()V|))
   ;; If the thread has an associated Lisp thread, interrupt it.
   (let ((lisp-thread (gethash thread *java-threads*)))
-    (when lisp-thread
+    (when (and lisp-thread (bt:thread-alive-p lisp-thread))
       ;; Interrupt the Lisp thread to wake it from blocking operations
-      (bordeaux-threads:interrupt-thread
+      (handler-case (bordeaux-threads:interrupt-thread
        lisp-thread
        (lambda ()
          ;; Check if interrupted flag is set and throw InterruptedException
          (when (gethash thread *thread-interrupted*)
            (let ((exc (%make-java-instance "java/lang/InterruptedException")))
              (|<init>()V| exc)
-             (error (%lisp-condition exc)))))))))
+             (error (%lisp-condition exc))))))
+        (sb-thread:interrupt-thread-error () nil)))))
 
-(defmethod |notify()V| ((objref |java/lang/Object|))
+(defun %java-notify (objref)
+  "Notify one waiter on any Java object representation, including arrays."
   (let* ((monitor (%get-monitor objref))
          (mutex (mutex monitor))
          (cv (condition-variable monitor))
@@ -1515,6 +1528,9 @@ present.  Consumed by Thread.getState()/start()/getThreadGroup()."
       (when (wait-set monitor)
         (pop (wait-set monitor))
         (sb-thread:condition-broadcast cv)))))
+
+(defmethod |notify()V| ((object |java/lang/Object|)) (%java-notify object))
+(defmethod |notify()V| ((object java-array)) (%java-notify object))
 
 (defun |java/util/concurrent/atomic/AtomicLong.VMSupportsCS8()| ()
   0)
@@ -1595,24 +1611,30 @@ present.  Consumed by Thread.getState()/start()/getThreadGroup()."
 parent delegation is the Java caller's job)."
   (|java/lang/ClassLoader.findLoadedClass0(Ljava/lang/String;)Ljava/lang/Class;| loader name))
 
+(defmethod |findClass(Ljava/lang/String;)Ljava/lang/Class;| :around ((loader |java/lang/ClassLoader|) name)
+  "Serve the application classpath only for OpenLDK's system loader."
+  (if (eq loader *boot-class-loader*)
+      (let ((class (%classload-system (substitute #\/ #\. (lstring name)))))
+        (if class (java-class class) (%throw '|java/lang/ClassNotFoundException| (lstring name))))
+      (call-next-method)))
+
+(defun %find-bootstrap-class (name)
+  "Find a runtime-image class without consulting the application classpath."
+  (let* ((binary-name (substitute #\/ #\. (lstring name)))
+         (slash (position #\/ binary-name :from-end t)))
+    (when (and slash (jdk-class-p binary-name)
+               (%runtime-image-package-p (subseq binary-name 0 slash)))
+      (when-let ((class (%classload-system binary-name)))
+        (java-class class)))))
+
 (defmethod |findBootstrapClass(Ljava/lang/String;)Ljava/lang/Class;| ((loader |java/lang/ClassLoader|) name)
-  (handler-case
-      (let ((ldk-class (%classload-system (substitute #\/ #\. (lstring name)))))
-        (java-class ldk-class))
-    (condition (c)
-      (declare (ignore c))
-      nil)))
+  (%find-bootstrap-class name))
 
 ;; JDK 17: findBootstrapClass is a private static native method.  Only the
-;; boot and app loaders' classes: a class a user loader defined is not a
-;; bootstrap class, though the global by-name table holds it too.
+;; runtime-image classes: neither application classes nor classes belonging
+;; to user loaders are visible through a null parent.
 (defun |java/lang/ClassLoader.findBootstrapClass(Ljava/lang/String;)Ljava/lang/Class;| (name)
-  (handler-case
-      (let ((ldk-class (%classload-system (substitute #\/ #\. (lstring name)))))
-        (java-class ldk-class))
-    (condition (c)
-      (declare (ignore c))
-      nil)))
+  (%find-bootstrap-class name))
 
 (defvar *native-url-strings* (make-hash-table :test #'eq)
   "URL strings attached to resource URLs constructed by OpenLDK.")
@@ -1818,10 +1840,8 @@ same-named defmethod."
 (defmethod |createLong(Ljava/lang/String;IIJ)Ljava/nio/ByteBuffer;| (perf name variability units value)
   (classload "java/nio/DirectByteBuffer")
   (let* ((dbb (%make-java-instance "java/nio/DirectByteBuffer"))
-         (mem (sb-alien:make-alien sb-alien:long 1))
-         (ptr (sb-sys:sap-int (sb-alien:alien-sap mem))))
-    (setf (gethash ptr *unsafe-memory-table*) (cons mem 8))
-    (setf (sb-alien:deref mem 0) value)
+         (ptr (%allocate-unsafe-memory 8)))
+    (setf (sb-sys:signed-sap-ref-64 (sb-sys:int-sap ptr) 0) value)
     (|<init>(JJ)V| dbb ptr 8)
     dbb))
 

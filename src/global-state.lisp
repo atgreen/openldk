@@ -130,7 +130,8 @@ or NIL for the boot loader's packages."
       (str:starts-with? "com/sun/" classname)
       (str:starts-with? "jdk/" classname)
       (str:starts-with? "org/xml/" classname)
-      (str:starts-with? "org/w3c/" classname)))
+      (str:starts-with? "org/w3c/" classname)
+      (str:starts-with? "org/ietf/" classname)))
 
 (defun get-ldk-loader-for-java-loader (java-loader)
   "Get or create the <ldk-class-loader> for a java.lang.ClassLoader object.
@@ -393,7 +394,7 @@ loaders, whose classes are not in the global or app loader tables."
 ;; name as one in a superclass (javac's synthetic this$0 outer references do
 ;; this routinely); they are distinct fields resolved by declaring class.
 ;; Shadowing fields get a class-qualified CLOS slot; this table maps
-;; "class-bin-name.field-name" -> that slot symbol.
+;; (declaring <class> . field-name) -> that slot symbol, keeping loaders distinct.
 (defvar *field-shadow-slots* (make-hash-table :test #'equal :synchronized t))
 
 ;; Per-class-name locks for thread-safe class loading.
@@ -558,7 +559,10 @@ java.lang.Class), was defined by a user-defined class loader."
     (or (let ((class (gethash name (slot-value loader slot-name))))
           (if (and class
                    (eq loader *boot-ldk-class-loader*)
-                   (%defined-by-user-loader-p class slot-name))
+                   (let ((owner (if (member slot-name '(ldk-classes-by-bin-name ldk-classes-by-fq-name))
+                                    (ldk-loader class)
+                                    (gethash (slot-value class '|classLoader|) *java-to-ldk-loaders*))))
+                     (and owner (not (zerop (slot-value owner 'id))))))
               nil
               class))
         (when-let ((parent (slot-value loader 'parent-loader)))

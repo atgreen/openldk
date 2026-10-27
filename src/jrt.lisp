@@ -130,6 +130,6 @@ the job libjimage's JNI implementation does in HotSpot."
     (let ((dbb (%make-java-instance "java/nio/DirectByteBuffer")))
       ;; JDK 25's JNI-NewDirectByteBuffer constructor is (long, long).
       (|<init>(JJ)V| dbb
-       (sb-sys:sap-int (car sap-and-size))
-       (cdr sap-and-size))
+       (sb-sys:sap-int (first sap-and-size))
+       (rest sap-and-size))
       dbb)))

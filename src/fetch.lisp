@@ -55,6 +55,7 @@
   (:documentation "A resource OpenLDK needs could not be downloaded."))
 
 (defun fetch-error (format-control &rest format-arguments)
+  "Signal a resource download error using FORMAT-CONTROL and FORMAT-ARGUMENTS."
   (error 'fetch-error :format-control format-control :format-arguments format-arguments))
 
 (defun ldk-cache-dir ()
@@ -64,6 +65,7 @@
        (uiop:xdg-cache-home "openldk/"))))
 
 (defun ldk-offline-p ()
+  "Return true when resource downloads are disabled by LDK_OFFLINE."
   (let ((offline (uiop:getenvp "LDK_OFFLINE")))
     (and offline (string/= offline "0"))))
 
@@ -88,11 +90,12 @@ Failure -- including the program not being installed -- is a FETCH-ERROR."
     output))
 
 (defun %file-sha256 (file)
+  "Return the lowercase hexadecimal SHA-256 digest of FILE."
   (let ((output (handler-case
                     (%run-tool (list "sha256sum" (uiop:native-namestring file)))
                   (fetch-error ()
                     (%run-tool (list "shasum" "-a" "256" (uiop:native-namestring file)))))))
-    (string-downcase (subseq output 0 (position #\Space output)))))
+    (string-downcase (serapeum:take (position #\Space output) output))))
 
 (defun fetch-url (url destination &key sha256)
   "Download URL to the file DESTINATION, checking its SHA256 if given.
@@ -113,7 +116,7 @@ The file only appears at DESTINATION once complete and verified."
                  (fetch-error "Checksum mismatch for ~A:~%  expected ~A~%  got      ~A"
                               url sha256 actual))))
            (sb-posix:rename temporary (uiop:native-namestring destination)))
-      (when (probe-file temporary)
+      (when (uiop:file-exists-p temporary)
         (delete-file temporary))))
   destination)
 
@@ -135,7 +138,7 @@ only appears once fully unpacked, so a partial one is never used."
            ;; Another process may have got there first; theirs is as good.
            (unless (uiop:directory-exists-p directory)
              (sb-posix:rename unpacked target)))
-      (when (probe-file tarball)
+      (when (uiop:file-exists-p tarball)
         (delete-file tarball))
       (when (uiop:directory-exists-p unpacked)
         (uiop:delete-directory-tree (uiop:ensure-directory-pathname unpacked)

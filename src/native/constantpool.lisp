@@ -354,7 +354,8 @@ not searched -- VarHandle/MethodHandle field access targets declared fields)."
             (when super-class
               (find-field-in-class super-class name)))))))
 
-(defun |java/lang/invoke/MethodHandleNatives.resolve(Ljava/lang/invoke/MemberName;Ljava/lang/Class;IZ)Ljava/lang/invoke/MemberName;| (member-name klass speculative-resolve native-access)
+(defun |java/lang/invoke/MethodHandleNatives.resolve(Ljava/lang/invoke/MemberName;Ljava/lang/Class;IZ)Ljava/lang/invoke/MemberName;|
+    (member-name klass speculative-resolve native-access)
   "JDK 17: resolve(MemberName self, Class<?> caller, int speculativeResolve, boolean nativeAccess)"
   (declare (ignore klass speculative-resolve native-access))
   (let* ((member-class (slot-value member-name '|clazz|))
@@ -601,7 +602,8 @@ Lookup.checkAccess is bypassed."
   (declare (ignore this))
   nil)
 
-(defun |java/lang/invoke/MethodHandles$Lookup.findStatic(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/MethodHandle;| (lookup klass name method-type)
+(defun |java/lang/invoke/MethodHandles$Lookup.findStatic(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/MethodHandle;|
+    (lookup klass name method-type)
   "Create a DirectMethodHandle for static method invocation.
    DirectMethodHandle is required by LambdaMetafactory for lambda expressions."
   (declare (ignore lookup))
@@ -728,7 +730,8 @@ Lookup.checkAccess is bypassed."
       (setf (slot-value mn '|flags|) flags))
     mn))
 
-(defun |java/lang/invoke/MethodHandles$Lookup.findVirtual(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/MethodHandle;| (lookup refc name method-type)
+(defun |java/lang/invoke/MethodHandles$Lookup.findVirtual(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/MethodHandle;|
+    (lookup refc name method-type)
   "Create a DirectMethodHandle for virtual method invocation.
    Used by lambda metafactory for instance method references."
   (declare (ignore lookup))
@@ -933,9 +936,7 @@ member it names."
            (ref-kind (ash (logand flags #x0F000000) -24)))
       (cond
         ((= ref-kind 8)       ; constructor
-         (classload class-name)
-         (let* ((pkg (class-package class-name))
-                (lisp-class-name (intern class-name pkg))
+         (let* ((ldk-class (get-ldk-class-for-java-class clazz))
                 ;; <init> is void; normalise any return type to V
                 (desc (cond
                         ((null method-type) "()V")
@@ -944,7 +945,7 @@ member it names."
                         (t (format nil "~AV" method-type))))
                 (init-method-name (format nil "<init>~A" (subseq desc 0 (1+ (position #\) desc)))))
                 (lisp-init-name (intern init-method-name :openldk)))
-           (list :constructor lisp-class-name lisp-init-name nil)))
+           (list :constructor ldk-class lisp-init-name nil (%descriptor-unbox-flags desc))))
         ((= ref-kind 6)       ; static: name is class.method(desc) in the loader package
          (let* ((java-loader (slot-value clazz '|classLoader|))
                 (ldk-loader (get-ldk-loader-for-java-loader java-loader))
@@ -964,12 +965,13 @@ member it names."
 linkToStatic/linkToVirtual/linkToSpecial; resolution is memoized per MemberName.
 Primitive-typed args are unboxed so method references adapted to functional
 interfaces (which pass boxed Object args) reach primitive-parameter methods."
-  (destructuring-bind (kind a b &optional ret-char) (%resolve-member-name member-name)
+  (destructuring-bind (kind a b &optional ret-char constructor-unbox-flags) (%resolve-member-name member-name)
     (declare (ignore ret-char))
     (ecase kind
-      (:constructor                     ; a=class-symbol, b=init-symbol
-       (let ((instance (make-instance a)))
-         (apply b instance args)
+      (:constructor                     ; a=class metadata, b=init-symbol
+       (%clinit a)
+       (let ((instance (make-instance (intern (name a) (ldk-class-package a)))))
+         (apply b instance (%unbox-args-for-flags constructor-unbox-flags args))
          instance))
       (:static                          ; a=fn-symbol, b=unbox-flags
        (apply a (%unbox-args-for-flags b args)))

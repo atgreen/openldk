@@ -45,9 +45,9 @@
 ;;; of Java classes are loaded.
 
 (defclass java-generic-function (standard-generic-function)
-  ((dispatch-cache :initform (make-hash-table :test 'eq)
+  ((dispatch-cache :initform (make-hash-table :test 'eq :synchronized t)
                    :accessor java-gf-dispatch-cache)
-   (invoke-special-cache :initform (make-hash-table :test 'eq)
+   (invoke-special-cache :initform (make-hash-table :test 'eq :synchronized t)
                          :accessor java-gf-invoke-special-cache)
    ;; Bumped whenever INVOKE-SPECIAL-CACHE is cleared, so the call sites
    ;; that keep an entry of their own (INVOKE-SPECIAL-AT) see it is stale.
@@ -56,8 +56,11 @@
    ;; First specializer -> its methods, for %JAVA-APPLICABLE-METHODS: NIL
    ;; until built, or :COMPLEX for methods it can't serve.
    (method-index :initform nil :accessor java-gf-method-index)
+   (method-lock :initform (bordeaux-threads:make-recursive-lock "java-gf-methods")
+                :reader java-gf-method-lock)
    (cache-lock :initform (bordeaux-threads:make-lock "java-gf-cache")
                :reader java-gf-cache-lock))
+  (:documentation "Java single-dispatch generic function with synchronized method caches.")
   (:metaclass sb-mop:funcallable-standard-class))
 
 (defvar *method-bodies* (make-hash-table :test 'eq :weakness :key :synchronized t)
@@ -109,10 +112,11 @@ or :AROUND method?"
 
 (defun %index-java-method (index method)
   "Add METHOD to INDEX, a METHOD-INDEX table, returning INDEX, or :COMPLEX."
-  (if (%simple-java-method-p method)
-      (progn (push method (gethash (first (sb-mop:method-specializers method)) index))
-             index)
-      :complex))
+  (cond ((%simple-java-method-p method)
+         (push method (gethash (first (sb-mop:method-specializers method)) index))
+         index)
+        (t
+         :complex)))
 
 (defun %java-gf-method-index (gf)
   "GF's METHOD-INDEX, built if need be.  Call with its cache lock held."
@@ -120,7 +124,7 @@ or :AROUND method?"
       (setf (java-gf-method-index gf)
             (let ((index (make-hash-table :test 'eq)))
               (dolist (method (sb-mop:generic-function-methods gf) index)
-                (when (eq (%index-java-method index method) :complex)
+                (when (eql (%index-java-method index method) :complex)
                   (return :complex)))))))
 
 (defun %java-applicable-methods (gf class class-list)
@@ -129,16 +133,17 @@ first element is CLASS and the rest T: GF's methods on CLASS and its
 superclasses, most specific first.  PCL's tests every method of GF, and
 toString() or <init>() have thousands; this looks up the few classes
 CLASS inherits from."
-  (let ((index (bordeaux-threads:with-lock-held ((java-gf-cache-lock gf))
+  (bordeaux-threads:with-recursive-lock-held ((java-gf-method-lock gf))
+   (let ((index (bordeaux-threads:with-lock-held ((java-gf-cache-lock gf))
                  (%java-gf-method-index gf))))
-    (if (eq index :complex)
-        (closer-mop:compute-applicable-methods-using-classes gf class-list)
-        (progn
-          (unless (sb-mop:class-finalized-p class)
+    (cond ((eql index :complex)
+           (closer-mop:compute-applicable-methods-using-classes gf class-list))
+          (t
+           (unless (sb-mop:class-finalized-p class)
             (sb-mop:finalize-inheritance class))
-          (bordeaux-threads:with-lock-held ((java-gf-cache-lock gf))
+           (bordeaux-threads:with-lock-held ((java-gf-cache-lock gf))
             (loop for c in (sb-mop:class-precedence-list class)
-                  append (gethash c index)))))))
+                  append (gethash c index))))))))
 
 (defun %compute-java-effective-method (gf class)
   "Compute an effective method function, called with GF's arguments, for GF
@@ -161,10 +166,10 @@ may still be a bare stub that a later classload fleshes out)."
                     (apply #'no-applicable-method gf args))
                   nil)
           ;; Partition into :around and primary methods
-          (let* ((around (remove-if-not
+          (let* ((around (serapeum:filter
                           (lambda (m) (equal (method-qualifiers m) '(:around)))
                           methods))
-                 (primary (remove-if-not
+                 (primary (serapeum:filter
                            (lambda (m) (null (method-qualifiers m)))
                            methods))
                  (chain (append around primary))
@@ -221,6 +226,16 @@ applicable-method set.  Non-class specializers flush everything."
            (clrhash special-cache)
            (incf (java-gf-invoke-special-version gf))))))))
 
+(defmethod sb-mop:add-method :around ((gf java-generic-function) method)
+  ;; SBCL replaces a method by removing its predecessor first. Keep
+  ;; dispatch snapshots out of that temporary gap, including the hooks.
+  (bordeaux-threads:with-recursive-lock-held ((java-gf-method-lock gf))
+    (call-next-method)))
+
+(defmethod sb-mop:remove-method :around ((gf java-generic-function) method)
+  (bordeaux-threads:with-recursive-lock-held ((java-gf-method-lock gf))
+    (call-next-method)))
+
 (defmethod sb-mop:add-method :after ((gf java-generic-function) method)
   (bordeaux-threads:with-lock-held ((java-gf-cache-lock gf))
     (let ((index (java-gf-method-index gf)))
@@ -233,7 +248,7 @@ applicable-method set.  Non-class specializers flush everything."
     (let ((index (java-gf-method-index gf)))
       (if (hash-table-p index)
           (let ((specializer (first (sb-mop:method-specializers method))))
-            (setf (gethash specializer index) (remove method (gethash specializer index))))
+            (alexandria:removef (gethash specializer index) method))
           ;; A complex method may have been the one removed: rebuild.
           (setf (java-gf-method-index gf) nil))))
   (%invalidate-java-gf-cache gf (first (sb-mop:method-specializers method))))
@@ -251,31 +266,34 @@ dispatch (equals/hashCode/toString) from scratch."
              ;; Compute and cache the effective method for the receiver's
              ;; class, then apply it.
              (let ((class (class-of (first args))))
-               (multiple-value-bind (emfun applicable-p)
-                   (%compute-java-effective-method gf class)
-                 (when applicable-p
-                   (bordeaux-threads:with-lock-held (lock)
-                     (setf (gethash class cache) emfun)))
+               (let ((emfun
+                       (bordeaux-threads:with-recursive-lock-held ((java-gf-method-lock gf))
+                         (multiple-value-bind (function applicable-p)
+                             (%compute-java-effective-method gf class)
+                           (when applicable-p
+                             (bordeaux-threads:with-lock-held (lock)
+                               (setf (gethash class cache) function)))
+                           function))))
+                 ;; Calling a method may compile it and load other classes.
+                 ;; Release the method lock before executing Java code.
                  (apply emfun args)))))
       ;; One discriminating function per arity up to four arguments -- most
       ;; Java methods' -- so a call conses no argument list; a cached body
       ;; (see %COMPUTE-JAVA-EFFECTIVE-METHOD) is then called as is.
       (macrolet ((dispatcher (&rest params)
                    `(lambda ,params
-                      (let ((emfun (gethash (class-of ,(first params)) cache)))
-                        (if emfun
-                            (funcall emfun ,@params)
-                            (miss (list ,@params)))))))
+                      (if-let ((emfun (gethash (class-of ,(first params)) cache)))
+                        (funcall emfun ,@params)
+                        (miss (list ,@params))))))
         (case (length (closer-mop:generic-function-lambda-list gf))
           (1 (dispatcher a))
           (2 (dispatcher a b))
           (3 (dispatcher a b c))
           (4 (dispatcher a b c d))
           (t (lambda (&rest args)
-               (let ((emfun (gethash (class-of (first args)) cache)))
-                 (if emfun
-                     (apply emfun args)
-                     (miss args))))))))))
+               (if-let ((emfun (gethash (class-of (first args)) cache)))
+                 (apply emfun args)
+                 (miss args)))))))))
 
 
 ;;; Method names carry their return types, as the JVM's do, but some
@@ -288,12 +306,14 @@ dispatch (equals/hashCode/toString) from scratch."
   "Short method name (no return type) -> full-named generic function symbols.")
 
 (defun %register-full-gf (symbol)
+  "Index a full Java method SYMBOL under its name without the return type."
   (let* ((name (symbol-name symbol))
          (close (position #\) name)))
     (when (and close (< (1+ close) (length name)))
-      (pushnew symbol (gethash (subseq name 0 (1+ close)) *full-gfs-by-short-name*)))))
+      (pushnew symbol (gethash (serapeum:take (1+ close) name) *full-gfs-by-short-name*)))))
 
 (defun %ensure-java-gf-1 (symbol nargs)
+  "Create a Java generic function named SYMBOL with NARGS required arguments."
   (unless (fboundp symbol)
     (ensure-generic-function symbol
                              :generic-function-class 'java-generic-function
@@ -309,7 +329,7 @@ generic function of its short name exists too, for Lisp code calling it."
   (let* ((name (symbol-name symbol))
          (close (position #\) name)))
     (when (and close (< (1+ close) (length name)))
-      (%ensure-java-gf-1 (intern (subseq name 0 (1+ close)) (symbol-package symbol)) nargs)))
+      (%ensure-java-gf-1 (intern (serapeum:take (1+ close) name) (symbol-package symbol)) nargs)))
   (%register-full-gf symbol)
   symbol)
 
@@ -352,8 +372,9 @@ the runtime's classes are loaded."
                                          (closer-mop:generic-function-methods full-gf)))
                         (let ((params (loop for i from 1 below nargs
                                             collect (intern (format nil "ARG~A" i) :openldk))))
+                          ;; The loaded Java class determines this method's specializer.
                           (ignore-errors
-                           (eval `(defmethod ,full ((this ,class-name) ,@params)
+                           (eval `(defmethod ; lint:suppress eval-usage ,full ((this ,class-name) ,@params)
                                     (,short this ,@params)))))))))))))))))
 
 (defun %java-dispatchable-gf-p (gf)

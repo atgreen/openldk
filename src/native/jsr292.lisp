@@ -76,21 +76,23 @@
 (defvar *member-field-slots* (make-hash-table :test 'eq :weakness :key :synchronized t)
   "MemberName -> the CLOS slot holding the field it names.")
 
+(defun %field-object-slot (field)
+  "Resolve a reflective Field or field MemberName using its declaring class."
+  (%resolve-field-slot (get-ldk-class-for-java-class (slot-value field '|clazz|))
+                       (lstring (slot-value field '|name|))))
+
 (defun %member-field-slot (member)
   "The CLOS slot holding the field MEMBER names.  Computed once per
 MemberName: field access through a method handle asks on every call."
   (or (gethash member *member-field-slots*)
       (setf (gethash member *member-field-slots*)
-            (let* ((class-name (substitute #\/ #\. (lstring (slot-value (slot-value member '|clazz|) '|name|))))
-                   (field-name (lstring (slot-value member '|name|))))
-              (or (gethash (format nil "~A.~A" class-name field-name) *field-shadow-slots*)
-                  (intern (mangle-field-name field-name) :openldk))))))
+            (%field-object-slot member))))
 
 (defun %member-static-storage (member)
   "The object holding the static fields of MEMBER's class, initializing it."
   (let* ((clazz (slot-value member '|clazz|))
          (class-name (substitute #\/ #\. (lstring (slot-value clazz '|name|))))
-         (ldk-class (classload class-name)))
+         (ldk-class (get-ldk-class-for-java-class clazz)))
     (%clinit ldk-class)
     (symbol-value (intern (format nil "+static-~A+" class-name) (ldk-class-package ldk-class)))))
 

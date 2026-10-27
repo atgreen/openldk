@@ -54,7 +54,7 @@
   ;; When in a fiber, check fiber mapping first
   #+sb-fiber
   (when (in-fiber-p)
-    (let ((java-thread (gethash (sb-thread:current-fiber) *fiber-to-java-threads*)))
+    (let ((java-thread (gethash (uiop:symbol-call :sb-thread :current-fiber) *fiber-to-java-threads*)))
       (when java-thread
         (return-from |java/lang/Thread.currentThread()Ljava/lang/Thread;| java-thread))))
   ;; Check if current Lisp thread has an associated Java Thread
@@ -121,7 +121,7 @@
        (if (bordeaux-threads:thread-alive-p lisp-thread) 1 0))
       #+sb-fiber
       ((gethash thread *java-to-fibers*)
-       (if (sb-thread:fiber-alive-p (gethash thread *java-to-fibers*)) 1 0))
+       (if (uiop:symbol-call :sb-thread :fiber-alive-p (gethash thread *java-to-fibers*)) 1 0))
       ;; The calling thread's own Java object (e.g. the main thread) is
       ;; only registered in the lisp->java direction.
       ((eq thread (gethash (bordeaux-threads:current-thread)
@@ -136,8 +136,17 @@
     (when (and interrupted
                clear-interrupted
                (not (eql clear-interrupted 0)))
-      (setf (gethash thread *thread-interrupted*) nil))
+      (%clear-java-thread-interrupt thread))
     (if interrupted 1 0)))
+
+(defun %clear-java-thread-interrupt (thread)
+  "Clear both the native interrupt event and the JDK's visible status field."
+  (setf (gethash thread *thread-interrupted*) nil)
+  (when (slot-exists-p thread '|interrupted|)
+    (setf (slot-value thread '|interrupted|) 0)))
+
+(defun |java/lang/Thread.clearInterruptEvent()V| ()
+  (%clear-java-thread-interrupt (|java/lang/Thread.currentThread()Ljava/lang/Thread;|)))
 
 ;;; JDK 21 Thread native methods for virtual thread support.
 ;;; OpenLDK treats all threads as platform (carrier) threads.
@@ -178,7 +187,7 @@ this must hold the real implementation path."
   "JDK 21 private native yield0 — replaces public native yield()."
   #+sb-fiber
   (when (in-fiber-p)
-    (sb-thread:fiber-yield)
+    (uiop:symbol-call :sb-thread :fiber-yield)
     (return-from |java/lang/Thread.yield0()V|))
   ;; Platform thread: actually yield the OS thread (sched_yield).  A no-op here
   ;; turns java.util.concurrent spin-then-yield-then-park backoff loops
@@ -200,8 +209,10 @@ this must hold the real implementation path."
   (setf *scoped-value-cache* cache))
 
 (defun |java/lang/Thread.findScopedValueBindings()Ljava/lang/Object;| ()
-  "Return scoped value bindings for the current thread."
-  nil)
+  "JDK bytecode maintains the current snapshot explicitly; no stack elision occurs."
+  (let ((thread (|java/lang/Thread.currentThread()Ljava/lang/Thread;|)))
+    (when (and thread (slot-exists-p thread '|scopedValueBindings|))
+      (slot-value thread '|scopedValueBindings|))))
 
 (defun |java/lang/Thread.ensureMaterializedForStackWalk(Ljava/lang/Object;)V| (obj)
   "No-op for platform threads."
@@ -228,7 +239,7 @@ this must hold the real implementation path."
   (declare (ignore thread))
   #+sb-fiber
   (when (in-fiber-p)
-    (setf (gethash (sb-thread:current-fiber) *fiber-to-java-threads*) new-thread)
+    (setf (gethash (uiop:symbol-call :sb-thread :current-fiber) *fiber-to-java-threads*) new-thread)
     (return-from |setCurrentThread(Ljava/lang/Thread;)V|))
   (let ((lisp-thread (bordeaux-threads:current-thread)))
     (setf (gethash lisp-thread *lisp-to-java-threads*) new-thread)))
@@ -246,28 +257,56 @@ name is recorded in the Java thread already, so there is nothing to do."
 
 ;;; JDK 21: Object.wait0(J) — private native wait.
 ;;; Must contain the actual wait logic (not delegate to wait(J) which calls wait0).
-(defmethod |wait0(J)V| ((this |java/lang/Object|) timeout)
-  (let* ((monitor (%get-monitor this))
+(defun %java-monitor-wait (object timeout)
+  "Wait on OBJECT's monitor and always restore ownership before unwinding."
+  (let* ((monitor (%get-monitor object))
          (mutex (mutex monitor))
-         (current-thread (current-thread-identity)))
-    (bordeaux-threads:with-lock-held (mutex)
-      (unless (eq (owner monitor) current-thread)
-        (error (%lisp-condition (%make-throwable '|java/lang/IllegalMonitorStateException|))))
-      (let ((saved-recursion (recursion-count monitor)))
-        (push current-thread (wait-set monitor))
-        (setf (owner monitor) nil (recursion-count monitor) 0)
-        ;; Broadcast, as monitor-exit does: a single wakeup could land on
-        ;; another wait() rather than a thread entering.
-        (%monitor-wake monitor)
-        (loop while (member current-thread (wait-set monitor))
-              do (if (zerop timeout)
-                     (%monitor-sleep monitor)
-                     (unless (%monitor-sleep monitor (/ timeout 1000.0))
-                       (setf (wait-set monitor) (remove current-thread (wait-set monitor)))
-                       (return))))
-        (loop while (owner monitor)
-              do (%monitor-sleep monitor))
-        (setf (owner monitor) current-thread (recursion-count monitor) saved-recursion)))))
+         (identity (current-thread-identity))
+         (thread (|java/lang/Thread.currentThread()Ljava/lang/Thread;|))
+         (interrupted nil)
+         (deadline (when (plusp timeout) (+ (get-internal-real-time)
+                                            (* timeout (/ internal-time-units-per-second 1000))))))
+    (bt:with-lock-held (mutex)
+      (unless (eq (owner monitor) identity) (%throw '|java/lang/IllegalMonitorStateException|))
+      (if (gethash thread *thread-interrupted*)
+          (setf interrupted t)
+          (let ((saved-recursion (recursion-count monitor)))
+            (push identity (wait-set monitor))
+            (setf (owner monitor) nil (recursion-count monitor) 0)
+            (%monitor-wake monitor)
+            (unwind-protect
+                 (handler-case
+                     (loop while (member identity (wait-set monitor))
+                           for remaining = (and deadline (/ (- deadline (get-internal-real-time))
+                                                            internal-time-units-per-second))
+                           do (when (and remaining (<= remaining 0)) (return))
+                              (unless (%monitor-sleep monitor remaining) (return)))
+                   (|condition-java/lang/InterruptedException| () (setf interrupted t)))
+              (setf (wait-set monitor) (remove identity (wait-set monitor)))
+              (loop while (owner monitor)
+                    do (handler-case (%monitor-sleep monitor)
+                         (|condition-java/lang/InterruptedException| () (setf interrupted t))))
+              (setf (owner monitor) identity (recursion-count monitor) saved-recursion)))))
+    (when interrupted
+      (%clear-java-thread-interrupt thread)
+      (%throw '|java/lang/InterruptedException|)))
+  nil)
+
+(defmethod |wait0(J)V| ((object |java/lang/Object|) timeout)
+  (%java-monitor-wait object timeout))
+(defmethod |wait0(J)V| ((object java-array) timeout)
+  (%java-monitor-wait object timeout))
+
+(defun %java-array-wait (array timeout &optional (nanos 0))
+  "Object.wait's argument validation for arrays, which are Lisp structures."
+  (when (or (minusp timeout) (< nanos 0) (> nanos 999999))
+    (%throw '|java/lang/IllegalArgumentException|))
+  (when (and (plusp nanos) (< timeout #x7fffffffffffffff)) (incf timeout))
+  (%java-monitor-wait array timeout))
+
+(defmethod |wait()V| ((array java-array)) (%java-array-wait array 0))
+(defmethod |wait(J)V| ((array java-array) timeout) (%java-array-wait array timeout))
+(defmethod |wait(JI)V| ((array java-array) timeout nanos) (%java-array-wait array timeout nanos))
 
 ;;; JDK 21 VirtualThread — JVMTI notification stubs.
 ;;; OpenLDK doesn't support JVMTI, so all are no-ops.
@@ -339,7 +378,7 @@ name is recorded in the Java thread already, so there is nothing to do."
   #+sb-fiber
   (let ((fiber (gethash thread *java-to-fibers*)))
     (when fiber
-      (return-from |isAlive()Z| (if (sb-thread:fiber-alive-p fiber) 1 0))))
+      (return-from |isAlive()Z| (if (uiop:symbol-call :sb-thread :fiber-alive-p fiber) 1 0))))
   (let ((lisp-thread (gethash thread *java-threads*)))
     (if (and lisp-thread (bordeaux-threads:thread-alive-p lisp-thread))
         1
@@ -351,11 +390,11 @@ name is recorded in the Java thread already, so there is nothing to do."
   (let ((fiber (gethash thread *java-to-fibers*)))
     (when fiber
       (cond
-        ((not (sb-thread:fiber-alive-p fiber)) (return-from |join(J)V|))
+        ((not (uiop:symbol-call :sb-thread :fiber-alive-p fiber)) (return-from |join(J)V|))
         (t
          (if (zerop millis)
-             (sb-thread:fiber-join fiber)
-             (sb-thread:fiber-join fiber :timeout (/ millis 1000.0d0)))
+             (uiop:symbol-call :sb-thread :fiber-join fiber)
+             (uiop:symbol-call :sb-thread :fiber-join fiber :timeout (/ millis 1000.0d0)))
          (return-from |join(J)V|)))))
   ;; Fall through to OS thread join
   (let ((lisp-thread (gethash thread *java-threads*)))
@@ -378,20 +417,20 @@ name is recorded in the Java thread already, so there is nothing to do."
 #+sb-fiber
 (defmethod |start0()V| :around ((thread |java/lang/BaseVirtualThread|))
   "Start a virtual thread as a fiber on the fiber scheduler."
-  (let ((fiber (sb-thread:make-fiber
+  (let ((fiber (uiop:symbol-call :sb-thread :make-fiber
                 (lambda ()
                   (let ((*scoped-value-cache* nil))
                     (unwind-protect
                          (progn
                            ;; Register fiber-to-Java mapping
-                           (setf (gethash (sb-thread:current-fiber) *fiber-to-java-threads*) thread)
+                           (setf (gethash (uiop:symbol-call :sb-thread :current-fiber) *fiber-to-java-threads*) thread)
                            ;; Call the Thread's run() method
                            (handler-case
                                (|run()V| thread)
                              (error (e)
                                (format *error-output* "~&VThread ~A terminated with error: ~A~%" thread e))))
                       ;; Cleanup mappings
-                      (remhash (sb-thread:current-fiber) *fiber-to-java-threads*)
+                      (remhash (uiop:symbol-call :sb-thread :current-fiber) *fiber-to-java-threads*)
                       (remhash thread *java-to-fibers*)
                       (remhash thread *fiber-park-flags*))))
                 :name (format nil "Java-VThread-~A"
@@ -442,7 +481,9 @@ name is recorded in the Java thread already, so there is nothing to do."
   (sb-ext:dynamic-space-size))
 
 (defmethod |gc()V| ((rt |java/lang/Runtime|))
-  (sb-ext:gc :full t)
+  ;; Generation 7 also clears dead core-backed objects. A normal full GC can
+  ;; leave warm-image referents alive through otherwise dead core objects.
+  (sb-ext:gc :gen 7)
   nil)
 
 ;; JDK 9+: Signal native methods — no-op stubs for Terminator.setup()

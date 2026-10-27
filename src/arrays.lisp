@@ -239,7 +239,7 @@ ArrayStoreException during bootstrap."
                     (lstring (slot-value value-component '|name|))))))))
       (t
        (let* ((bin-name (substitute #\/ #\. component-name))
-              (clos-class (find-class (intern bin-name (class-package bin-name)) nil)))
+              (clos-class (find-class (intern bin-name (%java-class-package component)) nil)))
          (or (null clos-class)
              (typep value clos-class)
              (%native-type-castable-p value bin-name)))))))
@@ -253,7 +253,7 @@ ArrayStoreException during bootstrap."
           ((char= (char component-name 0) #\[) :slow)
           (t
            (let* ((bin-name (substitute #\/ #\. component-name))
-                  (clos-class (find-class (intern bin-name (class-package bin-name)) nil)))
+                  (clos-class (find-class (intern bin-name (%java-class-package component)) nil)))
              ;; A class not yet emitted may be later: check in full each time.
              (or clos-class :slow)))))
       t))

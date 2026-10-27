@@ -68,6 +68,23 @@
          :format-control "unimplemented: ~?"
          :format-arguments (list what format-arguments)))
 
+(define-condition bytecode-verification-error (openldk-error)
+  ((java-kind :initarg :java-kind :initform "java/lang/VerifyError" :reader verification-java-kind))
+  (:documentation "Invalid classfile structure or bytecode, before IR translation."))
+
+(defun verification-error (control &rest arguments)
+  "Reject bytecode with a diagnostic that can be translated to Java VerifyError."
+  (error 'bytecode-verification-error :format-control control :format-arguments arguments))
+
+(defun class-format-error (control &rest arguments)
+  "Reject malformed classfile data with Java ClassFormatError semantics."
+  (error 'bytecode-verification-error :java-kind "java/lang/ClassFormatError"
+         :format-control control :format-arguments arguments))
+
+(defun %throw-verification-error (condition)
+  "Translate a verifier diagnostic at the Java loading/execution boundary."
+  (%throw (intern (verification-java-kind condition) :openldk) (princ-to-string condition)))
+
 ;;; Converting internal Lisp conditions into Java throwables.
 ;;;
 ;;; A SIGSEGV at NIL+offset (a null dereference in JIT'd code) and a Lisp

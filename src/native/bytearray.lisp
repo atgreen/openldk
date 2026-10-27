@@ -65,6 +65,7 @@
         (setf (aref data (+ index i)) (if (> b 127) (- b 256) b))))))
 
 (defun %signed-of-width (v bits)
+  "Interpret the low BITS of V as a signed two's complement integer."
   (if (logbitp (1- bits) v) (- v (ash 1 bits)) v))
 
 (dolist (spec '(("jdk/internal/util/ByteArray" . t)
@@ -114,7 +115,7 @@ TimeZone.getTimeZone does not recognize, silently defaulting to GMT."
          (let* ((link (sb-posix:readlink "/etc/localtime"))
                 (pos (search "zoneinfo/" link)))
            (when pos
-             (subseq link (+ pos (length "zoneinfo/"))))))
+             (serapeum:drop (+ pos (length "zoneinfo/")) link))))
        "GMT")))
 
 (defmethod |length()| ((str string))
@@ -143,6 +144,7 @@ TimeZone.getTimeZone does not recognize, silently defaulting to GMT."
   (%register-field-offset field))
 
 (defun |java/lang/Class$Atomic.objectFieldOffset([Ljava/lang/reflect/Field;Ljava/lang/String;)| (field name)
+  "Signal that the legacy Class atomic field-offset entry point is unsupported."
   (declare (ignore field)
            (ignore name))
   (unimplemented "java/lang/Class$Atomic.objectFieldOffset"))

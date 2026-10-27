@@ -318,3 +318,163 @@ nothing behind when it refuses."
          (signals openldk::uncacheable
            (openldk::%externalize-definition `(foo ,(intern "BAR" package))))
       (delete-package package))))
+
+(test volatile-field-resolution
+  ;; The JIT must preserve volatile semantics when the Fieldref names an
+  ;; inheriting class, but must stop when a subclass shadows that field.
+  (let* ((openldk::*ldk-classes-by-bin-name* (make-hash-table :test 'equal))
+         (parent (make-instance 'openldk::<class> :name "ordering/Parent"
+                                :super nil :ldk-loader nil
+                                :fields (list (make-instance 'openldk::<field>
+                                                             :name "flag" :access-flags #x40))))
+         (child (make-instance 'openldk::<class> :name "ordering/Child"
+                               :super "ordering/Parent" :ldk-loader nil :fields nil)))
+    (setf (gethash "ordering/Parent" openldk::*ldk-classes-by-bin-name*) parent)
+    (is (openldk::%volatile-field-p child "flag"))
+    (is (not (openldk::%volatile-field-p child "missing")))
+    (setf (openldk::fields child)
+          (list (make-instance 'openldk::<field> :name "flag" :access-flags 0)))
+    (is (not (openldk::%volatile-field-p child "flag")))))
+
+(defun %verification-fixture (bytes &key (descriptor "()V") (max-stack 4) (max-locals 4) maps
+                                       (method-name "test") super pool (version 69) (static t))
+  "Construct raw metadata for verifier tests without loading Java or running the JIT."
+  (let* ((class (make-instance 'openldk::<class> :name "verify/Fixture" :super super
+                               :interfaces nil :ldk-loader nil :major-version version
+                               :fields #() :constant-pool (or pool #(nil))))
+         (attributes (make-hash-table :test 'equal))
+         (code-attributes (make-hash-table :test 'equal))
+         (method (make-instance 'openldk::<method> :class class :name method-name
+                                :descriptor descriptor :access-flags (if static 8 0) :attributes attributes)))
+    (when maps (setf (gethash "StackMapTable" code-attributes) maps))
+    (setf (gethash "Code" attributes)
+          (make-instance 'openldk::<code> :code bytes :max-stack max-stack :max-locals max-locals
+                         :exceptions nil :attributes code-attributes)
+          (openldk::methods class) (vector method))
+    class))
+
+(defun %verify-fixture (bytes &rest options)
+  "Run both independent verifier passes on a synthetic method."
+  (let ((class (apply #'%verification-fixture bytes options)))
+    (openldk::verify-class-structure class)
+    (openldk::verify-class-bytecode class)))
+
+(test verifier-structure
+  (is (%verify-fixture #(177) :max-stack 0 :max-locals 0))
+  (signals openldk::bytecode-verification-error (%verify-fixture #(16)))
+  (signals openldk::bytecode-verification-error (%verify-fixture #(203)))
+  (signals openldk::bytecode-verification-error (%verify-fixture #(167 0 2 177)))
+  (signals openldk::bytecode-verification-error (%verify-fixture #(21 4 87 177) :max-locals 4))
+  (signals openldk::bytecode-verification-error (%verify-fixture #(22 0 173) :descriptor "(J)J" :max-locals 1))
+  (signals openldk::bytecode-verification-error (%verify-fixture #(196 0 0 0 177)))
+  (signals openldk::bytecode-verification-error (%verify-fixture #(18 0 87 177)))
+  (signals openldk::bytecode-verification-error (%verify-fixture #(188 99 87 177)))
+  (signals openldk::bytecode-verification-error (%verify-fixture #(168 0 0))))
+
+(test verifier-types
+  (is (%verify-fixture #(26 4 96 172) :descriptor "(I)I" :max-stack 2 :max-locals 1))
+  (is (%verify-fixture #(30 173) :descriptor "(J)J" :max-stack 2 :max-locals 2))
+  (is (%verify-fixture #(42 190 172) :descriptor "([I)I" :max-locals 1))
+  (signals openldk::bytecode-verification-error (%verify-fixture #(1 172) :descriptor "()I"))
+  (signals openldk::bytecode-verification-error (%verify-fixture #(87 177)))
+  (signals openldk::bytecode-verification-error (%verify-fixture #(3 4 96 172) :descriptor "()I" :max-stack 1))
+  (signals openldk::bytecode-verification-error (%verify-fixture #(26 172) :descriptor "()I"))
+  (signals openldk::bytecode-verification-error (%verify-fixture #(9 89 173) :descriptor "()J"))
+  (signals openldk::bytecode-verification-error (%verify-fixture #(42 3 46 172) :descriptor "([J)I"))
+  (signals openldk::bytecode-verification-error (%verify-fixture #(3 177) :descriptor "()I"))
+  (signals openldk::bytecode-verification-error (%verify-fixture #(0)))
+  (signals openldk::bytecode-verification-error
+    (%verify-fixture #(177) :method-name "<init>" :static nil :super "java/lang/Object")))
+
+(test verifier-stack-maps
+  (let ((code #(26 153 0 7 4 167 0 4 5 172)))
+    (is (%verify-fixture code :descriptor "(I)I" :maps #(0 2 8 64 1)))
+    (signals openldk::bytecode-verification-error (%verify-fixture code :descriptor "(I)I"))
+    (signals openldk::bytecode-verification-error (%verify-fixture code :descriptor "(I)I" :maps #(0 2 8 64 2)))
+    (signals openldk::bytecode-verification-error (%verify-fixture code :descriptor "(I)I" :maps #(0 1 9)))
+    (signals openldk::bytecode-verification-error (%verify-fixture code :descriptor "(I)I" :maps #(0 1 247)))
+    (signals openldk::bytecode-verification-error (%verify-fixture code :descriptor "(I)I" :maps #(0 1 200)))
+    (signals openldk::bytecode-verification-error (%verify-fixture code :descriptor "(I)I" :maps #(0 0 0)))))
+
+(test concurrent-method-replacement
+  "A dispatch during lazy replacement must not observe the removed method's gap."
+  (let* ((base-name (gensym "DISPATCH-BASE-"))
+         (child-name (gensym "DISPATCH-CHILD-"))
+         (gf-name (gensym "DISPATCH-PROBE-"))
+         (removed (sb-thread:make-semaphore))
+         (attempting (sb-thread:make-semaphore))
+         (completed (sb-thread:make-semaphore))
+         (resume (sb-thread:make-semaphore))
+         (reader nil) (writer nil) (result nil) (writer-error nil))
+    (eval `(defclass ,base-name () ()))
+    (eval `(defclass ,child-name (,base-name) ()))
+    (let* ((gf (ensure-generic-function gf-name :generic-function-class 'openldk::java-generic-function
+                                               :lambda-list '(object)))
+           (base (find-class base-name))
+           (child (find-class child-name))
+           (object (make-instance child))
+           (old (make-instance 'standard-method :lambda-list '(object) :specializers (list child)
+                                                :function (lambda (args next) (declare (ignore args next)) :old)))
+           (hook (make-instance 'standard-method :qualifiers '(:after) :lambda-list '(gf method)
+                               :specializers (list (sb-mop:intern-eql-specializer gf) (find-class t))
+                               :function (lambda (args next)
+                                           (declare (ignore next))
+                                           (when (eq (second args) old)
+                                             (sb-thread:signal-semaphore removed)
+                                             (sb-thread:wait-on-semaphore resume :timeout 5))))))
+      (add-method gf (make-instance 'standard-method :lambda-list '(object) :specializers (list base)
+                                                    :function (lambda (args next) (declare (ignore args next)) :base)))
+      (add-method gf old)
+      (is (eq :old (funcall gf object)))
+      (add-method #'remove-method hook)
+      (unwind-protect
+           (progn
+             (setf writer (sb-thread:make-thread
+                           (lambda ()
+                             (handler-case
+                                 (add-method gf (make-instance 'standard-method :lambda-list '(object)
+                                                        :specializers (list child)
+                                                        :function (lambda (args next)
+                                                                    (declare (ignore args next)) :new)))
+                               (error (error) (setf writer-error error))))))
+             (is (sb-thread:wait-on-semaphore removed :timeout 5))
+             (setf reader (sb-thread:make-thread
+                           (lambda ()
+                             (sb-thread:signal-semaphore attempting)
+                             (setf result (handler-case (funcall gf object) (error () :error)))
+                             (sb-thread:signal-semaphore completed))))
+             (is (sb-thread:wait-on-semaphore attempting :timeout 5))
+             ;; The old dispatcher returns :BASE here. The atomic dispatcher
+             ;; waits until the replacement is complete instead.
+             (sb-thread:wait-on-semaphore completed :timeout 0.1)
+             (sb-thread:signal-semaphore resume)
+             (sb-thread:join-thread writer)
+             (sb-thread:join-thread reader)
+             (is (null writer-error))
+             (is (eq :new result))
+             (is (eq :new (funcall gf object))))
+        (sb-thread:signal-semaphore resume)
+        (when writer (sb-thread:join-thread writer))
+        (when reader (sb-thread:join-thread reader))
+        (remove-method #'remove-method hook)
+        (fmakunbound gf-name)
+        (setf (find-class child-name) nil (find-class base-name) nil)))))
+
+(test native-allocation-keeps-occupied-pages
+  "A native allocation must skip a mapped address without overwriting its data."
+  (let ((openldk::*unsafe-memory-table* (make-hash-table :synchronized t))
+        (openldk::*native-allocation-next-address* #x610000000000)
+        (openldk::*native-allocation-free-blocks* nil)
+        (first nil) (second nil))
+    (unwind-protect
+         (progn
+           (setf first (openldk::%allocate-unsafe-memory 8))
+           (setf (sb-sys:sap-ref-8 (sb-sys:int-sap first) 0) #x5a)
+           ;; Force the next allocation to encounter this live mapping.
+           (setf openldk::*native-allocation-next-address* first)
+           (setf second (openldk::%allocate-unsafe-memory 8))
+           (is (/= first second))
+           (is (= #x5a (sb-sys:sap-ref-8 (sb-sys:int-sap first) 0)))
+           (is (= 2 (hash-table-count openldk::*unsafe-memory-table*))))
+      (when first (openldk::%free-unsafe-memory first))
+      (when second (openldk::%free-unsafe-memory second)))))

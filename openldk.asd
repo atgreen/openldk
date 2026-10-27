@@ -50,6 +50,7 @@
 ;; were built at the default (speed 1).  At speed 3 the Spring Boot
 ;; sample starts 11% faster from the code cache.
 (defun call-with-openldk-policy (thunk)
+  "Compile THUNK with the optimization policy used by the runtime and JIT."
   (proclaim '(optimize (speed 3) (safety 1) (debug 1)))
   (funcall thunk))
 
@@ -64,6 +65,7 @@
                (:file "src/conditions")
                (:file "src/fetch")
                (:file "src/global-state")
+               (:file "src/memory")
                (:file "src/fiber")
                (:file "src/java-gf")
                (:file "src/debug")
@@ -82,6 +84,8 @@
                (:file "src/codegen")
                (:file "src/descriptors")
                (:file "src/classfile")
+               (:file "src/verifier")
+               (:file "src/interpreter")
                ;; JDK native-method implementations, split by domain;
                ;; loaded in this order (chunks of the former src/native.lisp).
                (:file "src/native/support")
@@ -90,6 +94,7 @@
                (:file "src/native/threads")
                (:file "src/native/management")
                (:file "src/native/jsr292")
+               (:file "src/native/modules")
                (:file "src/native/unsafe")
                (:file "src/native/reflection")
                (:file "src/native/system")
@@ -99,6 +104,8 @@
                (:file "src/native/unsafe-tail")
                (:file "src/native/process")
                (:file "src/native/net")
+               (:file "src/native/ordering")
+               (:file "src/native/references")
                (:file "src/zlib-native")
                (:file "src/url")
                (:file "src/streams")
@@ -108,6 +115,7 @@
                (:file "src/fasl-cache")
                (:file "src/aot")
                (:file "src/openldk")
+               (:file "src/jni")
                (:file "src/cli"))
   :around-compile
   "(lambda (thunk)

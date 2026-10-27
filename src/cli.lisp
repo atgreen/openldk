@@ -110,7 +110,7 @@
                ;; -version
                ((string= arg "-version")
                 (flet ((vm-prop (key)
-                         (cdr (assoc key +java-identity-properties+ :test #'string=))))
+                         (cdr (assoc key *java-identity-properties* :test #'string=))))
                   (format t "openldk version ~S~%" (vm-prop "java.version"))
                   (format t "~A (build ~A)~%"
                           (vm-prop "java.runtime.name")
@@ -354,18 +354,18 @@ relative paths against its user.dir)."
     (when class (setf (initialized-p class) nil))))
 
 (defvar *saved-native-memory* '()
-  "(address . contents) of each block of Unsafe memory alive when the
-image was saved, for %RESTORE-NATIVE-MEMORY.")
+  "(address contents owned-mapping-p) for each native block retained in an image.")
 
 (defun %save-native-memory ()
-  (setf *saved-native-memory*
-        (loop for address being the hash-keys of *unsafe-memory-table* using (hash-value entry)
-              collect (let* ((size (cdr entry))
-                             (contents (make-array size :element-type '(unsigned-byte 8)))
-                             (sap (sb-sys:int-sap address)))
-                        (dotimes (i size) (setf (aref contents i) (sb-sys:sap-ref-8 sap i)))
-                        (cons address contents))))
-  (clrhash *unsafe-memory-table*)
+  (bt:with-lock-held (*native-allocation-lock*)
+    (setf *saved-native-memory*
+          (loop for address being the hash-keys of *unsafe-memory-table* using (hash-value entry)
+                collect (let* ((size (cdr entry))
+                               (contents (make-array size :element-type '(unsigned-byte 8)))
+                               (sap (sb-sys:int-sap address)))
+                          (dotimes (i size) (setf (aref contents i) (sb-sys:sap-ref-8 sap i)))
+                          (list address contents (typep (car entry) 'sb-sys:system-area-pointer)))))
+    (clrhash *unsafe-memory-table*))
   (pushnew '%restore-native-memory sb-ext:*init-hooks*))
 
 (defconstant +map-fixed-noreplace+ #x100000
@@ -378,7 +378,7 @@ addresses work in the restarted image.  A block whose pages the restarted
 process already uses stays lost."
   (let ((page-size 4096)
         (mapped (make-hash-table)))
-    (loop for (address . contents) in *saved-native-memory*
+    (loop for (address contents owned-mapping-p) in *saved-native-memory*
           for size = (length contents)
           for first-page = (* page-size (floor address page-size))
           for end = (+ address (max size 1))
@@ -395,7 +395,8 @@ process already uses stays lost."
           if ok
             do (let ((sap (sb-sys:int-sap address)))
                  (dotimes (i size) (setf (sb-sys:sap-ref-8 sap i) (aref contents i)))
-                 (setf (gethash address *unsafe-memory-table*) (cons :restored size)))
+                 (setf (gethash address *unsafe-memory-table*)
+                       (cons (if owned-mapping-p sap :restored) size)))
           else
             do (format *error-output* "~&; OpenLDK: native memory at #x~X (~D bytes) not restored~%"
                        address size))
@@ -439,12 +440,8 @@ process already uses stays lost."
 kill other threads, drop process-local handles, and give every lock a fresh
 mutex.  Call this last, right before saving, after any build-time runs of
 Java code (warmups)."
+  (%jni-check-save)
   (%fasl-cache-stop-build)
-  ;; Native memory Java code allocated (Unsafe.allocateMemory: direct
-  ;; buffers NIO caches, for one) is malloc'd, outside the saved heap, but
-  ;; the Java objects holding its addresses are saved: keep the contents,
-  ;; to put back at the same addresses on restart.
-  (%save-native-memory)
   ;; Force ProcessEnvironment to re-initialize at runtime so it reads
   ;; the actual runtime environment, not stale warmup state.
   (let ((pe (%get-ldk-class-by-bin-name "java/lang/ProcessEnvironment" t)))
@@ -478,6 +475,11 @@ Java code (warmups)."
   (setf *method-compilation-cv* (bt:make-condition-variable :name "method-compilation-cv"))
   (setf *identity-hash-counter-lock* (bt:make-lock "identity-hash-lock"))
   (setf *cas-lock* (bt:make-recursive-lock "unsafe-cas"))
+  (setf *java-memory-lock* (bt:make-recursive-lock "Java ordered memory"))
+  (setf *native-allocation-lock* (bt:make-lock "Native allocations"))
+  (setf *java-reference-lock* (bt:make-lock "Java references"))
+  (setf *java-reference-processor* nil)
+  (setf *scoped-value-cache* nil)
   ;; Let the restarted image stamp its own start time.
   (setf *vm-start-time-millis* nil)
   ;; Drop stale in-progress compilation claims from dead warmup threads.
@@ -546,7 +548,12 @@ Java code (warmups)."
     ;; slots with the same saved-locked hazard.
     (dolist (gf gfs)
       (setf (slot-value gf 'cache-lock)
-            (bt:make-lock "java-gf-cache")))))
+            (bt:make-lock "java-gf-cache")
+            (slot-value gf 'method-lock)
+            (bt:make-recursive-lock "java-gf-methods"))))
+  ;; Snapshot only after all Java threads are stopped and cache cleanup
+  ;; is complete. A Cleaner must not free a block while it is being saved.
+  (%save-native-memory))
 
 (defun %reset-class (class)
   "Return CLASS, an LDK class, to its uninitialized state: clear its
@@ -769,6 +776,7 @@ resetting its classpath.  Skipped, with a note, without a javac."
    OUTPUT-PATH:       Path for the saved executable.
    DEFAULT-MAINCLASS: The Java class to run when no class is given on the CLI.
    CLASSPATH:         Classpath string to bake in. If nil, reads CLASSPATH env var."
+  (%jni-check-save)
   (initialize)
   (let ((cp (or classpath (uiop:getenv "CLASSPATH") ".")))
     (setf *default-mainclass* default-mainclass)

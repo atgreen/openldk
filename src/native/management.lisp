@@ -46,13 +46,16 @@
 (in-package :openldk)
 
 (defun |sun/management/VMManagementImpl.getVersion0()Ljava/lang/String;| ()
+  "Return the management interface version implemented by OpenLDK."
   (jstring "4.0"))
 
 (defun |sun/management/VMManagementImpl.initOptionalSupportFields()V| ()
+  "Publish support for current-thread CPU time to the management interface."
   (let ((statics (symbol-value (intern "+static-sun/management/VMManagementImpl+" :openldk))))
     (setf (slot-value statics '|currentThreadCpuTimeSupport|) 1)))
 
 (defun %current-thread-cpu-time-nanos ()
+  "Convert SBCL runtime accounting to nanoseconds."
   (* (get-internal-run-time) (/ 1000000000 internal-time-units-per-second)))
 
 (defun %thread-cpu-time (id)
@@ -63,24 +66,30 @@
       -1))
 
 (defun |sun/management/ThreadImpl.getThreadTotalCpuTime0(J)J| (id)
+  "Return known CPU time for thread ID, or -1 when unavailable."
   (%thread-cpu-time id))
 
 (defun |sun/management/ThreadImpl.getThreadUserCpuTime0(J)J| (id)
+  "Return the available CPU-time approximation for thread ID."
   (%thread-cpu-time id))
 
 (defun |sun/management/ThreadImpl.setThreadCpuTimeEnabled0(Z)V| (enable)
+  "Accept the CPU-time monitoring flag; runtime accounting is always available."
   (declare (ignore enable))
   nil)
 
 (defun |sun/management/ThreadImpl.setThreadContentionMonitoringEnabled0(Z)V| (enable)
+  "Accept the monitoring flag without enabling unsupported contention accounting."
   (declare (ignore enable))
   nil)
 
 (defun |sun/management/ThreadImpl.setThreadAllocatedMemoryEnabled0(Z)V| (enable)
+  "Accept the monitoring flag without enabling unsupported allocation accounting."
   (declare (ignore enable))
   nil)
 
 (defun |sun/management/ThreadImpl.getThreads()[Ljava/lang/Thread;| ()
+  "Return the currently registered live Java threads."
   (|java/lang/Thread.getThreads()[Ljava/lang/Thread;|))
 
 (defmacro %define-vm-management-natives (&rest specs)
@@ -92,6 +101,7 @@
                         ,value))))
 
 (defun %live-java-thread-count ()
+  "Count the currently registered live Java threads."
   (java-array-length (|java/lang/Thread.getThreads()[Ljava/lang/Thread;|)))
 
 (%define-vm-management-natives

@@ -44,15 +44,8 @@
 ;; *native-overrides* is defined in global-state.lisp so earlier-loaded
 ;; files (e.g. jrt.lisp) can register overrides too.
 
-;; OpenLDK supplies JDK native entry points as Lisp methods.  Loading the
-;; corresponding HotSpot JNI libraries (awt, javajpeg, zip, and friends) into
-;; SBCL would neither register nor satisfy those methods, so treat the Java
-;; library-load notification as already fulfilled.
-(setf (gethash "java/lang/System.loadLibrary(Ljava/lang/String;)V"
-               *native-overrides*)
-      (lambda (library-name)
-        (declare (ignore library-name))
-        nil))
+;; System.load/loadLibrary dispatch is installed by jni.lisp. JDK services
+;; keep their CL implementations; application libraries use the JNI bridge.
 
 ;;; Post-<clinit> hooks: functions called after a class's static initializer runs.
 ;;; Used for classes whose fields are pre-populated by the JVM before <clinit>.
@@ -90,6 +83,35 @@ defmethod before the JIT would upgrade them), which is why the name check matter
 ;; method GFs. A genuine no-applicable-method on an ordinary Lisp generic
 ;; function is an OpenLDK (or dependency) bug and must surface as a normal Lisp
 ;; error with its real backtrace, not be masked as a Java NPE / "internal error".
+(defvar *java-dispatch-retries* nil)
+
+(defun %retry-java-dispatch (gf args)
+  "A published class or a method being replaced may briefly have no method.
+Wait for its loader and lazy compiler before treating that gap as an error."
+  (unless (member gf *java-dispatch-retries*)
+    (let* ((symbol (class-name (class-of (first args))))
+           (class (and (symbolp symbol)
+                       (%get-ldk-class-by-bin-name (symbol-name symbol) t (%ldk-loader-for-symbol symbol))))
+           (signature (closer-mop:generic-function-name gf))
+           (index (and class (symbolp signature)
+                       (position-if (lambda (method)
+                                      (and (gethash "Code" (attributes method))
+                                           (string= (symbol-name signature)
+                                                    (concatenate 'string (name method) (descriptor method)))))
+                                    (methods class)))))
+      (when index
+        ;; Metadata is published before stubs. Do not hold this lock while
+        ;; compiling: compilation can resolve further classes and run Java.
+        (bordeaux-threads:with-recursive-lock-held ((%get-class-lock (name class))) nil)
+        (let ((*java-dispatch-retries* (cons gf *java-dispatch-retries*)))
+          (%compile-method class (1+ index))
+          (when (%gf-applicable-p signature (first args))
+            (when (typep gf 'java-generic-function)
+              (bordeaux-threads:with-lock-held ((java-gf-cache-lock gf))
+                (setf (java-gf-method-index gf) nil)
+                (remhash (class-of (first args)) (java-gf-dispatch-cache gf))))
+            (values (apply signature args) t)))))))
+
 (defmethod no-applicable-method ((gf generic-function) &rest args)
   (cond
     ((not (%java-method-gf-p gf))
@@ -98,6 +120,10 @@ defmethod before the JIT would upgrade them), which is why the name check matter
      (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|))))
     (t
      (let ((target (%forwarding-target gf (car args))))
+       ;; Handwritten CL natives keep precedence over bytecode compilation.
+       (unless target
+         (multiple-value-bind (result retried-p) (%retry-java-dispatch gf args)
+           (when retried-p (return-from no-applicable-method result))))
        (cond
          (target (apply target args))
          ;; A generic function a call site made, with no methods anywhere: in
@@ -327,6 +353,18 @@ and Lisp-level plumbing (frames with no Java-method name)."
         (:lambda nil)
         (t t)))))
 
+(defun %safe-list-backtrace ()
+  "Collect frames without letting unavailable optimized arguments break a throw.
+SBCL cannot reconstruct some dynamic-extent &MORE arguments (notably MAP
+inside the verifier). Skip that frame instead of recursively throwing NPE."
+  (let ((frames nil))
+    (sb-debug:map-backtrace
+     (lambda (frame)
+       (handler-case
+           (push (sb-debug::frame-call-as-list frame 3 :method-frame-style :normal) frames)
+         (error () nil))))
+    (nreverse frames)))
+
 (defmethod |fillInStackTrace(I)Ljava/lang/Throwable;| ((this |java/lang/Throwable|) dummy)
   (declare (ignore dummy))
   (let ((backtrace (remove-if-not
@@ -336,7 +374,7 @@ and Lisp-level plumbing (frames with no Java-method name)."
                     ;; argument of every frame was a third of a throw.
                     ;; The limit counts a method frame's two hidden
                     ;; arguments, which come before the receiver.
-                    (loop for rest on (sb-debug:list-backtrace :argument-limit 3)
+                    (loop for rest on (%safe-list-backtrace)
                           unless (%throwable-construction-frame-p (car rest) this)
                             return rest))))
     (setf (slot-value this '|backtrace|) backtrace)

@@ -194,46 +194,43 @@ say) and return the next one's class."
      (format nil "Ljava/lang/Object;"))))
 
 (defun %get-array-ldk-class-from-name (cname)
-  (let* ((ldk-class (%get-ldk-class-by-bin-name cname t)))
-    (if ldk-class
-        ldk-class
-        (let* ((fq-name (substitute #\. #\/ cname)) ;; fq-name uses dots
-               (lclass (make-instance '<class>
-                                      :name cname
-                                      :super "java/lang/Object"))
-               (java-class (%make-java-instance "java/lang/Class")))
-          (setf (slot-value java-class '|name|) (ijstring fq-name))
-          (setf (slot-value java-class '|classLoader|) nil)
-          ;; Every array type implements these.
-          (setf (slot-value lclass 'interfaces) (vector "java/lang/Cloneable" "java/io/Serializable"))
-          ;; JDK 17: getComponentType() reads the componentType field directly
-          ;; (no longer native). Set it so array types resolve correctly.
-          (when (> (length cname) 1)
-            (let ((ct (if (char= (char cname 1) #\[)
-                          (java-class (%get-array-ldk-class-from-name (subseq cname 1)))
-                          (%bin-type-name-to-class (subseq cname 1)))))
-              (when ct
-                (when (slot-exists-p java-class '|componentType|)
-                  (setf (slot-value java-class '|componentType|) ct))
-                ;; JDK 25 reads the modifiers field (getModifiers, isInterface):
-                ;; the component's access, final and abstract, as on a JVM.
-                (when (slot-exists-p java-class '|modifiers|)
-                  (let ((access (if (slot-exists-p ct '|modifiers|)
-                                    (logand (or (slot-value ct '|modifiers|) 1) #x7)
-                                    1)))
-                    (setf (slot-value java-class '|modifiers|) (logior access #x10 #x400))))
-                ;; An array of the application's classes has their loader.
-                (when (and *boot-class-loader*
-                           (eq (slot-value ct '|classLoader|) *boot-class-loader*))
-                  (setf (slot-value java-class '|classLoader|) *boot-class-loader*)))))
-          (setf (slot-value lclass 'java-class) java-class)
-          ;; Store by fq-name (with dots) in *-by-fq-name* tables
-          (setf (gethash fq-name *ldk-classes-by-fq-name*) lclass)
-          (setf (gethash fq-name *java-classes-by-fq-name*) java-class)
-          ;; Store by bin-name (with slashes) in *-by-bin-name* tables
-          (setf (gethash cname *ldk-classes-by-bin-name*) lclass)
-          (setf (gethash cname *java-classes-by-bin-name*) java-class)
-          lclass))))
+  "Resolve an array without asking ClassLoader.loadClass for an array name.
+The component's defining loader owns the array, including multidimensional
+arrays. Resolving an array never initializes its component class."
+  (let* ((cname (substitute #\/ #\. cname))
+         (component (if (char= (char cname 1) #\[)
+                        (java-class (%get-array-ldk-class-from-name (subseq cname 1)))
+                        (%bin-type-name-to-class (subseq cname 1))))
+         (java-loader (and component (slot-value component '|classLoader|)))
+         (loader (get-ldk-loader-for-java-loader java-loader))
+         (ldk-table (if loader (slot-value loader 'ldk-classes-by-bin-name)
+                        *ldk-classes-by-bin-name*)))
+    (bordeaux-threads:with-recursive-lock-held ((%get-class-lock cname))
+      (or (gethash cname ldk-table)
+          (let* ((fq-name (substitute #\. #\/ cname))
+                 (class (make-instance '<class> :name cname :super "java/lang/Object"
+                                       :methods #() :fields #() :initialized-p t :verified-p t))
+                 (java-class (%make-java-instance "java/lang/Class")))
+            (setf (ldk-loader class) loader
+                  (interfaces class) (vector "java/lang/Cloneable" "java/io/Serializable")
+                  (slot-value java-class '|name|) (ijstring fq-name)
+                  (slot-value java-class '|classLoader|) java-loader
+                  (slot-value java-class '|module|) (slot-value component '|module|)
+                  (slot-value java-class '|componentType|) component
+                  (slot-value java-class '|modifiers|)
+                  (logior (logand (or (slot-value component '|modifiers|) 1) #x7) #x10 #x400)
+                  (java-class class) java-class
+                  (gethash cname ldk-table) class)
+            (when loader
+              (setf (gethash fq-name (slot-value loader 'ldk-classes-by-fq-name)) class
+                    (gethash cname (slot-value loader 'java-classes-by-bin-name)) java-class
+                    (gethash fq-name (slot-value loader 'java-classes-by-fq-name)) java-class))
+            ;; Keep the compatibility tables for Lisp callers with no loader.
+            (setf (gethash cname *ldk-classes-by-bin-name*) class
+                  (gethash fq-name *ldk-classes-by-fq-name*) class
+                  (gethash cname *java-classes-by-bin-name*) java-class
+                  (gethash fq-name *java-classes-by-fq-name*) java-class)
+            class)))))
 
 (defun %get-array-ldk-class (element-type)
   (let* ((cname (format nil "[~A" (%type-to-descriptor element-type))))
@@ -316,7 +313,7 @@ its superclasses, made and registered on first use; or NIL for any other."
                                 ;; Reference type → [Lname;
                                 (t (format nil "[L~A;" comp-name)))))
                        (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;|
-                        (jstring array-name) nil nil nil)))
+                        (jstring array-name) nil (slot-value comp-class '|classLoader|) nil)))
                     (t
                      ;; The class's symbol is in its defining loader's package;
                      ;; look the name up in that loader, as two loaders can
@@ -333,21 +330,23 @@ its superclasses, made and registered on first use; or NIL for any other."
     (when *debug-trace*
       (incf *call-nesting-level* -1))))
 
-;; Class.forName(Module, String) is Java code delegating into the built-in
-;; class-loader/module machinery (BootLoader.loadClass etc.), which OpenLDK
-;; fakes -- it silently returns null there, breaking ResourceBundle's
-;; bundle-class lookup (javac's messages, among others).  Resolve through
-;; OpenLDK's own class loading instead.  Per spec: returns null when not
-;; found and does NOT initialize the class.
+;; Runtime modules use OpenLDK's classpath backend. Other modules resolve
+;; through their Java loader, preserving custom-loader resources. In either
+;; case the result must belong to the requested module and is not initialized.
 (setf (gethash "java/lang/Class.forName(Ljava/lang/Module;Ljava/lang/String;)Ljava/lang/Class;"
                *native-overrides*)
       (lambda (module name)
-        (declare (ignore module))
         (handler-case
-            (let ((lclass (%classload-system (substitute #\/ #\. (lstring name)))))
-              (when lclass
-                (java-class lclass)))
-          (condition () nil))))
+            (let* ((module-name (slot-value module '|name|))
+                   (runtime-module (and module-name
+                                        (eq module (gethash (lstring module-name) *boot-modules*))))
+                   (class (if runtime-module
+                              (let ((metadata (%classload-system (substitute #\/ #\. (lstring name)))))
+                                (and metadata (java-class metadata)))
+                              (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;|
+                               name nil (slot-value module '|loader|) nil))))
+              (when (and class (eq (slot-value class '|module|) module)) class))
+          (|condition-java/lang/ClassNotFoundException| () nil))))
 
 (defmethod |java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;| (name initialize loader caller)
   (unwind-protect
@@ -356,6 +355,7 @@ its superclasses, made and registered on first use; or NIL for any other."
            (format t "~&~V@A trace: entering java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;) ~A~%"
                    (incf *call-nesting-level* 1) "*" (list name initialize loader caller)))
          (let* ((lname (substitute #\/ #\. (lstring name)))
+                (user-loader (and loader (not (eq loader *boot-class-loader*))))
                 (result
                   ;; Ask a user class loader first (if provided and not the boot
                   ;; loader) through loadClass, as the JVM does: it checks the
@@ -363,22 +363,21 @@ its superclasses, made and registered on first use; or NIL for any other."
                   ;; calls findClass.  Then fall back to our classpath search.
                   ;; OpenLDK's own callers (descriptor resolution) pass
                   ;; binary names, but Java loaders take dotted ones.
-                  (or (and (and loader (not (equal loader *boot-class-loader*)))
+                  (or (and (eq (char lname 0) #\[)
+                           (let ((*descriptor-loader* loader))
+                             (java-class (%get-array-ldk-class-from-name lname))))
+                      (and user-loader
                            (handler-case
                                (|loadClass(Ljava/lang/String;)Ljava/lang/Class;|
                                 loader (if (find #\/ (lstring name))
                                            (jstring (substitute #\. #\/ (lstring name)))
                                            name))
-                             (|condition-java/lang/ClassNotFoundException| () nil)
-                             (error () nil)))
-                      (and (eq (char lname 0) #\[)
-                           (or (%get-java-class-by-bin-name lname t)
-                               (java-class (%get-array-ldk-class-from-name lname))))
-                      (and (%get-ldk-class-by-bin-name lname t)
-                           (java-class (%get-ldk-class-by-bin-name lname)))
-                      (let ((klass (classload lname)))
-                        (when klass
-                          (java-class klass))))))
+                             (|condition-java/lang/ClassNotFoundException| () nil)))
+                      (and (not user-loader)
+                           (or (and (%get-ldk-class-by-bin-name lname t)
+                                    (java-class (%get-ldk-class-by-bin-name lname)))
+                               (let ((klass (classload lname)))
+                                 (when klass (java-class klass))))))))
            ;; Per JVM spec: when initialize=true, ensure <clinit> has run.
            ;; Previously only the classload branch called %clinit; the findClass
            ;; and already-loaded branches skipped it, breaking autoloads that

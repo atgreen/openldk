@@ -39,13 +39,12 @@
 
 (in-package :openldk)
 
-(defvar *interned-string-table* (make-hash-table :test #'equal))
+(defvar *interned-string-table* (make-hash-table :test #'equal :synchronized t))
 
 (defun lstring (string)
   "Extract a Lisp string from a |java/lang/String| object."
   (when string
-    (let ((value (slot-value string '|value|)))
-      (when value
+    (when-let ((value (slot-value string '|value|)))
         ;; Compact strings: value is byte[], coder is 0 (LATIN1) or 1 (UTF16)
         (let ((data (java-array-data value))
               (coder (or (ignore-errors (slot-value string '|coder|)) 0)))
@@ -98,7 +97,7 @@
                                (t
                                 (vector-push-extend (code-char u) result)
                                 (incf i))))))
-                (coerce result 'string))))))))
+                (coerce result 'string)))))))
 
 (defun %java-byte (octet)
   "OCTET (0..255) as the signed value a Java byte holds."
@@ -187,18 +186,20 @@ pair to match the JVM (which hashes UTF-16 code units)."
             (setf (slot-value this '|hash|) h))
           h))))
 
+(defun %intern-java-string (key candidate)
+  "Publish one canonical Java string for KEY, atomically across threads."
+  (sb-ext:with-locked-hash-table (*interned-string-table*)
+    (or (gethash key *interned-string-table*)
+        (setf (gethash key *interned-string-table*) candidate))))
+
 (defmethod |intern()Ljava/lang/String;| ((str |java/lang/String|))
-  (let ((lisp-string (lstring str)))
-    (let ((istr (gethash lisp-string *interned-string-table*)))
-      (or istr
-          (let ((istr (setf (gethash lisp-string *interned-string-table*) str)))
-            istr)))))
+  (%intern-java-string (lstring str) str))
 
 (defmethod |intern()| ((str string))
-  (let ((istr (gethash str *interned-string-table*)))
-    (or istr
-        (let ((istr (setf (gethash str *interned-string-table*) (jstring str))))
-          istr))))
+  ;; Construct outside the table lock: allocation may load Java classes,
+  ;; whose compilation can itself intern strings. Recheck when publishing.
+  (or (gethash str *interned-string-table*)
+      (%intern-java-string str (jstring str))))
 
 (defmethod |toString()Ljava/lang/String;| (str)
   str)

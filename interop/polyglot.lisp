@@ -49,6 +49,7 @@
 
 (defpackage #:openldk.polyglot
   (:use #:cl)
+  (:documentation "Convenience entry points for embedded JVM languages.")
   (:nicknames #:polyglot)
   (:export #:*languages*
            #:startup
@@ -72,7 +73,7 @@
   "Start each of LANGUAGES (by default, all of them).  A language that fails
 to start is reported and skipped; return those that started."
   (loop for language in languages
-        for package = (cdr (assoc language *languages*))
+        for package = (rest (assoc language *languages*))
         when (progn
                (when verbose (format t "~&; starting ~(~A~)...~%" language))
                (handler-case (progn (uiop:symbol-call package "STARTUP") t)
@@ -96,8 +97,8 @@ its common paths, so an image saved after WARM-UP has them compiled.")
   "Run a little code in each of LANGUAGES (started ones), so it is compiled
 before an image is saved.  A failure is reported, not signalled."
   (dolist (language languages languages)
-    (destructuring-bind (function code) (cdr (assoc language *warm-up*))
-      (handler-case (uiop:symbol-call (cdr (assoc language *languages*)) function code)
+    (destructuring-bind (function code) (rest (assoc language *warm-up*))
+      (handler-case (uiop:symbol-call (rest (assoc language *languages*)) function code)
         (error (e)
           (format t "~&; warming up ~(~A~) failed: ~A~%" language e))))))
 

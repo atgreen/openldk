@@ -78,6 +78,7 @@ BYTES (ProcessImpl's argument and environment blocks)."
   "RUN-PROGRAM's :input/:output/:error argument for ProcessImpl's request
 FD for standard stream INDEX: -1 asks for a pipe, INDEX itself to inherit
 ours, and a redirect to a file arrives as the file's Lisp stream."
+  (declare (ignore index))
   (cond
     ((eql fd -1) :stream)
     ((streamp fd) fd)

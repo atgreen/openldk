@@ -64,3 +64,5 @@ data/
 
 # Startup benchmark builds (bench/*/run.sh)
 /bench/*/target/
+libopenldk-jni.so
+__pycache__/

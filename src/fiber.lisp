@@ -60,20 +60,21 @@
 ;;; Thread identity abstraction
 ;;; ---------------------------------------------------------------------------
 
+(defvar *foreign-thread-identity* nil
+  "Stable identity for JNI threads whose SBCL callback thread wrappers can change.")
+
 (defun current-thread-identity ()
   "Return the current thread identity for monitor ownership and mappings.
 When executing in a fiber context, returns the fiber; otherwise returns the
 OS thread via bordeaux-threads:current-thread."
-  #+sb-fiber
-  (let ((fiber (sb-thread:current-fiber)))
-    (or fiber (bordeaux-threads:current-thread)))
-  #-sb-fiber
-  (bordeaux-threads:current-thread))
+  (or *foreign-thread-identity*
+      #+sb-fiber (uiop:symbol-call :sb-thread :current-fiber)
+      (bordeaux-threads:current-thread)))
 
 (defun in-fiber-p ()
   "Return T when the current code is executing inside a fiber."
   #+sb-fiber
-  (not (null (sb-thread:current-fiber)))
+  (not (null (uiop:symbol-call :sb-thread :current-fiber)))
   #-sb-fiber
   nil)
 
@@ -118,13 +119,13 @@ OS thread via bordeaux-threads:current-thread."
   (bordeaux-threads:with-lock-held (*fiber-scheduler-lock*)
     (when (null *fiber-scheduler-group*)
       (setf *fiber-scheduler-group*
-            (sb-thread:start-fibers
-             (list (sb-thread:make-fiber (lambda ()
-                                           (loop (sb-thread:fiber-sleep 86400)))
+            (uiop:symbol-call :sb-thread :start-fibers
+             (list (uiop:symbol-call :sb-thread :make-fiber (lambda ()
+                                           (loop (uiop:symbol-call :sb-thread :fiber-sleep 86400)))
                                          :name "keepalive")))))))
 
 #+sb-fiber
 (defun submit-virtual-thread-fiber (fiber)
   "Submit FIBER for execution on the fiber scheduler group."
   (ensure-fiber-scheduler)
-  (sb-thread:submit-fiber *fiber-scheduler-group* fiber))
+  (uiop:symbol-call :sb-thread :submit-fiber *fiber-scheduler-group* fiber))

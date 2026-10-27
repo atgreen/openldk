@@ -580,32 +580,29 @@ after load, so the table is cached on the <class> object."
                    (or (methods ldk-class) #()))
               table))))
 
+(defun %find-member-declaring-class (class predicate &optional loader)
+  "Find defining metadata through each class's own loader and member table."
+  (let ((seen nil))
+    (labels ((visit (current)
+               (when (and current (not (member current seen)))
+                 (push current seen)
+                 (%note-class-dependency (name current))
+                 (if (funcall predicate current)
+                     current
+                     (loop for parent in (remove nil (cons (super current)
+                                                           (coerce (interfaces current) 'list)))
+                           thereis (visit (%resolve-class parent (ldk-loader current))))))))
+      (visit (if (stringp class) (%resolve-class class (or loader (%context-loader))) class)))))
+
 (defun %find-field-declaring-class (class field-name &optional loader)
-  "Bin-name of the class/interface that actually declares FIELD-NAME,
-searching CLASS then its superclass and superinterfaces.  A static field
-access initializes only the declaring class (JLS 12.4.1), not the class
-named in the reference."
-  (let ((ldk-class (%get-ldk-class-by-bin-name class t loader)))
-    (when ldk-class
-      (if (some (lambda (f) (and f (string= (name f) field-name)))
-                (coerce (fields ldk-class) 'list))
-          class
-          (loop for parent in (remove nil (cons (super ldk-class)
-                                                (coerce (interfaces ldk-class) 'list)))
-                for result = (%find-field-declaring-class parent field-name loader)
-                when result return result)))))
+  "Metadata for the class that declares FIELD-NAME, including imported parents."
+  (%find-member-declaring-class
+   class (lambda (current) (find field-name (fields current) :key #'name :test #'string=)) loader))
 
 (defun %field-declaring-ir-class (ref-ir-class fieldname)
-  "ir-class for the class that DECLARES FIELDNAME, searching up from the
-referenced class REF-IR-CLASS.  Falls back to REF-IR-CLASS when it declares
-the field itself or the declarer can't be resolved.  Used so a static field
-access initializes the declaring class, not the referenced one."
-  (let* ((ref-name (name (ir-class-class ref-ir-class)))
-         (decl-name (%find-field-declaring-class ref-name fieldname)))
-    (if (and decl-name (not (string= decl-name ref-name)))
-        (let ((lc (%resolve-class-in-context decl-name)))
-          (if lc (make-instance 'ir-class :class lc) ref-ir-class))
-        ref-ir-class)))
+  "Initialize the field's actual declaring class, preserving its defining loader."
+  (let ((declaring (%find-field-declaring-class (ir-class-class ref-ir-class) fieldname)))
+    (if declaring (make-instance 'ir-class :class declaring) ref-ir-class)))
 
 (defun %declares-default-method-p (ldk-class)
   "True when LDK-CLASS is an interface declaring a default method (a
@@ -620,15 +617,9 @@ default method -- not every superinterface."
              (coerce (methods ldk-class) 'list))))
 
 (defun %find-declaring-class (class method-name &optional loader)
-  "Find the class that declares METHOD-NAME, searching class hierarchy.
-   LOADER is the <ldk-class-loader> to use for class lookups."
-  (let ((ldk-class (%get-ldk-class-by-bin-name class t loader)))
-    (when ldk-class
-      (if (gethash method-name (%class-method-name-table ldk-class))
-          class
-          (loop for parent in (remove nil (cons (super ldk-class) (coerce (interfaces ldk-class) 'list)))
-                for result = (%find-declaring-class parent method-name loader)
-                when result return result)))))
+  "Metadata for the class declaring METHOD-NAME, including imported parents."
+  (%find-member-declaring-class
+   class (lambda (current) (gethash method-name (%class-method-name-table current))) loader))
 
 (defun %linkto-varargs-symbol (full-name method-sym)
   "METHOD-SYM, or for a MethodHandle.linkTo<Kind> intrinsic with a
@@ -650,14 +641,23 @@ take the method's arguments followed by the MemberName."
                    :code (let* ((loader (slot-value context 'ldk-loader))
                                 ;; Ensure class is loaded before package lookup
                                 (resolved (%resolve-class-in-context class))
-                                (declaring-class (or (%find-declaring-class class method-name loader) class))
-                                (pkg (class-package declaring-class loader))
-                                (full-name (format nil "~A.~A" declaring-class method-name))
+                                (declaring (or (%find-declaring-class resolved method-name loader) resolved))
+                                (pkg (if declaring (ldk-class-package declaring) (class-package class loader)))
+                                (full-name (format nil "~A.~A" (if declaring (name declaring) class) method-name))
                                 ;; Use static-method-symbol to check :openldk first (for native methods)
                                 (method-sym (%linkto-varargs-symbol
                                              full-name (static-method-symbol full-name pkg)))
                                 (nargs (length args))
                                 (call (cond
+                                        ;; Library ownership is caller-sensitive. Carry the
+                                        ;; declaring class explicitly: SBCL may eliminate a
+                                        ;; tail-calling Java frame before the loader runs.
+                                        ((member full-name '("java/lang/System.load(Ljava/lang/String;)V"
+                                                             "java/lang/System.loadLibrary(Ljava/lang/String;)V")
+                                                 :test #'string=)
+                                         (list (if (search "loadLibrary" full-name) '%jni-system-load-library '%jni-system-load)
+                                               (code (codegen (car args) context))
+                                               (java-class (slot-value context 'class))))
                                         ((eq nargs 0)
                                          (list method-sym))
                                         ((eq nargs 1)
@@ -756,6 +756,30 @@ class is a self-reference to the class currently being compiled."
 (defun %string-prefix-p (prefix string)
   (and (>= (length string) (length prefix))
        (string= prefix string :end2 (length prefix))))
+
+(defun %resolve-class-literal (binary-name caller)
+  "Resolve an executed ldc through CALLER's loader, without initializing its class."
+  (let ((caller-name (substitute #\/ #\. (lstring (slot-value caller '|name|)))))
+    (when (or (string= caller-name binary-name)
+              (%self-referential-hidden-class-p caller-name binary-name))
+      (return-from %resolve-class-literal caller)))
+  (handler-case
+      (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;|
+       (jstring (substitute #\. #\/ binary-name)) nil (%class-java-loader caller) caller)
+    (|condition-java/lang/ClassNotFoundException| ()
+      (%throw '|java/lang/NoClassDefFoundError| (substitute #\. #\/ binary-name)))))
+
+(defmethod codegen ((insn ir-class-literal) context)
+  (make-instance '<expression>
+                 :insn insn
+                 ;; Each instruction keeps its resolved Class. The instruction
+                 ;; remains effectful: even an unused constant can throw.
+                 :code `(let ((cell (load-time-value (cons nil nil))))
+                          (or (car cell)
+                              (setf (car cell)
+                                    (%resolve-class-literal ,(binary-name insn)
+                                                            ,(java-class (slot-value context 'class))))))
+                 :expression-type :REFERENCE))
 
 (defmethod codegen ((insn ir-class) context)
   (let* ((classname (slot-value (slot-value insn 'class) 'name))
@@ -1297,16 +1321,17 @@ interface TARGET-NAME (a binary name) or a subtype of it."
     ((eql 1 (|isArray()Z| java-class))
      (member target-name '("java/lang/Cloneable" "java/io/Serializable") :test #'string=))
     (t
-     (labels ((subtype-p (class)
-                (and class
-                     (or (string= (name class) target-name)
-                         (flet ((named (name)
-                                  (subtype-p (%get-ldk-class-by-bin-name
-                                              name t (and (slot-boundp class 'ldk-loader)
-                                                          (ldk-loader class))))))
-                           (or (and (super class) (named (super class)))
-                               (some #'named (coerce (or (interfaces class) #()) 'list))))))))
-       (subtype-p (get-ldk-class-for-java-class java-class))))))
+     ;; The CLOS hierarchy already contains the actual resolved supertypes.
+     ;; Looking their names up in the component loader's parent tables loses
+     ;; types imported from a sibling loader (as in OSGi bundle wiring).
+     ;; Walking this hierarchy also avoids invoking Java loaders recursively
+     ;; while those loaders are themselves checking arrays.
+     (let* ((class (get-ldk-class-for-java-class java-class))
+            (clos-class (and class (find-class (intern (name class) (ldk-class-package class)) nil))))
+       (and clos-class
+            (some (lambda (supertype)
+                    (string= (symbol-name (class-name supertype)) target-name))
+                  (closer-mop:class-precedence-list clos-class)))))))
 
 (defun %instanceof-array (objref typename)
   "instanceof against an array target type TYPENAME."
@@ -1963,9 +1988,10 @@ boolean prints true/false and char prints the character rather than an int."
                                 ,method-name
                                 ,(code (codegen (second args) context))
                                 ,interface-type-name
-                                ,@(when (search "altMetafactory" bootstrap-method-name)
-                                    `((list ,@(mapcar (lambda (a) (code (codegen a context)))
-                                                      (nthcdr 4 args))))))))
+                                ,(when (search "altMetafactory" bootstrap-method-name)
+                                   `(list ,@(mapcar (lambda (a) (code (codegen a context)))
+                                                     (nthcdr 4 args))))
+                                ,(java-class (slot-value context 'class)))))
         ;; Fallback: generic invokedynamic handling
         (t
          (make-instance '<expression>
@@ -1992,7 +2018,7 @@ boolean prints true/false and char prints the character rather than an int."
                    :insn insn
                    :code (let* ((class (ir-class-class class)))
                            (if class
-                               (let* ((pkg (class-package (slot-value class 'name)))
+                               (let* ((pkg (ldk-class-package class))
                                       (clinit (intern (format nil "%clinit-~A" (slot-value class 'name)) pkg)))
                                  ;; A class that isn't there (a stub, see EMIT of
                                  ;; CONSTANT-CLASS-REFERENCE) has no initializer:
@@ -2157,38 +2183,46 @@ type."
                               (openldk::make-invoke-special-site ',method-symbol ',owner-symbol))
                              (list ,@arg-code))))))
 
-(defun %resolve-field-slot (ref-class-name member-name)
-  "Resolve a Fieldref (REF-CLASS-NAME, MEMBER-NAME) to its CLOS slot
+(defun %resolve-field-slot (ref-class member-name)
+  "Resolve a Fieldref (REF-CLASS, MEMBER-NAME) to its CLOS slot
 symbol, honoring JVM field resolution: walk up from the referenced class
 to the first class declaring the field; a shadowing declaration has its
 own class-qualified slot recorded in *FIELD-SHADOW-SLOTS*."
   (let ((plain (intern (mangle-field-name member-name) :openldk))
-        ;; The Fieldref's class arrives as whatever EMIT produced for the
-        ;; class constant: an IR-CLASS wrapping <CLASS> metadata (or, in
-        ;; principle, a bare string) -- normalize to the binary name.
-        (ref-class-name (typecase ref-class-name
-                          (string ref-class-name)
-                          (ir-class (let ((c (ir-class-class ref-class-name)))
-                                      (and c (name c))))
-                          (<class> (name ref-class-name))
-                          (t nil))))
-    (if (null ref-class-name)
-        plain
-        (loop with cname = ref-class-name
-              for depth from 0 below 64
-              while cname
-              do (let ((shadow (gethash (format nil "~A.~A" cname member-name)
-                                        *field-shadow-slots*)))
-                   (when shadow (return shadow))
-                   (let ((cls (progn (%note-class-dependency cname)
-                                     (gethash cname *ldk-classes-by-bin-name*))))
-                     (unless cls (return plain))
-                     (when (find member-name (fields cls)
-                                 :key (lambda (fl) (slot-value fl 'name))
-                                 :test #'string=)
-                       (return plain))
-                     (setf cname (slot-value cls 'super))))
-              finally (return plain)))))
+        (class (typecase ref-class
+                 (string (%resolve-class-in-context ref-class))
+                 (ir-class (ir-class-class ref-class))
+                 (<class> ref-class))))
+    (loop for current = class then (and (super current)
+                                       (%resolve-class (super current) (ldk-loader current)))
+          while current
+          do (%note-class-dependency (name current))
+          when (find member-name (fields current) :key #'name :test #'string=)
+            return (or (gethash (cons current member-name) *field-shadow-slots*) plain)
+          finally (return plain))))
+
+(defun %volatile-field-p (ref-class member-name)
+  "Whether the resolved field has ACC_VOLATILE, including inherited fields."
+  (let ((class (typecase ref-class
+                 (ir-class (ir-class-class ref-class))
+                 (<class> ref-class)
+                 (string (%resolve-class-in-context ref-class)))))
+    (loop while class
+          do (%note-class-dependency (name class))
+             (let ((field (find member-name (fields class) :key #'name :test #'string=)))
+               (when field
+                 (return (not (zerop (logand #x40 (access-flags field)))))))
+             (setf class (%get-ldk-class-by-bin-name
+                          (super class) t
+                          (when (slot-boundp class 'ldk-loader) (ldk-loader class)))))))
+
+(defun %volatile-slot-value (object slot-name)
+  (with-java-memory-ordering
+    (%java-slot-value object slot-name)))
+
+(defun (setf %volatile-slot-value) (value object slot-name)
+  (with-java-memory-ordering
+    (setf (%java-slot-value object slot-name) value)))
 
 (defun %slot-accessor (context)
   "The operator for a field access: a per-site cached access, or for
@@ -2203,28 +2237,33 @@ compact code a plain call."
     (make-instance '<expression>
                    :insn insn
                    ;; The accessor throws NullPointerException for a null OBJREF.
-                   :code `(,@(%slot-accessor context)
+                   :code `(,@(if (%volatile-field-p ref-class member-name)
+                                  '(%volatile-slot-value)
+                                  (%slot-accessor context))
                            ,(code (codegen objref context))
                            ;; Field names stay in :openldk for CLOS slot inheritance
                            (quote ,(%resolve-field-slot ref-class member-name))
-                           ,@(%slot-cache-argument context)))))
+                           ,@(unless (%volatile-field-p ref-class member-name)
+                               (%slot-cache-argument context))))))
 
 (defmethod codegen ((insn ir-static-member) context)
   (with-slots (class member-name) insn
-    (let ((class-name (slot-value (slot-value class 'class) 'name)))
-      ;; Ensure class is loaded before looking up its package
-      ;; This is necessary because the class might be in a different loader's package
-      (%resolve-class-in-context class-name)
-      (let* ((pkg (class-package class-name))
+    (let* ((class (%field-declaring-ir-class class member-name))
+           (declaring (ir-class-class class))
+           (class-name (name declaring)))
+      (let* ((pkg (ldk-class-package declaring))
              (static-sym-name (format nil "+static-~A+" class-name))
              (sym (intern static-sym-name pkg)))
         (make-instance '<expression>
                        :insn insn
-                       :code `(,@(%slot-accessor context)
+                       :code `(,@(if (%volatile-field-p class member-name)
+                                      '(%volatile-slot-value)
+                                      (%slot-accessor context))
                                ,sym
                                ;; Field names stay in :openldk for CLOS slot inheritance
                                (quote ,(intern (mangle-field-name member-name) :openldk))
-                               ,@(%slot-cache-argument context)))))))
+                               ,@(unless (%volatile-field-p class member-name)
+                                   (%slot-cache-argument context))))))))
 
 (defmethod codegen ((insn ir-throw) context)
   (make-instance '<expression>

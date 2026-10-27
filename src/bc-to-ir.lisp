@@ -869,22 +869,24 @@ instruction's byte length in the context's INSN-SIZE array."
               (emit (aref constant-pool index) constant-pool)
             (incf pc)
             (push pc (aref (next-insn-list context) pc-start))
-            (let* ((var (make-stack-variable context pc-start (get-stack-type-from-descriptor (emit-type (aref constant-pool index) constant-pool))))
+            (let* ((declaring (%field-declaring-ir-class class fieldname))
+                   (own-initializer (and is-clinit-p (eq (ir-class-class declaring) context-class)))
+                   (var (make-stack-variable context pc-start (get-stack-type-from-descriptor (emit-type (aref constant-pool index) constant-pool))))
                    (code (list (make-instance 'ir-assign
-                                              :address (if (and is-clinit-p (equal (ir-class-class class) context-class)) pc-start (+ pc-start 0.1))
+                                              :address (if own-initializer pc-start (+ pc-start 0.1))
                                               :lvalue var
                                               :rvalue (make-instance 'ir-static-member
                                                                      :address pc-start
                                                                      :class class
                                                                      :member-name fieldname)))))
               (push var (stack context))
-              (if (and is-clinit-p (equal (ir-class-class class) context-class))
+              (if own-initializer
                   code
                   (cons (make-instance 'ir-clinit
                                        :address pc-start
                                        ;; JLS 12.4.1: initialize the class that
                                        ;; declares the field, not the referenced one.
-                                       :class (%field-declaring-ir-class class fieldname))
+                                       :class declaring)
                         code)))))))))
 
 (defun unsigned-to-signed-short (unsigned-value)
@@ -1570,7 +1572,12 @@ are ordinary declared methods and use normal dispatch.")
                   (list call)
                   (list (make-instance 'ir-clinit
                                        :address pc-start
-                                       :class (make-instance 'ir-class :class (%resolve-class-in-context callee-class)))
+                                       :class (make-instance 'ir-class
+                                                             :class (or (%find-declaring-class
+                                                                         callee-class
+                                                                         (lispize-method-name (emit method-reference constant-pool))
+                                                                         (ldk-loader context))
+                                                                        (%resolve-class-in-context callee-class))))
                         call)))))))))
 
 (define-bytecode-transpiler :INVOKEDYNAMIC (context code)
@@ -1680,7 +1687,10 @@ are ordinary declared methods and use normal dispatch.")
   (with-slots (class) context
     (with-slots (constant-pool) class
       (let ((constant (aref constant-pool index)))
-        (if (typep constant 'constant-dynamic)
+        (cond
+          ((typep constant 'constant-class-reference)
+           (values (make-instance 'ir-class-literal :binary-name (emit-name constant constant-pool)) :REFERENCE))
+          ((typep constant 'constant-dynamic)
             ;; A dynamically computed constant (JSR-292, JDK 11+).
             (let* ((nat (aref constant-pool (slot-value constant 'name-and-type-index)))
                    (name (slot-value (aref constant-pool (slot-value nat 'name-index)) 'value))
@@ -1697,8 +1707,8 @@ are ordinary declared methods and use normal dispatch.")
                                      :args (mapcar (lambda (arg) (emit (aref constant-pool arg) constant-pool))
                                                    (method-args bootstrap-method))
                                      :caller (slot-value class 'name))
-                      (get-stack-type-from-descriptor descriptor)))
-            (values (emit constant constant-pool) (get-stack-jtype constant)))))))
+                      (get-stack-type-from-descriptor descriptor))))
+          (t (values (emit constant constant-pool) (get-stack-jtype constant))))))))
 
 (define-bytecode-transpiler :LDC (context code)
   (with-slots (pc class stack) context
@@ -1936,18 +1946,20 @@ array is made."
               (emit (aref constant-pool index) constant-pool)
             (incf pc)
             (push pc (aref (next-insn-list context) pc-start))
-            (let ((code (list (make-instance 'ir-assign
-                                             :address (if (and is-clinit-p (equal (ir-class-class class) context-class)) pc-start (+ pc-start 0.1))
+            (let* ((declaring (%field-declaring-ir-class class fieldname))
+                   (own-initializer (and is-clinit-p (eq (ir-class-class declaring) context-class)))
+                   (code (list (make-instance 'ir-assign
+                                             :address (if own-initializer pc-start (+ pc-start 0.1))
                                              :rvalue (pop (stack context))
                                              :lvalue (make-instance 'ir-static-member
                                                                     :address pc-start
                                                                     :class class
                                                                     :member-name fieldname)))))
-              (if (and is-clinit-p (equal (ir-class-class class) context-class))
+              (if own-initializer
                   code
                   (cons (make-instance 'ir-clinit
                                        :address pc-start
-                                       :class (%field-declaring-ir-class class fieldname))
+                                       :class declaring)
                         code)))))))))
 
 (define-bytecode-transpiler :RETURN (context code)

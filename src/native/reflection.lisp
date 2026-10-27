@@ -43,6 +43,14 @@
 
 ;;; --- Reflective method/constructor invocation (JDK 9+: jdk/internal/reflect) ---
 
+(defun %invoke-reflection-target (function arguments)
+  "Wrap exceptions from the target body, after reflection's own checks and initialization."
+  (handler-case (apply function arguments)
+    (|condition-java/lang/Throwable| (condition)
+      (let ((wrapper (%make-java-instance "java/lang/reflect/InvocationTargetException")))
+        (|<init>(Ljava/lang/Throwable;)V| wrapper (slot-value condition '|objref|))
+        (error (%lisp-condition wrapper))))))
+
 (defun |jdk/internal/reflect/NativeMethodAccessorImpl.invoke0(Ljava/lang/reflect/Method;Ljava/lang/Object;[Ljava/lang/Object;)|
     (method obj args)
   "Native reflective method invocation for JDK 9+."
@@ -78,11 +86,12 @@
       (unless (and sym (fboundp sym))
         (internal-error "Reflective invoke0: method ~A not found (class=~A, static=~A)"
                fn-name class-name is-static))
+      (if is-static
+          (%clinit (get-ldk-class-for-java-class declaring-class))
+          (unless obj (%throw '|java/lang/NullPointerException|)))
       (let* ((lisp-args (when args
                           (coerce (java-array-data args) 'list)))
-             (result (if is-static
-                         (apply (symbol-function sym) lisp-args)
-                         (apply (symbol-function sym) obj lisp-args)))
+             (result (%invoke-reflection-target sym (if is-static lisp-args (cons obj lisp-args))))
              ;; Return descriptor char is the one just past the ')'.
              (ret-char (char descriptor (1+ (position #\) descriptor)))))
         ;; Method.invoke returns Object, so a primitive return must be boxed
@@ -117,7 +126,7 @@
          (lispized (lispize-method-name (format nil "<init>~A" descriptor)))
          (pkg (find-package :openldk))
          (sym (find-symbol lispized pkg)))
-    (classload class-name)
+    (%clinit (get-ldk-class-for-java-class declaring-class))
     (let ((instance (%make-java-instance class-name
                                          (get-ldk-loader-for-java-loader
                                           (slot-value declaring-class '|classLoader|))))
@@ -125,7 +134,7 @@
           (lisp-args (when args
                        (%unbox-args-for-descriptor descriptor (coerce (java-array-data args) 'list)))))
       (if (and sym (fboundp sym))
-          (apply (symbol-function sym) instance lisp-args)
+          (%invoke-reflection-target sym (cons instance lisp-args))
           (internal-error "Reflective newInstance0: constructor ~A not found for class ~A"
                  lispized class-name))
       instance)))
@@ -283,7 +292,7 @@ initialize the declaring class, as the JVM does before reflective access."
 (setf (gethash "java/lang/reflect/Field.get(Ljava/lang/Object;)Ljava/lang/Object;" *native-overrides*)
       (lambda (field obj)
         (let* ((char (%field-primitive-char (slot-value field '|type$|)))
-               (slot-key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk))
+               (slot-key (%field-object-slot field))
                (storage (%field-slot-storage field obj))
                (raw (if (and storage (slot-exists-p storage slot-key) (slot-boundp storage slot-key))
                         (slot-value storage slot-key)
@@ -295,7 +304,7 @@ initialize the declaring class, as the JVM does before reflective access."
 (setf (gethash "java/lang/reflect/Field.set(Ljava/lang/Object;Ljava/lang/Object;)V" *native-overrides*)
       (lambda (field obj value)
         (let* ((char (%field-primitive-char (slot-value field '|type$|)))
-               (slot-key (intern (mangle-field-name (lstring (slot-value field '|name|))) :openldk))
+               (slot-key (%field-object-slot field))
                (storage (%field-slot-storage field obj))
                ;; Unbox the wrapper when the field is primitive; wrappers carry
                ;; the primitive in their |value| slot.
@@ -342,7 +351,7 @@ initialize the declaring class, as the JVM does before reflective access."
 ;; initialized".  OpenLDK's runtime behaves as a fully-initialized single
 ;; unnamed module, so report the module system as inited.
 (setf (gethash "jdk/internal/misc/VM.isModuleSystemInited()Z" *native-overrides*)
-      (lambda () 1))
+      (lambda () (if *boot-module-layer-initializing* 0 1)))
 
 ;; Likewise VM.isBooted (initLevel 4).  ServiceLoader, before the VM has
 ;; booted, serves only java.base code; once booted it lets any caller whose
@@ -351,13 +360,9 @@ initialize the declaring class, as the JVM does before reflective access."
 (setf (gethash "jdk/internal/misc/VM.isBooted()Z" *native-overrides*)
       (lambda () 1))
 
-;; OpenLDK builds no boot module layer, so ModuleLayer.boot() is null, which
-;; code running in a booted VM doesn't expect (ManagementFactory looks for
-;; java.logging in it).  Answer the empty layer: lookups in it find nothing.
+;; Build the JDK's actual module descriptors, reads, exports, and layer.
 (setf (gethash "java/lang/ModuleLayer.boot()Ljava/lang/ModuleLayer;" *native-overrides*)
-      (lambda ()
-        (%clinit (classload "java/lang/ModuleLayer"))
-        (|java/lang/ModuleLayer.empty()Ljava/lang/ModuleLayer;|)))
+      #'%boot-module-layer)
 
 ;; Reporting the module system as inited (above) has one side effect worth
 ;; neutralizing: StackTraceElement.isHashedInJavaBase() short-circuits to false
@@ -401,11 +406,9 @@ initialize the declaring class, as the JVM does before reflective access."
 (defun |java/lang/ref/Reference.getAndClearReferencePendingList()Ljava/lang/ref/Reference;| () nil)
 (defun |java/lang/ref/Reference.hasReferencePendingList()Z| () 0)
 
-;;; OpenLDK runs no reference-processing threads (SBCL's GC handles memory),
-;;; so Reference's clinit never registers a JavaLangRefAccess.  initPhase1
-;;; calls SharedSecrets.getJavaLangRefAccess().startThreads() and Bits
-;;; calls .waitForReferenceProcessing(), so hand out a no-op stub instead
-;;; of the null that made initPhase1 NPE and abort mid-way.
+;;; OpenLDK supplies reference delivery in native/references.lisp instead of
+;;; starting the JDK ReferenceHandler and Finalizer threads. Supply the shared
+;;; access object during initPhase1; its wait method drains discovered references.
 
 (defclass %java-lang-ref-access-stub (|java/lang/Object|) ())
 
@@ -417,17 +420,9 @@ initialize the declaring class, as the JVM does before reflective access."
 (defmethod |runFinalization()V| ((this %java-lang-ref-access-stub))
   nil)
 
-(defmethod |waitForReferenceProcessing()Z| ((this %java-lang-ref-access-stub))
-  0)
-
 (setf (gethash "jdk/internal/access/SharedSecrets.getJavaLangRefAccess()Ljdk/internal/access/JavaLangRefAccess;"
                *native-overrides*)
       (lambda () *java-lang-ref-access-stub*))
-
-(defmethod |clear0()V| ((this |java/lang/ref/Reference|))
-  "Native clear0: set the referent to null."
-  (when (slot-exists-p this '|referent|)
-    (setf (slot-value this '|referent|) nil)))
 
 ;;; Finalizer native stubs
 (defun |java/lang/ref/Finalizer.isFinalizationEnabled()Z| ()

@@ -201,6 +201,10 @@ pure expression nodes override this so DCE can eliminate them."
   ((class :with)))
 (define-print-object/std ir-class)
 
+(defclass/std ir-class-literal (ir-node)
+  ((binary-name))
+  (:documentation "An ldc class constant, resolved only when the instruction executes."))
+
 (defmethod side-effect-p ((node ir-class))
   (declare (ignore node))
   nil)

@@ -103,7 +103,8 @@ lambda over Jackson 2 classes behind a check that they are present."
             (error c))))))
 
 (defmethod emit ((cmh constant-method-handle) cp)
-  (%emit-or-missing-class (lambda () (%emit-method-handle cmh cp))))
+  (let ((*descriptor-loader* (or (%context-java-loader) *descriptor-loader*)))
+    (%emit-or-missing-class (lambda () (%emit-method-handle cmh cp)))))
 
 (defun %emit-method-handle (cmh cp)
   (assert (classload "java/lang/invoke/MethodHandles$Lookup"))
@@ -136,7 +137,8 @@ lambda over Jackson 2 classes behind a check that they are present."
                           (4 '|java/lang/invoke/MethodHandles$Lookup.findStaticSetter(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;)Ljava/lang/invoke/MethodHandle;|)
                           (5 '|java/lang/invoke/MethodHandles$Lookup.findVirtual(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/MethodHandle;|)
                           (6 '|java/lang/invoke/MethodHandles$Lookup.findStatic(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/MethodHandle;|)
-                          (7 '|java/lang/invoke/MethodHandles$Lookup.findSpecial(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/Class;)Ljava/lang/invoke/MethodHandle;|)
+                          (7
+                           '|java/lang/invoke/MethodHandles$Lookup.findSpecial(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/Class;)Ljava/lang/invoke/MethodHandle;|) ; lint:suppress max-line-length
                           (8 '|java/lang/invoke/MethodHandles$Lookup.findConstructor(Ljava/lang/Class;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/MethodHandle;|)
                           ;; interface methods use findVirtual
                           (9 '|java/lang/invoke/MethodHandles$Lookup.findVirtual(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/MethodHandle;|)
@@ -174,7 +176,8 @@ lambda over Jackson 2 classes behind a check that they are present."
   (assert (classload "java/lang/invoke/MethodType"))
   (%emit-or-missing-class
    (lambda ()
-     (let ((descriptor (emit (aref cp (descriptor-index cmt)) cp)))
+     (let ((descriptor (emit (aref cp (descriptor-index cmt)) cp))
+           (*descriptor-loader* (or (%context-java-loader) *descriptor-loader*)))
        (let ((mt (|java/lang/invoke/MethodType.methodType(Ljava/lang/Class;[Ljava/lang/Class;)Ljava/lang/invoke/MethodType;|
                   (%get-return-type descriptor)
                   (make-java-array
@@ -321,7 +324,9 @@ lambda over Jackson 2 classes behind a check that they are present."
     java-class
     method-name-table  ; lazy hash set of lispized name+descriptor strings
     content-hash       ; MD5 of the classfile, hex, for the FASL cache
-    ldk-loader)))  ; <ldk-class-loader> that loaded this class
+    ldk-loader)  ; <ldk-class-loader> that loaded this class
+   (verified-p :std nil)
+   (verification-name :std nil)))
 
 (defclass/std <inner-class> ()
   ((inner-class-info-index
@@ -350,7 +355,7 @@ of its attributes finds none rather than failing."
    (attributes)))
 
 (defclass/std <method> (<field>)
-  ())
+  ((verified-p :std nil)))
 
 (defclass/std <bootstrap-method> ()
   ((method-ref)
@@ -407,11 +412,18 @@ of its attributes finds none rather than failing."
   "Read an unsigned 8-byte big-endian integer from BITIO."
   `(bitio:read-integer bitio :num-bytes 8 :byte-endian :be :unsignedp t))
 
+(defvar *classfile-octet-limit* nil
+  "Maximum possible attribute size while parsing an in-memory classfile.")
+
 (defmacro read-buffer (size)
-  "Read SIZE bytes into a (unsigned-byte 8) array from BITIO."
-  `(let ((buf (make-array ,size :element-type '(unsigned-byte 8))))
-     (bitio:read-bytes bitio buf :bit-endian :be :bits-per-byte 8)
-     buf))
+  "Read SIZE octets, checking the input's bound before allocating storage."
+  (let ((count (gensym "COUNT")))
+    `(let ((,count ,size))
+       (when (and *classfile-octet-limit* (> ,count *classfile-octet-limit*))
+         (class-format-error "Attribute exceeds classfile length"))
+       (let ((buf (make-array ,count :element-type '(unsigned-byte 8))))
+         (bitio:read-bytes bitio buf :bit-endian :be :bits-per-byte 8)
+         buf))))
 
 (defclass/std <exception-table-entry> ()
   ((start-pc)
@@ -462,10 +474,13 @@ stream."
                                                   :method-ref bootstrap-method-ref
                                                   :method-args bootstrap-arguments))))))
           ("Code"
+           (when (gethash "Code" attributes) (class-format-error "Duplicate Code attribute"))
            (let* ((max-stack (read-u2))
                   (max-locals (read-u2))
                   (code-length (read-u4))
-                  (code (read-buffer code-length))
+                  (code (progn
+                          (unless (< 0 code-length 65536) (class-format-error "Invalid Code length ~D" code-length))
+                          (read-buffer code-length)))
                   (exception-table-length (read-u2))
                   (exceptions (read-exceptions bitio constant-pool exception-table-length))
                   (attribute-count (read-u2))
@@ -541,7 +556,9 @@ stream."
                                   (or (%get-java-class-by-bin-name "byte" t) :early-byte-placeholder)
                                   :initial-contents (read-buffer attributes-length))))
           ("StackMapTable"
-           (read-buffer attributes-length))
+           (when (gethash name attributes)
+             (class-format-error "Duplicate StackMapTable attribute"))
+           (setf (gethash name attributes) (read-buffer attributes-length)))
           ("SourceFile"
            (read-buffer attributes-length))
           ("SourceDebugExtension"
@@ -701,20 +718,23 @@ lone surrogates and other BMP characters map to one character each."
           do (fast-io:fast-write-sequence buffer out 0 end))
     (fast-io:finish-output-buffer out)))
 
-(defun read-classfile (fin)
+(defun %read-classfile (fin)
   "Parse a classfile from binary input stream FIN and return a <class>."
   (let* ((class (make-instance '<class>))
-         (octets (%read-all-octets fin)))
+         (octets (%read-all-octets fin))
+         (*classfile-octet-limit* (length octets)))
     ;; The FASL cache keys compiled methods by their class's content.
     (setf (slot-value class 'content-hash) (%md5-hex octets))
     (with-slots (methods fields super interfaces) class
       (fast-io:with-fast-input (fin-fast octets)
         (let ((bitio (bitio:make-bitio fin-fast #'fast-io:fast-read-byte #'wrap-fast-read-sequence)))
           (flet ((read-u1 () (bitio:read-one-byte bitio)))
-            (bitio:read-integer bitio :unsignedp nil :byte-endian :be) ;; magic bytes
+            (unless (= (read-u4) #xcafebabe)
+              (class-format-error "Invalid classfile magic"))
             (let ((minor-version (read-u2))
                   (major-version (read-u2)))
-              (when (> major-version 69)
+              (when (or (< major-version 45) (> major-version 69)
+                        (and (>= major-version 56) (not (zerop minor-version))))
                 ;; Java-visible: the JVM throws UnsupportedClassVersionError.
                 (let ((exc (%make-java-instance "java/lang/UnsupportedClassVersionError")))
                   (|<init>(Ljava/lang/String;)V| exc
@@ -724,7 +744,7 @@ lone surrogates and other BMP characters map to one character each."
               (setf (slot-value class 'major-version) major-version)
               (setf (slot-value class 'minor-version) minor-version)
               (let ((constant-pool-count (read-u2)))
-                (let ((constant-pool (make-array (1+ constant-pool-count)))
+                (let ((constant-pool (make-array (1+ constant-pool-count) :initial-element nil))
                       (skip nil))
                   (setf (slot-value class 'constant-pool) constant-pool)
                   (dotimes (i (1- constant-pool-count))
@@ -863,5 +883,18 @@ lone surrogates and other BMP characters map to one character each."
                           (setf (aref methods i) method)
                           (setf (slot-value method 'attributes)
                                 (read-attributes bitio constant-pool class attributes-count)))))
-                    (setf (attributes class) (read-attributes bitio constant-pool class (read-u2)))))))))))
+                    (setf (attributes class) (read-attributes bitio constant-pool class (read-u2)))))))))
+        (unless (= (fast-io:buffer-position fin-fast) (length octets))
+          (class-format-error "Trailing bytes after classfile"))))
     class))
+
+(defun read-classfile (stream)
+  "Parse and structurally validate a class before its bytecodes reach the JIT."
+  (handler-case
+      (let ((class (%read-classfile stream)))
+        (verify-class-structure class)
+        (setf (verification-name class) (name class))
+        class)
+    (bytecode-verification-error (condition) (error condition))
+    (end-of-file () (class-format-error "Truncated classfile"))
+    (type-error (condition) (class-format-error "Malformed classfile: ~A" condition))))

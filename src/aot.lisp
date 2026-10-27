@@ -46,6 +46,7 @@
 
 (defun %write-aot-method (class-name method-name definition-code)
   "Write AOT compiled Lisp code to a file in the top-level AOT directory."
+  (declare (ignore method-name))
   (when *aot-dir*
     (let* ((path-parts (split-sequence:split-sequence #\/ class-name))
            (dir-path (format nil "~A/~{~A~^/~}"

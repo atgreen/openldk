@@ -68,7 +68,7 @@ TIMEOUT seconds when given.  Returns NIL on a timeout."
 
 (defvar *monitors* (make-hash-table :weakness :key :synchronized t))
 
-(defvar *last-monitor* (cons nil nil)
+(defvar *last-monitor* (list nil)
   "(object . monitor) of the last %GET-MONITOR, replaced whole so threads
 never see one object's monitor for another's.  A lookup in the weak
 table takes its lock, a sixth of an uncontended synchronized call.")
@@ -78,8 +78,8 @@ table takes its lock, a sixth of an uncontended synchronized call.")
 Monitors for unreferenced objects are automatically reclaimed by the GC
 via the weak hash table."
   (let ((last *last-monitor*))
-    (if (eq (car last) object)
-        (cdr last)
+    (if (eq (first last) object)
+        (rest last)
         (let ((monitor
                 (or (gethash object *monitors*)
                     ;; Double-checked locking: re-check under the hash table

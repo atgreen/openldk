@@ -286,4 +286,9 @@ op's value arguments (expected/new/delta as applicable)."
     (dolist (op ops)
       (let ((cat category))
         (setf (symbol-function (intern (format nil "%VARHANDLE-OP-~A" op) :openldk))
-              (lambda (vh &rest args) (%varhandle-invoke cat vh args)))))))
+              (lambda (vh &rest args)
+                ;; The dispatcher otherwise erases the access mode to CATEGORY.
+                ;; Conservatively order plain modes too, preserving atomicity
+                ;; of byte-array views and interoperability with volatile fields.
+                (with-java-memory-ordering
+                  (%varhandle-invoke cat vh args))))))))

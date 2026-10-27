@@ -66,25 +66,67 @@
 (defvar *zipfile-state* (make-hash-table :test #'eq :weakness :key :synchronized t)
   "java.util.zip.ZipFile -> (path . zip:zipfile).")
 
+(defvar *zipfile-entry-metadata* (make-hash-table :test #'eq :weakness :key :synchronized t)
+  "Open zip -> entry offset -> (stored CRC . compression method).")
+
+(defvar *zipfile-read-locks* (make-hash-table :test #'eq :weakness :key :synchronized t)
+  "Open zip -> lock protecting its shared seekable input stream.")
+
+(defun %java-zip-entry-contents (zip entry)
+  "Read ENTRY atomically with respect to other readers of ZIP's file stream."
+  (bt:with-lock-held ((gethash zip *zipfile-read-locks*))
+    (zip:zipfile-entry-contents entry)))
+
+(defun %open-java-zipfile (path)
+  "Open PATH and retain central-directory metadata omitted by the zip library.
+Read the stored CRC, rather than computing it from the data: URLClassLoader
+uses this value to detect corrupted entries, including streamed ZIP entries
+whose local headers contain zero CRCs."
+  (let* ((zip (zip:open-zipfile path))
+         (stream (zip::zipfile-stream zip))
+         (position (file-position stream))
+         (metadata (make-hash-table)))
+    (handler-case
+        (unwind-protect
+             (progn
+               (zip::seek-to-end-header stream)
+               (let ((end (zip::make-end-header stream)))
+                 (file-position stream (zip::end/central-directory-offset end))
+                 (dotimes (index (zip::end/total-files end))
+                   (let ((header (zip::make-directory-entry stream)))
+                     (setf (gethash (zip::cd/offset header) metadata)
+                           (cons (zip::cd/crc header) (zip::cd/method header)))
+                     (file-position stream (+ (file-position stream)
+                                              (zip::cd/name-length header)
+                                              (zip::cd/extra-length header)
+                                              (zip::cd/comment-length header))))))
+               (setf (gethash zip *zipfile-entry-metadata*) metadata
+                     (gethash zip *zipfile-read-locks*) (bt:make-lock "Java ZIP input stream"))
+               zip)
+          (file-position stream position))
+      (error (condition)
+        (zip:close-zipfile zip)
+        (error condition)))))
+
 (defun %zipfile-name (zip-file)
-  (car (gethash zip-file *zipfile-state*)))
+  "Return the retained Java pathname of ZIP-FILE."
+  (first (gethash zip-file *zipfile-state*)))
 
 (defun %zipfile-zip (zip-file)
   "The open zip:zipfile for ZIP-FILE, reopening it if a saved image has
 restarted since it was opened."
-  (let ((state (gethash zip-file *zipfile-state*)))
-    (when state
-      (or (cdr state)
-          (setf (cdr state) (zip:open-zipfile (lstring (car state))))))))
+  (when-let ((state (gethash zip-file *zipfile-state*)))
+    (or (rest state)
+        (setf (rest state) (%open-java-zipfile (lstring (first state)))))))
 
 (defun %zipfile-reset-for-save ()
   "Close every open zip, keeping its path: file descriptors don't survive
 SAVE-LISP-AND-DIE, so each one reopens on first use after a restart."
   (maphash (lambda (zip-file state)
              (declare (ignore zip-file))
-             (when (cdr state)
-               (ignore-errors (zip:close-zipfile (cdr state)))
-               (setf (cdr state) nil)))
+             (when (rest state)
+               (ignore-errors (zip:close-zipfile (rest state)))
+               (setf (rest state) nil)))
            *zipfile-state*))
 
 
@@ -105,7 +147,7 @@ of the JavaUtilZipFileAccess bridge: JarFile.entries() goes through it."
   "Open the zip file at path NAME (a Java string) for ZIP-FILE."
   (%check-not-directory name)
   (setf (gethash zip-file *zipfile-state*)
-        (cons name (zip:open-zipfile (lstring name)))))
+        (cons name (%open-java-zipfile (lstring name)))))
 
 (defmethod |<init>(Ljava/io/File;I)V| ((this |java/util/zip/ZipFile|) file mode)
   (assert (= mode 1)) ; only support read for now
@@ -139,6 +181,10 @@ entry ZE in ZIP-FILE."
     (|<init>(Ljava/lang/String;)V| entry name)
     (|setSize(J)| entry (zip::zipfile-entry-size ze))
     (|setCompressedSize(J)V| entry (zip::zipfile-entry-compressed-size ze))
+    (let ((metadata (gethash (zip::zipfile-entry-offset ze)
+                             (gethash (%zipfile-zip zip-file) *zipfile-entry-metadata*))))
+      (|setCrc(J)V| entry (first metadata))
+      (|setMethod(I)V| entry (rest metadata)))
     ;; A JarFile's entries are JarEntries: JarFile.getJarEntry casts
     ;; (Groovy's compiler, finding its global transforms in jars).
     (if (typep zip-file '|java/util/jar/JarFile|)
@@ -291,8 +337,9 @@ finds them: META-INF/*.SF, *.RSA, *.DSA, *.EC and SIG-*, not in subdirectories."
 (defmethod |read()| ((this <zip-input-stream>))
   (with-slots (zip-file entry buffer index) this
     (unless buffer
-      (setf buffer (zip:zipfile-entry-contents (zip:get-zipfile-entry (lstring (slot-value entry '|name|))
-                                                                      (%zipfile-zip zip-file))))
+      (let ((zip (%zipfile-zip zip-file)))
+        (setf buffer (%java-zip-entry-contents zip (zip:get-zipfile-entry (lstring (slot-value entry '|name|))
+                                                                        zip))))
       (setf index -1))
     (if (< index (1- (length buffer)))
         (aref buffer (incf index))
@@ -312,7 +359,8 @@ finds them: META-INF/*.SF, *.RSA, *.DSA, *.EC and SIG-*, not in subdirectories."
 
 (defmethod |close()V| ((this |java/util/zip/ZipFile|))
   (when-let ((zip (%zipfile-zip this)))
-    (zip:close-zipfile zip)
+    (bt:with-lock-held ((gethash zip *zipfile-read-locks*))
+      (zip:close-zipfile zip))
     (remhash this *zipfile-state*)))
 
 (defvar *crc-table*
@@ -382,10 +430,11 @@ finds them: META-INF/*.SF, *.RSA, *.DSA, *.EC and SIG-*, not in subdirectories."
   (unless (eql 1 (slot-value this '|hasCheckedSpecialAttributes|))
     (let* ((zip (%zipfile-zip this))
            (entry (and zip (zip:get-zipfile-entry "META-INF/MANIFEST.MF" zip)))
-           (text (and entry (flexi-streams:octets-to-string (zip:zipfile-entry-contents entry)
+           (text (and entry (flexi-streams:octets-to-string (%java-zip-entry-contents zip entry)
                                                             :external-format :latin-1))))
+      ;; Normalize line endings on a copy: the ZIP data may be shared.
       (setf (slot-value this '|hasClassPathAttribute|)
-            (if (and text (search (format nil "~%Class-Path:") (substitute #\Newline #\Return text)
+            (if (and text (search (format nil "~%Class-Path:") (substitute #\Newline #\Return text) ; lint:suppress substitute-use
                                   :test #'char-equal))
                 1 0))
       (setf (slot-value this '|hasCheckedSpecialAttributes|) 1))))
@@ -397,7 +446,7 @@ finds them: META-INF/*.SF, *.RSA, *.DSA, *.EC and SIG-*, not in subdirectories."
          (entry (and zip (zip:get-zipfile-entry "META-INF/MANIFEST.MF" zip))))
     (when entry
       (let ((bytes (map 'vector (lambda (b) (if (> b 127) (- b 256) b))
-                        (zip:zipfile-entry-contents entry)))
+                        (%java-zip-entry-contents zip entry)))
             (stream (%make-java-instance "java/io/ByteArrayInputStream"))
             (manifest (%make-java-instance "java/util/jar/Manifest")))
         (|<init>([B)V| stream (make-java-array :component-class (%get-java-class-by-bin-name "byte")
