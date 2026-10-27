@@ -40,6 +40,15 @@ public class SVGProbe {
         if (blurred.getAlpha(7, 12) < 10 || blurred.getAlpha(12, 12) < 180
                 || blurred.getAlpha(0, 0) != 0 || blurred.getAlpha(8, 12) >= 250)
             throw new AssertionError("SVG Gaussian blur was not rendered");
-        System.out.println("SWT JSVG paths, alpha, gradient, scaling, text, and blur passed");
+        String clip = "<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'>"
+            + "<defs><clipPath id='c'><circle cx='12' cy='12' r='8'/></clipPath>"
+            + "<filter id='b'><feGaussianBlur stdDeviation='1'/></filter></defs>"
+            + "<g clip-path='url(#c)'><rect width='24' height='24' fill='red' filter='url(#b)'/></g></svg>";
+        ImageData clipped = new JSVGRasterizer().rasterizeSVG(
+                new ByteArrayInputStream(clip.getBytes(StandardCharsets.UTF_8)), 100);
+        if (clipped.getAlpha(12, 12) < 200 || clipped.getAlpha(0, 0) != 0
+                || clipped.getAlpha(22, 12) != 0)
+            throw new AssertionError("Filtered SVG curved clip was not applied");
+        System.out.println("SWT JSVG paths, alpha, gradient, scaling, text, blur, and clips passed");
     }
 }

@@ -106,6 +106,7 @@
                (:file "src/native/net")
                (:file "src/native/ordering")
                (:file "src/native/graphics")
+               (:file "src/native/shape-spans")
                (:file "src/native/fonts")
                (:file "src/native/font-rendering")
                (:file "src/native/references")

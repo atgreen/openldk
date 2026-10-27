@@ -6,7 +6,7 @@ normal workbench shutdown. A process that merely remains alive does not pass.
 
 Current status: the HotSpot control passes. OpenLDK passes buffered-image,
 Java2D pixel-comparison, and standalone SWT JSVG rasterizer checks, including
-text glyphs and Gaussian blur. The full
+text glyphs, Gaussian blur, and curved clips on filtered images. The full
 OpenLDK editor/save/build session remains under investigation; the workbench
 check is a completion target, rather than a claim that Eclipse works.
 

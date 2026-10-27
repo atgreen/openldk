@@ -17,8 +17,11 @@ allowing two sample levels for native integer-kernel rounding. The CL loops
 retain JDK 25's signed 16-bit convolution behavior for ushort storage.
 Filtered image production, pixel grabbing, and Toolkit image materialization
 are checked separately; these are used by SVG filter pipelines.
-Native span iterators for arbitrary clips, complex text shaping, and
-display-backed AWT surfaces still require support.
+Complex clips use CL scanline spans over flattened Java paths, with normalized
+coordinates, both winding rules, and clipped alpha tiles. Eight image frames
+check curves, holes, polygons, transforms, and antialiased painting against the
+same JDK pixel tolerances. Complex text shaping and display-backed AWT surfaces
+still require support.
 
 `FontProbe discover` checks only enumeration. The default probe also checks
 glyph advances and outline bounds; these are compared to the JDK within half
