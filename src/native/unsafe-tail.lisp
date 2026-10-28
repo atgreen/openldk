@@ -251,6 +251,31 @@ op's value arguments (expected/new/delta as applicable)."
           ((equal nm "short") 16) ((equal nm "byte") 8)
           (t nil))))
 
+(defun %vh-buffer-descriptor (category name &optional implementation)
+  "Method type for a buffer access; implementation methods erase coordinates."
+  (multiple-value-bind (nbytes kind) (%vh-byteview-spec name)
+    (let* ((value (ecase kind (:char "C") (:float "F") (:double "D")
+                        (:signed (ecase nbytes (2 "S") (4 "I") (8 "J")))))
+           (arguments (case category (:read "") ((:cas :cae) (concatenate 'string value value))
+                            (t value)))
+           (result (case category (:write "V") (:cas "Z") (t value))))
+      (format nil "(~AI~A)~A"
+              (if implementation "Ljava/lang/invoke/VarHandle;Ljava/lang/Object;" "Ljava/nio/ByteBuffer;")
+              arguments result))))
+
+(defun %vh-buffer-call (category vh args access-mode descriptor)
+  "Preserve exact invocation checks and ordinary MethodHandle conversions."
+  (let* ((name (%vh-classname vh))
+         (expected (%vh-buffer-descriptor category name)))
+    (if (string= expected descriptor)
+        (%vh-buffer-view category vh args access-mode name)
+        (if (not (zerop (|hasInvokeExactBehavior()Z| vh)))
+            (%throw '|java/lang/invoke/WrongMethodTypeException| "Mismatched buffer view invocation type")
+            (let* ((mode (|java/lang/invoke/VarHandle$AccessMode.valueFromMethodName(Ljava/lang/String;)Ljava/lang/invoke/VarHandle$AccessMode;|
+                          (jstring access-mode)))
+                   (handle (|toMethodHandle(Ljava/lang/invoke/VarHandle$AccessMode;)Ljava/lang/invoke/MethodHandle;| vh mode)))
+              (apply #'%invoke-generic handle descriptor args))))))
+
 (defun %vh-buffer-view (category vh args access-mode name)
   "Execute a ByteBuffer view access with JDK 25 mode and alignment rules."
   (multiple-value-bind (nbytes kind) (%vh-byteview-spec name)
@@ -370,9 +395,22 @@ op's value arguments (expected/new/delta as applicable)."
     (dolist (op ops)
       (let ((cat category) (access-mode op))
         (setf (symbol-function (intern (format nil "%VARHANDLE-OP-~A" op) :openldk))
-              (lambda (vh &rest args)
+              (lambda (vh descriptor &rest args)
                 ;; The dispatcher otherwise erases the access mode to CATEGORY.
                 ;; Conservatively order plain modes too, preserving atomicity
                 ;; of byte-array views and interoperability with volatile fields.
                 (with-java-memory-ordering
-                  (%varhandle-invoke cat vh args access-mode))))))))
+                  (if (search "$ByteBufferHandle" (%vh-classname vh))
+                      (%vh-buffer-call cat vh args access-mode descriptor)
+                      (%varhandle-invoke cat vh args access-mode)))))
+        ;; MethodHandle adapters and VarHandle.toMethodHandle reach the
+        ;; implementation's static entry points instead of the bytecode
+        ;; dispatcher. Keep both paths on the same codec and ordering rules.
+        (dolist (kind '("Shorts" "Chars" "Ints" "Longs" "Floats" "Doubles"))
+          (let* ((class-name (format nil "java/lang/invoke/VarHandleByteArrayAs~A$ByteBufferHandle" kind))
+                 (signature (format nil "~A.~A~A" class-name op
+                                    (%vh-buffer-descriptor cat class-name t))))
+            (setf (gethash signature *native-overrides*)
+                  (lambda (vh &rest args)
+                    (with-java-memory-ordering
+                      (%vh-buffer-view cat vh args access-mode class-name))))))))))

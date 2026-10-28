@@ -109,6 +109,15 @@ public class BufferViewProbe {
         MethodHandle set = h.toMethodHandle(VarHandle.AccessMode.SET);
         set.invokeExact(b, 0, 99);
         check((int)get.invokeExact(b, 0) == 99);
+        check((long)h.get(b, 0) == 99L);
+        check(((Integer)h.get(b, 0)).intValue() == 99);
+        check((int)h.get((Object)b, 0) == 99);
+        h.set(b, 0, (short)12);
+        check((int)h.get(b, 0) == 12);
+        fails(WrongMethodTypeException.class, () -> h.set(b, 0, 12L));
+        fails(WrongMethodTypeException.class, () -> { boolean v = (boolean)h.get(b, 0); });
+        fails(ClassCastException.class, () -> { int v = (int)h.get((Object)"bad", 0); });
+        h.set(b, 0, 99);
         VarHandle exact = h.withInvokeExactBehavior();
         check((int)exact.get(b, 0) == 99);
         fails(WrongMethodTypeException.class, () -> { long v = (long)exact.get(b, 0); });

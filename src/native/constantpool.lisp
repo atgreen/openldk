@@ -357,7 +357,7 @@ not searched -- VarHandle/MethodHandle field access targets declared fields)."
 (defun |java/lang/invoke/MethodHandleNatives.resolve(Ljava/lang/invoke/MemberName;Ljava/lang/Class;IZ)Ljava/lang/invoke/MemberName;|
     (member-name klass speculative-resolve native-access)
   "JDK 17: resolve(MemberName self, Class<?> caller, int speculativeResolve, boolean nativeAccess)"
-  (declare (ignore klass speculative-resolve native-access))
+  (declare (ignore klass speculative-resolve))
   (let* ((member-class (slot-value member-name '|clazz|))
          (ldk-class (get-ldk-class-for-java-class member-class))
          (mn-flags (slot-value member-name '|flags|))
@@ -381,6 +381,11 @@ not searched -- VarHandle/MethodHandle field access targets declared fields)."
         (let ((method (when ldk-class
                         (find-method-in-class ldk-class (lstring (slot-value member-name '|name|))
                                               :static (if want-static :yes :no)))))
+          ;; A speculative lookup must not manufacture a successful
+          ;; MemberName for an absent method. VarForm uses this to discover
+          ;; which access modes an implementation actually provides.
+          (when (and ldk-class (null method) (not (zerop native-access)))
+            (return-from |java/lang/invoke/MethodHandleNatives.resolve(Ljava/lang/invoke/MemberName;Ljava/lang/Class;IZ)Ljava/lang/invoke/MemberName;| nil))
           (when method
             (setf (slot-value member-name '|flags|) (logior mn-flags (access-flags method)))))))
   member-name)

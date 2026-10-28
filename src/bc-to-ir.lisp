@@ -1484,7 +1484,10 @@ are ordinary declared methods and use normal dispatch.")
                                          :address pc-start
                                          :return-type return-type
                                          :method-name (format nil "%VARHANDLE-OP-~A" method-simple-name)
-                                         :args args))
+                                         :args (list* (first args)
+                                                      (make-instance 'ir-literal :address pc-start
+                                                                     :value descriptor :type :REFERENCE)
+                                                      (rest args))))
                          (t
                           (make-instance 'ir-call-virtual-method
                                          :address pc-start

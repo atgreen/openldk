@@ -170,6 +170,15 @@ Run `make check-standards` for focused comparisons against JDK 25:
 - VarHandle integer overflow, floating-point CAS (NaNs and signed zero),
   read-only fields, unsupported access modes, volatile publication, and
   release/acquire publication.
+- ByteBuffer view VarHandles: all six element types, both byte orders,
+  heap/direct buffers, slices, alignment, read-only access, direct-buffer
+  atomics, mode discovery, method-handle adapters, exact invocation, and
+  confined/closed arenas. JDK 25 rejects ordered/atomic access to heap views.
+- Repeated platform/virtual-thread stress for volatile publication, CAS,
+  fences, monitor wait/notify, interruption, and cancellation.
+- Current-thread CPU accounting and isolation from other threads' work.
+  Linux 64-bit uses per-thread user/system resource usage; other platforms
+  report the optional capability as unsupported.
 - Loader constraints for field/method descriptors, delayed definitions,
   overriding and inherited interface implementations, transitive constraints,
   concurrent publication, rollback, and failed-resolution caching across loader
@@ -190,7 +199,7 @@ Run `make check-standards` for focused comparisons against JDK 25:
 
 These are targeted comparisons, not complete Java Memory Model, verifier,
 cryptography, or Vector API conformance tests. Vector transcendental native
-libraries and ByteBuffer view VarHandles are not covered. Loading
+libraries are not covered. Loading
 constraint checks are covered by the focused probes. Complete JVM linking/access
 conformance is not established, and class unloading remains unimplemented. In particular, loader
 registries, Lisp packages/static bindings, CLOS definitions/methods, and JNI
