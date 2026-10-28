@@ -1700,6 +1700,7 @@ are ordinary declared methods and use normal dispatch.")
                                           (gethash "BootstrapMethods" (attributes class))))
                    (bsm-handle (aref constant-pool (method-ref bootstrap-method))))
               (values (make-instance 'ir-constant-dynamic
+                                     :constant-pool-index index
                                      :bootstrap-method-name (emit-static-method-reference
                                                              (aref constant-pool (reference-index bsm-handle))
                                                              constant-pool)

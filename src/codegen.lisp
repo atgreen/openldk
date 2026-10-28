@@ -1622,19 +1622,23 @@ JVMS 5.4.6 selects that method independently of the receiver's class."
 (defun %call-bootstrap-method (bootstrap-method-name caller name args)
   "Call the bootstrap method BOOTSTRAP-METHOD-NAME (the full
 \"class/name.method(descriptor)\" string) with a lookup on the class CALLER
-(a binary name), the Java string NAME, and ARGS (the call site's type, then
+(a binary name or Java Class), the Java string NAME, and ARGS (the call site's type, then
 the static arguments).  The bootstrap class is always a boot/library class
 or the caller's, so load it and resolve the static function in its own
 defining package rather than the caller's."
   (let* ((paren (position #\( bootstrap-method-name))
          (dot (position #\. bootstrap-method-name :end paren :from-end t))
-         (bootstrap-class (subseq bootstrap-method-name 0 dot)))
-    (%resolve-class-in-context bootstrap-class)
-    (let* ((pkg (class-package bootstrap-class))
+         (bootstrap-class (subseq bootstrap-method-name 0 dot))
+         (caller-class (if (stringp caller) (%get-java-class-by-bin-name caller t) caller))
+         (loader (if (stringp caller)
+                     (%context-loader)
+                     (ldk-loader (get-ldk-class-for-java-class caller-class))))
+         (resolved (%resolve-class bootstrap-class loader)))
+    (let* ((pkg (if resolved (ldk-class-package resolved) (class-package bootstrap-class loader)))
            (fn-sym (static-method-symbol (lispize-method-name bootstrap-method-name) pkg))
            (param-types (parse-parameter-types bootstrap-method-name))
            (nparams (length param-types))
-           (full-args (append (list (%make-trusted-lookup (%get-java-class-by-bin-name caller t)) name)
+           (full-args (append (list (%make-trusted-lookup caller-class) name)
                               args))
            ;; Bootstrap methods are frequently varargs (last parameter an
            ;; Object[]), e.g. SwitchBootstraps.typeSwitch and
@@ -1663,27 +1667,48 @@ SITE-KEY identifies the call site; CALLER is the binary name of its class."
       (setf (gethash site-key *invokedynamic-cache*)
             (%call-bootstrap-method bootstrap-method-name caller fname args))))
 
-(defvar *constant-dynamic-cache* (make-hash-table :test #'eq :synchronized t)
-  "ldc site key -> (value), once its CONSTANT_Dynamic is resolved.")
+(defvar *constant-dynamic-cache* (make-hash-table :test #'equal :synchronized t)
+  "(defining Java Class . constant pool index) -> (:value . value) or (:error . throwable).")
 
-(defun %resolve-constant-dynamic (site-key bootstrap-method-name caller name descriptor &rest args)
-  "The value of a CONSTANT_Dynamic: its bootstrap method's result, called
-once per ldc site with the constant's type, unboxed if primitive."
-  (car (or (gethash site-key *constant-dynamic-cache*)
-           (setf (gethash site-key *constant-dynamic-cache*)
-                 (let ((value (%call-bootstrap-method
-                               bootstrap-method-name caller (jstring name)
-                               (cons (%bin-type-name-to-class descriptor) args))))
-                   (list (if (find (char descriptor 0) "ZBCSIJFD")
-                             (%maybe-unbox value)
-                             value)))))))
+(defvar *constant-dynamic-lock* (bordeaux-threads:make-lock "constant-dynamic-publication"))
+
+(defun %resolve-constant-dynamic (index bootstrap-method-name caller name descriptor &rest args)
+  "Resolve one CONSTANT_Dynamic, shared by every instruction using its pool entry.
+Bootstrap execution may race, as allowed by JVMS 5.4.3.6; publish one outcome.
+Never hold the publication lock while executing arbitrary Java bootstrap code."
+  (let* ((key (cons caller index))
+         (outcome
+           (or (gethash key *constant-dynamic-cache*)
+               (let* ((*descriptor-loader* (%class-java-loader caller))
+                      (computed
+                        (handler-case
+                            (let ((value (%call-bootstrap-method
+                                          bootstrap-method-name caller (jstring name)
+                                          (cons (%bin-type-name-to-class descriptor) args))))
+                              (cons :value (if (find (char descriptor 0) "ZBCSIJFD")
+                                               (%maybe-unbox value)
+                                               value)))
+                          (|condition-java/lang/Throwable| (condition)
+                            (let ((throwable (slot-value condition '|objref|)))
+                              (unless (typep throwable '|java/lang/Error|)
+                                (let ((wrapper (%make-java-instance "java/lang/BootstrapMethodError")))
+                                  (|<init>(Ljava/lang/Throwable;)V| wrapper throwable)
+                                  (setf throwable wrapper)))
+                              (cons :error throwable))))))
+                 (bordeaux-threads:with-lock-held (*constant-dynamic-lock*)
+                   (or (gethash key *constant-dynamic-cache*)
+                       (setf (gethash key *constant-dynamic-cache*) computed)))))))
+    (if (eql (car outcome) :error)
+        (error (%lisp-condition (cdr outcome)))
+        (cdr outcome))))
 
 (defmethod codegen ((insn ir-constant-dynamic) context)
-  (with-slots (bootstrap-method-name name descriptor args caller) insn
+  (with-slots (constant-pool-index bootstrap-method-name name descriptor args) insn
     (make-instance '<expression>
                    :insn insn
-                   :code `(%resolve-constant-dynamic ',(gensym "CONDY-SITE") ,bootstrap-method-name
-                                                     ,caller ,name ,descriptor
+                   :code `(%resolve-constant-dynamic ,constant-pool-index ,bootstrap-method-name
+                                                     ,(java-class (slot-value context 'class))
+                                                     ,name ,descriptor
                                                      ,@(mapcar (lambda (a) (code (codegen a context))) args))
                    :expression-type (get-stack-type-from-descriptor descriptor))))
 

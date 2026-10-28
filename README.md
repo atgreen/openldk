@@ -118,6 +118,24 @@ for Java 16 (records), 17 (sealed types), 21 (record patterns and pattern switch
 and 25. The suite also covers Java 25 primitive patterns with `--enable-preview`,
 including exact conversions, guarded switches, nulls, and qualified enum cases.
 
+### Modern library APIs
+
+Run `make check-modern` to compare these library behaviors with JDK 25:
+
+- Class-File API (Java 24/25): generate and transform executable methods with
+  branches, stack maps, and exception handlers; resolve dynamic constants with
+  defining-class identity, shared constant-pool entries, and cached failures.
+- Gatherers (Java 24/25): fixed/sliding windows, scan/fold, composition, parallel
+  reduction, short-circuiting, and bounded concurrent mapping.
+- Sequenced collections (Java 21/25): backed reversed views, endpoint mutations,
+  encounter order, entry snapshots, and unmodifiable wrappers.
+- Stable values (Java 25 preview): null contents, retries after supplier failures,
+  recursive initialization rejection, platform/virtual thread races, and lazy
+  suppliers, functions, lists, and maps. These require `--enable-preview`.
+
+These APIs use the installed JDK's Java implementations. The comparisons cover
+specific behaviors; they do not establish complete API or JVM conformance.
+
 ### Scoped values and structured concurrency
 
 Scoped values support nested bindings, restoration after exceptions, and thread
