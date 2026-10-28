@@ -163,6 +163,41 @@ Run `make check-modern` to compare these library behaviors with JDK 25:
 These APIs use the installed JDK's Java implementations. The comparisons cover
 specific behaviors; they do not establish complete API or JVM conformance.
 
+### Runtime standards comparisons
+
+Run `make check-standards` for focused comparisons against JDK 25:
+
+- VarHandle integer overflow, floating-point CAS (NaNs and signed zero),
+  read-only fields, unsupported access modes, volatile publication, and
+  release/acquire publication.
+- Loader constraints for field/method descriptors, delayed definitions,
+  overriding and inherited interface implementations, transitive constraints,
+  concurrent publication, rollback, and failed-resolution caching across loader
+  policy changes. `findLoadedClass` includes recorded delegated initiations.
+- Final superclass/method restrictions and superclass/interface kinds.
+  `make check-verifier` additionally covers malformed declarations, duplicate
+  members, and conflicting modifiers alongside bytecode and stack-map checks.
+- RFC 5869 HKDF-SHA256 known-answer derivation through `javax.crypto.KDF`,
+  plus plain and password-encrypted PEM private-key round trips. PEM requires
+  `--enable-preview`; these use the installed JDK's providers.
+- Vector API arithmetic, masks, shuffles, reductions, and array access through
+  Java fallback implementations. Use `--add-modules jdk.incubator.vector`
+  for compiled or source launches. Both `--add-modules=name` and repeated
+  options are accepted. OpenLDK advertises no VM vector intrinsics.
+- Weak/phantom reference GC queue delivery, explicit clearing/enqueueing,
+  automatic and idempotent Cleaner actions, and retention of defining loaders
+  while their Class objects and MethodHandles remain live.
+
+These are targeted comparisons, not complete Java Memory Model, verifier,
+cryptography, or Vector API conformance tests. Vector transcendental native
+libraries and ByteBuffer view VarHandles are not covered. Loading
+constraint checks are covered by the focused probes. Complete JVM linking/access
+conformance is not established, and class unloading remains unimplemented. In particular, loader
+registries, Lisp packages/static bindings, CLOS definitions/methods, and JNI
+ownership currently retain loader state; changing only a registry to weak
+references would not provide safe class unloading. JNI libraries remain loaded
+for the process lifetime and `JNI_OnUnload` is not called.
+
 ### Scoped values and structured concurrency
 
 Scoped values support nested bindings, restoration after exceptions, and thread

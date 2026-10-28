@@ -349,7 +349,7 @@ nothing behind when it refuses."
                                        (method-name "test") super pool (version 69) (static t))
   "Construct raw metadata for verifier tests without loading Java or running the JIT."
   (let* ((class (make-instance 'openldk::<class> :name "verify/Fixture" :super super
-                               :interfaces nil :ldk-loader nil :major-version version
+                               :interfaces nil :ldk-loader nil :major-version version :access-flags #x21
                                :fields #() :constant-pool (or pool #(nil))))
          (attributes (make-hash-table :test 'equal))
          (code-attributes (make-hash-table :test 'equal))

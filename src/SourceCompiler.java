@@ -27,6 +27,10 @@ class SourceCompiler {
             var options = new ArrayList<>(List.of("-proc:none", "--release", args[4], "-d", output.toString(),
                     "-classpath", args[2], "-encoding", "UTF-8"));
             if (preview) options.add("--enable-preview");
+            for (int i = 5; i < args.length; i++) {
+                options.add("--add-modules");
+                options.add(args[i]);
+            }
             DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
             JavacTask task = (JavacTask)compiler.getTask(null, files, diagnostics, options, null, List.of(input));
             var unit = task.parse().iterator().next();

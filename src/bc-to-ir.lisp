@@ -45,6 +45,21 @@
 ;;; operand stack held in the <CONTEXT>, and returns a list of IR nodes.
 ;;; The IR is later lowered to Lisp by codegen.lisp.
 
+(defmacro with-member-linkage-errors ((context address) &body body)
+  "Retain Java linkage failures encountered by eager translation/code generation."
+  (let ((ctx (gensym "CONTEXT")) (pc (gensym "PC")) (bytes (gensym "BYTES")) (index (gensym "CP-INDEX")))
+    `(let* ((,ctx ,context)
+            (,pc (floor ,address))
+            (,bytes (and (slot-boundp ,ctx 'bytecode) (bytecode ,ctx)))
+            (,index (when (and ,bytes (<= 0 ,pc) (< (+ ,pc 2) (length ,bytes))
+                               (<= 178 (aref ,bytes ,pc) 185))
+                      (+ (ash (aref ,bytes (1+ ,pc)) 8) (aref ,bytes (+ ,pc 2))))))
+       (handler-bind ((|condition-java/lang/LinkageError|
+                        (lambda (condition)
+                          (when ,index
+                            (%publish-member-linkage-outcome (slot-value ,ctx 'class) ,index condition)))))
+         ,@body))))
+
 (defmacro define-bytecode-transpiler (name args &body body)
   "Define transpiler function NAME for one JVM opcode.  BODY reads the
 instruction at (PC CONTEXT) and returns IR nodes; the macro records the
@@ -54,7 +69,11 @@ instruction's byte length in the context's INSN-SIZE array."
     `(defun ,name ,args
        ,(when has-declare (car body))
        (let* ((,start-pc (pc context))
-              (code (progn ,@(if has-declare (cdr body) body))))
+              (code ,(if (member name '(:GETFIELD :PUTFIELD :GETSTATIC :PUTSTATIC
+                                         :INVOKEVIRTUAL :INVOKESPECIAL :INVOKESTATIC :INVOKEINTERFACE))
+                         `(with-member-linkage-errors (context ,start-pc)
+                            ,@(if has-declare (cdr body) body))
+                         `(progn ,@(if has-declare (cdr body) body)))))
          ;; Save the size of this instruction in the INSN-SIZE array.
          (setf (aref (insn-size context) ,start-pc) (- (pc context) ,start-pc))
          code))))

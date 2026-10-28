@@ -378,6 +378,13 @@ its superclasses, made and registered on first use; or NIL for any other."
                                     (java-class (%get-ldk-class-by-bin-name lname)))
                                (let ((klass (classload lname)))
                                  (when klass (java-class klass))))))))
+           (when result
+             (let ((class (get-ldk-class-for-java-class result)))
+               ;; Lisp descriptor lookups also pass NIL and may use the
+               ;; compatibility tables. Such a result was not initiated by
+               ;; the bootstrap loader: preserve its actual defining loader.
+               (%record-initiating-class class (if loader (get-ldk-loader-for-java-loader loader)
+                                                  (ldk-loader class)))))
            ;; Per JVM spec: when initialize=true, ensure <clinit> has run.
            ;; Previously only the classload branch called %clinit; the findClass
            ;; and already-loaded branches skipped it, breaking autoloads that

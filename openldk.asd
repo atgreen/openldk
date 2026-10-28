@@ -86,6 +86,7 @@
                (:file "src/classfile")
                (:file "src/verifier")
                (:file "src/interpreter")
+               (:file "src/loader-constraints")
                ;; JDK native-method implementations, split by domain;
                ;; loaded in this order (chunks of the former src/native.lisp).
                (:file "src/native/support")

@@ -27,7 +27,8 @@ def utf(value):
 
 
 def classfile(name, code, descriptor='()I', stack=4, locals_=4, maps=None,
-              constructor=None, handlers=(), version=69, extra=(), trailing=b'', magic=0xcafebabe):
+              constructor=None, handlers=(), version=69, extra=(), trailing=b'', magic=0xcafebabe,
+              class_flags=0x21, method_flags=9, duplicate_method=False, field_flags=None, duplicate_field=False):
     """A public class with Object's constructor, an empty main, and a test method."""
     # Pool indices are intentionally stable so bad instructions can name holes.
     pool = [utf(name), b'\x07' + u2(1), utf('java/lang/Object'), b'\x07' + u2(3),
@@ -45,9 +46,17 @@ def classfile(name, code, descriptor='()I', stack=4, locals_=4, maps=None,
 
     methods = [method(1, 5, 6, constructor if constructor is not None else bytes([42, 183, 0, 8, 177]), 2, 1),
                method(9, 10, 11, bytes([177]), 0, 1),
-               method(9, 12, 13, bytes(code), stack, locals_, maps, handlers)]
+               method(method_flags, 12, 13, bytes(code), stack, locals_, maps, handlers)]
+    if field_flags is not None:
+        pool.append(utf('I'))
+    if duplicate_method:
+        methods.append(methods[-1])
+    fields = [] if field_flags is None else [u2(field_flags) + u2(12) + u2(len(pool)) + u2(0)]
+    if duplicate_field:
+        fields *= 2
     return (u4(magic) + u2(0) + u2(version) + u2(len(pool) + 1)
-            + b''.join(pool) + u2(0x21) + u2(2) + u2(4) + u2(0) + u2(0)
+            + b''.join(pool) + u2(class_flags) + u2(2) + u2(4) + u2(0)
+            + u2(len(fields)) + b''.join(fields)
             + u2(len(methods)) + b''.join(methods) + u2(0) + trailing)
 
 
@@ -69,6 +78,12 @@ CASES = [
     ('ValidInterfaceReceiver', True, dict(code=[42, 185, 0, 20, 1, 0, 172], descriptor='(Ljava/util/List;)I', extra=LIST_SIZE)),
     ('ValidInterfaceObject', True, dict(code=[42, 185, 0, 20, 1, 0, 172], descriptor='(Ljava/lang/Object;)I', extra=LIST_SIZE)),
     ('ValidCatchSupertype', True, dict(code=[3, 172, 87, 3, 172], handlers=[(0, 2, 2, 0)], maps=bytes([0, 1, 66, 7, 0, 4]))),
+    ('BadFinalAbstractClass', False, dict(code=[3, 172], class_flags=0x431)),
+    ('BadDuplicateMethod', False, dict(code=[3, 172], duplicate_method=True)),
+    ('BadMethodVisibility', False, dict(code=[3, 172], method_flags=0x0b)),
+    ('BadAbstractStaticMethod', False, dict(code=[3, 172], method_flags=0x409)),
+    ('BadFinalVolatileField', False, dict(code=[3, 172], field_flags=0x51)),
+    ('BadDuplicateField', False, dict(code=[3, 172], field_flags=1, duplicate_field=True)),
     ('BadReceiverClass', False, dict(code=[42, 182, 0, 20, 172], descriptor='(Ljava/lang/Object;)I', extra=STRING_LENGTH)),
     ('BadReceiverPrimitive', False, dict(code=[26, 182, 0, 20, 172], descriptor='(I)I', extra=STRING_LENGTH)),
     ('BadInterfaceCount', False, dict(code=[42, 185, 0, 20, 0, 0, 172], descriptor='(Ljava/util/List;)I', extra=LIST_SIZE)),

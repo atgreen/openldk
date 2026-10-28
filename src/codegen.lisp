@@ -658,22 +658,53 @@ take the method's arguments followed by the MemberName."
             `(%with-class-access ,(java-class caller) ,(java-class target) ,(code expression)))))
   expression)
 
+(defmacro %with-member-constraints (site form)
+  `(progn (%check-member-constraint-site ,site) ,form))
+
+(define-setf-expander %with-member-constraints (site place &environment environment)
+  (multiple-value-bind (temps values stores writer reader) (get-setf-expansion place environment)
+    (let ((site-temp (gensym "CONSTRAINT-SITE")))
+      (values (cons site-temp temps) (cons site values) stores
+              `(%with-member-constraints ,site-temp ,writer)
+              `(%with-member-constraints ,site-temp ,reader)))))
+
+(defun %checked-member-expression (expression insn context)
+  "Keep CP member constraint checks at execution sites, including SETF places."
+  (let* ((bytes (and context (slot-boundp context 'bytecode) (bytecode context)))
+         (pc (and (address insn) (floor (address insn)))))
+    (when (and bytes pc (<= 0 pc) (< (+ pc 2) (length bytes))
+               (<= 178 (aref bytes pc) 185))
+      (let ((index (+ (ash (aref bytes (1+ pc)) 8) (aref bytes (+ pc 2)))))
+        (setf (code expression)
+              `(%with-member-constraints
+                   (load-time-value (%member-linkage-site ,(slot-value context 'class) ,index))
+                 ,(code expression))))))
+  expression)
+
+(defmethod codegen :around ((insn ir-clinit) context)
+  (with-member-linkage-errors (context (address insn))
+    (%checked-member-expression (call-next-method) insn context)))
+
 (defmethod codegen :around ((insn ir-call-virtual-method) context)
-  (%checked-class-expression (call-next-method)
+  (with-member-linkage-errors (context (address insn))
+    (%checked-class-expression (%checked-member-expression (call-next-method) insn context)
                             (if (typep insn 'ir-call-static-method)
-                                (slot-value insn 'class) (reference-class insn)) context))
+                                (slot-value insn 'class) (reference-class insn)) context)))
 
 (defmethod codegen :around ((insn ir-call-special-method) context)
-  (%checked-class-expression (call-next-method) (slot-value insn 'class) context))
+  (with-member-linkage-errors (context (address insn))
+    (%checked-class-expression (%checked-member-expression (call-next-method) insn context) (slot-value insn 'class) context)))
 
 (defmethod codegen :around ((insn ir-new) context)
   (%checked-class-expression (call-next-method) (slot-value insn 'class) context))
 
 (defmethod codegen :around ((insn ir-member) context)
-  (%checked-class-expression (call-next-method) (ref-class insn) context))
+  (with-member-linkage-errors (context (address insn))
+    (%checked-class-expression (%checked-member-expression (call-next-method) insn context) (ref-class insn) context)))
 
 (defmethod codegen :around ((insn ir-static-member) context)
-  (%checked-class-expression (call-next-method) (slot-value insn 'class) context))
+  (with-member-linkage-errors (context (address insn))
+    (%checked-class-expression (%checked-member-expression (call-next-method) insn context) (slot-value insn 'class) context)))
 
 (defmethod codegen ((insn ir-call-static-method) context)
   (with-slots (class method-name args return-type) insn

@@ -298,6 +298,13 @@ bench-remainder:
 check-compat: openldk | check-jdk
 	python3 test/compat/check.py
 
+.PHONY: check-standards check-loader-constraints
+check-standards: openldk | check-jdk
+	python3 test/standards/check.py
+
+check-loader-constraints: openldk | check-jdk
+	python3 test/standards/check.py --probe LoaderConstraintProbe
+
 check-modern: openldk | check-jdk
 	python3 test/modern/check.py
 

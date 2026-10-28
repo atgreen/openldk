@@ -123,6 +123,8 @@ or NIL for the boot loader's packages."
 (defvar *app-ldk-class-loader* nil)
 
 ;; Map from java.lang.ClassLoader objects to <ldk-class-loader> objects
+(defvar *java-loader-map-lock* (bt:make-recursive-lock "Java loader identities"))
+
 (defvar *java-to-ldk-loaders* (make-hash-table :test #'eq :synchronized t))
 
 (defun jdk-class-p (classname)
@@ -136,7 +138,7 @@ or NIL for the boot loader's packages."
       (str:starts-with? "org/w3c/" classname)
       (str:starts-with? "org/ietf/" classname)))
 
-(defun get-ldk-loader-for-java-loader (java-loader)
+(defun %get-ldk-loader-for-java-loader (java-loader)
   "Get or create the <ldk-class-loader> for a java.lang.ClassLoader object.
    Returns the boot loader if JAVA-LOADER is NIL.
 
@@ -159,6 +161,14 @@ or NIL for the boot loader's packages."
                                                     :java-loader java-loader)))
             (setf (gethash java-loader *java-to-ldk-loaders*) new-loader)
             new-loader))))
+
+(defun get-ldk-loader-for-java-loader (java-loader)
+  "Return one metadata identity per Java loader, even during concurrent first use."
+  (if java-loader
+      (or (gethash java-loader *java-to-ldk-loaders*)
+          (bt:with-recursive-lock-held (*java-loader-map-lock*)
+            (%get-ldk-loader-for-java-loader java-loader)))
+      *boot-ldk-class-loader*))
 
 (defun loader-package (loader)
   "Get the Lisp package for a class loader. Uses :openldk for boot loader.
@@ -577,3 +587,6 @@ java.lang.Class), was defined by a user-defined class loader."
               class))
         (when-let ((parent (slot-value loader 'parent-loader)))
           (%lookup-class-with-delegation parent name slot-name)))))
+
+(defvar *cli-add-modules* nil
+  "Additional boot module roots supplied by the launcher.")

@@ -1382,11 +1382,10 @@ the method another way (through the FASL cache) and returns true if it did."
                 (force-output *error-output*)
                 (error c)))))))))
 
-(defun %install-jit-error-stub (class method method-key)
-  "Install a function that signals on invocation, so a failed JIT compile
-doesn't leave a self-recursing compilation stub behind.  Uses plain Lisp
-errors (not Java exceptions) to avoid triggering further class loading
-during error handling."
+(defun %install-jit-error-stub (class method method-key &optional java-condition)
+  "Install a stable failure instead of leaving a self-recursing JIT stub.
+Preserve an existing Java linkage condition without entering Java to construct
+another exception; internal compiler failures continue to use Lisp errors."
   ;; Instance methods dispatch on a generic function in :openldk, where the
   ;; lazy compile stub and %build-method-definition both put them.  Interning
   ;; in the loader's package instead (OPENLDK.APP for the classpath) put the
@@ -1401,7 +1400,8 @@ during error handling."
           (setf (symbol-function fn-symbol)
                 (lambda (&rest args)
                   (declare (ignore args))
-                  (internal-error "JIT compilation failed for ~A" method-key))))
+                  (if java-condition (error java-condition)
+                      (internal-error "JIT compilation failed for ~A" method-key)))))
         ;; Instance method: install a defmethod that throws an error.
         ;; Use CL:EVAL (not %eval) to avoid re-entering the JIT.
         (let* ((class-sym (intern (slot-value class 'name)
@@ -1413,7 +1413,8 @@ during error handling."
           (when (find-class class-sym nil)
             (eval `(defmethod ,fn-symbol ((,this-sym ,class-sym) ,@param-names)
                      (declare (ignore ,this-sym ,@param-names))
-                     (internal-error "JIT compilation failed for ~A" ,method-key))))))))
+                     (if ,java-condition (error ,java-condition)
+                         (internal-error "JIT compilation failed for ~A" ,method-key)))))))))
 
 (defun %compile-method (class-or-name method-index)
   "JIT-compile method METHOD-INDEX of CLASS-OR-NAME (a <class>, or in AOT
@@ -1511,6 +1512,11 @@ classes with the same name."
                                                    internal-time-units-per-second))))
                          (force-output)))))
                  (setf compilation-completed t))
+             (|condition-java/lang/LinkageError| (condition)
+               ;; Eager linking during compilation is still a Java linkage
+               ;; failure, not a Lisp compiler error. Preserve it on every call.
+               (%install-jit-error-stub class method method-key condition)
+               (setf compilation-completed t))
              (error (c)
                ;; Compilation failed (IR translation, codegen, or eval error).
                (format *error-output* "~&;; JIT-ERROR in ~A: ~A~%" method-key c)
@@ -1953,6 +1959,41 @@ without running the compiler, since most methods are never called."
       (let ((existing (gethash classname *ldk-classes-by-bin-name*)))
         (or (null existing) (%defined-by-user-loader-p existing 'ldk-classes-by-bin-name)))))
 
+(defun %same-runtime-package-p (left right)
+  "Package identity includes the defining class loader."
+  (and (eq (ldk-loader left) (ldk-loader right))
+       (string= (subseq (name left) 0 (or (position #\/ (name left) :from-end t) 0))
+                (subseq (name right) 0 (or (position #\/ (name right) :from-end t) 0)))))
+
+(defun %check-class-inheritance (class super interfaces)
+  "Enforce superclass/interface kinds and the JVM's final inheritance rules."
+  (when super
+    (when (or (logbitp 4 (access-flags super)) (interface-p super))
+      (%throw '|java/lang/IncompatibleClassChangeError|
+              (format nil "~A has invalid superclass ~A" (name class) (name super))))
+    (loop for parent = super then (and (super parent) (%resolve-class (super parent) (ldk-loader parent)))
+          while parent
+          do (loop for method across (methods class)
+                   unless (or (static-p method) (string= (name method) "<init>")
+                              (logbitp 1 (access-flags method)))
+                     do (let ((inherited (find-if
+                                          (lambda (candidate)
+                                            (and (string= (name method) (name candidate))
+                                                 (string= (descriptor method) (descriptor candidate))))
+                                          (methods parent))))
+                          (when (and inherited (logbitp 4 (access-flags inherited))
+                                     (not (static-p inherited))
+                                     (not (logbitp 1 (access-flags inherited)))
+                                     (or (not (zerop (logand (access-flags inherited) #x5)))
+                                         (%same-runtime-package-p class parent)))
+                            (%throw '|java/lang/IncompatibleClassChangeError|
+                                    (format nil "~A overrides final method ~A.~A"
+                                            (name class) (name parent) (name inherited))))))))
+  (dolist (parent interfaces)
+    (when (and parent (not (interface-p parent)))
+      (%throw '|java/lang/IncompatibleClassChangeError|
+              (format nil "~A has non-interface parent ~A" (name class) (name parent))))))
+
 (defun %check-sealed-supertypes (class parents)
   "Enforce permitted direct subtypes and runtime package/module membership."
   (dolist (parent parents)
@@ -1992,7 +2033,8 @@ without running the compiler, since most methods are never called."
         (let ((existing-ldk-class (find-class-in-loader-hierarchy classname ldk-loader)))
           (when existing-ldk-class
             (return-from %classload-from-stream existing-ldk-class))))))
-  (unwind-protect
+  (let ((definition nil) (completed nil))
+    (unwind-protect
        (let* ((publish-globally (%publish-class-globally-p classname ldk-loader))
               (pkg (loader-package ldk-loader))
               (classname-symbol (intern classname pkg))
@@ -2005,6 +2047,8 @@ without running the compiler, since most methods are never called."
                              (%throw-verification-error condition)))))
                   (setf (name c) classname)
                   (setf (slot-value c 'ldk-loader) ldk-loader)
+                  (setf definition c)
+                  (%record-initiating-class c ldk-loader)
                   ;; Store in loader's hash tables
                   (setf (gethash classname (slot-value ldk-loader 'ldk-classes-by-bin-name)) c)
                   (setf (gethash fq-classname (slot-value ldk-loader 'ldk-classes-by-fq-name)) c)
@@ -2032,7 +2076,10 @@ without running the compiler, since most methods are never called."
              (remhash fq-classname *ldk-classes-by-fq-name*))
            (return-from %classload-from-stream nil))
          (handler-case
-             (%check-sealed-supertypes class (cons super interfaces))
+             (progn
+               (%check-class-inheritance class super interfaces)
+               (%prepare-loader-constraints class)
+               (%check-sealed-supertypes class (cons super interfaces)))
            (error (condition)
              ;; A rejected definition must not poison later attempts in this loader.
              (remhash classname (slot-value ldk-loader 'ldk-classes-by-bin-name))
@@ -2167,8 +2214,11 @@ without running the compiler, since most methods are never called."
          (loop for field across (fields class)
                do (classload (slot-value (slot-value field 'class) 'name)))
 
+         (setf completed t)
          class)
-    (close classfile-stream)))
+      (close classfile-stream)
+      (when (and definition (not completed))
+        (%forget-failed-class-definition definition ldk-loader)))))
 
 (defun %classload-system (classname)
   "Load CLASSNAME as the boot or app class loader would, from the JDK and
@@ -2210,7 +2260,7 @@ parent could also provide."
                                           (%get-ldk-class-by-bin-name (super class) t
                                                                       (ldk-loader class))))))))))
 
-(defun %resolve-class (classname ldk-loader)
+(defun %resolve-class-without-initiation (classname ldk-loader)
   "Resolve CLASSNAME through its defining LDK-LOADER, or return NIL.
 A user loader's loadClass implements its complete delegation policy; the
 application classpath must not be searched on that loader's behalf."
@@ -2240,6 +2290,12 @@ application classpath must not be searched on that loader's behalf."
               (ask-java-loader))
           (or (and ldk-loader (%get-ldk-class-by-bin-name classname t ldk-loader))
               (%classload-system classname))))))
+
+(defun %resolve-class (classname ldk-loader)
+  "Resolve through a stable initiating-loader identity, recording delegated results."
+  (or (%initiated-class classname ldk-loader)
+      (when-let ((class (%resolve-class-without-initiation classname ldk-loader)))
+        (%record-initiating-class class (or ldk-loader (ldk-loader class))))))
 
 (defun %resolve-class-in-context (classname)
   "Resolve CLASSNAME for the method being compiled: through the loader of
@@ -2543,6 +2599,11 @@ properties, and *CLASSPATH* construction."
                              (make-instance 'jar-classpath-entry :jarfile cpe)
                              (make-instance 'dir-classpath-entry :dir cpe)))
            (discover-jmod-classpath-entries))))
+  (when *cli-add-modules* (%reset-boot-module-layer))
+  (loop for modules in (reverse *cli-add-modules*)
+        for index from 0
+        do (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;|
+            (jstring (format nil "jdk.module.addmods.~D" index)) (jstring modules)))
   ;; Resolve the boot graph before application loading/JIT compilation can
   ;; reenter module initialization through an access check.
   (%boot-module-layer)

@@ -677,9 +677,10 @@ name after its package, $ and all."
   (let* ((class-name (lstring name))
          (bin-name (substitute #\/ #\. class-name))
          (ldk-loader (get-ldk-loader-for-java-loader loader)))
-    ;; Check only this loader's class map (not parent - that's Java's job)
-    (when ldk-loader
-      (gethash bin-name (slot-value ldk-loader 'java-classes-by-bin-name)))))
+    ;; findLoadedClass includes delegated classes for which this loader was
+    ;; recorded as an initiating loader; it must not search arbitrary parents.
+    (when-let ((class (%initiated-class bin-name ldk-loader)))
+      (java-class class))))
 
 (defun %classfile-name (bytes offset length)
   "The binary name the class file in BYTES (from OFFSET, LENGTH long)
@@ -700,6 +701,8 @@ REPL defines its classes so)."
          (class-name (if name
                          (substitute #\/ #\. (lstring name))
                          (%classfile-name bytes offset len)))
+         (_ (when (%initiated-class class-name ldk-loader)
+              (%throw '|java/lang/LinkageError| (format nil "Duplicate class definition: ~A" class-name))))
          (stream (make-instance 'byte-array-input-stream
                                 :array bytes :start offset :end (+ offset len)))
          (result (%classload-from-stream class-name stream loader ldk-loader)))
@@ -2103,3 +2106,15 @@ same-named defmethod."
 (defun |java/lang/Shutdown.beforeHalt()V| ()
   nil)
 
+
+;;; Vector API operations use the JDK's Java fallback implementations. Report
+;;; no VM vector intrinsics rather than advertising the host CPU's SIMD support.
+(defun |jdk/internal/vm/vector/VectorSupport.registerNatives()I| ()
+  0)
+
+(defun |jdk/internal/vm/vector/VectorSupport.getMaxLaneCount(Ljava/lang/Class;)I| (element-type)
+  (declare (ignore element-type))
+  -1)
+
+(defun |jdk/internal/vm/vector/VectorSupport.getCPUFeatures()Ljava/lang/String;| ()
+  (jstring ""))

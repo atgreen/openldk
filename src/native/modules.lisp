@@ -87,6 +87,21 @@
 (defvar *checking-class-access* nil
   "Access checking and boot graph construction are trusted runtime operations.")
 
+(defun %reset-boot-module-layer ()
+  "Discard the image's warmed graph before resolving launch-time module roots."
+  (when (slot-value |+static-java/lang/System+| '|bootLayer|)
+    (dolist (loader (list (|jdk/internal/loader/ClassLoaders.bootLoader()Ljdk/internal/loader/BuiltinClassLoader;|)
+                          (|jdk/internal/loader/ClassLoaders.platformClassLoader()Ljava/lang/ClassLoader;|)
+                          (|jdk/internal/loader/ClassLoaders.appClassLoader()Ljava/lang/ClassLoader;|)))
+      (|clear()V| (slot-value loader '|nameToModule|))
+      (|clear()V| (slot-value loader '|moduleToReader|))
+      (setf (slot-value loader '|resourceCache|) nil))
+    (|clear()V| (|jdk/internal/loader/BuiltinClassLoader.packageToModule()Ljava/util/Map;|))
+    (clrhash *class-access-cache*)
+    (clrhash *boot-modules*)
+    (clrhash *runtime-package-modules*)
+    (setf (slot-value |+static-java/lang/System+| '|bootLayer|) nil)))
+
 (defun %check-bytecode-class-access (caller target)
   "Check runtime package/module class access, retaining failed resolutions.
 Graph updates affect fresh references, not a reference which already failed."

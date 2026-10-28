@@ -288,13 +288,58 @@ NullPointerException; a Lisp string serves as a char[]."
   ;; Deferred due to bootstrap complexity with exception classes
   (length (java-array-data array)))
 
+(defun %check-reflective-array (array)
+  "Validate the Object argument to java.lang.reflect.Array operations."
+  (unless array (%throw '|java/lang/NullPointerException|))
+  (unless (java-array-p array)
+    (%throw '|java/lang/IllegalArgumentException| "Argument is not an array")))
+
+(defun %array-widening-p (source target)
+  "Whether reflection permits the primitive conversion SOURCE -> TARGET."
+  (or (eql source target)
+      (find target
+            (case source
+              (#\B "SIJFD") (#\S "IJFD") (#\C "IJFD")
+              (#\I "JFD") (#\J "FD") (#\F "D")))))
+
+(defun %reflective-array-primitive-type (array)
+  (%check-reflective-array array)
+  (%field-primitive-char (%array-component-class array)))
+
+(defun %reflective-array-get (array index target)
+  "Read a primitive array using reflection's widening conversion rules."
+  (let* ((source (%reflective-array-primitive-type array))
+         (value (jaref array index)))
+    (unless (and source (%array-widening-p source target))
+      (%throw '|java/lang/IllegalArgumentException| "Invalid array element conversion"))
+    (let ((number (if (characterp value) (char-code value) value)))
+      (case target
+        (#\F (float number 1f0)) (#\D (float number 1d0))
+        (t value)))))
+
+(defun %reflective-array-set (array index value source)
+  "Store a primitive value without allowing reflection to narrow its type."
+  (let ((target (%reflective-array-primitive-type array)))
+    ;; Bounds checks precede the primitive conversion check, as on the JDK.
+    (jaref array index)
+    (unless (and target (%array-widening-p source target))
+      (%throw '|java/lang/IllegalArgumentException| "Invalid array element conversion"))
+    (setf (jaref array index) value))
+  nil)
+
+(dolist (entry '(("Boolean" #\Z) ("Byte" #\B) ("Char" #\C) ("Short" #\S)
+                 ("Int" #\I) ("Long" #\J) ("Float" #\F) ("Double" #\D)))
+  (destructuring-bind (name type) entry
+    (eval `(defun ,(intern (format nil "java/lang/reflect/Array.get~A(Ljava/lang/Object;I)~A" name type))
+               (array index)
+             (%reflective-array-get array index ,type)))
+    (eval `(defun ,(intern (format nil "java/lang/reflect/Array.set~A(Ljava/lang/Object;I~A)V" name type))
+               (array index value)
+             (%reflective-array-set array index value ,type)))))
+
 (defun |java/lang/reflect/Array.getLength(Ljava/lang/Object;)I| (obj)
   "java.lang.reflect.Array.getLength implementation."
-  ;; Null check (JVM spec: throw NullPointerException)
-  (when (null obj)
-    (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|))))
-  ;; TODO: Add type check (throw IllegalArgumentException if not an array)
-  ;; Deferred due to bootstrap complexity with exception classes
+  (%check-reflective-array obj)
   (length (java-array-data obj)))
 
 (defun |java/lang/reflect/Array.get(Ljava/lang/Object;I)Ljava/lang/Object;| (array index)
