@@ -121,6 +121,7 @@
                (:file "src/openldk")
                (:file "src/jni")
                (:file "src/foreign")
+               (:static-file "src/SourceCompiler.java")
                (:file "src/cli"))
   :around-compile
   "(lambda (thunk)

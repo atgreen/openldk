@@ -46,6 +46,9 @@
     (make-package "OPENLDK.SYSTEM" :use '(:openldk))))
 
 (defvar *classpath* nil)
+(defvar *enable-preview* nil
+  "Whether Java 25 preview class files and APIs are enabled for this launch.")
+(defvar *source-launch-directory* nil)
 
 
 ;; Counter for generating unique class loader IDs

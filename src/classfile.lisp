@@ -734,7 +734,9 @@ lone surrogates and other BMP characters map to one character each."
             (let ((minor-version (read-u2))
                   (major-version (read-u2)))
               (when (or (< major-version 45) (> major-version 69)
-                        (and (>= major-version 56) (not (zerop minor-version))))
+                        (and (>= major-version 56) (not (zerop minor-version))
+                             (not (and *enable-preview* (= major-version 69)
+                                       (= minor-version 65535)))))
                 ;; Java-visible: the JVM throws UnsupportedClassVersionError.
                 (let ((exc (%make-java-instance "java/lang/UnsupportedClassVersionError")))
                   (|<init>(Ljava/lang/String;)V| exc

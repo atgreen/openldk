@@ -88,9 +88,34 @@ protected, or package access. Instance mains construct the launched class
 using its non-private no-argument constructor. Inherited methods and interface
 defaults are considered; static interface methods are not inherited. This
 also works for compiled compact-source classes and JAR manifest entry points.
-Compile source files with JDK 25's `javac` before launching them; OpenLDK does
-not provide Java source-file launch mode. Run `make check-launcher` to compare
-entry-point behavior with JDK 25.
+
+Launch source files directly with `openldk Hello.java [args...]`, including compact
+sources and instance mains. OpenLDK uses the installed JDK compiler in a separate
+process, then runs the resulting classes itself. Compiler output stays in a
+private temporary directory and is removed on completion, errors, or System.exit.
+The compiler helper is embedded in the executable; no source checkout is needed.
+Source dependencies are compiled from the source root, and `-cp` supplies compiled
+dependencies. Use `--source 25` (or `--source=25`) for scripts without a `.java`
+extension; an initial shebang line is ignored. Annotation processing is disabled.
+Source launches cannot be combined with `--aot`.
+Dependencies must be discoverable during compilation; loading additional source
+files dynamically through reflection is not implemented.
+
+Run `make check-launcher` and `make check-source-launcher` to compare compiled
+and source entry-point behavior with JDK 25.
+
+### Scoped values and structured concurrency
+
+Scoped values support nested bindings, restoration after exceptions, and thread
+isolation. Structured task scopes support scoped-value inheritance, cancellation,
+timeouts, owner checks, and waiting for child cleanup. Structured concurrency is
+a Java 25 preview API: compile with `javac --enable-preview --release 25` and run
+with `openldk --enable-preview`. Preview class files are rejected without the flag;
+only the Java 25 preview class-file version is accepted.
+
+Run `make check-concurrency` for JDK/OpenLDK comparisons. These checks use the
+existing virtual-thread backend; they do not establish virtual-thread scalability
+or validate the optional SBCL fiber backend.
 
 To launch Eclipse on OpenLDK, optionally download the SDK, or repeat the
 headless editor/build check, see [the Eclipse runner](test/eclipse/README.md).

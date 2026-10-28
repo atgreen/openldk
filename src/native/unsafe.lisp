@@ -1045,9 +1045,9 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
 ;; below (delegating to NativeConstructorAccessorImpl.newInstance0); the earlier
 ;; standalone copy that lived here was a duplicate and has been removed.
 
-;;; PreviewFeatures.isPreviewEnabled — always false (we don't support --enable-preview).
+;;; PreviewFeatures.isPreviewEnabled follows the current launch options.
 (defun |jdk/internal/misc/PreviewFeatures.isPreviewEnabled()Z| ()
-  0)
+  (if *enable-preview* 1 0))
 
 ;;; ProcessImpl.init — static native initializer for process spawning.
 ;;; On a real JVM this sets up signal handling for child processes.

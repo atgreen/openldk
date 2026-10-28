@@ -1481,6 +1481,10 @@ present.  Consumed by Thread.getState()/start()/getThreadGroup()."
                           (|run()V| thread))
                       (error (e)
                         (format *error-output* "~&Thread ~A terminated with error: ~A~%" thread e)))
+                 ;; The VM must run Thread.exit after run(), including for
+                 ;; BoundVirtualThread. Its container notification lets a
+                 ;; structured task scope observe completion of its children.
+                 (%run-java-thread-exit thread)
                  ;; On termination: mark not-alive (eetop=0) and wake any thread
                  ;; blocked in Thread.join(), which does `while (isAlive()) wait(0)`
                  ;; on this Thread object -- the JVM notifies join waiters here.

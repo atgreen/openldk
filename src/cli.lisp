@@ -39,6 +39,19 @@
 
 (in-package :openldk)
 
+(defparameter *source-compiler-source*
+  (uiop:read-file-string (asdf:system-relative-pathname :openldk "src/SourceCompiler.java"))
+  "Compiler helper embedded in the image so source launches work after relocation.")
+
+(defvar *source-launch-p* nil)
+(defvar *source-launch-version* nil)
+
+(defun %cleanup-source-launch ()
+  "Remove compiler output, including when a source program calls System.exit."
+  (when *source-launch-directory*
+    (uiop:delete-directory-tree *source-launch-directory* :validate t :if-does-not-exist :ignore)
+    (setf *source-launch-directory* nil)))
+
 ;;; Command-line entry points and image building: the java-style argument
 ;;; parser, the toplevel wrappers installed in dumped images, and the
 ;;; MAKE-IMAGE/DUMP-APP-IMAGE builders.  The run driver itself (MAIN,
@@ -47,7 +60,8 @@
 (defun %print-usage ()
   "Print Java-style usage message."
   (format *error-output* "~%Usage: openldk [options] <mainclass> [args...]~%")
-  (format *error-output* "       openldk [options] -jar <jarfile> [args...]~%~%")
+  (format *error-output* "       openldk [options] -jar <jarfile> [args...]~%")
+  (format *error-output* "       openldk [options] <sourcefile.java> [args...]~%~%")
   (format *error-output* "where options include:~%")
   (format *error-output* "    -cp <class search path>~%")
   (format *error-output* "    -classpath <class search path>~%")
@@ -55,6 +69,8 @@
   (format *error-output* "                  and ZIP archives to search for class files.~%")
   (format *error-output* "    -D<name>=<value>~%")
   (format *error-output* "                  set a system property~%")
+  (format *error-output* "    --enable-preview~%                  enable Java 25 preview features~%")
+  (format *error-output* "    --source <release>~%                  launch a source file (including scripts without .java)~%")
   (format *error-output* "    -verbose:[class|gc|jni]~%")
   (format *error-output* "                  enable verbose output~%")
   (format *error-output* "    -version      print product version and exit~%")
@@ -75,10 +91,25 @@
         (program-args nil)
         (properties nil)
         (i 0))
+    (setf *enable-preview* nil)
+    (setf *source-launch-p* nil *source-launch-version* nil)
     ;; Parse options until we hit mainclass
     (loop while (< i (length raw-args))
           for arg = (nth i raw-args)
           do (cond
+               ((string= arg "--enable-preview")
+                (setf *enable-preview* t)
+                (incf i))
+               ((or (string= arg "--source") (str:starts-with? "--source=" arg))
+                (if (string= arg "--source")
+                    (progn
+                      (incf i)
+                      (unless (< i (length raw-args))
+                        (format *error-output* "--source requires a release number~%")
+                        (uiop:quit 1))
+                      (setf *source-launch-version* (nth i raw-args)))
+                    (setf *source-launch-version* (subseq arg 9)))
+                (incf i))
                ;; -classpath <path> or -cp <path>
                ((or (string= arg "-classpath") (string= arg "-cp"))
                 (incf i)
@@ -136,6 +167,9 @@
                ;; -jar <jarfile>: the manifest names the main class, and
                ;; the classpath is the jar and its Class-Path, as on a JVM.
                ((string= arg "-jar")
+                (when *source-launch-version*
+                  (format *error-output* "--source cannot be combined with -jar~%")
+                  (uiop:quit 1))
                 (incf i)
                 (when (< i (length raw-args))
                   (multiple-value-setq (mainclass classpath)
@@ -152,12 +186,51 @@
                ;; First non-option is the mainclass
                (t
                 (setf mainclass arg)
+                (setf *source-launch-p* (or *source-launch-version* (str:ends-with? ".java" arg)))
                 (incf i)
                 ;; Everything after mainclass is program args
                 (setf program-args (subseq raw-args i))
                 (return))))
     (setf *cli-jvm-properties* (nreverse properties))
     (values mainclass program-args classpath dump-dir aot)))
+
+(defun %launch-main (mainclass args classpath dump-dir aot)
+  "Compile source input when requested, then execute application code in OpenLDK."
+  (unless *source-launch-p*
+    (return-from %launch-main (main mainclass args :classpath classpath :dump-dir dump-dir :aot aot)))
+  (when aot (error "Source-file launching cannot be combined with --aot"))
+  (ensure-java-home)
+  (let* ((directory (uiop:ensure-directory-pathname
+                     (sb-posix:mkdtemp (namestring (merge-pathnames "openldk-source-XXXXXX"
+                                                                  (uiop:temporary-directory))))))
+         (helper (merge-pathnames "SourceCompiler.java" directory))
+         (classes (merge-pathnames "classes/" directory))
+         (cp (or classpath (uiop:getenv "LDK_CLASSPATH") (uiop:getenv "CLASSPATH") "."))
+         (failure nil))
+    ;; System.exit may run on any Java thread. Keep cleanup state visible
+    ;; process-wide instead of dynamically binding it only on the launcher.
+    (setf *source-launch-directory* directory)
+    (unwind-protect
+         (handler-case
+             (progn
+               (ensure-directories-exist classes)
+               (with-open-file (stream helper :direction :output :if-exists :supersede :external-format :utf-8)
+                 (write-string *source-compiler-source* stream))
+               (let* ((java (merge-pathnames "bin/java" (uiop:ensure-directory-pathname (uiop:getenv "JAVA_HOME"))))
+                      (process (uiop:launch-program
+                                (list (namestring java) (namestring helper)
+                                      (namestring (truename mainclass)) (namestring classes) cp
+                                      (if *enable-preview* "true" "false") (or *source-launch-version* "25"))
+                                :output *standard-output* :error-output *error-output*)))
+                 (unless (zerop (uiop:wait-process process))
+                   (error "Source compilation failed: ~A" mainclass)))
+               (let ((name (uiop:read-file-string (merge-pathnames "main-class" classes))))
+                 (main name args :classpath (format nil "~A~A~A" (namestring classes)
+                                                    (uiop:inter-directory-separator) cp)
+                       :dump-dir dump-dir)))
+           (error (condition) (setf failure condition)))
+      (%cleanup-source-launch))
+    (when failure (error failure))))
 
 (defun %manifest-attributes (jarfile)
   "The main attributes of JARFILE's manifest, an alist of (name . value),
@@ -251,7 +324,7 @@ files resolve against it."
                      (when *debug-exceptions*
                        (sb-debug:print-backtrace :count 60 :stream *error-output*))))
                   (uiop:quit 1))))
-      (main mainclass args :classpath classpath :dump-dir dump-dir :aot aot))
+      (%launch-main mainclass args classpath dump-dir aot))
     ;; Force exit — daemon threads may be blocked in wait() and won't terminate.
     ;; An aborting exit runs no exit hooks, so report the cache's counts here.
     (%fasl-cache-report)
@@ -272,7 +345,7 @@ files resolve against it."
         (%print-usage)
         (uiop:quit 1))
       (handler-case
-          (main mainclass args :classpath classpath :dump-dir dump-dir :aot aot)
+          (%launch-main mainclass args classpath dump-dir aot)
         (error (condition)
           (cond
             ((typep condition '|condition-java/lang/Throwable|)

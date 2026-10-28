@@ -73,10 +73,10 @@ check-jdk:
 	@test -n "$(JAVA_HOME)" || { echo "error: JAVA_HOME is not set; OpenLDK requires a JDK 25 (e.g. /usr/lib/jvm/java-25-openjdk)"; exit 1; }
 	@grep -qs '^JAVA_VERSION="25' "$(JAVA_HOME)/release" || { echo "error: JAVA_HOME=$(JAVA_HOME) is not a JDK 25 installation (OpenLDK requires JDK 25)"; exit 1; }
 
-openldk: src/*.lisp src/native/*.lisp *.asd Makefile | check-jdk
+openldk: src/*.lisp src/native/*.lisp src/SourceCompiler.java *.asd Makefile | check-jdk
 	sbcl --dynamic-space-size $(DYNAMIC_SPACE_SIZE) --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))" --eval "(openldk::make-image)"
 
-javacl: src/*.lisp src/native/*.lisp *.asd Makefile | check-jdk
+javacl: src/*.lisp src/native/*.lisp src/SourceCompiler.java *.asd Makefile | check-jdk
 	sbcl --dynamic-space-size $(DYNAMIC_SPACE_SIZE) --disable-debugger --eval "(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system \"javacl\"))" --eval "(openldk::make-javac-image)"
 
 $(KAWA_JAR):
@@ -280,7 +280,13 @@ check-jni: openldk jni | check-jdk
 check-jni-zstd: openldk jni | check-jdk
 	python3 test/jni/check.py --zstd
 
-.PHONY: check-zip check-nio check-modules check-reentrant check-launcher check-eclipse check-foreign
+.PHONY: check-zip check-nio check-modules check-reentrant check-launcher check-eclipse check-foreign check-concurrency check-source-launcher
+check-concurrency: openldk | check-jdk
+	python3 test/concurrency/check.py
+
+check-source-launcher: openldk | check-jdk
+	python3 test/source-launcher/check.py
+
 check-foreign: openldk jni | check-jdk
 	python3 test/foreign/check.py
 

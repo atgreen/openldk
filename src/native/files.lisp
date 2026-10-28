@@ -55,6 +55,7 @@
 
 (defun |java/lang/Shutdown.halt0(I)V| (status)
   (unless *ignore-quit*
+    (%cleanup-source-launch)
     (uiop:quit status t)))
 
 (defmethod |getRawAnnotations()[B| ((class |java/lang/Class|))

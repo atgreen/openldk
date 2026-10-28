@@ -420,6 +420,13 @@ name is recorded in the Java thread already, so there is nothing to do."
 
 ;;; Fiber-based start0 for virtual threads (when SBCL has fiber support).
 ;;; Creates a fiber instead of an OS thread for BaseVirtualThread instances.
+(defun %run-java-thread-exit (thread)
+  "Run Java's VM exit hook before publishing termination, even after a failed task."
+  (handler-case
+      (invoke-special '|exit()V| '|java/lang/Thread| (list thread))
+    (error (condition)
+      (format *error-output* "~&Thread ~A terminated with error during exit: ~A~%" thread condition))))
+
 #+sb-fiber
 (defmethod |start0()V| :around ((thread |java/lang/BaseVirtualThread|))
   "Start a virtual thread as a fiber on the fiber scheduler."
@@ -436,6 +443,7 @@ name is recorded in the Java thread already, so there is nothing to do."
                              (error (e)
                                (format *error-output* "~&VThread ~A terminated with error: ~A~%" thread e))))
                       ;; Cleanup mappings
+                      (%run-java-thread-exit thread)
                       (remhash (uiop:symbol-call :sb-thread :current-fiber) *fiber-to-java-threads*)
                       (remhash thread *java-to-fibers*)
                       (remhash thread *fiber-park-flags*))))
