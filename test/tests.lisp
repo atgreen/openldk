@@ -98,6 +98,15 @@ file, nothing."
     (is (= 0 coder))
     (is (equalp '(112 108 97 105 110) (coerce bytes 'list)))))
 
+(test native-strings-are-simple
+  ;; Latin-1 and UTF-16 strings must both cross SBCL's C-string boundary.
+  ;; An adjustable UTF-16 result with a fill pointer fails in STRING-TO-C-STRING.
+  (dolist (source (list "plain" (string (code-char #xe9))
+                       (string (code-char #x3bb)) (string (code-char #x1f680))))
+    (let ((result (openldk::lstring (openldk::jstring source))))
+      (is (string= source result))
+      (is (typep result 'simple-string)))))
+
 (test method-let-drops-unused-variables
   ;; Unmentioned variables without an initial value are dropped; bound
   ;; parameters and mentioned variables stay.

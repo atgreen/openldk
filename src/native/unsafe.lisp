@@ -1114,9 +1114,8 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
         (slot-value ldk-class 'major-version)
         65))) ;; Default to JDK 21 class file version
 
-;; Module support stubs.
-;; We provide a single shared unnamed Module so that Class.getModule()
-;; never returns nil and Module.isNamed() returns false.
+;; Bootstrap fallback until module registration has associated Class objects
+;; with their named modules. User loaders have distinct unnamed modules.
 (defvar *unnamed-module* nil)
 
 (defun %get-unnamed-module ()
@@ -1137,8 +1136,12 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
 
 ;; JDK 9+: JavaLangAccess.defineUnnamedModule — return a fresh unnamed Module
 (defmethod |defineUnnamedModule(Ljava/lang/ClassLoader;)Ljava/lang/Module;| (this classloader)
-  (declare (ignore this classloader))
-  (%get-unnamed-module))
+  (declare (ignore this))
+  (classload "java/lang/Module")
+  (let ((module (%make-java-instance "java/lang/Module")))
+    (setf (slot-value module '|name|) nil
+          (slot-value module '|loader|) classloader)
+    module))
 
 ;; JDK 9+: JavaLangAccess.addEnableNativeAccess — identity stub
 (defmethod |addEnableNativeAccess(Ljava/lang/Module;)Ljava/lang/Module;| (this module)
@@ -1171,10 +1174,12 @@ Without either on the classpath, every name is reported, as before."
 (defun |java/lang/Module.defineModule0(Ljava/lang/Module;ZLjava/lang/String;Ljava/lang/String;[Ljava/lang/Object;)V|
     (module is-open version location packages)
   (declare (ignore is-open version location))
-  (%register-boot-module module packages))
+  (if *boot-module-layer-initializing*
+      (%register-boot-module module packages)
+      (%register-defined-module module packages)))
 
-;; The remaining Module graph natives (reads/exports edges) are likewise no-ops:
-;; OpenLDK enforces no module boundaries, so all reads/exports already succeed.
+;; The Java Module implementation records graph updates. These native hooks
+;; need no duplicate graph: access checks consult the Java reads/exports state.
 (defun |java/lang/Module.addReads0(Ljava/lang/Module;Ljava/lang/Module;)V| (from to)
   (declare (ignore from to))
   nil)

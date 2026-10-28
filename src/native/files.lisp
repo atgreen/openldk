@@ -680,13 +680,13 @@ serves the MappedByteBuffer as is."
   (logior 2 4 8))
 
 (defun %read-c-string-from-sap (address)
-  "Read a null-terminated C string from native memory at ADDRESS."
-  (let ((sap (sb-sys:int-sap address)))
-    (loop for i from 0
-          for byte = (sb-sys:sap-ref-8 sap i)
-          until (zerop byte)
-          collect (code-char byte) into chars
-          finally (return (coerce chars 'string)))))
+  "Decode a NUL-terminated native pathname using OpenLDK's UTF-8 native encoding."
+  (let* ((sap (sb-sys:int-sap address))
+         (length (loop for i from 0 when (zerop (sb-sys:sap-ref-8 sap i)) return i))
+         (bytes (make-array length :element-type '(unsigned-byte 8))))
+    (dotimes (i length)
+      (setf (aref bytes i) (sb-sys:sap-ref-8 sap i)))
+    (sb-ext:octets-to-string bytes :external-format :utf-8)))
 
 (defun |sun/nio/fs/UnixNativeDispatcher.exists0(J)| (address)
   "Check if file at native C-string ADDRESS exists. Returns non-zero if so."

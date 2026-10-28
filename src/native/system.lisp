@@ -78,7 +78,26 @@
     ("sun.stdout.encoding" . "UTF-8")
     ("sun.stderr.encoding" . "UTF-8")
     ("sun.jnu.encoding" . "UTF-8"))
-  "Encoding-related properties; OpenLDK always runs UTF-8.")
+  "Startup encodings; file.encoding may be overridden at launch.")
+
+(defun %configure-runtime-encoding ()
+  "Apply the launch-time default charset after restoring a warmed image.
+Native pathname and terminal encodings remain UTF-8, independently of file.encoding."
+  (let* ((requested (|java/lang/System.getProperty(Ljava/lang/String;)Ljava/lang/String;|
+                     (jstring "file.encoding")))
+         (name (if (and requested (not (string= (lstring requested) "COMPAT")))
+                   requested (jstring "UTF-8"))))
+    (%clinit (classload "jdk/internal/util/StaticProperty"))
+    (%clinit (classload "java/nio/charset/Charset"))
+    (let ((properties (symbol-value (intern "+static-jdk/internal/util/StaticProperty+"
+                                           (class-package "jdk/internal/util/StaticProperty"))))
+          (charset (symbol-value (intern "+static-java/nio/charset/Charset+"
+                                        (class-package "java/nio/charset/Charset")))))
+      (setf (slot-value properties '|FILE_ENCODING|) name
+            (slot-value charset '|defaultCharset|) nil))
+    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;|
+     (jstring "file.encoding") name))
+  nil)
 
 (defun %os-name ()
   (cond ((find :LINUX *features*) "Linux")

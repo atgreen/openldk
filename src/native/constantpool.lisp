@@ -530,16 +530,13 @@ Lookup.checkAccess is bypassed."
 (defun |java/lang/invoke/MethodHandles.lookup()Ljava/lang/invoke/MethodHandles$Lookup;| ()
   (%make-trusted-lookup))
 
-;; MethodHandles.lookup() is @CallerSensitive; its JIT-compiled bytecode builds
-;; a Lookup with a wrong lookupClass (OpenLDK has no caller-sensitive intrinsic)
-;; and non-trusted modes, so e.g. LinkedTransferQueue.<clinit> cannot access its
-;; own package-private `head` via findVarHandle. Force our trusted Lookup through
-;; *native-overrides* so it wins over the compiled body. (Calls the helper, not
-;; the same-named native, to avoid overriding itself into infinite recursion.)
-;; Its lookupClass is the caller's class: Lookup.findClass loads through that
-;; class's loader (JBoss Logging finds its generated loggers so).
+;; MethodHandles.lookup() is caller-sensitive. Supply the actual caller and
+;; ordinary ORIGINAL lookup modes instead of making every Java caller trusted.
+;; VM bootstrap operations use %MAKE-TRUSTED-LOOKUP explicitly.
 (defun %methodhandles-lookup ()
-  (%make-trusted-lookup (%java-caller-class '%methodhandles-lookup)))
+  (let ((lookup (%make-trusted-lookup (%java-caller-class '%methodhandles-lookup))))
+    (setf (slot-value lookup '|allowedModes|) #x5f)
+    lookup))
 
 (setf (gethash "java/lang/invoke/MethodHandles.lookup()Ljava/lang/invoke/MethodHandles$Lookup;" *native-overrides*)
       (lambda () (%methodhandles-lookup)))
@@ -550,16 +547,26 @@ Lookup.checkAccess is bypassed."
     (slot-value this '|lookupClass|)))
 
 (defun |java/lang/invoke/MethodHandles$Lookup.hasFullPrivilegeAccess()Z| (this)
-  "Conservatively claim full privilege to keep bootstrap happy."
-  (declare (ignore this))
-  1) ; true
+  "Full privilege requires both private and module access (or a trusted lookup)."
+  (let ((modes (slot-value this '|allowedModes|)))
+    (if (or (= modes -1) (= (logand modes #x12) #x12)) 1 0)))
 
-(defun |java/lang/invoke/MethodHandles$Lookup.checkUnprivilegedlookupClass(Ljava/lang/Class;I)| (klass mode)
-  "Native no-op to bypass security check for unprivileged lookup classes.
-   The JDK throws IllegalArgumentException for bootstrap classes (java.*, sun.*)
-   with full access mode (15), but we need to allow this for lambda metafactory."
-  (declare (ignore klass mode))
-  nil)
+(defun %check-lookup-method-access (lookup refc member method-type ref-kind)
+  "Check a native method-handle lookup with the JDK's Lookup access rules."
+  (unless (= -1 (slot-value lookup '|allowedModes|))
+    (let* ((class (get-ldk-class-for-java-class refc))
+           (name (lstring (slot-value member '|name|)))
+           (descriptor (%build-method-descriptor (slot-value method-type '|rtype|)
+                                                 (slot-value method-type '|ptypes|)))
+           (signature (concatenate 'string name descriptor))
+           (owner (if (= ref-kind 8) class (%find-declaring-class class signature)))
+           (method (and owner (gethash signature (%class-method-name-table owner)))))
+      (unless method
+        (%throw '|java/lang/NoSuchMethodException| signature))
+      (setf (slot-value member '|clazz|) (java-class owner)
+            (slot-value member '|flags|)
+            (logior (logand (slot-value member '|flags|) #xffff0000) (access-flags method)))
+      (|checkAccess(BLjava/lang/Class;Ljava/lang/invoke/MemberName;)V| lookup ref-kind refc member))))
 
 (defun %build-member-name-for-static (klass name method-type)
   (classload "java/lang/invoke/MemberName")
@@ -606,12 +613,12 @@ Lookup.checkAccess is bypassed."
     (lookup klass name method-type)
   "Create a DirectMethodHandle for static method invocation.
    DirectMethodHandle is required by LambdaMetafactory for lambda expressions."
-  (declare (ignore lookup))
   (classload "java/lang/invoke/DirectMethodHandle")
   (classload "java/lang/invoke/LambdaForm")
   (let* ((member (%build-member-name-for-static klass name method-type))
          (lf (%make-java-instance "java/lang/invoke/LambdaForm"))
          (mh (%make-java-instance "java/lang/invoke/DirectMethodHandle")))
+    (%check-lookup-method-access lookup klass member method-type 6)
     ;; Set vmentry on LambdaForm
     (setf (slot-value lf '|vmentry|) member)
 
@@ -652,13 +659,14 @@ Lookup.checkAccess is bypassed."
     (lookup refc name method-type special-caller)
   "Create a DirectMethodHandle for invokespecial method invocation.
    Used for private methods, constructors, and super calls in lambda metafactory."
-  (declare (ignore lookup special-caller))
+  (declare (ignore special-caller))
   (classload "java/lang/invoke/DirectMethodHandle")
   (classload "java/lang/invoke/LambdaForm")
   (let* ((member (%build-member-name-for-special refc name method-type))
          (lf (%make-java-instance "java/lang/invoke/LambdaForm"))
          (mh (%make-java-instance "java/lang/invoke/DirectMethodHandle")))
     ;; Set vmentry on LambdaForm
+    (%check-lookup-method-access lookup refc member method-type 7)
     (setf (slot-value lf '|vmentry|) member)
 
     ;; Set type on MethodHandle
@@ -694,13 +702,13 @@ Lookup.checkAccess is bypassed."
 (defun |java/lang/invoke/MethodHandles$Lookup.findConstructor(Ljava/lang/Class;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/MethodHandle;| (lookup refc method-type)
   "Create a DirectMethodHandle for constructor invocation.
    Used by lambda metafactory for method references to constructors."
-  (declare (ignore lookup))
   (classload "java/lang/invoke/DirectMethodHandle")
   (classload "java/lang/invoke/LambdaForm")
   (let* ((member (%build-member-name-for-constructor refc method-type))
          (lf (%make-java-instance "java/lang/invoke/LambdaForm"))
          (mh (%make-java-instance "java/lang/invoke/DirectMethodHandle")))
     ;; Set vmentry on LambdaForm
+    (%check-lookup-method-access lookup refc member method-type 8)
     (setf (slot-value lf '|vmentry|) member)
 
     ;; Set type on MethodHandle
@@ -737,13 +745,13 @@ Lookup.checkAccess is bypassed."
     (lookup refc name method-type)
   "Create a DirectMethodHandle for virtual method invocation.
    Used by lambda metafactory for instance method references."
-  (declare (ignore lookup))
   (classload "java/lang/invoke/DirectMethodHandle")
   (classload "java/lang/invoke/LambdaForm")
   (let* ((member (%build-member-name-for-virtual refc name method-type))
          (lf (%make-java-instance "java/lang/invoke/LambdaForm"))
          (mh (%make-java-instance "java/lang/invoke/DirectMethodHandle")))
     ;; Set vmentry on LambdaForm
+    (%check-lookup-method-access lookup refc member method-type 5)
     (setf (slot-value lf '|vmentry|) member)
 
     ;; Set type on MethodHandle

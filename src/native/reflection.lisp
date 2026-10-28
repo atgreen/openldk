@@ -282,6 +282,19 @@ initialize the declaring class, as the JVM does before reflective access."
         (%unsafe-static-storage field :errorp nil))
       obj))
 
+(defun %check-reflective-access (member object caller &optional constructor-p)
+  "Run the JDK's AccessibleObject access checks before our native accessor.
+The override flag only bypasses checks after setAccessible has authorized it."
+  (unless (eql 1 (slot-value member '|override|))
+    (let* ((declaring (slot-value member '|clazz|))
+           (modifiers (slot-value member '|modifiers|))
+           (target (cond (constructor-p declaring)
+                         ((logbitp 3 modifiers) nil)
+                         (object (|getClass()Ljava/lang/Class;| object))
+                         (t (%throw '|java/lang/NullPointerException|)))))
+      (|checkAccess(Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Class;I)V|
+       member caller declaring target modifiers))))
+
 ;; JDK 25 routes java.lang.reflect.Field.get/set through a MethodHandle-based
 ;; field accessor (MethodHandleAccessorFactory). OpenLDK cracks MethodHandle
 ;; vmentries directly rather than interpreting LambdaForms, so driving that
@@ -289,31 +302,27 @@ initialize the declaring class, as the JVM does before reflective access."
 ;; slot directly. Registered via *native-overrides* (not a defmethod) because
 ;; java/lang/reflect/Field is not a build-time CLOS class, so it can't be a
 ;; method specializer; the override installs before the JIT compiles the body.
-(setf (gethash "java/lang/reflect/Field.get(Ljava/lang/Object;)Ljava/lang/Object;" *native-overrides*)
-      (lambda (field obj)
-        (let* ((char (%field-primitive-char (slot-value field '|type$|)))
-               (slot-key (%field-object-slot field))
-               (storage (%field-slot-storage field obj))
-               (raw (if (and storage (slot-exists-p storage slot-key) (slot-boundp storage slot-key))
-                        (slot-value storage slot-key)
-                        (if char 0 nil))))
-          (if char
-              (%box-primitive-return raw char)
-              raw))))
+(defun %reflective-field-get (field obj)
+  (%check-reflective-access field obj (%java-caller-class '%reflective-field-get))
+  (let* ((char (%field-primitive-char (slot-value field '|type$|)))
+         (slot-key (%field-object-slot field))
+         (storage (%field-slot-storage field obj))
+         (raw (if (and storage (slot-exists-p storage slot-key) (slot-boundp storage slot-key))
+                  (slot-value storage slot-key)
+                  (if char 0 nil))))
+    (if char (%box-primitive-return raw char) raw)))
 
-(setf (gethash "java/lang/reflect/Field.set(Ljava/lang/Object;Ljava/lang/Object;)V" *native-overrides*)
-      (lambda (field obj value)
-        (let* ((char (%field-primitive-char (slot-value field '|type$|)))
-               (slot-key (%field-object-slot field))
-               (storage (%field-slot-storage field obj))
-               ;; Unbox the wrapper when the field is primitive; wrappers carry
-               ;; the primitive in their |value| slot.
-               (v (if (and char value (slot-exists-p value '|value|))
-                      (slot-value value '|value|)
-                      value)))
-          (when (and storage (slot-exists-p storage slot-key))
-            (setf (slot-value storage slot-key) v))
-          nil)))
+(defun %reflective-field-set (field obj value)
+  (%check-reflective-access field obj (%java-caller-class '%reflective-field-set))
+  (let* ((char (%field-primitive-char (slot-value field '|type$|)))
+         (slot-key (%field-object-slot field))
+         (storage (%field-slot-storage field obj))
+         ;; Unbox primitive wrapper arguments before storing their value.
+         (v (if (and char value (slot-exists-p value '|value|))
+                (slot-value value '|value|) value)))
+    (when (and storage (slot-exists-p storage slot-key))
+      (setf (slot-value storage slot-key) v))
+    nil))
 
 ;; Constructor.newInstance on JDK 25 builds a MethodHandle-based constructor
 ;; accessor (MethodHandleAccessorFactory.makeConstructorHandle), which NPEs in
@@ -323,19 +332,31 @@ initialize the declaring class, as the JVM does before reflective access."
 ;; route Constructor.newInstance straight to it so the MethodHandle accessor is
 ;; never built. Registered via *native-overrides* because java/lang/reflect/
 ;; Constructor is not a build-time CLOS class.
-(setf (gethash "java/lang/reflect/Constructor.newInstance([Ljava/lang/Object;)Ljava/lang/Object;" *native-overrides*)
-      (lambda (constructor args)
-        (|jdk/internal/reflect/NativeConstructorAccessorImpl.newInstance0(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)|
-         constructor args)))
+(defun %reflective-constructor-new-instance (constructor args)
+  (%check-reflective-access constructor nil (%java-caller-class '%reflective-constructor-new-instance) t)
+  (|jdk/internal/reflect/NativeConstructorAccessorImpl.newInstance0(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)|
+         constructor args))
 
 ;; Method.invoke has the same JDK 25 problem: acquireMethodAccessor builds a
 ;; MethodHandle-based accessor that NPEs in MethodHandle.asType. OpenLDK already
 ;; has a native reflective method path (NativeMethodAccessorImpl.invoke0); route
 ;; Method.invoke straight to it so the MethodHandle accessor is never built.
+(defun %reflective-method-invoke (method obj args)
+  (%check-reflective-access method obj (%java-caller-class '%reflective-method-invoke))
+  (|jdk/internal/reflect/NativeMethodAccessorImpl.invoke0(Ljava/lang/reflect/Method;Ljava/lang/Object;[Ljava/lang/Object;)|
+         method obj args))
+
+(setf (gethash "java/lang/reflect/Field.get(Ljava/lang/Object;)Ljava/lang/Object;" *native-overrides*)
+      #'%reflective-field-get)
+
+(setf (gethash "java/lang/reflect/Field.set(Ljava/lang/Object;Ljava/lang/Object;)V" *native-overrides*)
+      #'%reflective-field-set)
+
+(setf (gethash "java/lang/reflect/Constructor.newInstance([Ljava/lang/Object;)Ljava/lang/Object;" *native-overrides*)
+      #'%reflective-constructor-new-instance)
+
 (setf (gethash "java/lang/reflect/Method.invoke(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;" *native-overrides*)
-      (lambda (method obj args)
-        (|jdk/internal/reflect/NativeMethodAccessorImpl.invoke0(Ljava/lang/reflect/Method;Ljava/lang/Object;[Ljava/lang/Object;)|
-         method obj args)))
+      #'%reflective-method-invoke)
 
 (defun |sun/misc/VM.initialize()| ()
   nil)
@@ -348,8 +369,8 @@ initialize the declaring class, as the JVM does before reflective access."
 ;; System.initPhase1 (VM.initLevel 1), so this is false and blocks features
 ;; that gate on it -- notably java.lang.reflect.Proxy$ProxyBuilder, which
 ;; throws InternalError "Proxy is not supported until module system is fully
-;; initialized".  OpenLDK's runtime behaves as a fully-initialized single
-;; unnamed module, so report the module system as inited.
+;; initialized". Runtime setup constructs the boot module graph before
+;; application code runs; report initialization except while building it.
 (setf (gethash "jdk/internal/misc/VM.isModuleSystemInited()Z" *native-overrides*)
       (lambda () (if *boot-module-layer-initializing* 0 1)))
 

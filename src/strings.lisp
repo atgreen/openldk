@@ -97,7 +97,8 @@
                                (t
                                 (vector-push-extend (code-char u) result)
                                 (incf i))))))
-                (coerce result 'string)))))))
+                ;; C-string argument conversion requires a simple string.
+                (coerce result 'simple-string)))))))
 
 (defun %java-byte (octet)
   "OCTET (0..255) as the signed value a Java byte holds."

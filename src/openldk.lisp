@@ -190,10 +190,7 @@ interrupts).  Usage on a hung process:  touch /tmp/openldk-dump-trigger"
         ;; a native stub so we can delegate to our safe implementation.
         (and (string= class-name "com/sun/tools/javac/jvm/ClassReader$2")
              (string= (slot-value method 'name) "setEnclosingType")
-             (string= (slot-value method 'descriptor) "(Lcom/sun/tools/javac/code/Type;)V"))
-        ;; MethodHandles$Lookup security check bypassed to allow lambda metafactory
-        (and (string= class-name "java/lang/invoke/MethodHandles$Lookup")
-             (string= (slot-value method 'name) "checkUnprivilegedlookupClass")))))
+             (string= (slot-value method 'descriptor) "(Lcom/sun/tools/javac/code/Type;)V")))))
 
 (defun %find-branch-targets (code length)
   "Pre-scan bytecode to identify all PCs that are branch targets.
@@ -2500,6 +2497,7 @@ properties, and *CLASSPATH* construction."
                            :ldk-classes-by-fq-name *ldk-classes-by-fq-name*
                            :java-classes-by-bin-name *java-classes-by-bin-name*
                            :java-classes-by-fq-name *java-classes-by-fq-name*))))
+  (setf *module-access-ready* nil)
   ;; Application class loader: OPENLDK.APP package, child of boot.
   (unless *app-ldk-class-loader*
     (setf *app-ldk-class-loader*
@@ -2524,6 +2522,7 @@ properties, and *CLASSPATH* construction."
   (dolist (prop *cli-jvm-properties*)
     (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;|
      (ijstring (car prop)) (ijstring (cdr prop))))
+  (%configure-runtime-encoding)
   (when *debug-slynk*
     (slynk:create-server :port 2025)
     (sleep 10))
@@ -2543,7 +2542,11 @@ properties, and *CLASSPATH* construction."
                  collect (if (ends-with? ".jar" cpe)
                              (make-instance 'jar-classpath-entry :jarfile cpe)
                              (make-instance 'dir-classpath-entry :dir cpe)))
-           (discover-jmod-classpath-entries)))))
+           (discover-jmod-classpath-entries))))
+  ;; Resolve the boot graph before application loading/JIT compilation can
+  ;; reenter module initialization through an access check.
+  (%boot-module-layer)
+  (setf *module-access-ready* t))
 
 (defun %main-method-declared-by (class descriptor public-only &optional inherited-interface)
   "Find a candidate main declared by CLASS for DESCRIPTOR."

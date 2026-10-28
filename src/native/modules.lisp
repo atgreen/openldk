@@ -6,6 +6,11 @@
 
 (in-package :openldk)
 
+(defvar *module-access-ready* nil
+  "True after runtime startup has constructed the boot module graph.")
+(defvar *defined-package-modules* (make-hash-table :test #'equal :synchronized t)
+  "(defining Java loader . slash package name) -> application named module.")
+
 (defvar *boot-module-layer-initializing* nil
   "True while this thread is constructing the boot module layer.")
 (defvar *boot-module-lock* (bt:make-recursive-lock "boot-module-layer")
@@ -26,12 +31,22 @@
 
 (defun %defining-class-module (name ldk-loader java-loader)
   "A runtime module, or the unnamed module owned by the defining Java loader."
-  (or (%runtime-class-module name ldk-loader)
+  (or (when-let ((slash (position #\/ name :from-end t)))
+        (gethash (cons java-loader (subseq name 0 slash)) *defined-package-modules*)) ; lint:suppress use-serapeum-take
+      (%runtime-class-module name ldk-loader)
       (and java-loader
            (slot-exists-p java-loader '|unnamedModule|)
            (slot-boundp java-loader '|unnamedModule|)
            (slot-value java-loader '|unnamedModule|))
       *unnamed-module*))
+
+(defun %register-defined-module (module packages)
+  "Associate an application's named MODULE with its defining loader and packages."
+  (let ((loader (slot-value module '|loader|)))
+    (loop for package across (java-array-data packages)
+          do (setf (gethash (cons loader (substitute #\/ #\. (lstring package))) ; lint:suppress substitute-use
+                           *defined-package-modules*) module)))
+  nil)
 
 (defun %register-boot-module (module packages)
   "Associate a boot MODULE with PACKAGES and already loaded runtime classes."
@@ -61,7 +76,31 @@
               (|java/lang/ModuleLayer.empty()Ljava/lang/ModuleLayer;|))
           (t (bt:with-recursive-lock-held (*boot-module-lock*)
               (or (slot-value system '|bootLayer|)
-                  (let ((*boot-module-layer-initializing* t))
+                  (let ((*boot-module-layer-initializing* t)
+                        (*context* nil))
                     (classload "jdk/internal/module/ModuleBootstrap")
                     (setf (slot-value system '|bootLayer|)
                           (|jdk/internal/module/ModuleBootstrap.boot()Ljava/lang/ModuleLayer;|))))))))))
+
+(defvar *class-access-cache* (make-hash-table :test #'equal :synchronized t)
+  "(caller Class . referenced Class) -> :allowed or :denied symbolic resolution.")
+(defvar *checking-class-access* nil
+  "Access checking and boot graph construction are trusted runtime operations.")
+
+(defun %check-bytecode-class-access (caller target)
+  "Check runtime package/module class access, retaining failed resolutions.
+Graph updates affect fresh references, not a reference which already failed."
+  (when (and *module-access-ready* (not *boot-module-layer-initializing*)
+             (not *checking-class-access*) (not (eq caller target)))
+    (let* ((key (cons caller target))
+           (outcome (or (gethash key *class-access-cache*)
+                        (let ((*checking-class-access* t))
+                          (setf (gethash key *class-access-cache*)
+                                (if (eql 1 (|sun/invoke/util/VerifyAccess.isClassAccessible(Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Class;I)Z|
+                                            target caller nil #x1f))
+                                    :allowed :denied))))))
+      (when (eql outcome :denied)
+        (%throw '|java/lang/IllegalAccessError|
+                (format nil "~A cannot access ~A"
+                        (lstring (slot-value caller '|name|)) (lstring (slot-value target '|name|)))))))
+  nil)

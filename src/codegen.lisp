@@ -634,6 +634,47 @@ take the method's arguments followed by the MemberName."
                 :openldk)
         method-sym)))
 
+(defmacro %with-class-access (caller target form)
+  `(progn (%check-bytecode-class-access ,caller ,target) ,form))
+
+(define-setf-expander %with-class-access (caller target place &environment environment)
+  ;; Field IR is used both as a value and a SETF place. Preserve the underlying
+  ;; accessor's evaluation, caching, and volatile semantics in both cases.
+  (multiple-value-bind (temps values stores writer reader) (get-setf-expansion place environment)
+    (let ((caller-temp (gensym "ACCESS-CALLER"))
+          (target-temp (gensym "ACCESS-TARGET")))
+      (values (list* caller-temp target-temp temps) (list* caller target values) stores
+              `(%with-class-access ,caller-temp ,target-temp ,writer)
+              `(%with-class-access ,caller-temp ,target-temp ,reader)))))
+
+(defun %checked-class-expression (expression reference context)
+  "Wrap an instruction's result (or field place) with its class access check."
+  (let* ((caller (and context (slot-value context 'class)))
+         (target (typecase reference
+                   (ir-class (slot-value reference 'class))
+                   (string (%resolve-class-in-context reference)))))
+    (when (and caller target (java-class caller) (java-class target))
+      (setf (code expression)
+            `(%with-class-access ,(java-class caller) ,(java-class target) ,(code expression)))))
+  expression)
+
+(defmethod codegen :around ((insn ir-call-virtual-method) context)
+  (%checked-class-expression (call-next-method)
+                            (if (typep insn 'ir-call-static-method)
+                                (slot-value insn 'class) (reference-class insn)) context))
+
+(defmethod codegen :around ((insn ir-call-special-method) context)
+  (%checked-class-expression (call-next-method) (slot-value insn 'class) context))
+
+(defmethod codegen :around ((insn ir-new) context)
+  (%checked-class-expression (call-next-method) (slot-value insn 'class) context))
+
+(defmethod codegen :around ((insn ir-member) context)
+  (%checked-class-expression (call-next-method) (ref-class insn) context))
+
+(defmethod codegen :around ((insn ir-static-member) context)
+  (%checked-class-expression (call-next-method) (slot-value insn 'class) context))
+
 (defmethod codegen ((insn ir-call-static-method) context)
   (with-slots (class method-name args return-type) insn
     (make-instance '<expression>
@@ -764,8 +805,10 @@ class is a self-reference to the class currently being compiled."
               (%self-referential-hidden-class-p caller-name binary-name))
       (return-from %resolve-class-literal caller)))
   (handler-case
-      (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;|
-       (jstring (substitute #\. #\/ binary-name)) nil (%class-java-loader caller) caller)
+      (let ((target (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;|
+                     (jstring (substitute #\. #\/ binary-name)) nil (%class-java-loader caller) caller)))
+        (%check-bytecode-class-access caller target)
+        target)
     (|condition-java/lang/ClassNotFoundException| ()
       (%throw '|java/lang/NoClassDefFoundError| (substitute #\. #\/ binary-name)))))
 
@@ -871,71 +914,26 @@ class is a self-reference to the class currently being compiled."
                               (/ value1 value2)))
                  :expression-type :DOUBLE))
 
+(defun %java-floating-remainder (dividend divisor)
+  "Java's truncating floating remainder, preserving the dividend's zero sign.
+Exact rational arithmetic avoids overflowing or rounding the quotient/product
+for very large quotients (MAX_VALUE % MIN_VALUE, for example)."
+  (cond
+    ((or (float-features:float-nan-p dividend)
+         (float-features:float-nan-p divisor)
+         (float-features:float-infinity-p dividend)
+         (zerop divisor))
+     (if (typep dividend 'single-float)
+         float-features:single-float-nan float-features:double-float-nan))
+    ((or (float-features:float-infinity-p divisor) (zerop dividend)) dividend)
+    (t (let ((result (float (rem (rational dividend) (rational divisor)) dividend)))
+         (if (zerop result) (float-sign dividend result) result)))))
+
 (defmethod codegen ((insn ir-frem) context)
-  (make-instance '<expression>
-                 :insn insn
-                 :code `(let ((value2 ,(code (codegen (value2 insn) context)))
-                              (value1 ,(code (codegen (value1 insn) context))))
-                          (cond
-                            ;; If either value1 or value2 is NaN, the result is NaN
-                            ((or (float-features:float-nan-p value1)
-                                 (float-features:float-nan-p value2))
-                             float-features:single-float-nan)
-
-                            ;; If the dividend is an infinity or the divisor is a zero or both, the result is NaN
-                            ((or (float-features:float-infinity-p value1)
-                                 (zerop value2)
-                                 (and (float-features:float-infinity-p value1)
-                                      (zerop value2)))
-                             float-features:single-float-nan)
-
-                            ;; If the dividend is finite and the divisor is an infinity, the result equals the dividend
-                            ((and (not (float-features:float-infinity-p value1))
-                                  (float-features:float-infinity-p value2))
-                             value1)
-
-                            ;; If the dividend is a zero and the divisor is finite, the result equals the dividend
-                            ((and (zerop value1)
-                                  (not (float-features:float-infinity-p value2)))
-                             value1)
-
-                            ;; In the remaining cases, compute the remainder
-                            (t (let ((q (truncate value1 value2)))
-                                 (- value1 (* value2 q))))))
-                 :expression-type :FLOAT))
+  (%codegen-binop insn '%java-floating-remainder :FLOAT context))
 
 (defmethod codegen ((insn ir-drem) context)
-  (make-instance '<expression>
-                 :insn insn
-                 :code `(let ((value2 ,(code (codegen (value2 insn) context)))
-                              (value1 ,(code (codegen (value1 insn) context))))
-                          (cond
-                            ;; If either value1 or value2 is NaN, the result is NaN
-                            ((or (float-features:float-nan-p value1)
-                                 (float-features:float-nan-p value2))
-                             float-features:double-float-nan)
-
-                            ;; If the dividend is an infinity or the divisor is a zero or both, the result is NaN
-                            ((or (float-features:float-infinity-p value1)
-                                 (zerop value2)
-                                 (and (float-features:float-infinity-p value1)
-                                      (zerop value2)))
-                             float-features:double-float-nan)
-
-                            ;; If the dividend is finite and the divisor is an infinity, the result equals the dividend
-                            ((and (not (float-features:float-infinity-p value1))
-                                  (float-features:float-infinity-p value2))
-                             value1)
-
-                            ;; If the dividend is a zero and the divisor is finite, the result equals the dividend
-                            ((and (zerop value1)
-                                  (not (float-features:float-infinity-p value2)))
-                             value1)
-
-                            ;; In the remaining cases, compute the remainder
-                            (t (let ((q (truncate value1 value2)))
-                                 (- value1 (* value2 q))))))
-                 :expression-type :DOUBLE))
+  (%codegen-binop insn '%java-floating-remainder :DOUBLE context))
 
 (defmethod codegen ((insn ir-fcmpg) context)
   (make-instance '<expression>
@@ -1028,32 +1026,22 @@ class is a self-reference to the class currently being compiled."
                                 'single-float)
                  :expression-type :FLOAT))
 
+(defun %java-float-to-integer (value bits)
+  "JVM f2i/f2l/d2i/d2l: truncate toward zero, saturate, and convert NaN to zero."
+  (let ((limit (ash 1 (1- bits))))
+    (cond ((float-features:float-nan-p value) 0)
+          ((>= value limit) (1- limit))
+          ((<= value (- limit)) (- limit))
+          (t (truncate value)))))
+
 (defmethod codegen ((insn ir-d2i) context)
-  (make-instance '<expression>
-                 :insn insn
-                 :code `(let ((value ,(code (codegen (value insn) context))))
-                          (unsigned-to-signed-integer
-                           (logand
-                            (cond
-                              ((float-features:float-nan-p value) 0)
-                              ((float-features:float-infinity-p value)
-                               (if (plusp value) #x7FFFFFFF #x80000000))
-                              (t (floor value)))
-                            #xFFFFFFFF)))
+  (make-instance '<expression> :insn insn
+                 :code `(%java-float-to-integer ,(code (codegen (value insn) context)) 32)
                  :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-d2l) context)
-  (make-instance '<expression>
-                 :insn insn
-                 :code `(let ((value ,(code (codegen (value insn) context))))
-                          (unsigned-to-signed-long
-                           (logand
-                            (cond
-                              ((float-features:float-nan-p value) 0)
-                              ((float-features:float-infinity-p value)
-                               (if (plusp value) #x7FFFFFFFFFFFFFFF #x8000000000000000))
-                              (t (floor value)))
-                            #xFFFFFFFFFFFFFFFF)))
+  (make-instance '<expression> :insn insn
+                 :code `(%java-float-to-integer ,(code (codegen (value insn) context)) 64)
                  :expression-type :LONG))
 
 (defmethod codegen ((insn ir-l2f) context)
@@ -1122,31 +1110,13 @@ class is a self-reference to the class currently being compiled."
                  :expression-type :CHAR))
 
 (defmethod codegen ((insn ir-f2i) context)
-  (make-instance '<expression>
-                 :insn insn
-                 :code `(let ((value ,(code (codegen (value insn) context))))
-                          (unsigned-to-signed-integer
-                           (logand
-                            (cond
-                              ((float-features:float-nan-p value) 0)
-                              ((float-features:float-infinity-p value)
-                               (if (plusp value) #x7FFFFFFF #x80000000))
-                              (t (floor value)))
-                            #xFFFFFFFF)))
+  (make-instance '<expression> :insn insn
+                 :code `(%java-float-to-integer ,(code (codegen (value insn) context)) 32)
                  :expression-type :INTEGER))
 
 (defmethod codegen ((insn ir-f2l) context)
-  (make-instance '<expression>
-                 :insn insn
-                 :code `(let ((value ,(code (codegen (value insn) context))))
-                          (unsigned-to-signed-long
-                           (logand
-                            (cond
-                              ((float-features:float-nan-p value) 0)
-                              ((float-features:float-infinity-p value)
-                               (if (plusp value) #x7FFFFFFFFFFFFFFF #x8000000000000000))
-                              (t (floor value)))
-                            #xFFFFFFFFFFFFFFFF)))
+  (make-instance '<expression> :insn insn
+                 :code `(%java-float-to-integer ,(code (codegen (value insn) context)) 64)
                  :expression-type :LONG))
 
 (defmethod codegen ((insn ir-iinc) context)

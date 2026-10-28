@@ -118,6 +118,28 @@ for Java 16 (records), 17 (sealed types), 21 (record patterns and pattern switch
 and 25. The suite also covers Java 25 primitive patterns with `--enable-preview`,
 including exact conversions, guarded switches, nulls, and qualified enum cases.
 
+### Modules, Java 25 constructors, and runtime defaults
+
+The boot module graph is ready before application code runs. Application module
+layers associate packages with their defining loaders and named modules.
+Reflection uses the JDK's access checks for methods, constructors, and fields,
+including exports, opens, and authorized accessibility overrides. Ordinary
+MethodHandles lookups retain their caller and access modes. Calls, allocations,
+field references, and class literals check package/module visibility; a failed
+resolution stays failed when a read edge is later added. Full bytecode verification remains incomplete.
+
+Run `make check-compat` for comparisons with JDK 25 covering:
+
+- Named module layers, read/export/open updates, concealed JDK classes, reflective
+  access failures, and method-handle lookup permissions.
+- Java 25 module imports and flexible constructor bodies, including early field
+  assignments, delegation, and failures, in compiled and source-file launches.
+- Java 17/25 strict floating-point behavior: rounding, overflow, subnormals,
+  signed zero, NaNs, truncating remainders, and saturating integer conversions.
+- Java 18/25 UTF-8 defaults, non-ASCII filenames, readers/writers, explicit
+  charsets, and the `-Dfile.encoding=ISO-8859-1` launch override. Native pathname
+  encoding remains UTF-8 independently of the content encoding.
+
 ### Modern library APIs
 
 Run `make check-modern` to compare these library behaviors with JDK 25:
