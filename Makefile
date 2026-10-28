@@ -280,7 +280,7 @@ check-jni: openldk jni | check-jdk
 check-jni-zstd: openldk jni | check-jdk
 	python3 test/jni/check.py --zstd
 
-.PHONY: check-zip check-nio check-modules check-reentrant check-eclipse
+.PHONY: check-zip check-nio check-modules check-reentrant check-launcher check-eclipse
 check-zip: openldk | check-jdk
 	python3 test/zip/check.py
 
@@ -292,6 +292,9 @@ check-modules: openldk | check-jdk
 
 check-reentrant: openldk | check-jdk
 	python3 test/reentrant/check.py
+
+check-launcher: openldk | check-jdk
+	python3 test/launcher/check.py
 
 check-eclipse: openldk jni | check-jdk
 	python3 test/eclipse/check.py

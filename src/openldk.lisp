@@ -2510,20 +2510,82 @@ properties, and *CLASSPATH* construction."
                              (make-instance 'dir-classpath-entry :dir cpe)))
            (discover-jmod-classpath-entries)))))
 
-(defun %find-java-main-symbol (class)
-  "Find the static main([Ljava/lang/String;) symbol for CLASS, searching
-the superclass chain.  Static methods live in the defining class's
-loader package (OPENLDK.SYSTEM for classes loaded during warm-up)."
-  (when class
-    (let* ((pkg (if (and (slot-boundp class 'ldk-loader)
-                         (slot-value class 'ldk-loader))
-                    (loader-package (slot-value class 'ldk-loader))
-                    (or (find-package "OPENLDK.SYSTEM")
-                        (make-package "OPENLDK.SYSTEM" :use '(:openldk)))))
-           (main-symbol (intern (format nil "~A.main([Ljava/lang/String;)V" (name class)) pkg)))
-      (if (fboundp main-symbol)
-          main-symbol
-          (%find-java-main-symbol (gethash (super class) *ldk-classes-by-bin-name*))))))
+(defun %main-method-declared-by (class descriptor public-only &optional inherited-interface)
+  "Find a candidate main declared by CLASS for DESCRIPTOR."
+  (find-if (lambda (method)
+             (and (string= (name method) "main")
+                  (string= (descriptor method) descriptor)
+                  (not (logbitp 1 (access-flags method)))
+                  (or (not public-only) (logbitp 0 (access-flags method)))
+                  (not (and inherited-interface (static-p method)))))
+           (methods class)))
+
+(defun %main-interface-extends-p (child parent)
+  "Whether interface CHILD extends PARENT, including transitively."
+  (or (eq child parent)
+      (some (lambda (name)
+              (when-let ((interface (%resolve-class name (ldk-loader child))))
+                (%main-interface-extends-p interface parent)))
+            (coerce (interfaces child) 'list))))
+
+(defun %find-main-method (class descriptor public-only)
+  "Return (declaring-class . method), searching classes before interfaces.
+Static interface methods are not inherited; subinterface declarations take
+precedence over declarations of their superinterfaces."
+  (let ((interface-candidates nil)
+        (seen nil))
+    (labels ((visit-interface (interface)
+               (unless (member interface seen)
+                 (push interface seen)
+                 (let ((method (%main-method-declared-by interface descriptor public-only t)))
+                   (if method
+                       (push (cons interface method) interface-candidates)
+                       (map nil (lambda (name)
+                                  (when-let ((parent (%resolve-class name (ldk-loader interface))))
+                                    (visit-interface parent)))
+                            (interfaces interface)))))))
+      (loop for current = class then (and (super current)
+                                         (%resolve-class (super current) (ldk-loader current)))
+            while current
+            do (when-let ((method (%main-method-declared-by current descriptor public-only)))
+                 (return-from %find-main-method (cons current method)))
+               (map nil (lambda (name)
+                          (when-let ((interface (%resolve-class name (ldk-loader current))))
+                            (visit-interface interface)))
+                    (interfaces current)))
+      (find-if (lambda (candidate)
+                 (notany (lambda (other)
+                           (and (not (eq candidate other))
+                                (%main-interface-extends-p (car other) (car candidate))))
+                         interface-candidates))
+               interface-candidates))))
+
+(defun %invoke-java-main (class argv)
+  "Select and invoke a Java 25 main, constructing the launched class if needed."
+  (let* ((candidate (or (%find-main-method class "([Ljava/lang/String;)V" t)
+                        (%find-main-method class "([Ljava/lang/String;)V" nil)
+                        (%find-main-method class "()V" nil))))
+    (unless candidate
+      (error "Main method not found in class ~A." (name class)))
+    (let* ((owner (car candidate))
+           (method (cdr candidate))
+           (args (unless (string= (descriptor method) "()V") (list argv))))
+      (if (static-p method)
+          (%eval (cons (static-method-symbol
+                        (format nil "~A.main~A" (name owner) (descriptor method))
+                        (ldk-class-package owner)) args))
+          (let ((constructor (find-if (lambda (method)
+                                        (and (string= (name method) "<init>")
+                                             (string= (descriptor method) "()V")
+                                             (not (logbitp 1 (access-flags method)))))
+                                      (methods class))))
+            (when (or (interface-p class) (abstract-p class) (null constructor))
+              (error "Instance main in ~A requires a concrete class with a non-private no-argument constructor."
+                     (name class)))
+            (let ((instance (%make-java-instance (name class) (ldk-loader class))))
+              (invoke-special '|<init>()V| (intern (name class) (ldk-class-package class)) (list instance))
+              (%eval (list* (intern (format nil "main~A" (descriptor method)) :openldk)
+                            instance args))))))))
 
 (defun %await-nondaemon-java-threads ()
   "Wait for all non-daemon Java threads (other than the current one) to
@@ -2573,7 +2635,7 @@ seconds instead."
 
 (defun main (mainclass &optional (args (list)) &key dump-dir classpath aot)
   "Run a Java class with the given arguments.
-   MAINCLASS: The class with the static main method to execute.
+   MAINCLASS: The class or interface whose Java main method is executed.
    ARGS: Java program command line arguments (list of strings).
    CLASSPATH: The classpath from which classes are loaded.
    DUMP-DIR: The directory into which internal debug info is dumped.
@@ -2589,11 +2651,8 @@ seconds instead."
                     :initial-contents (mapcar #'jstring args))))
         (assert (or class (error "Can't load ~A" mainclass)))
         (%clinit class)
-        (let ((main-symbol (%find-java-main-symbol class)))
-          (unless main-symbol
-            (error "Main method not found in class ~A." (name class)))
-          (%eval (list main-symbol argv))
-          (%await-nondaemon-java-threads)))))
+        (%invoke-java-main class argv)
+        (%await-nondaemon-java-threads))))
 
 
 (defun %java-string (value)

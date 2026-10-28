@@ -82,6 +82,16 @@ what they do for `java`.  As on a JVM, `openldk` exits once `main` has
 returned and every non-daemon thread has ended;
 `LDK_THREAD_WAIT_SECONDS=N` stops waiting after N seconds.
 
+Java 25 entry points are supported: `main(String[])` takes precedence over
+`main()`, and either can be static or an instance method with public,
+protected, or package access. Instance mains construct the launched class
+using its non-private no-argument constructor. Inherited methods and interface
+defaults are considered; static interface methods are not inherited. This
+also works for compiled compact-source classes and JAR manifest entry points.
+Compile source files with JDK 25's `javac` before launching them; OpenLDK does
+not provide Java source-file launch mode. Run `make check-launcher` to compare
+entry-point behavior with JDK 25.
+
 To launch Eclipse on OpenLDK, optionally download the SDK, or repeat the
 headless editor/build check, see [the Eclipse runner](test/eclipse/README.md).
 
