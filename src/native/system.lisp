@@ -771,6 +771,9 @@ MethodHandles.classData().")
 
         ;; Set the loader on the class
         (setf (slot-value class 'ldk-loader) ldk-loader)
+        (%check-sealed-supertypes
+         class (mapcar (lambda (parent) (%resolve-class parent ldk-loader))
+                       (append (when (super class) (list (super class))) (coerce (interfaces class) 'list))))
 
         ;; Store in loader's class maps
         (setf (gethash classname (slot-value ldk-loader 'ldk-classes-by-bin-name)) class)
@@ -1199,13 +1202,23 @@ or anonymous class (Class.isAnonymousClass, getSimpleName)."
           (jstring (slot-value (aref (constant-pool lclass) index) 'value)))))))
 
 (defmethod |getPermittedSubclasses0()[Ljava/lang/Class;| ((this |java/lang/Class|))
-  "JDK 17+ native for sealed classes: return the PermittedSubclasses array,
-or null when the class is not sealed.  OpenLDK does not track the
-PermittedSubclasses attribute, so report every class as non-sealed (null)
--- which is what Proxy$ProxyBuilder and Class.getPermittedSubclasses()
-expect for ordinary interfaces/classes."
-  (declare (ignore this))
-  nil)
+  "Resolve permitted direct subtypes without initializing them; omit missing types."
+  (let ((class (get-ldk-class-for-java-class this)))
+    (when (and class (hash-table-p (attributes class)))
+      (multiple-value-bind (names sealed-p) (gethash "PermittedSubclasses" (attributes class))
+        (when sealed-p
+          (make-java-array
+           :component-class (%get-java-class-by-bin-name "java/lang/Class")
+           :initial-contents
+           (loop for name in names
+                 for child = (handler-case (%resolve-class name (ldk-loader class))
+                               (|condition-java/lang/LinkageError| () nil))
+                 when (and child
+                           (some (lambda (parent)
+                                   (eq class (%resolve-class parent (ldk-loader child))))
+                                 (append (when (super child) (list (super child)))
+                                         (coerce (interfaces child) 'list))))
+                   collect (java-class child))))))))
 
 (defmethod |getBooleanAttributes0(Ljava/io/File;)I| ((this |java/io/UnixFileSystem|) file)
   (handler-case

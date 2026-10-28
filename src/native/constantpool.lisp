@@ -615,7 +615,10 @@ Lookup.checkAccess is bypassed."
     ;; Set vmentry on LambdaForm
     (setf (slot-value lf '|vmentry|) member)
 
-    ;; Set type on MethodHandle
+    ;; Java bytecode reads the mangled MethodHandle.type field.
+    (when (slot-exists-p mh '|type$|)
+      (setf (slot-value mh '|type$|) method-type))
+    ;; Retain the legacy slot for Lisp-native handle consumers.
     (when (slot-exists-p mh '|type|)
       (setf (slot-value mh '|type|) method-type))
 

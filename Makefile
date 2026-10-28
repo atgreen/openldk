@@ -287,6 +287,10 @@ check-concurrency: openldk | check-jdk
 check-source-launcher: openldk | check-jdk
 	python3 test/source-launcher/check.py
 
+.PHONY: check-language
+check-language: openldk | check-jdk
+	python3 test/language/check.py
+
 check-foreign: openldk jni | check-jdk
 	python3 test/foreign/check.py
 

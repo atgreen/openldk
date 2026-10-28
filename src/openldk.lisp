@@ -1956,6 +1956,31 @@ without running the compiler, since most methods are never called."
       (let ((existing (gethash classname *ldk-classes-by-bin-name*)))
         (or (null existing) (%defined-by-user-loader-p existing 'ldk-classes-by-bin-name)))))
 
+(defun %check-sealed-supertypes (class parents)
+  "Enforce permitted direct subtypes and runtime package/module membership."
+  (dolist (parent parents)
+    (when parent
+      (multiple-value-bind (permitted sealed-p) (gethash "PermittedSubclasses" (attributes parent))
+        (when sealed-p
+          (let* ((loader (ldk-loader class))
+                 (parent-loader (ldk-loader parent))
+                 (module (%defining-class-module (name parent) parent-loader (java-loader parent-loader)))
+                 (named-p (and module (slot-value module '|name|)))
+                 (image-module (when (zerop (id parent-loader))
+                                 (%runtime-image-class-module-name (name parent)))))
+            (unless (and (member (name class) permitted :test #'string=)
+                         ;; Bootstrap metadata may predate INITIALIZE's loader
+                         ;; object; id zero always denotes the one boot loader.
+                         (or (eq loader parent-loader)
+                             (and (zerop (id loader)) (zerop (id parent-loader))))
+                         (cond
+                           (named-p (eq module (%defining-class-module (name class) loader (java-loader loader))))
+                           (image-module (equal image-module (%runtime-image-class-module-name (name class))))
+                           (t (equal (subseq (name class) 0 (or (position #\/ (name class) :from-end t) 0))
+                                     (subseq (name parent) 0 (or (position #\/ (name parent) :from-end t) 0))))))
+              (%throw '|java/lang/IncompatibleClassChangeError|
+                      (format nil "~A cannot inherit from sealed type ~A" (name class) (name parent))))))))))
+
 (defun %classload-from-stream (classname classfile-stream class-loader ldk-loader)
   "Load a class from a stream. CLASS-LOADER is the java.lang.ClassLoader object.
    LDK-LOADER is the <ldk-class-loader> to use for this class."
@@ -2009,6 +2034,16 @@ without running the compiler, since most methods are never called."
              (remhash classname *ldk-classes-by-bin-name*)
              (remhash fq-classname *ldk-classes-by-fq-name*))
            (return-from %classload-from-stream nil))
+         (handler-case
+             (%check-sealed-supertypes class (cons super interfaces))
+           (error (condition)
+             ;; A rejected definition must not poison later attempts in this loader.
+             (remhash classname (slot-value ldk-loader 'ldk-classes-by-bin-name))
+             (remhash fq-classname (slot-value ldk-loader 'ldk-classes-by-fq-name))
+             (when publish-globally
+               (remhash classname *ldk-classes-by-bin-name*)
+               (remhash fq-classname *ldk-classes-by-fq-name*))
+             (error condition)))
          (let ((klass (or (gethash classname (slot-value ldk-loader 'java-classes-by-bin-name))
                           (let ((klass (%make-java-instance "java/lang/Class"))
                                 (cname (jstring fq-classname)))

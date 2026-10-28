@@ -1650,7 +1650,7 @@ are ordinary declared methods and use normal dispatch.")
                                          :args (cons
                                                 method-type
                                                 (mapcar (lambda (arg)
-                                                          (emit (aref constant-pool arg) constant-pool))
+                                                          (nth-value 0 (%ldc-operand context arg)))
                                                         (method-args bootstrap-method))))))
                (if (eq return-type :VOID)
                    call
@@ -1705,7 +1705,7 @@ are ordinary declared methods and use normal dispatch.")
                                                              constant-pool)
                                      :name name
                                      :descriptor descriptor
-                                     :args (mapcar (lambda (arg) (emit (aref constant-pool arg) constant-pool))
+                                     :args (mapcar (lambda (arg) (nth-value 0 (%ldc-operand context arg)))
                                                    (method-args bootstrap-method))
                                      :caller (slot-value class 'name))
                       (get-stack-type-from-descriptor descriptor))))

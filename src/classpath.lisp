@@ -414,6 +414,21 @@ saved image was dumped)."
       (read-sequence bytes (slot-value cpe 'stream))
       bytes)))
 
+(defun %runtime-image-class-module-name (name)
+  "Find a boot class's module before Java's boot Module objects exist."
+  (dolist (entry *classpath*)
+    (typecase entry
+      (jmod-classpath-entry
+       (bt:with-lock-held ((slot-value entry 'lock))
+         (%ensure-entry-open entry)
+         (when (gethash (format nil "classes/~A.class" name) (slot-value entry 'zipfile-entries))
+           (return (pathname-name (slot-value entry 'jmodfile))))))
+      (jimage-classpath-entry
+       (bt:with-lock-held ((slot-value entry 'lock))
+         (%ensure-entry-open entry)
+         (when-let ((location (gethash (format nil "~A.class" name) (slot-value entry 'index))))
+           (return (first location))))))))
+
 (defgeneric runtime-image-has-package-p (cpe package-name)
   (:documentation "True when CPE, a part of the JDK's runtime image (the
 jimage, or a jmod), has a class or resource in PACKAGE-NAME, in internal

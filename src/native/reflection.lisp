@@ -688,12 +688,20 @@ reflects."
          (hash-table-p (attributes lclass))
          (gethash "Record" (attributes lclass)))))
 
+(defun %record-class-p (java-class)
+  "A final Record subclass with a Record attribute, even with zero components."
+  (let ((class (get-ldk-class-for-java-class java-class)))
+    (and class (equal (super class) "java/lang/Record")
+         (logbitp 4 (access-flags class))
+         (nth-value 1 (gethash "Record" (attributes class))))))
+
 (defmethod |isRecord0()Z| ((this |java/lang/Class|))
-  (if (%record-components this) 1 0))
+  (if (%record-class-p this) 1 0))
 
 ;; A RecordComponent per component of the Record attribute, its accessor
 ;; the record's public no-argument method of the component's name.
 (defmethod |getRecordComponents0()[Ljava/lang/reflect/RecordComponent;| ((this |java/lang/Class|))
+  (unless (%record-class-p this) (return-from |getRecordComponents0()[Ljava/lang/reflect/RecordComponent;| nil))
   (classload "java/lang/reflect/RecordComponent")
   (let ((*descriptor-loader* (%class-java-loader this))
         (no-classes (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/Class"))))

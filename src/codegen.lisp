@@ -1776,38 +1776,82 @@ writes neither NaN, the infinities nor Java's exponents (1.0E10)."
     ((integerp val) (format nil "~D" val))
     ((floatp val) (%java-float-string val))
     ((characterp val) (string val))
+    ((java-array-p val) (lstring (|toString()Ljava/lang/String;| val)))
     ((typep val '|java/lang/Object|)
      (let ((str (|toString()Ljava/lang/String;| val)))
        (if str (lstring str) "null")))
     (t (format nil "~A" val))))
 
-(defun %type-switch-match (target label)
+(defparameter *pattern-primitive-types*
+  '((#\Z "boolean" "java/lang/Boolean") (#\B "byte" "java/lang/Byte")
+    (#\S "short" "java/lang/Short") (#\C "char" "java/lang/Character")
+    (#\I "int" "java/lang/Integer") (#\J "long" "java/lang/Long")
+    (#\F "float" "java/lang/Float") (#\D "double" "java/lang/Double")))
+
+(defun %pattern-primitive-code (name)
+  (first (find-if (lambda (type) (member name (rest type) :test #'string=)) *pattern-primitive-types*)))
+
+(defun %primitive-pattern-exact-p (value source target)
+  "Use the JDK's exact testing conversions for a primitive or wrapper selector."
+  (when (find source "BSC") (setf source #\I))
+  (cond
+    ((eql source target) t)
+    ((or (eql source #\Z) (eql target #\Z)) nil)
+    ((or (and (eql source #\I) (find target "JD"))
+         (and (eql source #\F) (eql target #\D))) t)
+    (t
+     (let* ((names '((#\I . "Int") (#\J . "Long") (#\F . "Float") (#\D . "Double")
+                    (#\B . "Byte") (#\S . "Short") (#\C . "Char")))
+            (class (classload "java/lang/runtime/ExactConversionsSupport"))
+            (method (format nil "java/lang/runtime/ExactConversionsSupport.is~ATo~AExact(~A)Z"
+                            (cdr (assoc source names)) (cdr (assoc target names)) source)))
+       (%clinit class)
+       (= 1 (funcall (static-method-symbol method (ldk-class-package class)) value))))))
+
+(defun %type-switch-match (target label &optional selector-code caller)
   "True if TARGET matches a single SwitchBootstraps.typeSwitch LABEL, which is a
 Class (instanceof), a boxed integral constant, or a String constant."
   (cond
     ((typep label '|java/lang/Class|)
-     (= 1 (|isInstance(Ljava/lang/Object;)Z| label target)))
+     (let ((primitive (%pattern-primitive-code (lstring (|getName()Ljava/lang/String;| label)))))
+       (if (and primitive (= 1 (|isPrimitive()Z| label)))
+           (if selector-code
+               (%primitive-pattern-exact-p (%maybe-unbox target) selector-code primitive)
+               (%java-class-p target (third (assoc primitive *pattern-primitive-types*))))
+           (= 1 (|isInstance(Ljava/lang/Object;)Z| label target)))))
     ((integerp label)
-     (and (typep target '(or |java/lang/Integer| |java/lang/Short|
-                          |java/lang/Byte| |java/lang/Character|))
-          (slot-boundp target '|value|)
-          (eql (slot-value target '|value|) label)))
+     (cond
+       ((and selector-code (find selector-code "JZ")) (eql (%maybe-unbox target) label))
+       ((typep target '|java/lang/Number|) (eql (|intValue()I| target) label))
+       ((typep target '|java/lang/Character|) (eql (slot-value target '|value|) label))))
+    ((floatp label)
+     (let* ((single-p (typep label 'single-float))
+            (descriptor (if single-p "F" "D")))
+       (and (%java-class-p target (if single-p "java/lang/Float" "java/lang/Double"))
+            (= (%record-floating-bits (%maybe-unbox target) descriptor)
+               (%record-floating-bits label descriptor)))))
     ((typep label '|java/lang/String|)
      (and (typep target '|java/lang/String|)
           (string= (lstring target) (lstring label))))
+    ((%java-class-p label "java/lang/Enum$EnumDesc")
+     (eq target (|resolveConstantDesc(Ljava/lang/invoke/MethodHandles$Lookup;)Ljava/lang/Enum;|
+                 label (%make-trusted-lookup caller))))
     (t (and target (typep target '|java/lang/Object|)
             (= 1 (|equals(Ljava/lang/Object;)Z| target label))))))
 
-(defun %type-switch (target restart labels)
+(defun %type-switch (target restart labels &optional selector-type caller)
   "Native implementation of java.lang.runtime.SwitchBootstraps.typeSwitch's target
 method handle: returns the index of the first LABEL (at or after RESTART) that
 matches TARGET, LABELS's length if none match, or -1 when TARGET is null."
   (if (null target)
       -1
-      (let* ((v (coerce labels 'simple-vector))
+      (let* ((selector-code (and selector-type (%pattern-primitive-code selector-type)))
+             (target (if (and selector-code (not (find #\/ selector-type)))
+                         (%box-primitive-return target selector-code) target))
+             (v (coerce labels 'simple-vector))
              (n (length v)))
         (loop for i from (max restart 0) below n
-              when (%type-switch-match target (svref v i))
+              when (%type-switch-match target (svref v i) selector-code caller)
                 do (return-from %type-switch i))
         n)))
 
@@ -1881,34 +1925,48 @@ boolean prints true/false and char prints the character rather than an int."
                                   (%record-component-value record name)
                                   (%record-component-descriptor class name)))))))
 
-(defun %record-field-hash (v)
-  (cond ((null v) 0)
-        ((typep v '|java/lang/Object|) (or (|hashCode()I| v) 0))
-        ((integerp v) v)
-        ((characterp v) (char-code v))
-        (t (sxhash v))))
+(defun %record-floating-bits (value descriptor)
+  "Canonical Java floating bits: distinguish signed zero and merge all NaNs."
+  (if (char= (char descriptor 0) #\F)
+      (if (float-features:float-nan-p value) #x7fc00000
+          (float-features:single-float-bits (coerce value 'single-float)))
+      (if (float-features:float-nan-p value) #x7ff8000000000000
+          (float-features:double-float-bits (coerce value 'double-float)))))
+
+(defun %record-field-hash (value descriptor)
+  "Hash a component using its declared Java type, including boxed references."
+  (case (char descriptor 0)
+    (#\Z (if (zerop value) 1237 1231))
+    (#\C (if (characterp value) (char-code value) value))
+    ((#\B #\S #\I) value)
+    (#\J (logxor (ldb (byte 32 0) value) (ldb (byte 32 32) value)))
+    (#\F (%record-floating-bits value descriptor))
+    (#\D (let ((bits (%record-floating-bits value descriptor)))
+           (logxor (ldb (byte 32 0) bits) (ldb (byte 32 32) bits))))
+    (t (if value (|hashCode()I| value) 0))))
 
 (defun %record-hash-code (record class names-jstring)
   "Native implementation of a record's ObjectMethods-generated hashCode()."
-  (declare (ignore class))
   (let ((h 0))
     (dolist (name (%record-component-names names-jstring))
-      (setf h (logand (+ (* 31 h) (%record-field-hash (%record-component-value record name)))
+      (setf h (logand (+ (* 31 h) (%record-field-hash (%record-component-value record name)
+                                                   (%record-component-descriptor class name)))
                       #xFFFFFFFF)))
     (if (>= h #x80000000) (- h #x100000000) h)))
 
-(defun %record-field-equal (a b)
-  (cond ((and (null a) (null b)) t)
-        ((or (null a) (null b)) nil)
-        ((typep a '|java/lang/Object|) (= 1 (|equals(Ljava/lang/Object;)Z| a b)))
-        (t (eql a b))))
+(defun %record-field-equal (a b descriptor)
+  (case (char descriptor 0)
+    ((#\F #\D) (= (%record-floating-bits a descriptor) (%record-floating-bits b descriptor)))
+    ((#\L #\[) (or (eq a b) (and a b (= 1 (|equals(Ljava/lang/Object;)Z| a b)))))
+    (t (eql a b))))
 
 (defun %record-equals (record other class names-jstring)
   "Native implementation of a record's ObjectMethods-generated equals()."
   (if (and other (= 1 (|isInstance(Ljava/lang/Object;)Z| class other)))
       (if (every (lambda (name)
                    (%record-field-equal (%record-component-value record name)
-                                        (%record-component-value other name)))
+                                        (%record-component-value other name)
+                                        (%record-component-descriptor class name)))
                  (%record-component-names names-jstring))
           1 0)
       0))
@@ -1952,7 +2010,9 @@ boolean prints true/false and char prints the character rather than an int."
                         :insn insn
                         :code `(%type-switch ,(code (codegen (first dynamic-args) context))
                                              ,(code (codegen (second dynamic-args) context))
-                                             (list ,@(mapcar (lambda (a) (code (codegen a context))) (rest args))))
+                                             (list ,@(mapcar (lambda (a) (code (codegen a context))) (rest args)))
+                                             ,(first (parse-parameter-types call-site-descriptor))
+                                             ,(java-class (slot-value context 'class)))
                         :expression-type :INTEGER))
         ((search "SwitchBootstraps.enumSwitch" bootstrap-method-name)
          (make-instance '<expression>

@@ -267,6 +267,9 @@ lambda over Jackson 2 classes behind a check that they are present."
 (defmethod get-stack-jtype ((v constant-method-handle))
   :REFERENCE)
 
+(defmethod get-stack-jtype ((v constant-method-type))
+  :REFERENCE)
+
 (defmethod emit ((v constant-module-reference) cp)
   (emit (aref cp (slot-value v 'name-index)) cp))
 
@@ -589,7 +592,18 @@ stream."
                                    (list name descriptor
                                          (read-attributes bitio constant-pool class (read-u2))))))))
           ("PermittedSubclasses"
-           (read-buffer attributes-length))
+           (when (nth-value 1 (gethash name attributes))
+             (class-format-error "Duplicate PermittedSubclasses attribute"))
+           (let ((count (read-u2)))
+             (unless (= attributes-length (+ 2 (* 2 count)))
+               (class-format-error "Invalid PermittedSubclasses attribute length"))
+             (setf (gethash name attributes)
+                   (loop repeat count
+                         for index = (read-u2)
+                         for entry = (and (< 0 index (length constant-pool)) (aref constant-pool index))
+                         do (unless (typep entry 'constant-class-reference)
+                              (class-format-error "Invalid permitted subclass constant"))
+                         collect (slot-value (aref constant-pool (slot-value entry 'index)) 'value)))))
           ;; Kept, as RuntimeVisibleAnnotations is, for the reflective
           ;; getAnnotated* methods (Spring reads JSpecify's @Nullable so).
           ("RuntimeVisibleTypeAnnotations"
@@ -888,6 +902,9 @@ lone surrogates and other BMP characters map to one character each."
                     (setf (attributes class) (read-attributes bitio constant-pool class (read-u2)))))))))
         (unless (= (fast-io:buffer-position fin-fast) (length octets))
           (class-format-error "Trailing bytes after classfile"))))
+    (when (and (logbitp 4 (access-flags class))
+               (nth-value 1 (gethash "PermittedSubclasses" (attributes class))))
+      (class-format-error "A final class cannot declare permitted subclasses"))
     class))
 
 (defun read-classfile (stream)

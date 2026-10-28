@@ -104,6 +104,20 @@ files dynamically through reflection is not implemented.
 Run `make check-launcher` and `make check-source-launcher` to compare compiled
 and source entry-point behavior with JDK 25.
 
+### Records, sealed types, and patterns
+
+Record-generated equality and hashing use each component's declared Java type,
+including signed-zero/NaN floating semantics and reference identity for arrays.
+Record reflection includes empty records, generic components, annotations, and
+accessors. Sealed types expose their permitted direct subclasses without
+initializing them; class loading rejects unpermitted subclasses and implementations
+and checks defining-loader and package/module membership.
+
+Run `make check-language` for comparisons with JDK 25 using class files compiled
+for Java 16 (records), 17 (sealed types), 21 (record patterns and pattern switches),
+and 25. The suite also covers Java 25 primitive patterns with `--enable-preview`,
+including exact conversions, guarded switches, nulls, and qualified enum cases.
+
 ### Scoped values and structured concurrency
 
 Scoped values support nested bindings, restoration after exceptions, and thread
