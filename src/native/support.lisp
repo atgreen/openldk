@@ -41,6 +41,12 @@
 
 (in-package :openldk)
 
+(defmethod |toString()Ljava/lang/String;| ((array java-array))
+  "Render an array's Object identity, including when used in diagnostics."
+  (jstring (format nil "~A@~(~X~)"
+                   (lstring (|getName()Ljava/lang/String;| (|getClass()Ljava/lang/Class;| array)))
+                   (logand #xffffffff (|java/lang/System.identityHashCode(Ljava/lang/Object;)I| array)))))
+
 ;; *native-overrides* is defined in global-state.lisp so earlier-loaded
 ;; files (e.g. jrt.lisp) can register overrides too.
 
