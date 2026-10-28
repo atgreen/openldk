@@ -914,26 +914,11 @@ class is a self-reference to the class currently being compiled."
                               (/ value1 value2)))
                  :expression-type :DOUBLE))
 
-(defun %java-floating-remainder (dividend divisor)
-  "Java's truncating floating remainder, preserving the dividend's zero sign.
-Exact rational arithmetic avoids overflowing or rounding the quotient/product
-for very large quotients (MAX_VALUE % MIN_VALUE, for example)."
-  (cond
-    ((or (float-features:float-nan-p dividend)
-         (float-features:float-nan-p divisor)
-         (float-features:float-infinity-p dividend)
-         (zerop divisor))
-     (if (typep dividend 'single-float)
-         float-features:single-float-nan float-features:double-float-nan))
-    ((or (float-features:float-infinity-p divisor) (zerop dividend)) dividend)
-    (t (let ((result (float (rem (rational dividend) (rational divisor)) dividend)))
-         (if (zerop result) (float-sign dividend result) result)))))
-
 (defmethod codegen ((insn ir-frem) context)
-  (%codegen-binop insn '%java-floating-remainder :FLOAT context))
+  (%codegen-binop insn '%java-frem :FLOAT context))
 
 (defmethod codegen ((insn ir-drem) context)
-  (%codegen-binop insn '%java-floating-remainder :DOUBLE context))
+  (%codegen-binop insn '%java-drem :DOUBLE context))
 
 (defmethod codegen ((insn ir-fcmpg) context)
   (make-instance '<expression>

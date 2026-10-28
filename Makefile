@@ -287,6 +287,13 @@ check-concurrency: openldk | check-jdk
 check-source-launcher: openldk | check-jdk
 	python3 test/source-launcher/check.py
 
+.PHONY: check-remainder bench-remainder
+check-remainder: openldk | check-jdk
+	python3 test/remainder/check.py
+
+bench-remainder:
+	sbcl --dynamic-space-size 8192 --non-interactive --load bench/remainder.lisp
+
 .PHONY: check-language check-modern check-compat
 check-compat: openldk | check-jdk
 	python3 test/compat/check.py

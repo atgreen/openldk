@@ -146,7 +146,8 @@
   :description "Unit tests for OpenLDK."
   :depends-on ("openldk" "fiveam")
   :pathname "test"
-  :components ((:file "tests"))
+  :serial t
+  :components ((:file "remainder/reference") (:file "tests"))
   :perform (test-op (o c)
              (unless (uiop:symbol-call :fiveam '#:run! :openldk-tests)
                (error "OpenLDK unit tests failed."))))

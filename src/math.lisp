@@ -293,3 +293,107 @@
 (define-math-functions ("ulp(D)" (a))
   "Returns the unit in the last place (ULP) of a double."
   (float-epsilon a))
+
+;;; Java floating remainder. For finite magnitudes, x = mx * 2^ex and
+;;; y = my * 2^ey. Reduce mx modulo my, then consume ex-ey exponent bits
+;;; in chunks: ((mx << n) mod my). No floating quotient/product is formed.
+;;; The double significand has 53 bits; shifting by at most 9 keeps every
+;;; intermediate within a 62-bit positive fixnum on 64-bit SBCL. Singles
+;;; can consume 32 bits at a time with the same bound. Zero exits early.
+
+(defmacro %define-remainder-reducer (name width chunk)
+  `(progn
+     (declaim (inline ,name))
+     (defun ,name (dividend divisor gap)
+       (declare (type (unsigned-byte ,width) dividend)
+                (type (integer 1 ,(1- (ash 1 width))) divisor)
+                (type (integer 0 2045) gap)
+                (optimize (speed 3)))
+       (let ((remainder (rem dividend divisor)))
+         (declare (type (unsigned-byte ,width) remainder))
+         (loop while (and (plusp gap) (plusp remainder))
+               do (let ((shift (min gap ,chunk)))
+                    (declare (type (integer 0 ,chunk) shift))
+                    (setf remainder (rem (ash remainder shift) divisor))
+                    (decf gap shift)))
+         remainder))))
+
+(%define-remainder-reducer %single-remainder-significand 24 32)
+(%define-remainder-reducer %double-remainder-significand 53 9)
+
+(declaim (inline %java-frem %java-drem))
+
+(defun %java-frem (dividend divisor)
+  "Java float remainder, computed with bounded integer significands."
+  (declare (type single-float dividend divisor) (optimize (speed 3)))
+  (let* ((xb (sb-kernel:single-float-bits dividend))
+         (yb (sb-kernel:single-float-bits divisor))
+         (sign (logand xb #x80000000))
+         (x (logand xb #x7fffffff))
+         (y (logand yb #x7fffffff)))
+    (declare (type (unsigned-byte 31) x y))
+    (cond
+      ((or (>= x #x7f800000) (> y #x7f800000) (zerop y))
+       float-features:single-float-nan)
+      ((< x y) dividend)
+      ((= x y) (sb-kernel:make-single-float (sb-c::mask-signed-field 32 sign)))
+      (t
+       (let* ((ex (max 1 (ash x -23)))
+              (ey (max 1 (ash y -23)))
+              (mx (logior (logand x #x7fffff) (if (>= x #x800000) #x800000 0)))
+              (my (logior (logand y #x7fffff) (if (>= y #x800000) #x800000 0)))
+              (remainder (%single-remainder-significand mx my (- ex ey))))
+         (declare (type (unsigned-byte 24) remainder))
+         (if (zerop remainder)
+             (sb-kernel:make-single-float (sb-c::mask-signed-field 32 sign))
+             (let* ((shift (- 24 (integer-length remainder)))
+                    (exponent (- ey shift))
+                    (magnitude (if (plusp exponent)
+                                   (logior (ash exponent 23)
+                                           (logand (ash remainder shift) #x7fffff))
+                                   (ash remainder (1- ey)))))
+               (sb-kernel:make-single-float (sb-c::mask-signed-field 32 (logior sign magnitude))))))))))
+
+(defun %java-drem (dividend divisor)
+  "Java double remainder, computed with bounded integer significands."
+  (declare (type double-float dividend divisor) (optimize (speed 3)))
+  ;; Split the representation so even negative doubles' bit patterns never
+  ;; require constructing a boxed 64-bit unsigned integer.
+  (let* ((xh (sb-kernel:double-float-high-bits dividend))
+         (xl (sb-kernel:double-float-low-bits dividend))
+         (yh (logand (sb-kernel:double-float-high-bits divisor) #x7fffffff))
+         (yl (sb-kernel:double-float-low-bits divisor))
+         (sign (logand xh #x80000000))
+         (x (logand xh #x7fffffff)))
+    (declare (type (unsigned-byte 31) x yh))
+    (cond
+      ((or (>= x #x7ff00000) (> yh #x7ff00000)
+           (and (= yh #x7ff00000) (plusp yl))
+           (and (zerop yh) (zerop yl)))
+       float-features:double-float-nan)
+      ((or (< x yh) (and (= x yh) (< xl yl))) dividend)
+      ((and (= x yh) (= xl yl))
+       (sb-kernel:make-double-float (sb-c::mask-signed-field 32 sign) 0))
+      (t
+       (let* ((ex (max 1 (ash x -20)))
+              (ey (max 1 (ash yh -20)))
+              (mx (logior (ash (logand x #xfffff) 32) xl
+                          (if (>= x #x100000) #x10000000000000 0)))
+              (my (logior (ash (logand yh #xfffff) 32) yl
+                          (if (>= yh #x100000) #x10000000000000 0)))
+              (remainder (%double-remainder-significand mx my (- ex ey))))
+         (declare (type (unsigned-byte 53) remainder))
+         (if (zerop remainder)
+             (sb-kernel:make-double-float (sb-c::mask-signed-field 32 sign) 0)
+             (let* ((shift (- 53 (integer-length remainder)))
+                    (exponent (- ey shift))
+                    (fraction (if (plusp exponent)
+                                  (logand (ash remainder shift) #xfffffffffffff)
+                                  (logand (ash remainder (1- ey)) #xfffffffffffff))))
+               ;; Reconstruct the two halves separately: a combined 63-bit
+               ;; magnitude would exceed a fixnum for many normal results.
+               (sb-kernel:make-double-float
+                (sb-c::mask-signed-field 32
+                                        (logior sign (if (plusp exponent) (ash exponent 20) 0)
+                                                (ash fraction -32)))
+                (logand fraction #xffffffff)))))))))

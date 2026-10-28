@@ -487,3 +487,6 @@ nothing behind when it refuses."
            (is (= 2 (hash-table-count openldk::*unsafe-memory-table*))))
       (when first (openldk::%free-unsafe-memory first))
       (when second (openldk::%free-unsafe-memory second)))))
+
+(test floating-remainder-exact-reference
+  (is (= 201058 (openldk::%check-remainder-functions))))

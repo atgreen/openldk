@@ -140,6 +140,11 @@ Run `make check-compat` for comparisons with JDK 25 covering:
   charsets, and the `-Dfile.encoding=ISO-8859-1` launch override. Native pathname
   encoding remains UTF-8 independently of the content encoding.
 
+Floating remainder uses allocation-free integer significand reduction in Lisp.
+Run `make check-remainder` for 201,058 JDK-generated cases and
+`make bench-remainder` for comparisons with libm and the exact rational oracle.
+See [remainder implementation and measurements](docs/REMAINDER.md).
+
 ### Modern library APIs
 
 Run `make check-modern` to compare these library behaviors with JDK 25:
