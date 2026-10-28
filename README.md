@@ -125,6 +125,21 @@ library state cannot be preserved in an SBCL image. JNI compatibility is tested
 with the included C/C++ probes and zstd-jni; it is not a claim of complete JNI
 conformance for every library.
 
+### Foreign Function & Memory API
+
+OpenLDK supports native linking through the JDK 25 Java fallback linker and
+its own libffi bridge. It does not load the JDK's native fallback-linker library.
+`Linker.nativeLinker()` supports downcalls and arena-owned upcall stubs,
+including callbacks from native threads. Symbol lookup supports system symbols,
+arena-owned C libraries, and libraries loaded through JNI.
+
+The integration probes cover scalar types, pointers, structs passed and returned
+by value, variadic calls, errno capture, heap-array arguments to critical calls,
+and arena lifetime and thread checks. Heap arguments use native copies, sharing
+copies for aliases. The fallback linker rejects unions passed by value. The
+current bridge targets 64-bit little-endian Linux; other platforms have not
+been validated. Run `make check-foreign` to compare the probes with JDK 25.
+
 ## How it Works
 
 `openldk` reads class and jar files, and translates them into lisp

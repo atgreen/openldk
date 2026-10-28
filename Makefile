@@ -60,10 +60,10 @@ jni: $(JNI_BRIDGE)
 	mkdir -p .cache/jni
 	python3 $< "$(JAVA_HOME)/include/jni.h" $@
 
-$(JNI_BRIDGE): src/jni/bridge.c .cache/jni/table.inc
+$(JNI_BRIDGE): src/jni/bridge.c src/jni/ffi.c .cache/jni/table.inc
 	$(CC) $(CPPFLAGS) $(CFLAGS) -std=c11 -D_GNU_SOURCE -fPIC -shared -Wall -Wextra -Werror \
 	  -I"$(JAVA_HOME)/include" -I"$(JAVA_HOME)/include/$(JNI_OS)" -I.cache/jni \
-	  $< $(LDFLAGS) -lffi -ldl -o $@
+	  src/jni/bridge.c src/jni/ffi.c $(LDFLAGS) -lffi -ldl -o $@
 
 # Fail fast when JAVA_HOME is not a JDK 25 (e.g. the environment exports an
 # older JDK) instead of erroring deep inside the Lisp build.  Order-only
@@ -280,7 +280,10 @@ check-jni: openldk jni | check-jdk
 check-jni-zstd: openldk jni | check-jdk
 	python3 test/jni/check.py --zstd
 
-.PHONY: check-zip check-nio check-modules check-reentrant check-launcher check-eclipse
+.PHONY: check-zip check-nio check-modules check-reentrant check-launcher check-eclipse check-foreign
+check-foreign: openldk jni | check-jdk
+	python3 test/foreign/check.py
+
 check-zip: openldk | check-jdk
 	python3 test/zip/check.py
 

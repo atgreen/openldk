@@ -728,7 +728,10 @@
   "Install JNI fallbacks only where no handwritten CL native exists."
   ;; JDK natives include bootstrapping and short-name forwarding installed later
   ;; by %ADOPT-NATIVE-SHORT-METHODS. Keep their existing CL resolution intact.
-  (when (jdk-class-p (name class)) (return-from %install-jni-method-stubs nil))
+  ;; The fallback linker's natives are supplied by OpenLDK's own libffi shim.
+  (when (and (jdk-class-p (name class))
+             (not (string= (name class) "jdk/internal/foreign/abi/fallback/LibFallback")))
+    (return-from %install-jni-method-stubs nil))
   (loop for method across (methods class) when (native-p method)
         do (let* ((signature (lispize-method-name (concatenate 'string (name method) (descriptor method))))
                   (full (format nil "~A.~A" (name class) signature)))

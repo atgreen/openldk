@@ -120,6 +120,7 @@
                (:file "src/aot")
                (:file "src/openldk")
                (:file "src/jni")
+               (:file "src/foreign")
                (:file "src/cli"))
   :around-compile
   "(lambda (thunk)
