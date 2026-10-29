@@ -180,7 +180,7 @@
                          :lambda-list '(|this|))
 
 (defmethod %lisp-condition ((throwable |java/lang/Throwable|))
-  (error (format nil "Missing %lisp-condition implementation for ~A." throwable)))
+  (make-condition '|condition-java/lang/Throwable| :|objref| throwable))
 
 (define-condition |condition-java/lang/Throwable| (error)
   ((|objref| :initarg :|objref| :initform nil)))

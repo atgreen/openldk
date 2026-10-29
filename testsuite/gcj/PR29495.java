@@ -11,6 +11,10 @@ public class PR29495
     // This class has a synthetic field...
 
     public T get(T v) { return v; }
+
+    // Modern javac omits an unused enclosing-instance field. Keep the
+    // reference live so this remains a test of synthetic field metadata.
+    public PR29495 outer() { return PR29495.this; }
   }
 
   public class concrete extends container<String>

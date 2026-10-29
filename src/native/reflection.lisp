@@ -43,6 +43,29 @@
 
 ;;; --- Reflective method/constructor invocation (JDK 9+: jdk/internal/reflect) ---
 
+(defun |java/io/ObjectStreamClass.hasStaticInitializer(Ljava/lang/Class;)Z| (java-class)
+  "Inspect the declared initializer without running it or searching superclasses."
+  (let ((class (get-ldk-class-for-java-class java-class)))
+    (if (and class (find "<clinit>" (methods class) :key #'name :test #'string=)) 1 0)))
+
+(defvar *serialization-constructor-classes*
+  (make-hash-table :test #'eq :weakness :key :synchronized t)
+  "Serialization constructors retain their allocation class only while live.")
+
+(defun %serialization-constructor (factory java-class constructor)
+  "Keep the superclass constructor's metadata and allocate JAVA-CLASS on invocation."
+  (declare (ignore factory))
+  (%clinit (get-ldk-class-for-java-class java-class))
+  (let ((copy (|newWithAccessor(Ljdk/internal/reflect/ConstructorAccessor;)Ljava/lang/reflect/Constructor;|
+               constructor nil)))
+    (setf (slot-value copy '|override|) 1
+          (gethash copy *serialization-constructor-classes*) java-class)
+    copy))
+
+(setf (gethash "jdk/internal/reflect/ReflectionFactory.generateConstructor(Ljava/lang/Class;Ljava/lang/reflect/Constructor;)Ljava/lang/reflect/Constructor;"
+               *native-overrides*)
+      #'%serialization-constructor)
+
 (defun %invoke-reflection-target (function arguments)
   "Wrap exceptions from the target body, after reflection's own checks and initialization."
   (handler-case (apply function arguments)
@@ -115,7 +138,7 @@
    method obj args))
 
 (defun |jdk/internal/reflect/NativeConstructorAccessorImpl.newInstance0(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)|
-    (constructor args)
+    (constructor args &optional allocation-class)
   "Native reflective constructor invocation for JDK 9+."
   (let* ((declaring-class (slot-value constructor '|clazz|))
          (param-types (slot-value constructor '|parameterTypes|))
@@ -126,18 +149,22 @@
          (lispized (lispize-method-name (format nil "<init>~A" descriptor)))
          (pkg (find-package :openldk))
          (sym (find-symbol lispized pkg)))
-    (%clinit (get-ldk-class-for-java-class declaring-class))
-    (let ((instance (%make-java-instance class-name
-                                         (get-ldk-loader-for-java-loader
-                                          (slot-value declaring-class '|classLoader|))))
-          ;; Constructor.newInstance passes primitives boxed.
-          (lisp-args (when args
-                       (%unbox-args-for-descriptor descriptor (coerce (java-array-data args) 'list)))))
-      (if (and sym (fboundp sym))
-          (%invoke-reflection-target sym (cons instance lisp-args))
-          (internal-error "Reflective newInstance0: constructor ~A not found for class ~A"
-                 lispized class-name))
-      instance)))
+    (let* ((allocated-class (or allocation-class declaring-class))
+           (allocated-name (substitute #\/ #\. (lstring (slot-value allocated-class '|name|)))))
+      (%clinit (get-ldk-class-for-java-class allocated-class))
+      (let ((instance (%make-java-instance allocated-name
+                                          (get-ldk-loader-for-java-loader
+                                           (slot-value allocated-class '|classLoader|))))
+            ;; Constructor.newInstance passes primitives boxed.
+            (lisp-args (when args
+                        (%unbox-args-for-descriptor descriptor (coerce (java-array-data args) 'list)))))
+        (if (and sym (fboundp sym))
+            (%invoke-reflection-target #'invoke-special
+                                       (list sym (intern class-name (%java-class-package declaring-class))
+                                             (cons instance lisp-args)))
+            (internal-error "Reflective newInstance0: constructor ~A not found for class ~A"
+                   lispized class-name))
+        instance))))
 
 ;; JDK 21 routes Constructor.newInstance through this accessor class.
 (defun |jdk/internal/reflect/DirectConstructorHandleAccessor$NativeAccessor.newInstance0(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)Ljava/lang/Object;|
@@ -334,7 +361,7 @@ The override flag only bypasses checks after setAccessible has authorized it."
 (defun %reflective-constructor-new-instance (constructor args)
   (%check-reflective-access constructor nil (%java-caller-class '%reflective-constructor-new-instance) t)
   (|jdk/internal/reflect/NativeConstructorAccessorImpl.newInstance0(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)|
-         constructor args))
+         constructor args (gethash constructor *serialization-constructor-classes*)))
 
 ;; Method.invoke has the same JDK 25 problem: acquireMethodAccessor builds a
 ;; MethodHandle-based accessor that NPEs in MethodHandle.asType. OpenLDK already

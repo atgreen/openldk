@@ -149,6 +149,15 @@ function implementing a caller-sensitive method, which must be running."
          (callee (position-if (lambda (frame) (eq (%frame-head frame) function-name)) backtrace)))
     (and callee (some #'%frame-caller-java-class (nthcdr (1+ callee) backtrace)))))
 
+(defun |jdk/internal/misc/VM.latestUserDefinedLoader0()Ljava/lang/ClassLoader;| ()
+  "Find the nearest application loader, skipping bootstrap and platform frames."
+  (loop for frame in (%filtered-backtrace)
+        for class = (%frame-caller-java-class frame)
+        for loader = (and class (slot-value class '|classLoader|))
+        when (and loader
+                  (not (eq loader (|java/lang/ClassLoader.getPlatformClassLoader()Ljava/lang/ClassLoader;|))))
+          return loader))
+
 (defun |sun/reflect/Reflection.getCallerClass(I)| (index)
   (let ((backtrace (%filtered-backtrace)))
     (%get-java-class-by-bin-name

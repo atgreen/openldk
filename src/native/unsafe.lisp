@@ -417,7 +417,11 @@ the storage object does not (yet) exist."
        (multiple-value-bind (owner key field-p)
            (%unsafe-field-owner-and-key object offset)
          (cond
-           (field-p (setf (slot-value owner key) normalized))
+           ;; Java fields hold numeric UTF-16 code units, even when the
+           ;; array/native-memory scalar path uses Lisp characters.
+           (field-p (setf (slot-value owner key)
+                          (if (and (eq kind :char) (characterp normalized))
+                              (char-code normalized) normalized)))
            ((null object)
             (%unsafe-write-native-bits
              offset byte-count (%unsafe-scalar-to-bits normalized kind)))
@@ -1417,7 +1421,8 @@ Method/Constructor so reflection reports them (e.g. Method.toString()'s
             :component-class (%get-java-class-by-fq-name "java.lang.reflect.Method")
             :initial-contents (coerce (append (when lclass
                                                 (loop for method across (or (methods lclass) #())
-                                                      when (and (not (starts-with? "<init>" (name method)))
+                                                      when (and (not (member (name method) '("<init>" "<clinit>")
+                                                                             :test #'string=))
                                                                 (or (zerop public-only)
                                                                     (not (zerop (logand #x1 (access-flags method))))))
                                                       #|

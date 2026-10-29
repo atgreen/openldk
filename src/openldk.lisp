@@ -1843,6 +1843,22 @@ shadows a superclass field and needs its own storage."
           sym)
         (intern mangled :openldk))))
 
+(defun %initialize-wide-java-instance (object)
+  "Initialize many fields in a loop rather than compiling one enormous initializer."
+  (dolist (slot (closer-mop:class-slots (class-of object)))
+    (let ((name (closer-mop:slot-definition-name slot))
+          (initializer (closer-mop:slot-definition-initfunction slot)))
+      (when (and initializer (not (slot-boundp object name)))
+        (setf (slot-value object name) (funcall initializer)))))
+  object)
+
+(defun %define-wide-java-class (definition)
+  "Avoid quadratic register allocation in both DEFCLASS and its fast initializer."
+  (let ((sb-ext:*evaluator-mode* :interpret))
+    (%eval definition))
+  (%eval `(defmethod initialize-instance ((object ,(second definition)) &key)
+            (%initialize-wide-java-instance object))))
+
 (defun emit-<class> (class ldk-loader)
   "Emit the CLOS class definition for a Java class, and the defparameter
    of its static instance.  %INSTALL-METHOD-STUBS installs its methods.
@@ -1883,7 +1899,11 @@ shadows a superclass field and needs its own storage."
                       (list (%field-slot-symbol class f ldk-loader)
                             :initform (let ((cf (gethash "ConstantValue" (slot-value f 'attributes))))
                                         (if cf
-                                            (value (emit (aref (constant-pool class) cf) (constant-pool class)))
+                                            (let ((literal (emit (aref (constant-pool class) cf)
+                                                                 (constant-pool class))))
+                                              (if (typep literal 'ir-string-literal)
+                                                  (ijstring (value literal))
+                                                  (value literal)))
                                             (initform-from-descriptor (slot-value f 'descriptor))))
                             :allocation
                             (if (or (eq 0 (logand 8 (slot-value f 'access-flags)))
@@ -1898,7 +1918,11 @@ shadows a superclass field and needs its own storage."
                    'defparameter (intern (format nil "+static-~A+" (intern name pkg)) pkg)
                    (list
                     'make-instance (list 'quote (intern name pkg)))))))))
-    defclass-code))
+    (if (> (length (fields class)) 512)
+        `(progn
+           (%define-wide-java-class ',(second defclass-code))
+           ,(third defclass-code))
+        defclass-code)))
 
 (defvar *method-stubs* (make-hash-table :test 'eq :weakness :key :synchronized t)
   "Lazy-compilation stub methods installed by %INSTALL-METHOD-STUBS, so
