@@ -274,6 +274,10 @@ check-verifier: openldk | check-jdk
 	python3 test/verifier/check.py
 
 .PHONY: check-jni check-jni-zstd
+.PHONY: check-native-access
+check-native-access: openldk jni | check-jdk
+	python3 test/native-access/check.py
+
 check-jni: openldk jni | check-jdk
 	python3 test/jni/check.py
 

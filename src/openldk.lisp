@@ -2607,6 +2607,7 @@ properties, and *CLASSPATH* construction."
   ;; Resolve the boot graph before application loading/JIT compilation can
   ;; reenter module initialization through an access check.
   (%boot-module-layer)
+  (%configure-native-access)
   (setf *module-access-ready* t))
 
 (defun %main-method-declared-by (class descriptor public-only &optional inherited-interface)

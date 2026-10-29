@@ -70,6 +70,8 @@
   (format *error-output* "    -D<name>=<value>~%")
   (format *error-output* "                  set a system property~%")
   (format *error-output* "    --add-modules <modules>~%                  resolve additional root modules (comma separated)~%")
+  (format *error-output* "    --enable-native-access <modules>~%                  permit JNI/FFM access (or ALL-UNNAMED)~%")
+  (format *error-output* "    --illegal-native-access=<allow|warn|deny>~%                  control unpermitted JNI/FFM access (default: warn)~%")
   (format *error-output* "    --enable-preview~%                  enable Java 25 preview features~%")
   (format *error-output* "    --source <release>~%                  launch a source file (including scripts without .java)~%")
   (format *error-output* "    -verbose:[class|gc|jni]~%")
@@ -80,11 +82,91 @@
   (format *error-output* "                  Directory for internal debug info~%")
   (format *error-output* "    --aot <dir>   Ahead-of-time compilation directory~%~%"))
 
+(defun %tokenize-java-options (text &optional comments)
+  "Tokenize launcher environment/argument files, preserving quoted words."
+  (let ((tokens nil) (word (make-string-output-stream)) (started nil) (quote nil)
+        (i 0) (length (length text)))
+    (labels ((finish-word ()
+               (when started (push (get-output-stream-string word) tokens) (setf started nil)))
+             (space-p (ch) (find ch '(#\Space #\Tab #\Newline #\Return #\Page))))
+      (loop while (< i length)
+            for ch = (char text i)
+            do (cond
+                 ((and comments (null quote) (char= ch #\#))
+                  (finish-word)
+                  (loop while (and (< i length) (not (char= (char text i) #\Newline))) do (incf i)))
+                 ((and (null quote) (space-p ch)) (finish-word))
+                 ((and (find ch '(#\' #\")) (or (null quote) (char= quote ch)))
+                  (setf started t quote (if quote nil ch)))
+                 ((and comments quote (char= ch #\\) (< (1+ i) length))
+                  (incf i)
+                  (let ((escaped (char text i)))
+                    (if (find escaped '(#\Newline #\Return))
+                        (loop while (and (< (1+ i) length) (space-p (char text (1+ i)))) do (incf i))
+                        (write-char (case escaped (#\n #\Newline) (#\r #\Return) (#\t #\Tab) (#\f #\Page)
+                                                 (t escaped)) word)))
+                  (setf started t))
+                 (t (write-char ch word) (setf started t)))
+               (incf i))
+      (when quote
+        (format *error-output* "Unmatched quote in Java launcher options~%")
+        (uiop:quit 1))
+      (finish-word))
+    (nreverse tokens)))
+
+(defun %expand-java-argument-files (arguments &optional disabled)
+  "Expand argument files once, carrying --disable-@files across input sources."
+  (let ((result nil))
+    (dolist (arg arguments)
+      (cond
+        ((string= arg "--disable-@files") (setf disabled t))
+        ((and (not disabled) (> (length arg) 1) (char= (char arg 0) #\@))
+         (if (char= (char arg 1) #\@)
+             (push (subseq arg 1) result)
+             (handler-case
+                 (dolist (token (%tokenize-java-options (uiop:read-file-string (subseq arg 1)) t))
+                   (if (string= token "--disable-@files") (setf disabled t) (push token result)))
+               (error (condition)
+                 (format *error-output* "Cannot read Java argument file ~A: ~A~%" (subseq arg 1) condition)
+                 (uiop:quit 1)))))
+        (t (push arg result))))
+    (values (nreverse result) disabled)))
+
+(defun %validate-java-option-environment (arguments)
+  "JDK_JAVA_OPTIONS may configure the launcher, never select or bypass a main."
+  (loop while arguments
+        for arg = (pop arguments)
+        do (when (or (zerop (length arg)) (char/= (char arg 0) #\-)
+                     (member arg '("-jar" "-m" "--module" "-h" "-help" "--help" "-?"
+                                   "-version" "--version" "--list-modules" "--describe-module" "-d"
+                                   "--help-extra") :test #'string=)
+                     (starts-with? "--module=" arg))
+             (format *error-output* "Option not allowed in JDK_JAVA_OPTIONS: ~A~%" arg)
+             (uiop:quit 1))
+           (when (member arg '("-cp" "-classpath" "--class-path" "--source" "--add-modules"
+                               "--enable-native-access" "--module-path" "-p" "--upgrade-module-path"
+                               "--add-reads" "--add-exports" "--add-opens" "--limit-modules"
+                               "--patch-module" "--dump-dir" "--aot") :test #'string=)
+             (unless arguments
+               (format *error-output* "Missing JDK_JAVA_OPTIONS argument for ~A~%" arg)
+               (uiop:quit 1))
+             (pop arguments))))
+
+(defun %launcher-arguments ()
+  "Prepend JDK_JAVA_OPTIONS and expand launcher argument files once."
+  (let ((environment (uiop:getenv "JDK_JAVA_OPTIONS")))
+    (when (and environment (plusp (length environment)))
+      (format *error-output* "NOTE: Picked up JDK_JAVA_OPTIONS: ~A~%" environment))
+    (multiple-value-bind (options disabled)
+        (%expand-java-argument-files (when environment (%tokenize-java-options environment)))
+      (%validate-java-option-environment options)
+      (append options (%expand-java-argument-files (rest sb-ext:*posix-argv*) disabled)))))
+
 (defun %parse-java-args ()
   "Parse Java-style command line arguments.
    Returns (values mainclass args classpath dump-dir aot).
    Sets *cli-jvm-properties* as a side effect."
-  (let ((raw-args (rest sb-ext:*posix-argv*)) ; skip program name
+  (let ((raw-args (%launcher-arguments))
         (classpath nil)
         (dump-dir nil)
         (aot nil)
@@ -92,7 +174,8 @@
         (program-args nil)
         (properties nil)
         (i 0))
-    (setf *enable-preview* nil *cli-add-modules* nil)
+    (setf *enable-preview* nil *cli-add-modules* nil
+          *cli-enable-native-access* nil *cli-illegal-native-access* "warn")
     (setf *source-launch-p* nil *source-launch-version* nil)
     ;; Parse options until we hit mainclass
     (loop while (< i (length raw-args))
@@ -100,6 +183,23 @@
           do (cond
                ((string= arg "--enable-preview")
                 (setf *enable-preview* t)
+                (incf i))
+               ((or (string= arg "--enable-native-access") (starts-with? "--enable-native-access=" arg))
+                (let ((modules (if (string= arg "--enable-native-access")
+                                   (nth (incf i) raw-args)
+                                   (subseq arg 23))))
+                  (unless (and modules (plusp (length modules))
+                               (not (char= (char modules 0) #\-)))
+                    (format *error-output* "--enable-native-access requires module names~%")
+                    (uiop:quit 1))
+                  (push modules *cli-enable-native-access*))
+                (incf i))
+               ((starts-with? "--illegal-native-access=" arg)
+                (let ((mode (subseq arg 24)))
+                  (unless (member mode '("allow" "warn" "deny") :test #'string=)
+                    (format *error-output* "Invalid --illegal-native-access value: ~A~%" mode)
+                    (uiop:quit 1))
+                  (setf *cli-illegal-native-access* mode))
                 (incf i))
                ((or (string= arg "--add-modules") (starts-with? "--add-modules=" arg))
                 (let ((modules (if (string= arg "--add-modules")
@@ -233,6 +333,8 @@
                                               (namestring (truename mainclass)) (namestring classes) cp
                                               (if *enable-preview* "true" "false") (or *source-launch-version* "25"))
                                         (reverse *cli-add-modules*))
+                                :environment (remove-if (lambda (entry) (starts-with? "JDK_JAVA_OPTIONS=" entry))
+                                                        (sb-ext:posix-environ))
                                 :output *standard-output* :error-output *error-output*)))
                  (unless (zerop (uiop:wait-process process))
                    (error "Source compilation failed: ~A" mainclass)))
@@ -279,6 +381,11 @@ which are relative to JARFILE's directory."
     (unless main-class
       (format *error-output* "no main manifest attribute, in ~A~%" jarfile)
       (uiop:quit 1))
+    (when-let ((native (cdr (assoc "Enable-Native-Access" attributes :test #'string-equal))))
+      (unless (string= (string-trim '(#\Space #\Tab) native) "ALL-UNNAMED")
+        (format *error-output* "Invalid Enable-Native-Access manifest attribute: ~A~%" native)
+        (uiop:quit 1))
+      (push "ALL-UNNAMED" *cli-enable-native-access*))
     (values (string-trim " " main-class)
             (format nil (concatenate 'string "~A~{" (string (uiop:inter-directory-separator)) "~A~}")
                     jarfile

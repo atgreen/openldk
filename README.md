@@ -238,6 +238,14 @@ set `OPENLDK_JNI_BRIDGE` to its absolute path when relocating an executable.
 It uses standard JNI headers and does not load HotSpot's JDK libraries.
 Existing Lisp native implementations retain precedence.
 
+JNI and FFM use the JDK 25 native-access policy. For classpath applications,
+pass `--enable-native-access=ALL-UNNAMED`; resolved named modules can be granted
+access with a comma-separated module list. Unpermitted restricted operations
+warn by default. `--illegal-native-access=allow|warn|deny` selects the policy.
+Permissions also work through `JDK_JAVA_OPTIONS`, argument files, and an
+executable JAR's `Enable-Native-Access: ALL-UNNAMED` manifest attribute.
+Run `make check-native-access` for [policy comparisons](test/native-access/README.md).
+
 The implementation supports native symbol lookup and registration, loader
 ownership, initialization hooks, local/global/weak references, object creation,
 Java callbacks, fields, reflection, exceptions, strings, primitive/object arrays,

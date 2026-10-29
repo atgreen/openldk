@@ -1143,10 +1143,10 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
           (slot-value module '|loader|) classloader)
     module))
 
-;; JDK 9+: JavaLangAccess.addEnableNativeAccess — identity stub
+;; ModuleBootstrap and ModuleLayer.Controller grant native access through JLA.
 (defmethod |addEnableNativeAccess(Ljava/lang/Module;)Ljava/lang/Module;| (this module)
   (declare (ignore this))
-  module)
+  (|implAddEnableNativeAccess()Ljava/lang/Module;| module))
 
 (defun |jdk/internal/loader/BootLoader.getSystemPackageLocation(Ljava/lang/String;)Ljava/lang/String;| (name)
   "Location of a boot-loader (system) package: everything OpenLDK loads
