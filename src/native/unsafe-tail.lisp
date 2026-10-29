@@ -198,14 +198,10 @@
                           (float-features:double-float-bits right))))
     (t (eql left right))))
 
-(defun %vh-field-value (vh value)
+(defun %vh-field-value (name value)
   "Narrow integer stores to the field's Java type, including atomic arithmetic."
-  ;; Offsets may name a reflective Field, MemberName, or synthetic field.
-  ;; The VarHandle already owns the authoritative variable type for all three.
-  (let* ((type (|varType()Ljava/lang/Class;| vh))
-         (name (lstring (slot-value type '|name|)))
-         (bits (cond ((equal name "byte") 8) ((equal name "short") 16)
-                     ((equal name "int") 32) ((equal name "long") 64))))
+  (let ((bits (cond ((equal name "byte") 8) ((equal name "short") 16)
+                    ((equal name "int") 32) ((equal name "long") 64))))
     (cond (bits (%signed-of-width (ldb (byte bits 0) value) bits))
           ((equal name "char") (ldb (byte 16 0) (if (characterp value) (char-code value) value)))
           (t value))))
@@ -215,35 +211,36 @@
 (no args -> current value) and WRITE (one arg -> store it).  VALUES holds the
 op's value arguments (expected/new/delta as applicable)."
   (declare (type function read write))
-  (ecase category
-    (:read  (funcall read))
-    (:write (funcall write (first values)) nil)
-    (:cas   (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
-              (if (%vh-value-equal-p (funcall read) (first values))
-                  (progn (funcall write (second values)) 1)
-                  0)))
-    (:cae   (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
-              (let ((old (funcall read)))
-                (when (%vh-value-equal-p old (first values)) (funcall write (second values)))
-                old)))
-    (:getset (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
-               (prog1 (funcall read) (funcall write (first values)))))
-    (:getadd (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
-               (let ((old (funcall read)))
-                 (funcall write (+ old (first values)))
-                 old)))
-    (:getor  (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
-               (let ((old (funcall read)))
-                 (funcall write (logior old (first values)))
-                 old)))
-    (:getand (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
-               (let ((old (funcall read)))
-                 (funcall write (logand old (first values)))
-                 old)))
-    (:getxor (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
-               (let ((old (funcall read)))
-                 (funcall write (logxor old (first values)))
-                 old)))))
+  (with-java-memory-ordering
+    (ecase category
+      (:read  (funcall read))
+      (:write (funcall write (first values)) nil)
+      (:cas   (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
+                (if (%vh-value-equal-p (funcall read) (first values))
+                    (progn (funcall write (second values)) 1)
+                    0)))
+      (:cae   (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
+                (let ((old (funcall read)))
+                  (when (%vh-value-equal-p old (first values)) (funcall write (second values)))
+                  old)))
+      (:getset (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
+                 (prog1 (funcall read) (funcall write (first values)))))
+      (:getadd (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
+                 (let ((old (funcall read)))
+                   (funcall write (+ old (first values)))
+                   old)))
+      (:getor  (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
+                 (let ((old (funcall read)))
+                   (funcall write (logior old (first values)))
+                   old)))
+      (:getand (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
+                 (let ((old (funcall read)))
+                   (funcall write (logand old (first values)))
+                   old)))
+      (:getxor (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
+                 (let ((old (funcall read)))
+                   (funcall write (logxor old (first values)))
+                   old))))))
 
 (defun %vh-array-bits (array)
   "Signed width in bits of ARRAY's primitive element type, or NIL for references."
@@ -318,9 +315,8 @@ op's value arguments (expected/new/delta as applicable)."
                      (|put(IB)Ljava/nio/ByteBuffer;|
                       buffer (+ index i)
                       (%signed-of-width (ldb (byte 8 (* 8 (if (%byte-view-be-p vh) (- nbytes i 1) i))) bits) 8))))))
-        ;; The caller holds the Java memory-ordering lock, also used for
-        ;; field/array VarHandles and Unsafe operations. The bytewise codec
-        ;; therefore remains indivisible with respect to those accesses.
+        ;; Only the raw operation takes the ordering lock. Validation and
+        ;; MethodHandle adaptation may enter unrelated Java monitors.
         (%vh-run-op category #'read-value #'write-value values)))))
 
 (defun %varhandle-invoke (category vh args &optional access-mode)
@@ -350,9 +346,10 @@ op's value arguments (expected/new/delta as applicable)."
          (let ((array (first args)) (index (second args)) (values (cddr args)))
            (unless (member access-mode '("get" "set") :test #'string=)
              (%throw '|java/lang/UnsupportedOperationException| "Unsupported byte-array view access mode"))
-           (case category
-             (:read (%byte-view-get vh array index nbytes kind))
-             (:write (%byte-view-set vh array index nbytes kind (first values)) nil)))))
+           (with-java-memory-ordering
+             (case category
+               (:read (%byte-view-get vh array index nbytes kind))
+               (:write (%byte-view-set vh array index nbytes kind (first values)) nil))))))
       ;; array-element view (VarHandle*$Array): coordinates are (array index . values)
       ((search "$Array" name)
        (let* ((array (first args)) (index (second args)) (values (cddr args))
@@ -369,14 +366,18 @@ op's value arguments (expected/new/delta as applicable)."
        (multiple-value-bind (fkind storage slot) (%vh-field-place vh)
          (unless slot
            (internal-error "VarHandle: unsupported handle class ~A (ldk-304)" name))
-         (multiple-value-bind (obj values)
-             (ecase fkind
-               (:instance (values (first args) (rest args)))
-               (:static   (values storage args)))
-           (%vh-run-op category
-                       (lambda () (slot-value obj slot))
-                       (lambda (v) (setf (slot-value obj slot) (%vh-field-value vh v)))
-                       values)))))))
+         ;; varType may intern MethodTypes and enter a ReferenceQueue monitor.
+         ;; Resolve it before the memory lock; stores below only narrow bits.
+         (let ((type-name (unless (eql category :read)
+                            (lstring (slot-value (|varType()Ljava/lang/Class;| vh) '|name|)))))
+           (multiple-value-bind (obj values)
+               (ecase fkind
+                 (:instance (values (first args) (rest args)))
+                 (:static   (values storage args)))
+             (%vh-run-op category
+                         (lambda () (slot-value obj slot))
+                         (lambda (v) (setf (slot-value obj slot) (%vh-field-value type-name v)))
+                         values))))))))
 
 ;; Register %VARHANDLE-OP-<op> for each access mode the compiler may emit.
 ;; The op name is embedded in the function symbol (bc-to-ir builds it), so no
@@ -398,12 +399,12 @@ op's value arguments (expected/new/delta as applicable)."
         (setf (symbol-function (intern (format nil "%VARHANDLE-OP-~A" op) :openldk))
               (lambda (vh descriptor caller &rest args)
                 ;; The dispatcher otherwise erases the access mode to CATEGORY.
-                ;; Conservatively order plain modes too, preserving atomicity
-                ;; of byte-array views and interoperability with volatile fields.
-                (with-java-memory-ordering
-                  (if (search "$ByteBufferHandle" (%vh-classname vh))
-                      (%vh-buffer-call cat vh args access-mode descriptor caller)
-                      (%varhandle-invoke cat vh args access-mode)))))
+                ;; Adapters may enter JDK monitors (e.g. MethodType's reference
+                ;; queue). Never build/invoke them with the memory lock held:
+                ;; reference processing holds that monitor before volatile reads.
+                (if (search "$ByteBufferHandle" (%vh-classname vh))
+                    (%vh-buffer-call cat vh args access-mode descriptor caller)
+                    (%varhandle-invoke cat vh args access-mode))))
         ;; MethodHandle adapters and VarHandle.toMethodHandle reach the
         ;; implementation's static entry points instead of the bytecode
         ;; dispatcher. Keep both paths on the same codec and ordering rules.
@@ -413,5 +414,4 @@ op's value arguments (expected/new/delta as applicable)."
                                     (%vh-buffer-descriptor cat class-name t))))
             (setf (gethash signature *native-overrides*)
                   (lambda (vh &rest args)
-                    (with-java-memory-ordering
-                      (%vh-buffer-view cat vh args access-mode class-name))))))))))
+                    (%vh-buffer-view cat vh args access-mode class-name)))))))))

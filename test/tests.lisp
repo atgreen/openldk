@@ -611,3 +611,55 @@ nothing behind when it refuses."
       (dolist (check checks) (is (eql t (cdr check)) "Cleanup failed: ~A" (car check)))
       (dotimes (i 3) (sb-ext:gc :full t))
       (is (not (%ownership-probe-live-p class))))))
+
+(defclass |TestAsInts$ByteBufferHandle| () ())
+(defclass |TestIndirectVarHandle| () ())
+
+(test varhandle-adaptation-lock-order
+  "MethodHandle adaptation can enter ReferenceQueue monitors; it must not hold
+  the memory lock that ReferenceQueue's volatile fields acquire in reverse order."
+  (let* ((bindings
+           (list
+            (cons 'openldk::|hasInvokeExactBehavior()Z| (lambda (handle) (declare (ignore handle)) 0))
+            (cons 'openldk::jstring #'identity)
+            (cons 'openldk::|java/lang/invoke/VarHandle$AccessMode.valueFromMethodName(Ljava/lang/String;)Ljava/lang/invoke/VarHandle$AccessMode;|
+                  #'identity)
+            (cons 'openldk::|toMethodHandle(Ljava/lang/invoke/VarHandle$AccessMode;)Ljava/lang/invoke/MethodHandle;|
+                  (lambda (handle mode)
+                    (declare (ignore handle mode))
+                    (is (not (sb-thread:holding-mutex-p openldk::*java-memory-lock*)))
+                    (throw 'adapted :adapted)))
+            (cons 'openldk::%vh-buffer-view
+                  (lambda (&rest arguments)
+                    (declare (ignore arguments))
+                    (is (not (sb-thread:holding-mutex-p openldk::*java-memory-lock*)))
+                    (openldk::%vh-run-op
+                     :getadd
+                     (lambda ()
+                       (is (sb-thread:holding-mutex-p openldk::*java-memory-lock*))
+                       98)
+                     (lambda (value)
+                       (is (sb-thread:holding-mutex-p openldk::*java-memory-lock*))
+                       (is (= 99 value)))
+                     '(1))))
+            (cons 'openldk::%varhandle-invoke
+                  (lambda (&rest arguments)
+                    (declare (ignore arguments))
+                    (is (not (sb-thread:holding-mutex-p openldk::*java-memory-lock*)))
+                    88))))
+         (saved (mapcar (lambda (entry)
+                          (cons (car entry) (and (fboundp (car entry)) (fdefinition (car entry)))))
+                        bindings))
+         (operation (symbol-function 'openldk::|%VARHANDLE-OP-getAndAdd|))
+         (buffer-handle (make-instance '|TestAsInts$ByteBufferHandle|)))
+    (unwind-protect
+         (progn
+           (dolist (entry bindings) (setf (fdefinition (car entry)) (cdr entry)))
+           (is (eq :adapted
+                   (catch 'adapted
+                     (funcall operation buffer-handle "(Ljava/nio/ByteBuffer;II)V" nil nil 0 1))))
+           (is (= 98 (funcall operation buffer-handle "(Ljava/nio/ByteBuffer;II)I" nil nil 0 1)))
+           (is (= 88 (funcall operation (make-instance '|TestIndirectVarHandle|) "()V" nil))))
+      (dolist (entry saved)
+        (if (cdr entry) (setf (fdefinition (car entry)) (cdr entry))
+            (fmakunbound (car entry)))))))
