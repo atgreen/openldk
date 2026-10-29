@@ -404,7 +404,8 @@ var, and an alist of those names and the Lisp forms whose values they hold."
       (openldk.interop::%read-lisp-family-source
        stream close (lambda (i)
                       (declare (ignore i))
-                      (format nil "lisp-value-~D" (incf *lisp-value-counter*))))
+                      (format nil "lisp-value-~D" (incf *lisp-value-counter*)))
+       :dispatch-line-comments t)
     (values source (mapcar #'cons names forms))))
 
 (defvar *sites* (make-hash-table :test #'equal)

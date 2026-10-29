@@ -199,3 +199,107 @@
       (setf (symbol-function 'clojure:eval-string) original)
       (when (fboundp 'native-fasl) (fmakunbound 'native-fasl))
       (dolist (path (list source fasl)) (when (probe-file path) (delete-file path))))))
+
+(test clojure-multiple-vector-delimiters
+  (is (equalp #(#(1 2) #(3 4))
+              #[ (let [xs [1 2] ys [3 4]] [xs ys]) ]))
+  (is (equalp #(1 2 3 4)
+              #[ (let [[a b] [1 2] [c d] [3 4]] [a b c d]) ]))
+  (is (equalp #(#(1 2) #(3 #(4 5))) #[ [[1 2] [3 [4 5]]] ]))
+  (let ((n 10))
+    (is (equalp #(#(10 11) #(12 13))
+                #[ (let [xs [$n (inc $n)] ys [(+ $n 2) (+ $n 3)]]
+                     [xs ys]) ])))
+  (is (equalp #(#(2 1) #(4 3))
+              #@clj{ (mapv (fn [[a b]] [b a]) [[1 2] [3 4]]) }))
+  (defun-clojure native-vector-destructuring (n)
+    (let [[a b] [n (inc n)] [c d] [(+ n 2) (+ n 3)]]
+      [[a b] [c d]]))
+  (is (equalp #(#(1 2) #(3 4)) (native-vector-destructuring 1))))
+
+(defun %vector-stress-source (seed depth)
+  "Deterministic Clojure forms, deliberately mixing all delimiter kinds."
+  (if (zerop depth)
+      (nth (mod seed 8)
+           '("[]" "[1 2]" "[[] []]" "\"[ ] ) }\"" "\\[" "\\]"
+             "#\"[\\[\\]]\"" "[\"escaped \\\" ]\" []]"))
+      (let ((inner (%vector-stress-source (+ (* seed 17) 11) (1- depth))))
+        (case (mod seed 6)
+          (0 (format nil "[~A [] [~D]]" inner seed))
+          (1 (format nil "{:left [~A] :right [[] []]}" inner))
+          (2 (format nil "#{[~A]}" inner))
+          (3 (format nil "(identity [~A []])" inner))
+          (4 (format nil "^:stress [~A [~D]]" inner seed))
+          (t (format nil "'[~A []]" inner))))))
+
+(test clojure-generated-vector-reader
+  (let ((*readtable* (clojure:enable-syntax (copy-readtable nil)))
+        (sources nil))
+    (dotimes (seed 1024)
+      (let* ((source (format nil "~{~A~^ ~}"
+                             (loop for sibling below (1+ (mod seed 16))
+                                   collect (%vector-stress-source (+ seed sibling) (mod seed 9)))))
+             (text (format nil "#[~A] :after" source)))
+        (push source sources)
+        (with-input-from-string (stream text)
+          (let ((form (read stream)))
+            (is (string= source (second form)) "Generated case ~D" seed)
+            (is (eq :after (read stream)) "Block boundary in case ~D" seed)))))
+    ;; Independently verify that the generated inputs are legal Clojure.
+    (is (every #'identity
+               (funcall (clojure:eval-string
+                         "(fn [sources] (mapv (fn [s] (read-string (str \"[\" s \"]\")) true) sources))")
+                        sources)))))
+
+(test clojure-comment-vector-delimiters
+  (let ((*readtable* (clojure:enable-syntax (copy-readtable nil))))
+    (dolist (comment '(";" "#!"))
+      (dolist (ending (list (string #\Newline) (string #\Return)
+                            (format nil "~C~C" #\Return #\Newline)))
+        (let* ((source (format nil "[[1 2] ~A ignored ] } ) [ $unbound~A[3 4]]" comment ending))
+               (text (format nil "#[~A] :after" source)))
+          ;; Clojure itself accepts each source, independently of our reader.
+          (is (equalp #(#(1 2) #(3 4)) (clojure:eval-string source)))
+          (with-input-from-string (stream text)
+            (let ((form (read stream)))
+              (is (eq :after (read stream)))
+              (is (equalp #(#(1 2) #(3 4)) (eval form))))))))))
+
+(test clojure-dispatch-comments-in-all-syntaxes
+  (is (equalp #(#(1 2) #(3 4))
+              #@clj{ [[1 2] #! ignore ] } ) [ $unbound
+                       [3 4]] }))
+  (defun-clojure native-comment-vectors (n)
+    (let [xs [n (inc n)] #! ignore ] } ) [ $unbound
+          ys [(+ n 2) (+ n 3)]]
+      [xs ys]))
+  (is (equalp #(#(1 2) #(3 4)) (native-comment-vectors 1))))
+
+(test clojure-generated-vector-evaluation
+  (let ((*readtable* (clojure:enable-syntax (copy-readtable nil))))
+    (labels ((build (seed depth)
+               (if (zerop depth)
+                   (values (princ-to-string seed) seed)
+                   (let ((sources nil) (values nil))
+                     (dotimes (i (1+ (mod seed 3)))
+                       (multiple-value-bind (source value) (build (+ (* seed 3) i 1) (1- depth))
+                         (push source sources) (push value values)))
+                     (values (format nil "[~{~A~^ ~}]" (nreverse sources))
+                             (coerce (nreverse values) 'vector))))))
+      ;; One compilation for the batch; expected values come from CL, not
+      ;; the Clojure adapter or its reader.
+      (let ((sources nil) (expected nil))
+        (dotimes (i 32)
+          (multiple-value-bind (source value) (build i (mod i 4))
+            (push source sources) (push value expected)))
+        (is (equalp (coerce (nreverse expected) 'vector)
+                    (eval (read-from-string
+                           (format nil "#[ [~{~A~^ ~}] ]" (nreverse sources))))))))))
+
+(test clojure-map-without-result-conversion
+  (clojure:eval-string "(defn raw-map-probe [] {:x 42})")
+  (let ((raw (openldk.interop:java-call
+              "invoke()Ljava/lang/Object;" (clojure:lookup "user/raw-map-probe"))))
+    (is (not (hash-table-p raw)))
+    (is (typep raw (openldk.interop:java-class-symbol "clojure.lang.IPersistentMap")))
+    (is (= 42 (gethash :x (clojure:to-lisp raw))))))

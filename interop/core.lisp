@@ -652,11 +652,21 @@ literal.  Return the source with each $ splice replaced by a parameter name
                   (decf depth)))
         until (zerop depth)))
 
-(defun %read-lisp-family-source (stream close name-for &key escaped-symbols)
+(defun %skip-source-line-comment (stream out)
+  "Discard a comment through LF, CR, or CRLF, and retain one newline."
+  (loop for c = (read-char stream nil #\Newline t)
+        until (find c '(#\Newline #\Return))
+        finally (when (and (char= c #\Return)
+                           (eql (peek-char nil stream nil nil t) #\Newline))
+                  (read-char stream)))
+  (write-char #\Newline out))
+
+(defun %read-lisp-family-source (stream close name-for &key escaped-symbols dispatch-line-comments)
   "Read Clojure or Scheme source from STREAM up to the CLOSE (], } or )) that
 closes it.  Return the source, with the Ith $ splice replaced by (funcall
 NAME-FOR I), the list of those names, and the list of the Lisp forms whose
-values they take."
+values they take. DISPATCH-LINE-COMMENTS enables Clojure's #! comments;
+Scheme #! directives otherwise remain source text."
   (let ((depth 0)
         (splices '()))
     (values
@@ -678,10 +688,14 @@ values they take."
                    (write-char char out)
                    (write-char (read-char stream t nil t) out))
                   (#\#
-                   (write-char char out)
-                   (when (eql (peek-char nil stream nil nil t) #\|)
-                     (write-char (read-char stream) out)
-                     (%copy-block-comment stream out)))
+                   (if (and dispatch-line-comments
+                            (eql (peek-char nil stream nil nil t) #\!))
+                       (progn (read-char stream) (%skip-source-line-comment stream out))
+                       (progn
+                         (write-char char out)
+                         (when (eql (peek-char nil stream nil nil t) #\|)
+                           (write-char (read-char stream) out)
+                           (%copy-block-comment stream out)))))
                   (#\|
                    (write-char char out)
                    (when escaped-symbols
@@ -689,10 +703,7 @@ values they take."
                            do (write-char c out)
                               (cond ((char= c #\\) (write-char (read-char stream t nil t) out))
                                     ((char= c #\|) (return))))))
-                  (#\; ; a comment, to the end of the line
-                   (loop for c = (read-char stream nil #\Newline t)
-                         until (char= c #\Newline))
-                   (write-char #\Newline out))
+                  (#\; (%skip-source-line-comment stream out))
                   (#\$ ; a Lisp value
                    ;; $(form), $#'f or $#@lang{ ... }, or $,x in a
                    ;; backquoted macro template, is read as Lisp; $name
@@ -812,7 +823,8 @@ No Lisp form is evaluated here, including #. forms."
                     (%read-braced-source-and-names stream :close #\))
                     (%read-lisp-family-source stream #\)
                                               (lambda (i) (format nil "lispCapture~D" i))
-                                              :escaped-symbols (eql (cdr syntax) :scheme)))
+                                              :escaped-symbols (eql (cdr syntax) :scheme)
+                                              :dispatch-line-comments (eql (cdr syntax) :clojure)))
               (unless *read-suppress*
                 (append (list (car syntax) name parameters source captures forms)
                         (when typed (list return-type))))))

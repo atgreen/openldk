@@ -150,6 +150,25 @@ takes minutes; `make sbcl-clojure` builds an SBCL with it started.
 (clojure:eval '(mapv square (range 5)))            ; => #(0 1 4 9 16)
 ```
 
+To retain a Clojure result without converting maps to Lisp hash tables,
+call the function's `IFn` interface directly:
+
+```lisp
+(clojure:eval-string "(defn make-map [] {:answer 42})")
+(defparameter *clj-map*
+  (openldk.interop:java-call
+   "invoke()Ljava/lang/Object;" (clojure:lookup "user/make-map")))
+
+(clojure:to-lisp *clj-map*)                 ; convert later, if wanted
+```
+
+For arguments, use the corresponding `invoke` descriptor, such as
+`"invoke(Ljava/lang/Object;)Ljava/lang/Object;"` for one argument, and
+convert each argument with `clojure:from-lisp`. For a function object
+returned by `clojure:eval-string`, use `openldk.interop:foreign-object` to
+unwrap it before `java-call`. `defun-clojure` wrappers currently convert
+results automatically and have no raw-result option.
+
 In an s-expression, Lisp vectors are Clojure vectors and hash tables are
 maps, so `(defn add3 [a b c] ...)` is written `(defn add3 #(a b c) ...)`.
 Symbols are lowercased, so a case-sensitive name, such as a Java class or

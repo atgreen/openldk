@@ -197,3 +197,27 @@
     (signals error
       (openldk.interop::%expand-typed-function-definition
        'probe parameters "n + 1" nil nil nil 'identity))))
+
+(test lisp-family-multiple-vector-delimiters
+  ;; Read the real source text and then a following CL form. In particular,
+  ;; the first inner ] must not terminate the enclosing source block.
+  (dolist (close '(#\] #\} #\)))
+    (dolist (source '("[1 2] [3 4]"
+                      "[[1 2] [3 [4 5]]]"
+                      "(let [[a b] [1 2] [c d] [3 4]] [[a b] [c d]])"
+                      "[\"[[]]\" \\[ \\]] [3 4]"
+                      "{:a [[1 2] [3 4]] :b [[] []]}"))
+      (with-input-from-string (stream (format nil "~A~C :after" source close))
+        (multiple-value-bind (actual names forms)
+            (openldk.interop::%read-lisp-family-source stream close #'identity)
+          (is (string= source actual))
+          (is (null names))
+          (is (null forms))
+          (is (eq :after (read stream))))))))
+
+(test scheme-dispatch-directives-are-not-comments
+  (with-input-from-string (stream "#!fold-case [1 2]) :after")
+    (is (string= "#!fold-case [1 2]"
+                 (openldk.interop::%read-lisp-family-source stream #\) #'identity
+                                                           :escaped-symbols t)))
+    (is (eq :after (read stream)))))
