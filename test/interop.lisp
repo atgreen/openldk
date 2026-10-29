@@ -11,6 +11,33 @@
 
 (in-suite :openldk-interop-tests)
 
+(defvar *reader-evaluations* 0)
+
+(test native-definition-reader
+  (let ((openldk.interop::*function-syntaxes* nil)
+        (*readtable* (copy-readtable nil)))
+    (openldk.interop::%register-function-syntax 'defun-reader-probe :clojure)
+    (enable-source-syntax)
+    (let ((reader (get-macro-character (code-char 40))))
+      (enable-source-syntax)
+      (is (eq reader (get-macro-character (code-char 40)))))
+    (dolist (text '("()" "(a . b)" "(a (b . c) nil)" "'(a b)"
+                    "(defun-reader-probe! 1)" "(|defun-reader-probe| 1)"))
+      (is (equal (let ((*readtable* (copy-readtable nil))) (read-from-string text))
+                 (read-from-string text))))
+    (is (equal '(a 3 4 5) (eval (read-from-string "`(a ,(+ 1 2) ,@(list 4 5))"))))
+    (let ((cycle (read-from-string "#1=(a . #1#)")))
+      (is (eq cycle (cdr cycle))))
+    (let ((*reader-evaluations* 0))
+      (is (equal '(1) (read-from-string "(#.(incf *reader-evaluations*))")))
+      (is (= 1 *reader-evaluations*)))
+    (let ((definition (read-from-string
+                       (format nil "(; head comment~%#| nested #| ) |# comment |#~%defun-reader-probe add (a b) (let [sum (+ a b)] {:sum sum}))"))))
+      (is (eq 'defun-reader-probe (first definition)))
+      (is (equal '(a b) (third definition)))
+      (is (search "[sum (+ a b)]" (fourth definition))))
+    (is (eq :kept (read-from-string "#+(or) (defun-reader-probe ignored (a) #(str %) {:a a}) :kept")))))
+
 (define-java-class greeter (:implements ("java.util.function.Function"))
     ((greeting :initform "hello") (count :initform 0))
   ("apply(Ljava/lang/Object;)Ljava/lang/Object;" (self name)

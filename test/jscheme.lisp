@@ -99,3 +99,31 @@
   (dotimes (i 3)
     (is (= (* i 10) #@jscheme{ (* $i 10) }) "evaluated once, called again"))
   (is (equal '(2 3) #@jscheme{ (map $#'1+ '(1 2)) })))
+
+(defun-jscheme native-jscheme-add (a b)
+  (if #t (vector (+ a b) a b) #f))
+
+(jscheme:defun-jscheme native-jscheme-factorial (n)
+  (if (< n 2) 1 (* n (native-jscheme-factorial (- n 1)))))
+
+(test native-jscheme-definitions
+  (is (equalp #(7 3 4) (native-jscheme-add 3 4)))
+  (is (equalp #(7 3 4) (funcall #'native-jscheme-add 3 4)))
+  (is (= 720 (native-jscheme-factorial 6)))
+  (is (equal '(1 1 2 6) (mapcar #'native-jscheme-factorial '(0 1 2 3))))
+  (signals program-error (funcall (symbol-function 'native-jscheme-add) 1)))
+
+(test native-jscheme-created-once
+  (let ((*readtable* (jscheme:enable-syntax (copy-readtable)))
+        (*package* (find-package :openldk-jscheme-tests))
+        (calls 0) (original (symbol-function 'jscheme:eval-string)))
+    (unwind-protect
+         (progn
+           (setf (symbol-function 'jscheme:eval-string)
+                 (lambda (source) (incf calls) (funcall original source)))
+           (eval (read-from-string "(defun-jscheme native-once (a b) (+ a b))"))
+           (is (= 1 calls))
+           (dotimes (i 5) (is (= (+ i 2) (funcall 'native-once i 2))))
+           (is (= 1 calls)))
+      (setf (symbol-function 'jscheme:eval-string) original)
+      (fmakunbound 'native-once))))

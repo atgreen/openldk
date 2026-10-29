@@ -399,6 +399,67 @@ whose `doCall` calls the Lisp function.
 
 Tests: `make check-groovy` runs them in `sbcl-groovy`.
 
+## Functions with native language bodies
+
+Enable a language's syntax in a copy of the current readtable, then write
+`defun-clojure`, `defun-kawa`, or `defun-jscheme`. The body goes directly to
+that language's reader; no `#[ ]` or `#@LANGUAGE{ }` enclosure is needed.
+
+```lisp
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (asdf:load-system "openldk/clojure"))
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (setf *readtable* (clojure:enable-syntax (copy-readtable))))
+
+(defun-clojure foo (a b)
+  (let [sum (+ a b)]
+    {:sum sum :inputs [a b]}))
+
+(gethash :sum (foo 3 4))                    ; => 7
+(funcall #'foo 3 4)                        ; => a Lisp hash table
+```
+
+For Scheme, load `openldk/kawa` or `openldk/jscheme`, then call
+`kawa:enable-syntax` or `jscheme:enable-syntax` the same way:
+
+```lisp
+(defun-kawa factorial (n)
+  (if (< n 2) 1 (* n (factorial (- n 1)))))
+
+(defun-jscheme pair (a b)
+  (if #t (vector a b) #f))
+```
+
+The definition names also have package-qualified spellings:
+`clojure:defun-clojure`, `kawa:defun-kawa`, and `jscheme:defun-jscheme`.
+`openldk.interop:enable-source-syntax` enables definitions for the loaded
+adapters along with the existing `#@` source blocks. Ordinary CL reading,
+including dotted lists, quoting, reader labels, and `#.` evaluation, is
+preserved. Changes stay within the chosen readtable.
+
+The function has a CL name and a list of distinct required CL parameters.
+Their native names are lowercase; escape a mixed-case parameter with CL's
+`|name|` syntax to preserve its case. Body spelling and native literals are
+preserved. The native function can call itself by its lowercase CL name.
+Arguments and results use the adapter's existing value conversions, and the
+resulting CL function works with `funcall`, `apply`, and `mapcar`.
+
+The native procedure is created once when the definition executes, and is
+retained by the CL function. Clojure and Kawa compile it then; JScheme
+creates its interpreted procedure then. Calls do not re-read or compile
+the source. With `compile-file`, native creation happens when the FASL is
+loaded, not while the CL file is compiled. Reloading or redefining the
+function creates a new native procedure.
+
+An explicit `$value` or `$(form)` in the body captures a CL value once when
+the definition executes. Ordinary parameters need no `$` prefix:
+
+```lisp
+(let ((factor 3))
+  (defun-clojure triple (n) (* n $factor)))
+(triple 7)                                 ; => 21
+```
+
 ## Source syntax: `#@scala{ }`, `#@kotlin{ }`, `#@clj{ }`
 
 After `(openldk.interop:enable-source-syntax)`, `#@LANGUAGE{ ... }` holds

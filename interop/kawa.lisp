@@ -76,6 +76,8 @@
            #:lookup
            #:funcall
            #:define
+           #:enable-syntax
+           #:defun-kawa
            #:to-lisp
            #:from-lisp))
 
@@ -349,6 +351,17 @@ NIL result is #f rather than '()."
   :reader #'openldk.interop::%read-lisp-family-source-and-names)
 
 ;;; (:kawa-file "name") ASDF components: loaded by Kawa at LOAD-OP
+
+(defun enable-syntax (&optional (readtable *readtable*))
+  "Enable #@ source blocks and DEFUN-KAWA's native Scheme bodies in READTABLE."
+  (enable-source-syntax readtable))
+
+(defmacro defun-kawa (name parameters source &optional captures forms)
+  "Define NAME with required PARAMETERS and a native Scheme body.
+ENABLE-SYNTAX reads the body as source; compile once when the definition executes."
+  (openldk.interop::%expand-function-definition name parameters source captures forms 'eval-string :scheme))
+
+(openldk.interop::%register-function-syntax 'defun-kawa :scheme)
 
 (openldk.interop::define-foreign-file-type kawa-file openldk.interop::loaded-foreign-file "scm"
   (openldk.interop::load-foreign-file (component source)

@@ -137,3 +137,65 @@
 
 (test clojure-syntax-is-reentrant
   (is (= 55 (clojure-countdown 10)) "each level of the recursion keeps its own N"))
+
+(defun-clojure native-clojure-add (a b)
+  (let [sum (+ a b)] {:sum sum :values [a b]}))
+
+(clojure:defun-clojure native-clojure-factorial (n)
+  (if (< n 2) 1 (* n (native-clojure-factorial (dec n)))))
+
+(defun-clojure native-clojure-case (s)
+  (.toUpperCase s))
+
+(test native-clojure-definitions
+  (is (= 7 (gethash :sum (native-clojure-add 3 4))))
+  (is (equalp #(3 4) (gethash :values (funcall #'native-clojure-add 3 4))))
+  (is (= 720 (native-clojure-factorial 6)))
+  (is (string= "HELLO" (native-clojure-case "hello")))
+  (is (equal '("A" "B") (mapcar #'native-clojure-case '("a" "b"))))
+  (signals program-error (funcall (symbol-function 'native-clojure-add) 1)))
+
+(test native-clojure-compiles-once
+  (let* ((*readtable* (clojure:enable-syntax (copy-readtable)))
+         (*package* (find-package :openldk-clojure-tests))
+         (calls 0)
+         (original (symbol-function 'clojure:eval-string)))
+    (unwind-protect
+         (progn
+           (setf (symbol-function 'clojure:eval-string)
+                 (lambda (source) (incf calls) (funcall original source)))
+           (eval (read-from-string "(defun-clojure native-once (a b) (+ a b))"))
+           (is (= 1 calls))
+           (dotimes (i 5) (is (= (+ i 2) (funcall 'native-once i 2))))
+           (is (= 1 calls)))
+      (setf (symbol-function 'clojure:eval-string) original)
+      (fmakunbound 'native-once))))
+
+(test native-clojure-lexical-capture
+  (let ((factor 3))
+    (defun-clojure native-scaled (n) (* n $factor))
+    (is (= 21 (native-scaled 7)))
+    (setf factor 9)
+    (is (= 21 (native-scaled 7)) "the foreign closure captures the value at definition time")))
+
+(test native-clojure-compile-file
+  (let* ((source (merge-pathnames (format nil "openldk-definition-~A.lisp" (gensym))
+                                  (uiop:temporary-directory)))
+         (fasl (compile-file-pathname source))
+         (calls 0)
+         (original (symbol-function 'clojure:eval-string)))
+    (unwind-protect
+         (progn
+           (with-open-file (out source :direction :output :if-exists :supersede)
+             (format out "(in-package :openldk-clojure-tests)~%(eval-when (:compile-toplevel :load-toplevel :execute) (setf *readtable* (clojure:enable-syntax (copy-readtable))))~%(defun-clojure native-fasl (x) (inc x))~%"))
+           (setf (symbol-function 'clojure:eval-string)
+                 (lambda (text) (incf calls) (funcall original text)))
+           (is (not (nth-value 2 (compile-file source))))
+           (is (= 0 calls) "COMPILE-FILE does not run the foreign compiler")
+           (let ((*readtable* (copy-readtable nil))) (load fasl))
+           (is (= 1 calls) "FASL load compiles the native function")
+           (is (= 42 (funcall 'native-fasl 41)))
+           (is (= 1 calls) "ordinary calls invoke the retained function"))
+      (setf (symbol-function 'clojure:eval-string) original)
+      (when (fboundp 'native-fasl) (fmakunbound 'native-fasl))
+      (dolist (path (list source fasl)) (when (probe-file path) (delete-file path))))))

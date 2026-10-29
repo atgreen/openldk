@@ -638,7 +638,20 @@ literal.  Return the source with each $ splice replaced by a parameter name
   (or (member char '(#\( #\) #\[ #\] #\{ #\} #\" #\; #\,))
       (member char '(#\Space #\Tab #\Newline #\Return #\Page))))
 
-(defun %read-lisp-family-source (stream close name-for)
+(defun %copy-block-comment (stream output)
+  "Copy a nested #| comment after its opening delimiter has been copied."
+  (loop with depth = 1
+        for char = (read-char stream t nil t)
+        do (write-char char output)
+           (cond ((and (char= char #\#) (eql (peek-char nil stream nil nil t) #\|))
+                  (write-char (read-char stream) output)
+                  (incf depth))
+                 ((and (char= char #\|) (eql (peek-char nil stream nil nil t) #\#))
+                  (write-char (read-char stream) output)
+                  (decf depth)))
+        until (zerop depth)))
+
+(defun %read-lisp-family-source (stream close name-for &key escaped-symbols)
   "Read Clojure or Scheme source from STREAM up to the CLOSE (], } or )) that
 closes it.  Return the source, with the Ith $ splice replaced by (funcall
 NAME-FOR I), the list of those names, and the list of the Lisp forms whose
@@ -663,6 +676,18 @@ values they take."
                   (#\\ ; a character literal: \( isn't an open paren
                    (write-char char out)
                    (write-char (read-char stream t nil t) out))
+                  (#\#
+                   (write-char char out)
+                   (when (eql (peek-char nil stream nil nil t) #\|)
+                     (write-char (read-char stream) out)
+                     (%copy-block-comment stream out)))
+                  (#\|
+                   (write-char char out)
+                   (when escaped-symbols
+                     (loop for c = (read-char stream t nil t)
+                           do (write-char c out)
+                              (cond ((char= c #\\) (write-char (read-char stream t nil t) out))
+                                    ((char= c #\|) (return))))))
                   (#\; ; a comment, to the end of the line
                    (loop for c = (read-char stream nil #\Newline t)
                          until (char= c #\Newline))
@@ -713,7 +738,118 @@ splices named lispArg1, ..."
   "Make #@LANGUAGE{ ... } read LANGUAGE's source in READTABLE (by default,
 the current one); see above."
   (set-dispatch-macro-character #\# #\@ #'%read-source-syntax readtable)
+  (%enable-function-definition-syntax readtable)
   readtable)
+
+;;; Native function bodies, without an enclosing #@LANGUAGE{ } block.
+
+(defvar *function-syntaxes* nil
+  "Definition name -> (macro symbol . dialect), registered by language adapters.")
+
+(defvar *function-list-readers* (make-hash-table :test #'eq :weakness :key)
+  "Installed list reader functions, so enabling a copied readtable is idempotent.")
+
+(defun %register-function-syntax (macro dialect)
+  (setf (getf *function-syntaxes* (intern (symbol-name macro) :keyword))
+        (cons macro dialect)))
+
+(defun %function-syntax (token)
+  (when token
+    (let* ((colon (position #\: token :from-end t))
+           (name (string-upcase (subseq token (if colon (1+ colon) 0))))
+           (entry (loop for (key value) on *function-syntaxes* by #'cddr
+                        when (string= name (symbol-name key)) return value)))
+      ;; Bare names are syntax keywords; qualified names must name the actual
+      ;; exported macro. Do not commandeer another package's same-named function.
+      (when (and entry
+                 (or (not colon)
+                     (let ((package (find-package (string-upcase (subseq token 0 (position #\: token))))))
+                       (and package (eq (find-symbol name package) (car entry))))))
+        entry))))
+
+(defun %function-definition-prefix (stream)
+  "Look ahead only through whitespace, comments and a plain head token.
+Return the exact consumed text for replay by the original list reader.
+No Lisp form is evaluated here, including #. forms."
+  (let ((output (make-string-output-stream)))
+    (labels ((next () (let ((c (read-char stream t nil t))) (write-char c output) c))
+             (peek () (peek-char nil stream t nil t)))
+      (loop
+        (let ((char (peek)))
+          (cond ((find char '(#\Space #\Tab #\Newline #\Return #\Page)) (next))
+                ((char= char #\;) (loop until (char= (next) #\Newline)))
+                ((char= char #\#)
+                 (next)
+                 (if (eql (peek) #\|)
+                     (progn (next) (%copy-block-comment stream output))
+                     (return (values (get-output-stream-string output) nil))))
+                (t
+                 (let ((token (make-string-output-stream)))
+                   (loop for c = (peek)
+                         while (or (alphanumericp c) (find c "-_:./"))
+                         do (write-char (next) token))
+                   (return (values (get-output-stream-string output)
+                                   (when (or (find (peek) '(#\Space #\Tab #\Newline #\Return #\Page))
+                                             (and (get-macro-character (peek))
+                                                  (not (nth-value 1 (get-macro-character (peek))))))
+                                     (get-output-stream-string token))))))))))))
+
+(defun %read-function-definition (stream char original)
+  (multiple-value-bind (prefix token) (%function-definition-prefix stream)
+    (let ((syntax (%function-syntax token)))
+      (if syntax
+          (let ((name (read stream t nil t))
+                (parameters (read stream t nil t)))
+            (multiple-value-bind (source captures forms)
+                (%read-lisp-family-source stream #\)
+                                          (lambda (i) (format nil "lispCapture~D" i))
+                                          :escaped-symbols (eql (cdr syntax) :scheme))
+              (unless *read-suppress*
+                (list (car syntax) name parameters source captures forms))))
+          ;; Replay bytes, not printed objects: dotted lists, reader labels,
+          ;; backquotes, custom readers and read-time evaluation keep their
+          ;; original semantics. In particular, #. runs exactly once.
+          (funcall original (make-concatenated-stream (make-string-input-stream prefix) stream) char)))))
+
+(defun %enable-function-definition-syntax (readtable)
+  (let ((original (get-macro-character #\( readtable)))
+    (unless (gethash original *function-list-readers*)
+      (let ((reader (lambda (stream char) (%read-function-definition stream char original))))
+        (setf (gethash reader *function-list-readers*) t)
+        (set-macro-character #\( reader nil readtable))))
+  readtable)
+
+(defun %expand-function-definition (name parameters source captures forms evaluator dialect)
+  "Expand a native definition into a CL function closing over one compiled procedure."
+  (unless (and (symbolp name) name (not (constantp name))
+               (listp parameters) (alexandria:proper-list-p parameters)
+               (every (lambda (p) (and (symbolp p) p (not (constantp p)) (plusp (length (symbol-name p)))
+                                      (not (find (char (symbol-name p) 0) "&"))))
+                      parameters)
+               (= (length parameters) (length (remove-duplicates parameters)))
+               (stringp source))
+    (error "Native definitions need a function name, distinct required parameters, and source: ~S ~S"
+           name parameters))
+  (let* ((native-name (string-downcase (symbol-name name)))
+         (names (mapcar (lambda (p) (let ((s (symbol-name p)))
+                                     (if (string= s (string-upcase s)) (string-downcase s) s)))
+                        parameters))
+         (function-source
+           (if (eql dialect :clojure)
+               (format nil "(fn ~A [~{~A~^ ~}]~%~A~%)" native-name names source)
+               (format nil "(letrec ((~A (lambda (~{~A~^ ~})~%~A~%))) ~A)"
+                       native-name names source native-name)))
+         (compiled
+           (if captures
+               `(cl:funcall (,evaluator ,(if (eql dialect :clojure)
+                                            (format nil "(fn [~{~A~^ ~}] ~A)" captures function-source)
+                                            (format nil "(lambda (~{~A~^ ~}) ~A)" captures function-source)))
+                            ,@forms)
+               `(,evaluator ,function-source)))
+         (procedure (gensym "PROCEDURE")))
+    `(let ((,procedure ,compiled))
+       (defun ,name ,parameters
+         (cl:funcall ,procedure ,@parameters)))))
 
 ;;; Java classes defined in Lisp
 ;;;

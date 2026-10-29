@@ -102,3 +102,32 @@
   (dotimes (i 3)
     (is (= (* i 10) #@kawa{ (* $i 10) }) "evaluated once, called again"))
   (is (equal '(2 3) #@kawa{ (map $#'1+ '(1 2)) })))
+
+(defun-kawa native-kawa-add (a b)
+  #| A closing ) in a #| nested |# comment. |#
+  (if #t (vector (+ a b) a b) #f))
+
+(kawa:defun-kawa native-kawa-factorial (n)
+  (if (< n 2) 1 (* n (native-kawa-factorial (- n 1)))))
+
+(test native-kawa-definitions
+  (is (equalp #(7 3 4) (native-kawa-add 3 4)))
+  (is (equalp #(7 3 4) (funcall #'native-kawa-add 3 4)))
+  (is (= 720 (native-kawa-factorial 6)))
+  (is (equal '(1 1 2 6) (mapcar #'native-kawa-factorial '(0 1 2 3))))
+  (signals program-error (funcall (symbol-function 'native-kawa-add) 1)))
+
+(test native-kawa-compiles-once
+  (let ((*readtable* (kawa:enable-syntax (copy-readtable)))
+        (*package* (find-package :openldk-kawa-tests))
+        (calls 0) (original (symbol-function 'kawa:eval-string)))
+    (unwind-protect
+         (progn
+           (setf (symbol-function 'kawa:eval-string)
+                 (lambda (source) (incf calls) (funcall original source)))
+           (eval (read-from-string "(defun-kawa native-once (a b) (+ a b))"))
+           (is (= 1 calls))
+           (dotimes (i 5) (is (= (+ i 2) (funcall 'native-once i 2))))
+           (is (= 1 calls)))
+      (setf (symbol-function 'kawa:eval-string) original)
+      (fmakunbound 'native-once))))
