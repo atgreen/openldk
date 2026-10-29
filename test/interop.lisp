@@ -175,3 +175,25 @@
                (lstring (java-static "java.lang.String" "valueOf(Ljava/lang/Object;)"
                                      (make-java-object 'label :text "price"))))
       "an :around method wraps the Java method, called from Java (String.valueOf)"))
+
+(test typed-native-definition-reader
+  (let ((openldk.interop::*function-syntaxes* nil)
+        (*readtable* (copy-readtable nil)))
+    (openldk.interop::%register-function-syntax 'defun-typed-probe :kotlin)
+    (enable-source-syntax)
+    (let ((form (read-from-string
+                 "(defun-typed-probe add ((a :int) (b :int)) :returns :int
+                   listOf(a, b).map { it + 1 }.sum() /* ) */)")))
+      (is (eq 'defun-typed-probe (first form)))
+      (is (equal '((a :int) (b :int)) (third form)))
+      (is (search "listOf(a, b).map { it + 1 }.sum()" (fourth form)))
+      (is (eq :int (seventh form))))
+    (is (eq :kept (read-from-string
+                   "#+(or) (defun-typed-probe ignored ((n :int)) :returns :int n + 1) :kept")))
+    (let ((form (read-from-string "(defun-typed-probe capture ((n :int)) n * $factor)")))
+      (is (equal '("lispArg1") (fifth form)))
+      (is (equal '(factor) (sixth form)))))
+  (dolist (parameters '((n) ((n)) ((n :int) (n :long)) ((nil :int)) ((n :unknown))))
+    (signals error
+      (openldk.interop::%expand-typed-function-definition
+       'probe parameters "n + 1" nil nil nil 'identity))))

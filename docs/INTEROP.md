@@ -402,8 +402,8 @@ Tests: `make check-groovy` runs them in `sbcl-groovy`.
 ## Functions with native language bodies
 
 Enable a language's syntax in a copy of the current readtable, then write
-`defun-clojure`, `defun-kawa`, or `defun-jscheme`. The body goes directly to
-that language's reader; no `#[ ]` or `#@LANGUAGE{ }` enclosure is needed.
+`defun-clojure`, `defun-kawa`, `defun-jscheme`, `defun-kotlin`, or
+`defun-scala`. The body goes directly to that language's reader; no `#[ ]` or `#@LANGUAGE{ }` enclosure is needed.
 
 ```lisp
 (eval-when (:compile-toplevel :load-toplevel :execute)
@@ -437,7 +437,8 @@ adapters along with the existing `#@` source blocks. Ordinary CL reading,
 including dotted lists, quoting, reader labels, and `#.` evaluation, is
 preserved. Changes stay within the chosen readtable.
 
-The function has a CL name and a list of distinct required CL parameters.
+Clojure and Scheme definitions have a CL name and a list of distinct
+required CL parameters.
 Their native names are lowercase; escape a mixed-case parameter with CL's
 `|name|` syntax to preserve its case. Body spelling and native literals are
 preserved. The native function can call itself by its lowercase CL name.
@@ -459,6 +460,51 @@ the definition executes. Ordinary parameters need no `$` prefix:
   (defun-clojure triple (n) (* n $factor)))
 (triple 7)                                 ; => 21
 ```
+
+### Kotlin and Scala definitions
+
+Load `openldk/kotlin` or `openldk/scala` and enable `kotlin:enable-syntax`
+or `scala:enable-syntax` in a copied readtable as above. Both provide typed
+function definitions with native bodies:
+
+```lisp
+(defun-kotlin add ((a :int) (b :int))
+  a + b)
+
+(defun-scala greet ((name :string))
+  name.toUpperCase)
+
+(defun-kotlin factorial ((n :int)) :returns :int
+  if (n < 2) 1 else n * factorial(n - 1))
+
+(defun-scala factorial ((n :int)) :returns :int
+  if (n < 2) 1 else n * factorial(n - 1))
+
+(add 20 22)                                ; => 42
+(greet "hello")                            ; => "HELLO"
+```
+
+Each required parameter is `(NAME TYPE)`. Type keywords are `:int`, `:long`,
+`:short`, `:byte`, `:float`, `:double`, `:boolean`, `:char`, `:string`, and
+`:unit`. A string supplies an arbitrary native type, for example Kotlin's
+`"List<Int>"` or Scala's `"List[Int]"`. An optional `:returns TYPE` follows
+the parameter list; otherwise the native compiler infers the result type.
+Recursive Scala definitions generally need the return annotation.
+
+Names must be native identifiers (letters, digits and underscores, starting
+with a letter or underscore). Uppercase CL names become lowercase; use
+`|mixedCase|` to preserve case. Bodies accept native strings, comments,
+parentheses and brace blocks directly. Kotlin string templates and Scala
+interpolated strings retain their native meaning.
+
+As with Clojure and Scheme, `$value` or `$(form)` outside strings captures a
+Lisp value once when the definition executes. Capture types are inferred
+from those values. Required parameter types are explicit, independent of
+the first call. Arguments and results use the adapters' existing conversions.
+The native compiler runs when the definition executes or its FASL loads;
+ordinary calls use the retained compiled function without invoking it again.
+The macros are also exported as `kotlin:defun-kotlin` and `scala:defun-scala`.
+
 
 ## Source syntax: `#@scala{ }`, `#@kotlin{ }`, `#@clj{ }`
 

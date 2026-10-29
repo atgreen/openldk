@@ -563,7 +563,7 @@ C-family source (Scala, Kotlin)."
 (defun %splice-name-char-p (char)
   (or (alphanumericp char) (find char "-*_?!")))
 
-(defun %read-braced-source (stream &key (string-quotes '(#\")))
+(defun %read-braced-source (stream &key (close #\}) (string-quotes '(#\")))
   "Read C-family source (Scala, Kotlin, Groovy) from STREAM up to the } that
 closes the { already read.  STRING-QUOTES are the characters that delimit
 strings (and, tripled, raw strings); a ' that isn't one starts a character
@@ -595,6 +595,7 @@ literal.  Return the source with each $ splice replaced by a parameter name
          (loop for char = (next)
                do (cond
                     ((member char '(#\{ #\( #\[)) (incf depth) (write-char char out))
+                    ((and (char= char close) (zerop depth)) (loop-finish))
                     ((member char '(#\) #\])) (decf depth) (write-char char out))
                     ((char= char #\})
                      (if (zerop depth)
@@ -798,14 +799,23 @@ No Lisp form is evaluated here, including #. forms."
   (multiple-value-bind (prefix token) (%function-definition-prefix stream)
     (let ((syntax (%function-syntax token)))
       (if syntax
-          (let ((name (read stream t nil t))
-                (parameters (read stream t nil t)))
+          (let* ((name (read stream t nil t))
+                 (parameters (read stream t nil t))
+                 (typed (member (cdr syntax) '(:scala :kotlin)))
+                 (return-type
+                   (when (and typed (eql (peek-char t stream t nil t) #\:))
+                     (unless (or (eq (read stream t nil t) :returns) *read-suppress*)
+                       (error "Expected :RETURNS before a native function body."))
+                     (read stream t nil t))))
             (multiple-value-bind (source captures forms)
-                (%read-lisp-family-source stream #\)
-                                          (lambda (i) (format nil "lispCapture~D" i))
-                                          :escaped-symbols (eql (cdr syntax) :scheme))
+                (if typed
+                    (%read-braced-source-and-names stream :close #\))
+                    (%read-lisp-family-source stream #\)
+                                              (lambda (i) (format nil "lispCapture~D" i))
+                                              :escaped-symbols (eql (cdr syntax) :scheme)))
               (unless *read-suppress*
-                (list (car syntax) name parameters source captures forms))))
+                (append (list (car syntax) name parameters source captures forms)
+                        (when typed (list return-type))))))
           ;; Replay bytes, not printed objects: dotted lists, reader labels,
           ;; backquotes, custom readers and read-time evaluation keep their
           ;; original semantics. In particular, #. runs exactly once.
@@ -1433,3 +1443,41 @@ The class is loaded, and the method defined, when the form is evaluated."
       (cl:eval `(defmethod ,gf ,@(when qualifier (list qualifier))
                     ((,(first lambda-list) ,class-symbol) ,@(rest lambda-list))
                   ,@body)))))
+
+;;; Statically typed native definitions share the CL wrapper and header syntax.
+
+(defun %native-identifier (symbol)
+  (unless (and (symbolp symbol) symbol (not (constantp symbol)))
+    (error "Expected a native function or parameter name, got ~S" symbol))
+  (let ((name (symbol-name symbol)))
+    (unless (and (plusp (length name))
+                 (or (alpha-char-p (char name 0)) (char= (char name 0) #\_))
+                 (every (lambda (c) (or (alphanumericp c) (char= c #\_))) name))
+      (error "Native names must be identifiers; use an escaped CL symbol: ~S" symbol))
+    (if (string= name (string-upcase name)) (string-downcase name) name)))
+
+(defun %native-type (type)
+  (let ((entry (assoc type '((:int . "Int") (:long . "Long") (:short . "Short")
+                              (:byte . "Byte") (:float . "Float") (:double . "Double")
+                              (:boolean . "Boolean") (:char . "Char") (:string . "String")
+                              (:unit . "Unit")))))
+    (cond ((and (stringp type) (plusp (length type))) type)
+          (entry (cdr entry))
+          (t (error "Use a native type string or a primitive type keyword, got ~S" type)))))
+
+(defun %expand-typed-function-definition (name parameters source captures forms return-type creator)
+  (%native-identifier name)
+  (unless (and (alexandria:proper-list-p parameters)
+               (every (lambda (p) (and (alexandria:proper-list-p p) (= (length p) 2))) parameters)
+               (= (length parameters) (length (remove-duplicates parameters :key #'first)))
+               (stringp source))
+    (error "Native parameters must be distinct (NAME TYPE) pairs: ~S" parameters))
+  (let ((procedure (gensym "PROCEDURE"))
+        (args (mapcar #'first parameters)))
+    `(let ((,procedure
+             (,creator ,(%native-identifier name)
+                       ',(mapcar #'%native-identifier args)
+                       ',(mapcar (lambda (p) (%native-type (second p))) parameters)
+                       ,source ',captures (list ,@forms)
+                       ,(when return-type (%native-type return-type)))))
+       (defun ,name ,args (cl:funcall ,procedure ,@args)))))

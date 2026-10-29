@@ -114,3 +114,101 @@ fun product(): Int = runBlocking {
     a.await() * b.await()
 }")
                          "product"))))
+
+;;; Typed native definitions use this file's private source readtable.
+(defun-kotlin native_add ((a :int) (b :int))
+  a + b)
+
+(defun-kotlin native_greet ((name :string))
+  name.uppercase())
+
+(defun-kotlin native_factorial ((n :int)) :returns :int
+  if (n < 2) 1 else n * native_factorial(n - 1))
+
+(defun-kotlin native_zero ()
+  42)
+
+(defun-kotlin native_literal ()
+  "a ) } // /* \$literal")
+
+(test native-definitions
+  (is (= 7 (native_add 3 4)))
+  (is (= 42 (funcall #'native_add 20 22)))
+  (is (equal '(2 3 4) (mapcar (lambda (n) (native_add n 1)) '(1 2 3))))
+  (is (string= "HELLO" (native_greet "hello")))
+  (is (= 120 (native_factorial 5)))
+  (is (= 42 (native_zero)))
+  (is (string= "a ) } // /* $literal" (native_literal)))
+  (signals program-error (funcall #'native_add 1)))
+
+(test native-capture-once
+  (let ((factor 3))
+    (defun-kotlin native_times ((n :int))
+      n * $factor)
+    (setf factor 9)
+    (is (= 21 (native_times 7)))))
+
+(test native-compile-once
+  (let* ((original (symbol-function 'kotlin:compile))
+         (count 0)
+         (*package* (find-package :openldk-kotlin-tests))
+         (*readtable* (openldk.interop:enable-source-syntax (copy-readtable nil))))
+    (unwind-protect
+         (progn
+           (setf (symbol-function 'kotlin:compile)
+                 (lambda (&rest args) (incf count) (apply original args)))
+           (eval (read-from-string "(defun-kotlin native_once ((n :int)) n + 1)"))
+           (is (= 1 count))
+           (is (= 5 (native_once 4)))
+           (is (= 6 (native_once 5)))
+           (is (= 1 count)))
+      (setf (symbol-function 'kotlin:compile) original))))
+
+(test native-type-conversions
+  (defun-kotlin native_long ((n :long)) n + 1L)
+  (defun-kotlin native_double ((n :double)) n * 2.0)
+  (defun-kotlin native_boolean ((flag :boolean)) !flag)
+  (defun-kotlin native_list ((xs "List<Int>")) xs.sum())
+  (is (= 10000000001 (native_long 10000000000)))
+  (is (= 5.0d0 (native_double 2.5d0)))
+  (is (= 4.0d0 (native_double 2)))
+  (is (= 2 (native_long 1)))
+  (is (null (native_boolean t)))
+  (is (eq t (native_boolean :false)))
+  (is (eq t (native_boolean nil)))
+  (is (= 6 (native_list '(1 2 3)))))
+
+(test native-compile-file
+  (let* ((source (merge-pathnames (format nil "openldk-kotlin-definition-~A.lisp" (gensym))
+                                 (uiop:temporary-directory)))
+         (fasl (compile-file-pathname source))
+         (calls 0)
+         (original (symbol-function 'kotlin:compile)))
+    (unwind-protect
+         (progn
+           (with-open-file (out source :direction :output :if-exists :supersede)
+             (format out "(in-package :openldk-kotlin-tests)~%(eval-when (:compile-toplevel :load-toplevel :execute) (setf *readtable* (kotlin:enable-syntax (copy-readtable))))~%(defun-kotlin native_fasl ((x :int)) x + 1)~%"))
+           (setf (symbol-function 'kotlin:compile)
+                 (lambda (&rest args) (incf calls) (apply original args)))
+           (is (not (nth-value 2 (compile-file source))))
+           (is (= 0 calls))
+           (let ((*readtable* (copy-readtable nil))) (load fasl))
+           (is (= 1 calls))
+           (is (= 42 (funcall 'native_fasl 41)))
+           (is (= 1 calls)))
+      (setf (symbol-function 'kotlin:compile) original)
+      (when (fboundp 'native_fasl) (fmakunbound 'native_fasl))
+      (dolist (path (list source fasl)) (when (probe-file path) (delete-file path))))))
+
+(test native-captured-recursion
+  (let ((factor 2))
+    (defun-kotlin native_recursive_capture ((n :int)) :returns :int
+      if (n < 1) $factor else n * native_recursive_capture(n - 1))
+    (is (= 48 (native_recursive_capture 4)))))
+
+(test native-captures-converted-once
+  (let ((xs (list 1 2 3)))
+    (defun-kotlin native_captured_list ()
+      $xs.size)
+    (setf (cdr xs) nil)
+    (is (= 3 (native_captured_list)))))
