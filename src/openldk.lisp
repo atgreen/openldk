@@ -3125,5 +3125,6 @@ supplies additional system properties as (name . value) pairs."
   (%preload-lambda-interfaces "finalizing")
   (%adopt-native-short-methods)
   (%adopt-standard-java-gfs)
+  (%initialize-array-allocation-error)
   (setf *debug-load* nil)
   (setf *debug-compile* nil))

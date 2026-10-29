@@ -446,8 +446,7 @@ PASS: gcj/negzero.java execution test
 PASS: gcj/nested_with_ctor.java (test for excess errors)
 PASS: gcj/nested_with_ctor.java execution test
 PASS: gcj/newarray_overflow.java (test for excess errors)
-WARNING: program timed out
-XFAIL: gcj/newarray_overflow.java execution test
+PASS: gcj/newarray_overflow.java execution test
 PASS: gcj/override.java (test for excess errors)
 PASS: gcj/override.java execution test
 PASS: gcj/pr109.java (test for excess errors)

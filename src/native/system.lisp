@@ -1675,9 +1675,9 @@ present.  Consumed by Thread.getState()/start()/getThreadGroup()."
               components))
       (labels ((allocate (types sizes)
                  (if (cdr sizes)
-                     (make-java-array :component-class (car types) :size (car sizes)
-                                      :initial-contents (loop repeat (car sizes)
-                                                              collect (allocate (cdr types) (cdr sizes))))
+                     (let ((array (make-java-array :component-class (car types) :size (car sizes))))
+                       (dotimes (index (car sizes) array)
+                         (setf (jaref array index) (allocate (cdr types) (cdr sizes)))))
                      (make-java-array :component-class (car types) :size (car sizes)))))
         (allocate components dimensions)))))
 

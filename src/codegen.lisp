@@ -2208,17 +2208,15 @@ type."
              (component-name (subseq type-name 1))
              (rest-dims (cdr dimensions)))
         ;; Check for negative array size
-        (when (< size 0)
+        (when (some #'minusp dimensions)
           (let ((exc (%make-java-instance "java/lang/NegativeArraySizeException")))
             (|<init>()V| exc)
             (error (%lisp-condition exc))))
         (let ((component-class (%bin-type-name-to-class component-name)))
           (if rest-dims
-              (make-java-array :size size
-                               :component-class component-class
-                               :initial-contents
-                               (loop repeat size
-                                     collect (%make-multi-array component-name rest-dims)))
+              (let ((array (make-java-array :size size :component-class component-class)))
+                (dotimes (index size array)
+                  (setf (jaref array index) (%make-multi-array component-name rest-dims))))
               (make-java-array :size size
                                :component-class component-class
                                :initial-element (%multi-array-leaf-default component-name)))))))

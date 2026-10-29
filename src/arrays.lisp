@@ -125,6 +125,116 @@ element width as Java's narrowing stores do."
   "Lisp string of the UTF-16 code units (or characters) in char[] DATA."
   (map 'string (lambda (c) (if (characterp c) c (code-char c))) data))
 
+(defvar *array-allocation-error* nil
+  "Preconstructed Java OutOfMemoryError condition, installed after bootstrap.")
+
+(defvar *array-allocation-lock* (bt:make-recursive-lock "Java array allocation"))
+
+(defvar *array-allocation-headroom* (* 16 1024 1024)
+  "Leave space for exception handling, JIT compilation and Lisp runtime bookkeeping.")
+
+(defparameter *array-element-layouts*
+  (let ((layouts (make-hash-table :test #'equal)))
+    (loop for layout across sb-vm:*specialized-array-element-type-properties*
+          do (setf (gethash (sb-vm:saetp-specifier layout) layouts)
+                   (cons (sb-vm:saetp-n-bits layout) (sb-vm:saetp-n-pad-elements layout))))
+    layouts))
+
+(defparameter *array-wrapper-bytes* (sb-ext:primitive-object-size (make-java-array-default)))
+
+(defun %array-storage-bytes (size element-type)
+  "Actual SBCL backing-vector size, including padding, header and allocation alignment."
+  (let* ((layout (or (gethash element-type *array-element-layouts*)
+                     (gethash (upgraded-array-element-type element-type) *array-element-layouts*)))
+         (payload (ceiling (* (+ size (cdr layout)) (car layout)) 8))
+         (bytes (+ (* sb-vm:vector-data-offset sb-vm:n-word-bytes) payload)))
+    (logand (+ bytes sb-vm:lowtag-mask) (lognot sb-vm:lowtag-mask))))
+
+(defun %initialize-array-allocation-error ()
+  "Prepare an allocation-free emergency throw before running application code."
+  (let ((throwable (%make-throwable '|java/lang/OutOfMemoryError| "Java heap space")))
+    ;; Disable writable traces and suppression on this reusable emergency error.
+    ;; Neither signaling it nor filling its trace should allocate at exhaustion.
+    (dolist (slot '(|backtrace| |stackTrace| |suppressedExceptions| |cause|))
+      (setf (slot-value throwable slot) nil))
+    (setf (slot-value throwable '|depth|) 0
+          *array-allocation-error* (%lisp-condition throwable))))
+
+(defun %array-allocation-available (limit requested)
+  "Free page capacity after reserving room to copy ordinary-generation objects."
+  (let* ((high-water (sb-alien:extern-alien "next_free_page" sb-kernel::page-index-t))
+         (upper-usage (* high-water sb-vm:gencgc-page-bytes)))
+    (if (<= requested (- limit (* 2 upper-usage)))
+        ;; Even if every occupied page must move, both copies fit. Avoid a
+        ;; page-table walk on allocations far from the collection boundary.
+        (- limit (* 2 upper-usage))
+        (sb-sys:without-gcing
+          ;; Read slots directly: retaining an intermediate alien struct
+          ;; would allocate a Lisp wrapper per page during this scan.
+          (let ((occupied 0)
+                (movable 0))
+            (loop for index below
+                    (sb-alien:extern-alien "next_free_page" sb-kernel::page-index-t)
+                  for flags = (sb-alien:slot (sb-alien:deref sb-vm:page-table index)
+                                             'sb-vm::flags)
+                  unless (zerop flags)
+                    do (incf occupied)
+                       ;; GENCGC promotes large single-object pages in place.
+                       ;; Count partial single-object pages conservatively:
+                       ;; small objects on such pages can still be copied.
+                       ;; SINGLE_OBJECT_FLAG is 16 in SBCL's gencgc-impl.h.
+                       (when (and (<= (sb-alien:slot (sb-alien:deref sb-vm:page-table index)
+                                                    'sb-vm::gen)
+                                      sb-vm:+highest-normal-generation+)
+                                  (or (not (logtest 16 flags))
+                                      (< (ash (sb-alien:slot (sb-alien:deref sb-vm:page-table index)
+                                                           'sb-vm::words-used*) -1)
+                                         (/ sb-vm:gencgc-page-bytes sb-vm:n-word-bytes))))
+                         (incf movable)))
+            (- limit (* (+ occupied movable) sb-vm:gencgc-page-bytes)))))))
+
+(defun %collect-java-heap ()
+  "Reclaim ordinary generations before the saved-image mark pass needs tail space."
+  (bt:with-recursive-lock-held (*array-allocation-lock*)
+    (sb-ext:gc :gen sb-vm:+highest-normal-generation+)
+    ;; Generation 7 allocates its work queue beyond NEXT_FREE_PAGE, ignoring
+    ;; free holes below it. At a high water mark near the end it cannot run.
+    (when (<= (* (sb-alien:extern-alien "next_free_page" sb-kernel::page-index-t)
+                 sb-vm:gencgc-page-bytes)
+              (- (sb-ext:dynamic-space-size) *array-allocation-headroom*))
+      (sb-ext:gc :gen 7)
+      ;; The mark pass breaks dead core-backed chains; ordinary collection
+      ;; then makes their newly unreachable arrays available to the allocator.
+      (sb-ext:gc :gen sb-vm:+highest-normal-generation+))))
+
+(defun %check-array-allocation (size element-type)
+  "Reject impossible requests and collect before rejecting a crowded heap."
+  (when *array-allocation-error*
+    (let* ((bytes (* (+ (ceiling (%array-storage-bytes size element-type) sb-vm:gencgc-page-bytes)
+                        (ceiling *array-wrapper-bytes* sb-vm:gencgc-page-bytes))
+                     sb-vm:gencgc-page-bytes))
+           (limit (- (sb-ext:dynamic-space-size)
+                     (min *array-allocation-headroom* (ash (sb-ext:dynamic-space-size) -3)))))
+      (when (> bytes limit) (error *array-allocation-error*))
+      (when (> bytes (%array-allocation-available limit bytes))
+        (%collect-java-heap)
+        (when (> bytes (%array-allocation-available limit bytes))
+          (error *array-allocation-error*))))))
+
+(defmacro with-array-allocation-recovery (&body body)
+  "Translate recoverable SBCL exhaustion using the preconstructed Java condition."
+  (let ((escape (gensym "ALLOCATION")))
+    `(multiple-value-bind (result exhausted)
+         (block ,escape
+           (handler-bind ((sb-kernel::heap-exhausted-error
+                            (lambda (condition)
+                              (declare (ignore condition))
+                              (when *array-allocation-error*
+                                ;; Unwind the allocator before signaling Java.
+                                (return-from ,escape (values nil t))))))
+             (values (progn ,@body) nil)))
+       (if exhausted (error *array-allocation-error*) result))))
+
 (defun make-java-array (&key component-class (size 0) initial-element initial-contents
                           (element-type (%component-element-type component-class)))
   "Construct a Java-style array wrapper with COMPONENT-CLASS and DATA built
@@ -136,22 +246,27 @@ element type of DATA, defaults from COMPONENT-CLASS."
     (let ((exc (%make-java-instance "java/lang/NegativeArraySizeException")))
       (|<init>()V| exc)
       (error (%lisp-condition exc))))
-  (let ((initial-element (if (eq element-type t)
-                             initial-element
-                             (%array-value element-type (or initial-element 0)))))
-    (make-java-array-default
-     :component-class component-class
-     :data (cond
-             ((or (null initial-contents) (zerop (length initial-contents)))
-              (make-array size :element-type element-type :initial-element initial-element))
-             ((eq element-type t)
-              (make-array (length initial-contents) :initial-contents initial-contents))
-             ((typep initial-contents `(simple-array ,element-type (*)))
-              (copy-seq initial-contents))
-             (t
-              (map-into (make-array (length initial-contents) :element-type element-type)
-                        (lambda (v) (%array-value element-type v))
-                        initial-contents))))))
+  (with-array-allocation-recovery
+    (bt:with-recursive-lock-held (*array-allocation-lock*)
+      (%check-array-allocation (if (and initial-contents (plusp (length initial-contents)))
+                                  (length initial-contents) size)
+                              element-type)
+      (let ((initial-element (if (eq element-type t)
+                                 initial-element
+                                 (%array-value element-type (or initial-element 0)))))
+        (make-java-array-default
+         :component-class component-class
+         :data (cond
+                 ((or (null initial-contents) (zerop (length initial-contents)))
+                  (make-array size :element-type element-type :initial-element initial-element))
+                 ((eq element-type t)
+                  (make-array (length initial-contents) :initial-contents initial-contents))
+                 ((typep initial-contents `(simple-array ,element-type (*)))
+                  (copy-seq initial-contents))
+                 (t
+                  (map-into (make-array (length initial-contents) :element-type element-type)
+                            (lambda (v) (%array-value element-type v))
+                            initial-contents))))))))
 
 (defun %array-component-class (array)
   "Return ARRAY's component class as a |java/lang/Class| object, healing

@@ -669,6 +669,7 @@ Java code (warmups)."
   (setf *identity-hash-counter-lock* (bt:make-lock "identity-hash-lock"))
   (setf *cas-lock* (bt:make-recursive-lock "unsafe-cas"))
   (setf *java-memory-lock* (bt:make-recursive-lock "Java ordered memory"))
+  (setf *array-allocation-lock* (bt:make-recursive-lock "Java array allocation"))
   (setf *loader-constraint-lock* (bt:make-recursive-lock "Java loader constraints"))
   (setf *java-loader-map-lock* (bt:make-recursive-lock "Java loader identities"))
   (setf *native-allocation-lock* (bt:make-lock "Native allocations"))

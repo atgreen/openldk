@@ -502,9 +502,7 @@ name is recorded in the Java thread already, so there is nothing to do."
   (sb-ext:dynamic-space-size))
 
 (defmethod |gc()V| ((rt |java/lang/Runtime|))
-  ;; Generation 7 also clears dead core-backed objects. A normal full GC can
-  ;; leave warm-image referents alive through otherwise dead core objects.
-  (sb-ext:gc :gen 7)
+  (%collect-java-heap)
   nil)
 
 ;; JDK 9+: Signal native methods — no-op stubs for Terminator.setup()

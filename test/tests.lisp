@@ -663,3 +663,30 @@ nothing behind when it refuses."
       (dolist (entry saved)
         (if (cdr entry) (setf (fdefinition (car entry)) (cdr entry))
             (fmakunbound (car entry)))))))
+
+(test array-allocation-storage-sizing
+  "Use actual SBCL vector sizes, including padding and alignment, for every backing type."
+  (dolist (type '(t (signed-byte 8) (unsigned-byte 16) (signed-byte 16)
+                  (signed-byte 32) (signed-byte 64) single-float double-float
+                  bit base-char character))
+    (dolist (size '(0 1 2 3 7 8 15 16 31 64 257))
+      (let ((vector (make-array size :element-type type)))
+        (is (= (sb-ext:primitive-object-size vector)
+               (openldk::%array-storage-bytes size type))))))
+  (is (> (openldk::%array-storage-bytes (ash 1 30) t) (ash 1 33))))
+
+(test array-allocation-error-unwinds-first
+  "Translate storage exhaustion after leaving the allocator, reusing the prepared condition."
+  (let* ((emergency (make-condition 'simple-error :format-control "emergency"))
+         (openldk::*array-allocation-error* emergency)
+         (cleaned nil)
+         (caught
+           (handler-case
+               (openldk::with-array-allocation-recovery
+                 (unwind-protect
+                      (error 'sb-kernel::heap-exhausted-error :available 0 :requested 1024)
+                   (setf cleaned t)))
+             (simple-error (condition)
+               (is (eql t cleaned))
+               condition))))
+    (is (eq emergency caught))))
