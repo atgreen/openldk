@@ -12,6 +12,7 @@ JDK = Path(os.environ['JAVA_HOME'])
 PROBES = {
     'LoaderConstraintProbe': (25,),
     'ArrayReflectionProbe': (25,),
+    'FieldTypeProbe': (25,),
     'LoaderLifetimeProbe': (25,),
     'LinkageProbe': (25,),
     'MemoryModelProbe': (25,),

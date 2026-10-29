@@ -250,18 +250,10 @@
                                                 ;; JDK 17: Field(Class, String, Class, int, boolean, int, String, byte[])
                                                 (|<init>(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;IZILjava/lang/String;[B)V|
                                                  f this (ijstring (name field))
-                                                 (let ((cn (slot-value field 'descriptor)))
-                                                   (if (eq (char cn 0) #\L)
-                                                       ;; Object types: strip L prefix and ; suffix, use lazy lookup
-                                                       ;; to avoid triggering class loading during image build.
-                                                       (let ((cn (subseq cn 1 (1- (length cn)))))
-                                                         (or (%get-java-class-by-bin-name cn t)
-                                                             (let ((njc (%make-java-instance "java/lang/Class")))
-                                                               (setf (slot-value njc '|name|) (ijstring (substitute #\. #\/ cn)))
-                                                               (setf (gethash (substitute #\. #\/ cn) *java-classes-by-fq-name*) njc)
-                                                               (setf (gethash cn *java-classes-by-bin-name*) njc))))
-                                                       ;; Primitives (I, J, Z, etc.) and arrays ([I, [Ljava/lang/String;, etc.)
-                                                       (%bin-type-name-to-class cn)))
+                                                 ;; Resolve the canonical Class without initializing it.
+                                                 ;; A name-only placeholder has no defining loader or
+                                                 ;; metadata, poisoning clients' reflection caches.
+                                                 (%bin-type-name-to-class (descriptor field))
                                                  (access-flags field)
                                                  nil  ; trustedFinal
                                                  0    ; slot
