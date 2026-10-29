@@ -483,9 +483,12 @@ return T.  Instance methods are installed as CLOS methods so other classes'
 methods on the same generic function survive."
   (when-let ((native-fn (gethash method-key *native-overrides*)))
     (let ((fn-symbol (intern (%method-fn-name class method)
-                             (%class-loader-package class))))
+                             (%class-loader-package class)))
+          (owned-p (%user-ldk-loader-p (ldk-loader class))))
       (if (static-p method)
-          (setf (symbol-function fn-symbol) native-fn)
+          (if owned-p
+              (%install-owned-java-function class fn-symbol native-fn (count-parameters (descriptor method)))
+              (setf (symbol-function fn-symbol) native-fn))
           (let* ((class-sym (intern (slot-value class 'name)
                                     (%class-specializer-package class)))
                  (n-params (progn
@@ -493,10 +496,12 @@ methods on the same generic function survive."
                              (count-parameters (slot-value method 'descriptor))))
                  (param-names (loop for i from 1 upto n-params
                                     collect (intern (format nil "arg~A" i) :openldk)))
-                 (this-sym (intern "this" :openldk)))
+                 (this-sym (intern "this" :openldk))
+                 (entry (and owned-p (intern (format nil "%jnative:~A" method-key) (%class-loader-package class)))))
+            (when entry (%install-owned-java-function class entry native-fn (1+ n-params)))
             (%eval `(defmethod ,fn-symbol
                         ((,this-sym ,class-sym) ,@param-names)
-                      (funcall ,native-fn ,this-sym ,@param-names))))))
+                      (funcall ,(if entry `(function ,entry) native-fn) ,this-sym ,@param-names))))))
     (setf (gethash method-key *methods-being-compiled*) :done)
     t))
 
@@ -1391,6 +1396,22 @@ another exception; internal compiler failures continue to use Lisp errors."
   ;; in the loader's package instead (OPENLDK.APP for the classpath) put the
   ;; error stub on an unrelated generic function, so the lazy stub survived and
   ;; every call looped: %compile-method returns at once for a :done method.
+  (when (%user-ldk-loader-p (ldk-loader class))
+    (let* ((count (count-parameters (descriptor method)))
+           (arguments (loop repeat (+ count (if (static-p method) 0 1)) collect (gensym "ARG")))
+           (symbol (intern (%method-fn-name class method)
+                           (if (static-p method) (ldk-class-package class) :openldk)))
+           (implementation (if (static-p method) symbol
+                               (intern (format nil "%jerror:~A" method-key) (ldk-class-package class))))
+           (function (lambda (&rest values)
+                       (declare (ignore values))
+                       (if java-condition (error java-condition)
+                           (internal-error "JIT compilation failed for ~A" method-key)))))
+      (%install-owned-java-function class implementation function)
+      (unless (static-p method)
+        (%eval `(defmethod ,symbol ((,(first arguments) ,(intern (name class) (ldk-class-package class))) ,@(rest arguments))
+                  (,implementation ,@arguments)))))
+    (return-from %install-jit-error-stub nil))
   (let ((fn-symbol (intern (%method-fn-name class method)
                            (if (static-p method)
                                (%class-loader-package class)
@@ -1817,7 +1838,7 @@ shadows a superclass field and needs its own storage."
   (let ((mangled (mangle-field-name (slot-value field 'name))))
     (if (%field-shadows-super-p class field ldk-loader)
         (let ((sym (intern (format nil "~A$~A" mangled (slot-value class 'name)) :openldk)))
-          (setf (gethash (cons class (slot-value field 'name)) *field-shadow-slots*)
+          (setf (gethash (slot-value field 'name) (%owner-cache-table *field-shadow-slots* class))
                 sym)
           sym)
         (intern mangled :openldk))))
@@ -2197,7 +2218,7 @@ without running the compiler, since most methods are never called."
                                       collect (list '%ensure-class-initialized
                                                     k-ldk-class
                                                     (list 'function clinit-function))))))
-             (%eval icc)))
+             (%evaluate-java-definition class icc)))
 
          ;; Check if this is a Throwable subclass - find Throwable in its defining package
          (let ((throwable-symbol (intern "java/lang/Throwable" (class-package "java/lang/Throwable"))))

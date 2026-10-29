@@ -17,6 +17,7 @@ def main():
     parser.add_argument('--reference-only', action='store_true')
     parser.add_argument('--roots-only', action='store_true')
     parser.add_argument('--jni', action='store_true')
+    parser.add_argument('--verbose', action='store_true', help='report collection cases')
     parser.add_argument('--runtime', type=Path, default=ROOT / 'openldk')
     args = parser.parse_args()
     payload = BUILD / 'payload'
@@ -41,6 +42,8 @@ def main():
             command = [str(engine), '--enable-native-access=ALL-UNNAMED', '-cp', str(app), 'UnloadingJNIProbe', str(payload), str(library)]
         else:
             command = [str(engine), '-cp', str(app), 'UnloadingProbe', str(payload)]
+        if args.verbose:
+            command.insert(1, '-Dopenldk.unloading.verbose=true')
         if args.roots_only:
             command.append('roots-only')
         result = subprocess.run(command, env=environment, capture_output=True, text=True, timeout=240)

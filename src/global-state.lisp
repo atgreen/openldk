@@ -76,6 +76,9 @@
   (print-unreadable-object (loader out :type t)
     (format out "~A pkg=~A" (slot-value loader 'id) (slot-value loader 'pkg))))
 
+(defvar *ldk-loaders-by-id* (make-hash-table :weakness :value :synchronized t)
+  "Loader IDs identify constraints without retaining dead loader metadata.")
+
 (defvar *ldk-loaders-by-package* (make-hash-table :test #'eq :weakness :value :synchronized t)
   "Lisp package -> the <ldk-class-loader> whose classes are named in it.")
 
@@ -111,7 +114,8 @@
                                 :ldk-classes-by-fq-name (make-hash-table :test #'equal :synchronized t)
                                 :java-classes-by-bin-name (make-hash-table :test #'equal :synchronized t)
                                 :java-classes-by-fq-name (make-hash-table :test #'equal :synchronized t))))
-    (setf (gethash pkg *ldk-loaders-by-package*) loader)
+    (setf (gethash pkg *ldk-loaders-by-package*) loader
+          (gethash id *ldk-loaders-by-id*) loader)
     (when (fboundp '%register-loader-resources) (%register-loader-resources loader))
     loader))
 
@@ -373,6 +377,8 @@ loaders, whose classes are not in the global or app loader tables."
   "Default classpath string baked into an app image by dump-app-image.")
 
 ;; Map Java Thread objects to Lisp (bordeaux) threads
+(defvar *java-thread-registry-lock* (bt:make-recursive-lock "Java thread lifecycle"))
+
 (defvar *java-threads* (make-hash-table :test #'eq :synchronized t)
   "Hash table mapping Java Thread objects to bordeaux-threads.")
 
@@ -391,10 +397,10 @@ loaders, whose classes are not in the global or app loader tables."
 (defvar *vm-start-time-millis* nil)
 
 ;; Track interrupted status for each Thread (not a field in Java 8)
-(defvar *thread-interrupted* (make-hash-table :test #'eq :synchronized t)
+(defvar *thread-interrupted* (make-hash-table :test #'eq :weakness :key :synchronized t)
   "Hash table tracking interrupted status for each Java Thread object.")
 
-(defvar *java-thread-waits* (make-hash-table :test #'eq :synchronized t)
+(defvar *java-thread-waits* (make-hash-table :test #'eq :weakness :key :synchronized t)
   "Java Thread -> (monitor identity) while inside Object.wait.")
 (defvar *java-thread-sleeping* nil
   "Thread-local permission to deliver InterruptedException into native sleep.")
@@ -421,7 +427,7 @@ loaders, whose classes are not in the global or app loader tables."
 ;; this routinely); they are distinct fields resolved by declaring class.
 ;; Shadowing fields get a class-qualified CLOS slot; this table maps
 ;; (declaring <class> . field-name) -> that slot symbol, keeping loaders distinct.
-(defvar *field-shadow-slots* (make-hash-table :test #'equal :synchronized t))
+(defvar *field-shadow-slots* (make-hash-table :test #'eq :weakness :key :synchronized t))
 
 ;; Per-class-name locks for thread-safe class loading.
 ;; Maps class binary name (string) -> recursive lock.

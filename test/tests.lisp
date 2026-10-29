@@ -491,12 +491,20 @@ nothing behind when it refuses."
 (test floating-remainder-exact-reference
   (is (= 201058 (openldk::%check-remainder-functions))))
 
-(defun %owned-entry-probe (function &optional keep-owner)
+(defun %owned-entry-probe (function &optional keep-owner native-p)
   "A loader-owned function graph with no Java runtime needed."
   (let* ((loader (openldk::make-ldk-class-loader))
          (class (make-instance 'openldk::<class> :name "OwnershipProbe" :ldk-loader loader))
          (symbol (gensym "OWNED-ENTRY")))
-    (openldk::%install-owned-java-function class symbol function 0)
+    (if native-p
+        (let* ((key "OwnershipProbe.entry()I")
+               (method (make-instance 'openldk::<method> :name "entry" :descriptor "()I" :access-flags #x109))
+               (openldk::*native-overrides* (make-hash-table :test #'equal))
+               (openldk::*methods-being-compiled* (make-hash-table :test #'equal)))
+          (setf symbol (intern key (openldk::loader-package loader))
+                (gethash key openldk::*native-overrides*) function)
+          (openldk::%install-native-override class method key))
+        (openldk::%install-owned-java-function class symbol function 0))
     (sb-sys:with-pinned-objects (class)
       (values (sb-ext:make-weak-pointer class) (fdefinition symbol)
               (when keep-owner (vector class))))))
@@ -507,38 +515,99 @@ nothing behind when it refuses."
   (not (null (sb-ext:weak-pointer-value reference))))
 
 (test owned-method-entry-does-not-root-class
-  (multiple-value-bind (reference function) (%owned-entry-probe (lambda () 42))
-    ;; Keeping the process entry point itself must not keep a class alive.
-    (dotimes (i 3) (sb-ext:gc :full t))
-    (is (not (%ownership-probe-live-p reference)))
-    (is (functionp function))))
+  (dolist (native-p '(nil t))
+    (multiple-value-bind (reference function) (%owned-entry-probe (lambda () 42) nil native-p)
+      ;; Keeping the process entry point itself must not keep a class alive.
+      (dotimes (i 3) (sb-ext:gc :full t))
+      (is (not (%ownership-probe-live-p reference)))
+      (is (functionp function)))))
 
 (test executing-owned-method-retains-class
-  (let ((lock (sb-thread:make-mutex))
-        (condition (sb-thread:make-waitqueue))
-        (entered nil) (release nil))
-    (multiple-value-bind (reference function keeper)
-        (%owned-entry-probe
-         (lambda ()
-           (sb-thread:with-mutex (lock)
-             (setf entered t)
-             (sb-thread:condition-notify condition)
-             (loop until release do (sb-thread:condition-wait condition lock)))
-           42) t)
-      (let ((worker (sb-thread:make-thread function)))
-        (unwind-protect
-             (progn
-               (sb-thread:with-mutex (lock)
-                 (loop until entered
-                       do (unless (sb-thread:condition-wait condition lock :timeout 15)
-                            (unless entered (error "Owned method did not enter")))))
-               (setf (aref keeper 0) nil)
-               (dotimes (i 3) (sb-ext:gc :full t))
-               (is (%ownership-probe-live-p reference)))
-          (setf (aref keeper 0) nil)
-          (sb-thread:with-mutex (lock)
-            (setf release t)
-            (sb-thread:condition-notify condition)))
-        (is (= 42 (sb-thread:join-thread worker))))
+  (dolist (native-p '(nil t))
+    (let ((lock (sb-thread:make-mutex))
+          (condition (sb-thread:make-waitqueue))
+          (entered nil) (release nil))
+      (multiple-value-bind (reference function keeper)
+          (%owned-entry-probe
+           (lambda ()
+             (sb-thread:with-mutex (lock)
+               (setf entered t)
+               (sb-thread:condition-notify condition)
+               (loop until release do (sb-thread:condition-wait condition lock)))
+             42) t native-p)
+        (let ((worker (sb-thread:make-thread function)))
+          (unwind-protect
+               (progn
+                 (sb-thread:with-mutex (lock)
+                   (loop until entered
+                         do (unless (sb-thread:condition-wait condition lock :timeout 15)
+                              (unless entered (error "Owned method did not enter")))))
+                 (setf (aref keeper 0) nil)
+                 (dotimes (i 3) (sb-ext:gc :full t))
+                 (is (%ownership-probe-live-p reference)))
+            (setf (aref keeper 0) nil)
+            (sb-thread:with-mutex (lock)
+              (setf release t)
+              (sb-thread:condition-notify condition)))
+          (is (= 42 (sb-thread:join-thread worker))))
+        (dotimes (i 3) (sb-ext:gc :full t))
+        (is (not (%ownership-probe-live-p reference)))))))
+
+(declaim (notinline %monitor-cache-retention-probe))
+(defun %monitor-cache-retention-probe ()
+  "Return only weak references and a lookup result, without retaining test objects."
+  (let* ((object (list :monitor-owner))
+         (monitor (openldk::%get-monitor object)))
+    (values (sb-ext:make-weak-pointer object) (sb-ext:make-weak-pointer monitor)
+            (eq monitor (openldk::%get-monitor object)))))
+
+(test monitor-shortcut-does-not-root-object
+  ;; Keep the cache global, but discard the allocating thread's stack before GC.
+  ;; A conservative stack slot must not be mistaken for a cache-owned root.
+  (let ((worker (sb-thread:make-thread #'%monitor-cache-retention-probe)))
+    (multiple-value-bind (object monitor same) (sb-thread:join-thread worker)
+      (is (eql t same))
       (dotimes (i 3) (sb-ext:gc :full t))
-      (is (not (%ownership-probe-live-p reference))))))
+      (is (not (%ownership-probe-live-p object)))
+      (is (not (%ownership-probe-live-p monitor))))))
+
+(declaim (notinline %loader-cleanup-probe))
+(defun %loader-cleanup-probe ()
+  "Return observable cleanup results and a weak class reference, without its stack."
+  (let* ((package (make-package (symbol-name (gensym "UNLOADING-PROBE-")) :use '(:cl)))
+         (class-name (intern "Probe" package))
+         (function-name (intern "entry" package))
+         (generic-name (gensym "SHARED-DISPATCH-"))
+         (openldk::*unloaded-java-class-count* 0)
+         (openldk::*condition-table* (make-hash-table))
+         (resources (openldk::make-loader-resources :id -1 :package package
+                      :classes (list class-name) :functions (list function-name))))
+    (unwind-protect
+         (progn
+           (eval `(defclass ,class-name () ()))
+           (eval `(defmethod ,generic-name ((object ,class-name)) (declare (ignore object)) 42))
+           (setf (fdefinition function-name) (lambda () 42))
+           (let ((class (find-class class-name)))
+             (setf (gethash class openldk::*condition-table*) :condition)
+             (openldk::%cleanup-loader-resources resources)
+             (values (sb-ext:make-weak-pointer class)
+                     (list (cons :function-unbound (not (fboundp function-name)))
+                           (cons :class-unbound (null (find-class class-name nil)))
+                           (cons :class-unlinked
+                                 (notany (lambda (parent) (member class (sb-mop:class-direct-subclasses parent)))
+                                         (sb-mop:class-direct-superclasses class)))
+                           (cons :shared-dispatch-retained (not (null (fboundp generic-name))))
+                           (cons :methods-removed (null (sb-mop:generic-function-methods (fdefinition generic-name))))
+                           (cons :condition-removed (null (gethash class openldk::*condition-table*)))
+                           (cons :package-deleted (null (package-name package)))
+                           (cons :unloaded-count (= 1 openldk::*unloaded-java-class-count*))))))
+      (when (fboundp generic-name) (fmakunbound generic-name))
+      (when (fboundp function-name) (fmakunbound function-name))
+      (when (package-name package) (openldk::%cleanup-loader-resources resources)))))
+
+(test loader-cleanup-removes-runtime-definitions
+  (let ((worker (sb-thread:make-thread #'%loader-cleanup-probe)))
+    (multiple-value-bind (class checks) (sb-thread:join-thread worker)
+      (dolist (check checks) (is (eql t (cdr check)) "Cleanup failed: ~A" (car check)))
+      (dotimes (i 3) (sb-ext:gc :full t))
+      (is (not (%ownership-probe-live-p class))))))

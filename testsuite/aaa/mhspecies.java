@@ -32,6 +32,10 @@ public class mhspecies
         VarHandle vh = L.findStaticVarHandle(mhspecies.class, "counter", int.class);
         vh.getAndAdd(5);
         vh.compareAndSet(5, 7);
+        vh.set(Integer.MAX_VALUE);
+        vh.getAndAdd(1);
+        if (counter != Integer.MIN_VALUE) throw new AssertionError("field VarHandle integer overflow");
+        vh.compareAndSet(Integer.MIN_VALUE, 7);
         sb.append(counter);
         String result = sb.toString();
         System.out.println("abcdefg 42 6.0 1/2.5/3/z 42 7".equals(result) ? "OK" : "FAIL: " + result);

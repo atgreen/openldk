@@ -1603,7 +1603,7 @@ JVMS 5.4.6 selects that method independently of the receiver's class."
                                                    ,@(mapcar (lambda (a) (code (codegen a context))) (cdr args)))))))
                            call))))
 
-(defparameter *invokedynamic-cache* (make-hash-table :test #'equal))
+(defparameter *invokedynamic-cache* (make-hash-table :test #'eq :weakness :key))
 
 (defun %call-bootstrap-method (bootstrap-method-name caller name args)
   "Call the bootstrap method BOOTSTRAP-METHOD-NAME (the full
@@ -1653,7 +1653,7 @@ SITE-KEY identifies the call site; CALLER is the binary name of its class."
       (setf (gethash site-key *invokedynamic-cache*)
             (%call-bootstrap-method bootstrap-method-name caller fname args))))
 
-(defvar *constant-dynamic-cache* (make-hash-table :test #'equal :synchronized t)
+(defvar *constant-dynamic-cache* (make-hash-table :test #'eq :weakness :key :synchronized t)
   "(defining Java Class . constant pool index) -> (:value . value) or (:error . throwable).")
 
 (defvar *constant-dynamic-lock* (bordeaux-threads:make-lock "constant-dynamic-publication"))
@@ -1662,9 +1662,9 @@ SITE-KEY identifies the call site; CALLER is the binary name of its class."
   "Resolve one CONSTANT_Dynamic, shared by every instruction using its pool entry.
 Bootstrap execution may race, as allowed by JVMS 5.4.3.6; publish one outcome.
 Never hold the publication lock while executing arbitrary Java bootstrap code."
-  (let* ((key (cons caller index))
+  (let* ((table (%owner-cache-table *constant-dynamic-cache* caller 'eql))
          (outcome
-           (or (gethash key *constant-dynamic-cache*)
+           (or (gethash index table)
                (let* ((*descriptor-loader* (%class-java-loader caller))
                       (computed
                         (handler-case
@@ -1682,8 +1682,8 @@ Never hold the publication lock while executing arbitrary Java bootstrap code."
                                   (setf throwable wrapper)))
                               (cons :error throwable))))))
                  (bordeaux-threads:with-lock-held (*constant-dynamic-lock*)
-                   (or (gethash key *constant-dynamic-cache*)
-                       (setf (gethash key *constant-dynamic-cache*) computed)))))))
+                   (or (gethash index table)
+                       (setf (gethash index table) computed)))))))
     (if (eql (car outcome) :error)
         (error (%lisp-condition (cdr outcome)))
         (cdr outcome))))
@@ -2093,7 +2093,7 @@ boolean prints true/false and char prints the character rather than an int."
                         `(let ((callsite (%resolve-invokedynamic ,method-name
                                                                  ,bootstrap-method-name
                                                                  ',(gensym "INDY-SITE")
-                                                                 ,(slot-value (slot-value context 'class) 'name)
+                                                                 ,(java-class (slot-value context 'class))
                                                                  ,(jstring method-name)
                                                                  ,@(remove nil (mapcar (lambda (a)
                                                                                         (when a (code (codegen a context))))
@@ -2287,7 +2287,7 @@ own class-qualified slot recorded in *FIELD-SHADOW-SLOTS*."
           while current
           do (%note-class-dependency (name current))
           when (find member-name (fields current) :key #'name :test #'string=)
-            return (or (gethash (cons current member-name) *field-shadow-slots*) plain)
+            return (or (gethash member-name (%owner-cache-table *field-shadow-slots* current)) plain)
           finally (return plain))))
 
 (defun %volatile-field-p (ref-class member-name)

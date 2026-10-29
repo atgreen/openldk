@@ -241,26 +241,33 @@ arrays. Resolving an array never initializes its component class."
 no class file (openldk/LambdaSupplier, a dynamic lambda class): a public
 final synthetic subclass of Object implementing the Java interfaces among
 its superclasses, made and registered on first use; or NIL for any other."
-  (let ((cname (and (symbolp class-symbol) (symbol-name class-symbol))))
-    (when (and cname (eq (symbol-package class-symbol) (find-package :openldk))
+  (let* ((cname (and (symbolp class-symbol) (symbol-name class-symbol)))
+         (loader (and cname (or (%ldk-loader-for-symbol class-symbol) *boot-ldk-class-loader*))))
+    (when (and cname (or (eq (symbol-package class-symbol) (find-package :openldk)) (%user-ldk-loader-p loader))
                (starts-with? "openldk/" cname)
                (find-class class-symbol nil))
-      (or (gethash cname *java-classes-by-bin-name*)
+      (or (gethash cname (slot-value loader 'java-classes-by-bin-name))
           (let* ((fq-name (substitute #\. #\/ cname))
                  (jclass (%make-java-instance "java/lang/Class"))
                  (lclass (make-instance '<class>))
                  (interfaces
                    (loop for super in (closer-mop:class-direct-superclasses (find-class class-symbol))
                          for super-name = (symbol-name (class-name super))
-                         for super-lclass = (gethash super-name *ldk-classes-by-bin-name*)
+                         for super-lclass = (%get-ldk-class-by-bin-name super-name t loader)
                          when (and super-lclass (logtest #x200 (or (access-flags super-lclass) 0)))
                            collect super-name)))
             (setf (slot-value jclass '|name|) (ijstring fq-name))
+            (when (%user-ldk-loader-p loader)
+              (setf (slot-value jclass *java-loader-owner-slot*) loader
+                    (slot-value jclass '|classLoader|) (java-loader loader)))
             (when (slot-exists-p jclass '|modifiers|)
               (setf (slot-value jclass '|modifiers|) #x1011))
             (when (and *unnamed-module* (slot-exists-p jclass '|module|))
-              (setf (slot-value jclass '|module|) *unnamed-module*))
+              (setf (slot-value jclass '|module|)
+                    (if (%user-ldk-loader-p loader)
+                        (%defining-class-module cname loader (java-loader loader)) *unnamed-module*)))
             (setf (name lclass) cname
+                  (ldk-loader lclass) loader
                   (super lclass) "java/lang/Object"
                   (interfaces lclass) (coerce interfaces 'vector)
                   (access-flags lclass) #x1011
@@ -270,6 +277,10 @@ its superclasses, made and registered on first use; or NIL for any other."
                   (attributes lclass) (make-hash-table :test #'equal)
                   (initialized-p lclass) t
                   (java-class lclass) jclass)
+            (setf (gethash fq-name (slot-value loader 'ldk-classes-by-fq-name)) lclass
+                  (gethash cname (slot-value loader 'ldk-classes-by-bin-name)) lclass
+                  (gethash fq-name (slot-value loader 'java-classes-by-fq-name)) jclass
+                  (gethash cname (slot-value loader 'java-classes-by-bin-name)) jclass)
             (setf (gethash fq-name *ldk-classes-by-fq-name*) lclass
                   (gethash cname *ldk-classes-by-bin-name*) lclass
                   (gethash fq-name *java-classes-by-fq-name*) jclass

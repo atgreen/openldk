@@ -23,6 +23,10 @@ static void release_pin(JNIEnv *env, jclass type) {
 JNIEXPORT jint JNICALL Java_payload_UnloadingNative_version(JNIEnv *env, jclass type) {
     (void)env; (void)type; return 25;
 }
+JNIEXPORT jint JNICALL Java_payload_UnloadingNative_cachedVersion(JNIEnv *env, jclass type) {
+    if (!(*env)->GetStaticObjectField(env, type, cached_field)) return -1;
+    return (*env)->CallStaticIntMethod(env, type, cached_method);
+}
 JNIEXPORT void JNICALL Java_payload_UnloadingNative_pin(JNIEnv *env, jclass type) {
     pinned = (*env)->NewGlobalRef(env, type);
 }
@@ -43,6 +47,8 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
     cached_field = (*env)->GetStaticFieldID(env, type, "self", "Ljava/lang/Object;");
     JNINativeMethod method = {"releasePin", "()V", (void *)release_pin};
     if (!cached_method || !cached_field || (*env)->RegisterNatives(env, helper, &method, 1) != JNI_OK) return JNI_ERR;
+    if (!(*env)->GetStaticObjectField(env, type, cached_field)
+        || (*env)->ExceptionCheck(env)) return JNI_ERR;
     event("L\n");
     return JNI_VERSION_1_8;
 }
@@ -52,7 +58,14 @@ JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *vm, void *reserved) {
     if ((*vm)->GetEnv(vm, (void **)&env, JNI_VERSION_1_8) != JNI_OK) { event("BAD_ENV\n"); return; }
     if (pinned) event("BAD_PIN\n");
     if ((*env)->NewLocalRef(env, weak_type)) event("BAD_WEAK\n");
-    jclass helper = (*env)->NewLocalRef(env, weak_helper);
+    /* OnUnload FindClass must use the system loader, not the dead owner. */
+    jclass helper = (*env)->FindClass(env, "UnloadingJNIProbe");
+    if (!helper || (*env)->ExceptionCheck(env)) {
+        event("BAD_FINDCLASS\n");
+        (*env)->ExceptionClear(env);
+    }
+    jclass expected = (*env)->NewLocalRef(env, weak_helper);
+    if (!(*env)->IsSameObject(env, helper, expected)) event("BAD_LOADER\n");
     if (helper) (*env)->UnregisterNatives(env, helper);
     (*env)->DeleteWeakGlobalRef(env, weak_type);
     (*env)->DeleteWeakGlobalRef(env, weak_helper);

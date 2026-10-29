@@ -8,7 +8,7 @@
 
 (defvar *module-access-ready* nil
   "True after runtime startup has constructed the boot module graph.")
-(defvar *defined-package-modules* (make-hash-table :test #'equal :synchronized t)
+(defvar *defined-package-modules* (make-hash-table :test #'eq :weakness :key :synchronized t)
   "(defining Java loader . slash package name) -> application named module.")
 
 (defvar *boot-module-layer-initializing* nil
@@ -32,7 +32,7 @@
 (defun %defining-class-module (name ldk-loader java-loader)
   "A runtime module, or the unnamed module owned by the defining Java loader."
   (or (when-let ((slash (position #\/ name :from-end t)))
-        (gethash (cons java-loader (subseq name 0 slash)) *defined-package-modules*)) ; lint:suppress use-serapeum-take
+        (gethash (subseq name 0 slash) (%owner-cache-table *defined-package-modules* java-loader))) ; lint:suppress use-serapeum-take
       (%runtime-class-module name ldk-loader)
       (and java-loader
            (slot-exists-p java-loader '|unnamedModule|)
@@ -44,8 +44,8 @@
   "Associate an application's named MODULE with its defining loader and packages."
   (let ((loader (slot-value module '|loader|)))
     (loop for package across (java-array-data packages)
-          do (setf (gethash (cons loader (substitute #\/ #\. (lstring package))) ; lint:suppress substitute-use
-                           *defined-package-modules*) module)))
+          do (setf (gethash (substitute #\/ #\. (lstring package)) ; lint:suppress substitute-use
+                           (%owner-cache-table *defined-package-modules* loader)) module)))
   nil)
 
 (defun %register-boot-module (module packages)
@@ -82,8 +82,8 @@
                     (setf (slot-value system '|bootLayer|)
                           (|jdk/internal/module/ModuleBootstrap.boot()Ljava/lang/ModuleLayer;|))))))))))
 
-(defvar *class-access-cache* (make-hash-table :test #'equal :synchronized t)
-  "(caller Class . referenced Class) -> :allowed or :denied symbolic resolution.")
+(defvar *class-access-cache* (make-hash-table :test #'eq :weakness :key :synchronized t)
+  "Weak caller Class -> weak referenced Class -> access resolution outcome.")
 (defvar *checking-class-access* nil
   "Access checking and boot graph construction are trusted runtime operations.")
 
@@ -107,10 +107,10 @@
 Graph updates affect fresh references, not a reference which already failed."
   (when (and *module-access-ready* (not *boot-module-layer-initializing*)
              (not *checking-class-access*) (not (eq caller target)))
-    (let* ((key (cons caller target))
-           (outcome (or (gethash key *class-access-cache*)
+    (let* ((table (%owner-cache-table *class-access-cache* caller 'eq :key))
+           (outcome (or (gethash target table)
                         (let ((*checking-class-access* t))
-                          (setf (gethash key *class-access-cache*)
+                          (setf (gethash target table)
                                 (if (eql 1 (|sun/invoke/util/VerifyAccess.isClassAccessible(Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Class;I)Z|
                                             target caller nil #x1f))
                                     :allowed :denied))))))

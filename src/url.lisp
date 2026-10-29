@@ -232,7 +232,7 @@ protocol field, or parse it out of the URL's string form."
   ()
   (:documentation "Stub for java.net.JarURLConnection; populated at runtime."))
 
-(defvar *connection-urls* (make-hash-table :test #'eq :synchronized t)
+(defvar *connection-urls* (make-hash-table :test #'eq :weakness :key :synchronized t)
   "Synthetic URLConnection -> its java.net.URL.")
 
 (defun %url-string-of (url)

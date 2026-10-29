@@ -200,9 +200,10 @@
 
 (defun %vh-field-value (vh value)
   "Narrow integer stores to the field's Java type, including atomic arithmetic."
-  (let* ((field (gethash (slot-value vh '|fieldOffset|) *field-offset-table*))
-         (type (and field (slot-value field '|type$|)))
-         (name (and type (lstring (slot-value type '|name|))))
+  ;; Offsets may name a reflective Field, MemberName, or synthetic field.
+  ;; The VarHandle already owns the authoritative variable type for all three.
+  (let* ((type (|varType()Ljava/lang/Class;| vh))
+         (name (lstring (slot-value type '|name|)))
          (bits (cond ((equal name "byte") 8) ((equal name "short") 16)
                      ((equal name "int") 32) ((equal name "long") 64))))
     (cond (bits (%signed-of-width (ldb (byte bits 0) value) bits))
@@ -263,7 +264,7 @@ op's value arguments (expected/new/delta as applicable)."
               (if implementation "Ljava/lang/invoke/VarHandle;Ljava/lang/Object;" "Ljava/nio/ByteBuffer;")
               arguments result))))
 
-(defun %vh-buffer-call (category vh args access-mode descriptor)
+(defun %vh-buffer-call (category vh args access-mode descriptor caller)
   "Preserve exact invocation checks and ordinary MethodHandle conversions."
   (let* ((name (%vh-classname vh))
          (expected (%vh-buffer-descriptor category name)))
@@ -274,7 +275,7 @@ op's value arguments (expected/new/delta as applicable)."
             (let* ((mode (|java/lang/invoke/VarHandle$AccessMode.valueFromMethodName(Ljava/lang/String;)Ljava/lang/invoke/VarHandle$AccessMode;|
                           (jstring access-mode)))
                    (handle (|toMethodHandle(Ljava/lang/invoke/VarHandle$AccessMode;)Ljava/lang/invoke/MethodHandle;| vh mode)))
-              (apply #'%invoke-generic handle descriptor args))))))
+              (apply #'%invoke-generic-at handle descriptor caller args))))))
 
 (defun %vh-buffer-view (category vh args access-mode name)
   "Execute a ByteBuffer view access with JDK 25 mode and alignment rules."
@@ -395,13 +396,13 @@ op's value arguments (expected/new/delta as applicable)."
     (dolist (op ops)
       (let ((cat category) (access-mode op))
         (setf (symbol-function (intern (format nil "%VARHANDLE-OP-~A" op) :openldk))
-              (lambda (vh descriptor &rest args)
+              (lambda (vh descriptor caller &rest args)
                 ;; The dispatcher otherwise erases the access mode to CATEGORY.
                 ;; Conservatively order plain modes too, preserving atomicity
                 ;; of byte-array views and interoperability with volatile fields.
                 (with-java-memory-ordering
                   (if (search "$ByteBufferHandle" (%vh-classname vh))
-                      (%vh-buffer-call cat vh args access-mode descriptor)
+                      (%vh-buffer-call cat vh args access-mode descriptor caller)
                       (%varhandle-invoke cat vh args access-mode)))))
         ;; MethodHandle adapters and VarHandle.toMethodHandle reach the
         ;; implementation's static entry points instead of the bytecode

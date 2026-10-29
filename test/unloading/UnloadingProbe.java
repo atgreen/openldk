@@ -35,11 +35,15 @@ public class UnloadingProbe {
         Object root = switch (kind) {
             case "loader" -> loader;
             case "class" -> type;
-            case "instance" -> type.getConstructor().newInstance();
+            case "instance", "monitor" -> type.getConstructor().newInstance();
             case "array" -> Array.newInstance(type, 3);
             case "method" -> type.getMethod("answer");
             case "handle" -> MethodHandles.publicLookup().findStatic(type, "answer", MethodType.methodType(int.class));
             case "varhandle" -> MethodHandles.publicLookup().findStaticVarHandle(type, "counter", int.class);
+            case "lambda" -> type.getMethod("supplier").invoke(null);
+            case "dynamicLambda" -> type.getMethod("serializableSupplier").invoke(null);
+            case "proxy" -> type.getMethod("proxy").invoke(null);
+            case "lambdaClass" -> type.getMethod("supplier").invoke(null).getClass();
             case "uninitialized" -> null;
             default -> throw new AssertionError(kind);
         };
@@ -61,10 +65,15 @@ public class UnloadingProbe {
             case "varhandle" -> check((int)((VarHandle)tracked.root).get() == 7, "live VarHandle");
             case "instance" -> check(tracked.root.getClass().getMethod("instanceValue").invoke(tracked.root).equals(42), "live instance");
             case "array" -> check(tracked.root.getClass().getComponentType() == tracked.type.get(), "live array component");
+            case "lambda", "dynamicLambda" -> check(((java.util.function.Supplier<?>)tracked.root).get().equals(System.lineSeparator()), "live lambda");
+            case "proxy" -> check(tracked.type.get().getMethod("callProxy", Object.class).invoke(null, tracked.root).equals(System.lineSeparator()), "live proxy");
+            case "lambdaClass" -> check(((Class<?>)tracked.root).getClassLoader() == tracked.loader.get(), "lambda defining loader");
+            case "monitor" -> { synchronized (tracked.root) { check(tracked.type.get() != null, "synchronized instance"); } }
         }
         Reference.reachabilityFence(tracked.root);
     }
     static void collected(Tracked tracked, String kind) throws Exception {
+        if (Boolean.getBoolean("openldk.unloading.verbose")) System.err.println("Collecting " + kind);
         tracked.root = null;
         boolean queued = false;
         for (int i = 0; i < 150; i++) {
@@ -92,8 +101,10 @@ public class UnloadingProbe {
     }
     public static void main(String[] args) throws Throwable {
         directory = Path.of(args[0]);
+        var loading = java.lang.management.ManagementFactory.getClassLoadingMXBean();
+        long unloadedBefore = loading.getUnloadedClassCount();
         boolean rootsOnly = args.length > 1 && args[1].equals("roots-only");
-        for (String kind : new String[]{"loader", "class", "instance", "array", "method", "handle", "varhandle", "uninitialized"}) {
+        for (String kind : new String[]{"loader", "class", "instance", "array", "method", "handle", "varhandle", "lambda", "dynamicLambda", "proxy", "lambdaClass", "monitor", "uninitialized"}) {
             Tracked tracked = create(kind);
             if (tracked.root != null) alive(tracked, kind);
             if (!rootsOnly) collected(tracked, kind);
@@ -110,6 +121,10 @@ public class UnloadingProbe {
             check(!((Thread)active.root).isAlive(), "active method did not exit");
             if (failure.get() != null) throw failure.get();
             collected(active, "completed method");
+            for (int i = 0; i < 100 && loading.getUnloadedClassCount() == unloadedBefore; i++) {
+                System.gc(); Thread.sleep(20);
+            }
+            check(loading.getUnloadedClassCount() > unloadedBefore, "unloaded class accounting");
         }
         System.out.println(rootsOnly ? "Loader roots: live classes, instances, arrays and handles passed"
                                     : "Class unloading: roots, self cycles, repeated loaders and active methods passed");

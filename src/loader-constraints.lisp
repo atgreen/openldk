@@ -10,40 +10,52 @@
 ;;; JVMS 5.3.4: constraints relate initiating loaders, not just definitions.
 ;;; Never load a descriptor type to check a constraint: it may be defined later.
 (defvar *loader-constraint-lock* (bt:make-recursive-lock "Java loader constraints"))
-(defvar *initiated-classes* (make-hash-table :test #'equal))
-(defvar *loader-constraints* (make-hash-table :test #'equal))
-(defvar *member-constraint-results* (make-hash-table :test #'equal))
+(defvar *initiated-classes* (make-hash-table :test #'equal)
+  "Bootstrap initiations; other loaders retain their own initiation tables.")
+(defvar *loader-constraints* (make-hash-table :test #'equal)
+  "Equivalence groups of loader IDs, never strong loader references.")
+(defvar *member-constraint-results* (make-hash-table :test #'eq :weakness :key))
 
 (defun %constraint-loader (loader)
-  "All temporary bootstrap loader metadata denotes the same JVM loader."
-  (and loader (not (zerop (id loader))) loader))
+  "All temporary bootstrap metadata denotes the same JVM loader identity."
+  (and loader (not (zerop (id loader))) (id loader)))
+
+(defun %constraint-initiations (identity)
+  "The initiation table of a live loader, or NIL for a collected identity."
+  (if (null identity) *initiated-classes*
+      (when-let ((loader (gethash identity *ldk-loaders-by-id*)))
+        (slot-value loader 'initiated-classes))))
 
 (defun %initiated-class (name loader)
   "A definition initiated by LOADER, including delegated definitions."
-  (bt:with-recursive-lock-held (*loader-constraint-lock*)
-    (gethash (cons name (%constraint-loader loader)) *initiated-classes*)))
+  (sb-sys:with-pinned-objects (loader)
+    (bt:with-recursive-lock-held (*loader-constraint-lock*)
+      (when-let ((table (%constraint-initiations (%constraint-loader loader))))
+        (gethash name table)))))
 
 (defun %constraint-conflict-p (name loaders &optional candidate)
   "Whether LOADERS have initiated distinct definitions of NAME. Lock is held."
   (let ((known candidate))
-    (dolist (loader loaders)
-      (when-let ((class (gethash (cons name loader) *initiated-classes*)))
-        (when (and known (not (eq known class)))
-          (return-from %constraint-conflict-p t))
-        (setf known class)))))
+    (dolist (identity loaders)
+      (when-let ((table (%constraint-initiations identity)))
+        (when-let ((class (gethash name table)))
+          (when (and known (not (eq known class)))
+            (return-from %constraint-conflict-p t))
+          (setf known class))))))
 
 (defun %record-initiating-class (class loader)
   "Record initiation atomically, retracting the prospective record on conflict."
-  (let* ((name (name class)) (loader (%constraint-loader loader))
-         (conflict (bt:with-recursive-lock-held (*loader-constraint-lock*)
-                     (let* ((key (cons name loader))
-                            (old (gethash key *initiated-classes*))
-                            (group (find loader (gethash name *loader-constraints*) :test #'member)))
-                       (cond ((or (and old (not (eq old class)))
-                                  (%constraint-conflict-p name group class)) t)
-                             (t (setf (gethash key *initiated-classes*) class) nil))))))
-    (when conflict
-      (%throw '|java/lang/LinkageError| (format nil "Loader constraint violated for ~A" name))))
+  (sb-sys:with-pinned-objects (loader)
+    (let* ((name (name class)) (identity (%constraint-loader loader))
+           (conflict (bt:with-recursive-lock-held (*loader-constraint-lock*)
+                       (let* ((table (%constraint-initiations identity))
+                              (old (gethash name table))
+                              (group (find identity (gethash name *loader-constraints*) :test #'member)))
+                         (cond ((or (and old (not (eq old class)))
+                                    (%constraint-conflict-p name group class)) t)
+                               (t (setf (gethash name table) class) nil))))))
+      (when conflict
+        (%throw '|java/lang/LinkageError| (format nil "Loader constraint violated for ~A" name)))))
   class)
 
 (defun %impose-loader-constraint (name left right)
@@ -61,6 +73,17 @@
                                       (cons merged (remove a (remove b groups))))
                                 nil)))))))
       (%throw '|java/lang/LinkageError| (format nil "Loader constraint violated for ~A" name)))))
+
+(defun %forget-loader-constraints (identity)
+  "Discard a dead identity without splitting constraints among surviving loaders."
+  (bt:with-recursive-lock-held (*loader-constraint-lock*)
+    (maphash (lambda (name groups)
+               (if-let ((remaining (loop for group in groups
+                                      for live = (remove identity group :test #'eql)
+                                      when (rest live) collect live)))
+                 (setf (gethash name *loader-constraints*) remaining)
+                 (remhash name *loader-constraints*)))
+             *loader-constraints*)))
 
 (defun %descriptor-class-names (descriptor)
   "Reference element names in a field or method descriptor, without array ranks."
@@ -96,9 +119,9 @@
 (defun %member-linkage-site (caller index)
   "Share a stable resolution cell across every use of a constant-pool entry."
   (bt:with-recursive-lock-held (*loader-constraint-lock*)
-    (or (gethash (cons caller index) *member-constraint-results*)
-        (setf (gethash (cons caller index) *member-constraint-results*)
-              (%make-member-linkage-site caller index)))))
+    (let ((table (%owner-cache-table *member-constraint-results* caller 'eql)))
+      (or (gethash index table)
+          (setf (gethash index table) (%make-member-linkage-site caller index))))))
 
 (defun %publish-member-linkage-outcome (caller index outcome)
   "Publish the first outcome, after the corresponding constraint updates."
@@ -212,8 +235,8 @@
 (defun %forget-failed-class-definition (class loader)
   "Retract a failed definition without removing unrelated loader registrations."
   (bt:with-recursive-lock-held (*loader-constraint-lock*)
-    (let ((key (cons (name class) (%constraint-loader loader))))
-      (when (eq class (gethash key *initiated-classes*)) (remhash key *initiated-classes*))))
+    (let ((table (%constraint-initiations (%constraint-loader loader))))
+      (when (eq class (gethash (name class) table)) (remhash (name class) table))))
   (let ((java (java-class class)))
     (dolist (table (list (slot-value loader 'ldk-classes-by-bin-name)
                         (slot-value loader 'ldk-classes-by-fq-name)

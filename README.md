@@ -201,11 +201,13 @@ These are targeted comparisons, not complete Java Memory Model, verifier,
 cryptography, or Vector API conformance tests. Vector transcendental native
 libraries are not covered. Loading
 constraint checks are covered by the focused probes. Complete JVM linking/access
-conformance is not established, and class unloading remains unimplemented. In particular, loader
-registries, Lisp packages/static bindings, CLOS definitions/methods, and JNI
-ownership currently retain loader state; changing only a registry to weak
-references would not provide safe class unloading. JNI libraries remain loaded
-for the process lifetime and `JNI_OnUnload` is not called.
+conformance is not established. Custom class loaders can unload: their registries,
+static state, compiled methods, and synthetic classes have loader-owned lifetimes.
+Live classes, instances, arrays, reflected members, handles, and executing methods
+retain their defining loader. Ordinary JNI libraries run `JNI_OnUnload` before
+being closed and can then be loaded by another loader. Run the
+[class-loader lifetime probes](test/unloading/README.md) to compare retention,
+collection, repeated loads, and native teardown with JDK 25.
 
 ### Scoped values and structured concurrency
 
@@ -253,8 +255,10 @@ direct buffers, monitors, and native-thread attachment. Strings and primitive
 arrays use native copies with release/copy-back semantics. A native thread keeps
 its Java identity across callbacks, including daemon status and monitor ownership.
 
-JNI libraries remain loaded for the process lifetime; class-loader unloading and
-`JNI_OnUnload` are not implemented. Creating or destroying a standalone JVM via
+JNI libraries owned by custom class loaders unload after their loader becomes
+unreachable, including `JNI_OnUnload` notification. JNI global references retain
+Java objects; weak references and cached method/field IDs do not prevent class
+unloading. Creating or destroying a standalone JVM via
 the Invocation API is not supported. Saved images must load JNI libraries after
 restart: saving with loaded JNI libraries is rejected because arbitrary native
 library state cannot be preserved in an SBCL image. JNI compatibility is tested

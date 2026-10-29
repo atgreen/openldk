@@ -425,7 +425,14 @@ name is recorded in the Java thread already, so there is nothing to do."
   (handler-case
       (invoke-special '|exit()V| '|java/lang/Thread| (list thread))
     (error (condition)
-      (format *error-output* "~&Thread ~A terminated with error during exit: ~A~%" thread condition))))
+      (format *error-output* "~&Thread ~A terminated with error during exit: ~A~%" thread condition)))
+  (bt:with-recursive-lock-held (*java-thread-registry-lock*)
+    (remhash thread *java-threads*)
+    (remhash thread *thread-interrupted*)
+    (remhash thread *java-thread-waits*)
+    (let ((current (bt:current-thread)))
+      (when (eq thread (gethash current *lisp-to-java-threads*))
+        (remhash current *lisp-to-java-threads*)))))
 
 #+sb-fiber
 (defmethod |start0()V| :around ((thread |java/lang/BaseVirtualThread|))

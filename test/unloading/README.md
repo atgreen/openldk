@@ -22,7 +22,13 @@ successive loaders. It uses ordinary JNI headers and no HotSpot libraries.
 Use `--reference-only` to run either full probe against the reference JDK.
 Generated classes and logs are under `.cache/unloading-test/`.
 
-The current ownership checkpoint passes the root probe on OpenLDK and all full
-probes on JDK 25. Full OpenLDK collection and JNI teardown remain in development;
-relation caches and native ownership still need conversion. The full probes
-are retained here to verify that work, rather than being reported as passing.
+The full Java probe also checks generated lambdas and method-handle proxies,
+a lambda Class mirror, synchronized objects, and unloaded-class management
+accounting. Lambdas and proxies target JDK methods so that the wrapper itself
+must retain its defining loader. Use `--verbose` to report individual collection
+cases while diagnosing a failure.
+
+Both full probes pass on OpenLDK and JDK 25. The native probe additionally uses
+cached member IDs before collection and checks that `FindClass` during
+`JNI_OnUnload` uses the system loader, as required by the
+[JNI specification](https://docs.oracle.com/en/java/javase/25/docs/specs/jni/functions.html#findclass).

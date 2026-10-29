@@ -884,7 +884,7 @@ primitive type. ARGS must line up with the descriptor's declared parameters
 that linkTo*/%invoke-from-member-name resolves the target symbol once per call
 site instead of on every invocation.")
 
-(defvar *member-plans* (make-hash-table :test 'equal :synchronized t)
+(defvar *member-plans* (make-hash-table :test 'eq :weakness :key :synchronized t)
   "(class name type flags) -> invocation plan: the plans of MemberNames
 naming the same member, which code creates afresh again and again (Scala's
 compiler made 39,000 for 344 members in one compilation).")
@@ -903,7 +903,7 @@ compiler made 39,000 for 344 members in one compilation).")
             (%member-name-slot member-name '|flags|)))))
 
 (defvar *last-member-plan* (cons nil nil)
-  "(MemberName . plan) of the last %RESOLVE-MEMBER-NAME, replaced whole so
+  "Weak (MemberName . plan) of the last %RESOLVE-MEMBER-NAME, replaced whole so
 threads never see one's name with another's plan.  A loop calling one
 lambda finds its plan here, without the weak table's lock.")
 
@@ -916,18 +916,21 @@ UNBOX-FLAGS are %DESCRIPTOR-UNBOX-FLAGS of the descriptor, and RET-CHAR is
 %GET-RETURN-TYPE-CHAR of the MemberName.  The plan depends only on the
 (stable) MemberName, so it is memoized, by the MemberName and by the
 member it names."
-  (let ((last *last-member-plan*))
-    (if (eq (car last) member-name)
-        (cdr last)
+  (let* ((last *last-member-plan*)
+         (previous (and (car last) (sb-ext:weak-pointer-value (car last))))
+         (cached (and (eq previous member-name) (cdr last) (sb-ext:weak-pointer-value (cdr last)))))
+    (or cached
         (let ((plan (or (gethash member-name *member-name-invoke-cache*)
                         (setf (gethash member-name *member-name-invoke-cache*)
-                              (let ((key (%member-name-key member-name)))
-                                (or (and key (gethash key *member-plans*))
+                              (let* ((key (%member-name-key member-name))
+                                     (types (and key (%owner-cache-table *member-plans* (first key) 'eq :key)))
+                                     (table (and types (%owner-cache-table types (third key))))
+                                     (signature (and key (list (second key) (fourth key)))))
+                                (or (and table (gethash signature table))
                                     (let ((plan (%compute-member-name-plan member-name)))
-                                      (when key
-                                        (setf (gethash key *member-plans*) plan))
+                                      (when table (setf (gethash signature table) plan))
                                       plan)))))))
-          (setf *last-member-plan* (cons member-name plan))
+          (setf *last-member-plan* (cons (sb-ext:make-weak-pointer member-name) (sb-ext:make-weak-pointer plan)))
           plan))))
 
 (defun %compute-member-name-plan (member-name)

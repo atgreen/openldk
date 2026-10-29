@@ -284,23 +284,14 @@ BYTE-OFFSET lie within DATA."
 
 (defvar *unsafe-reference-memory-table* (make-hash-table))
 
-(defvar *unsafe-slot-keys* (make-hash-table :synchronized t)
-  "Unsafe offset -> %UNSAFE-SLOT-KEY of it.  Atomics and concurrent
-collections reach every CAS through here; mangling and interning the
-field's name each time took most of their time.")
+(defvar *unsafe-slot-keys* (make-hash-table :test #'eq :weakness :key :synchronized t)
+  "Field -> CLOS slot symbol. Cached slot lookup must not retain its declaring class.")
 
 (defun %unsafe-slot-key (offset)
-  "Return the CLOS slot symbol for the field registered at Unsafe OFFSET,
-or NIL if no field is registered there."
-  (let ((field (gethash offset *field-offset-table*)))
-    (when field
-      (let ((cached (gethash offset *unsafe-slot-keys*)))
-        ;; An offset is a hash of its field, so check the entry is this one's.
-        (if (and cached (eq (car cached) field))
-            (cdr cached)
-            (let ((key (%field-object-slot field)))
-              (setf (gethash offset *unsafe-slot-keys*) (cons field key))
-              key))))))
+  "Return the slot of the live field registered at OFFSET, or NIL."
+  (when-let ((field (gethash offset *field-offset-table*)))
+    (or (gethash field *unsafe-slot-keys*)
+        (setf (gethash field *unsafe-slot-keys*) (%field-object-slot field)))))
 
 (defun %unsafe-static-storage (field &key (errorp t))
   "Return the static storage object (+static-CLASSNAME+) for FIELD's

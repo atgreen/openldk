@@ -1455,12 +1455,14 @@ are ordinary declared methods and use normal dispatch.")
                           (make-instance 'ir-call-virtual-method
                                          :address pc-start
                                          :return-type return-type
-                                         :method-name "%INVOKE-GENERIC"
+                                         :method-name "%INVOKE-GENERIC-AT"
                                          :args (list* (first args)
                                                       (make-instance 'ir-literal
                                                                      :address pc-start
                                                                      :value descriptor
                                                                      :type :REFERENCE)
+                                                      (make-instance 'ir-literal :address pc-start
+                                                                     :value (java-class class) :type :REFERENCE)
                                                       (rest args))))
                          ((and (string= class-name "java/lang/invoke/MethodHandle")
                                (or (string= method-simple-name "invokeExact")
@@ -1487,6 +1489,8 @@ are ordinary declared methods and use normal dispatch.")
                                          :args (list* (first args)
                                                       (make-instance 'ir-literal :address pc-start
                                                                      :value descriptor :type :REFERENCE)
+                                                      (make-instance 'ir-literal :address pc-start
+                                                                     :value (java-class class) :type :REFERENCE)
                                                       (rest args))))
                          (t
                           (make-instance 'ir-call-virtual-method

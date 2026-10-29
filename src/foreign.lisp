@@ -47,7 +47,8 @@
               (text (lstring name)))
           (bordeaux-threads:with-recursive-lock-held (*jni-lock*)
             (dolist (library *jni-libraries* 0)
-              (when (eq loader (jni-library-loader library))
+              (when (and (member (jni-library-state library) '(:loading :loaded))
+                         (eql (if loader (id loader) 0) (jni-library-loader-id library)))
                 (let ((address (%jni-address
                                 (%jni-c "ldk_jni_symbol" sb-sys:system-area-pointer
                                         (sb-sys:system-area-pointer (%jni-pointer (jni-library-address library)))

@@ -114,6 +114,11 @@ void *ldk_jni_member(const char *signature) {
     if (!m->descriptor) { free(m); return NULL; }
     return m;
 }
+void ldk_jni_free_member(void *address) {
+    member *m = address;
+    free(m->descriptor);
+    free(m);
+}
 void *ldk_jni_open(const char *path) { return dlopen(path, RTLD_NOW | RTLD_LOCAL); }
 const char *ldk_jni_error(void) { const char *e = dlerror(); return e ? e : "native library error"; }
 void *ldk_jni_symbol(void *library, const char *name) { return dlsym(library, name); }
@@ -123,6 +128,12 @@ int ldk_jni_onload(void *function) {
     jint version = ((jint (JNICALL *)(JavaVM *, void *))function)(&java_vm, NULL);
     native_depth--;
     return valid_version(version) ? version : 0;
+}
+
+void ldk_jni_onunload(void *function) {
+    attached = 1; native_depth++;
+    ((void (JNICALL *)(JavaVM *, void *))function)(&java_vm, NULL);
+    native_depth--;
 }
 
 static ffi_type *ffi_java_type(char ch) {

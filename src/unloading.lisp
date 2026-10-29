@@ -13,11 +13,24 @@
 (defstruct loader-resources id package (classes nil) (functions nil))
 (defstruct owned-java-method class function)
 
+(defun %owner-cache-table (registry owner &optional (test 'equal) weakness)
+  "A persistent cache whose owner, not the registry, controls its lifetime."
+  (or (gethash owner registry)
+      (bt:with-recursive-lock-held (*loader-lifecycle-lock*)
+        (or (gethash owner registry)
+            (setf (gethash owner registry) (make-hash-table :test test :weakness weakness :synchronized t))))))
+
 (defun %retain-class-runtime-root (class object)
   "Keep runtime state with its defining class, rather than a process registry."
   (bt:with-recursive-lock-held (*loader-lifecycle-lock*)
     (pushnew object (slot-value class 'runtime-roots) :test #'eq))
   object)
+
+(defun %retain-field-offset-owner (field)
+  "A synthetic offset must stay valid while its declaring class remains live."
+  (when-let ((class (get-ldk-class-for-java-class (slot-value field '|clazz|))))
+    (%retain-class-runtime-root class field))
+  field)
 
 (defun %weak-class-reference (class)
   "A lazy entry point must not become an independent class-loader root."
@@ -131,18 +144,38 @@ The pinned artifact keeps the owner live throughout an executing method."
   "Release process-owned names after no Java root retains their loader."
   (when (fboundp '%jni-unload-loader-libraries)
     (%jni-unload-loader-libraries (loader-resources-id resources)))
+  (%forget-loader-constraints (loader-resources-id resources))
+  (when (boundp '*methods-being-compiled*)
+    (let ((table (symbol-value '*methods-being-compiled*)))
+      (maphash (lambda (key value)
+                 (declare (ignore value))
+                 (when (and (consp key) (eql (first key) (loader-resources-id resources)))
+                   (remhash key table))) table)))
+  (dolist (variable '(*dynamic-lambda-classes* *mh-proxy-classes*))
+    (when (boundp variable)
+      (let ((table (symbol-value variable)))
+        (maphash (lambda (key value)
+                   (when (member value (loader-resources-classes resources)) (remhash key table))) table))))
+  ;; Metadata is already unreachable, so no thread can add to this record.
+  ;; Do not hold the lifecycle lock while invalidating generic-function caches.
+  (mapc #'fmakunbound (loader-resources-functions resources))
+  (dolist (symbol (loader-resources-classes resources))
+    (when-let ((class (find-class symbol nil)))
+      (remhash class *condition-table*)
+      (dolist (method (copy-list (sb-mop:specializer-direct-methods class)))
+        (when-let ((generic (sb-mop:method-generic-function method)))
+          (remove-method generic method)))
+      ;; Unbinding a name alone leaves its class rooted in superclass lists.
+      (sb-kernel:with-world-lock ()
+        (dolist (parent (sb-mop:class-direct-superclasses class))
+          (sb-mop:remove-direct-subclass parent class))
+        (setf (find-class symbol) nil))))
   (bt:with-recursive-lock-held (*loader-lifecycle-lock*)
-    (mapc #'fmakunbound (loader-resources-functions resources))
-    (dolist (symbol (loader-resources-classes resources))
-      (when-let ((class (find-class symbol nil)))
-        (dolist (method (copy-list (sb-mop:specializer-direct-methods class)))
-          (when-let ((generic (sb-mop:method-generic-function method)))
-            (remove-method generic method)))
-        (setf (find-class symbol) nil)))
     (incf *unloaded-java-class-count* (length (loader-resources-classes resources)))
     (let ((package (loader-resources-package resources)))
       (when (package-name package)
-        (dolist (user (package-used-by-list package)) (unuse-package package user))
+        (dolist (user (package-used-by-list package))
+          (when (package-name user) (unuse-package package user)))
         (delete-package package)))))
 
 (defun %register-loader-resources (loader)

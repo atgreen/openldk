@@ -726,7 +726,7 @@ REPL defines its classes so)."
     (|java/lang/ClassLoader.defineClass1(Ljava/lang/ClassLoader;Ljava/lang/String;[BIILjava/security/ProtectionDomain;Ljava/lang/String;)Ljava/lang/Class;|
      loader name bytes 0 length protection-domain source)))
 
-(defvar *hidden-class-data* (make-hash-table :test #'eq)
+(defvar *hidden-class-data* (make-hash-table :test #'eq :weakness :key)
   "Maps a hidden class's java.lang.Class object to the classData passed to
 MethodHandles.Lookup.defineHiddenClassWithClassData; read back by
 MethodHandles.classData().")
@@ -1495,13 +1495,16 @@ present.  Consumed by Thread.getState()/start()/getThreadGroup()."
   ;; RUNNABLE now; the cleanup below marks TERMINATED so a dead thread can't
   ;; be restarted and getThreadGroup() returns null after termination.
   (%set-thread-status thread 4)
-  (let* ((debug-codegen *debug-codegen*)
+  ;; A short-lived child must not exit before its parent publishes the mapping.
+  (bt:with-recursive-lock-held (*java-thread-registry-lock*)
+   (let* ((debug-codegen *debug-codegen*)
          (lisp-thread
           (bordeaux-threads:make-thread
            (lambda ()
              (let ((*scoped-value-cache* nil))
                ;; Register this Lisp thread with the Java Thread
-               (setf (gethash (bordeaux-threads:current-thread) *lisp-to-java-threads*) thread)
+               (bt:with-recursive-lock-held (*java-thread-registry-lock*)
+                 (setf (gethash (bordeaux-threads:current-thread) *lisp-to-java-threads*) thread))
                (unwind-protect
                     ;; Call the Thread's run() method
                     (handler-case
@@ -1533,7 +1536,7 @@ present.  Consumed by Thread.getState()/start()/getThreadGroup()."
                     (monitor-exit thread))))))
            :name (format nil "Java-Thread-~A" (slot-value thread '|name|)))))
     ;; Store the Lisp thread in our mapping
-    (setf (gethash thread *java-threads*) lisp-thread)))
+    (setf (gethash thread *java-threads*) lisp-thread))))
 
 (defmethod |interrupt0()V| ((thread |java/lang/Thread|))
   "Interrupt the thread by signaling the underlying Lisp thread (or fiber)."
@@ -1715,7 +1718,7 @@ parent delegation is the Java caller's job)."
 (defun |java/lang/ClassLoader.findBootstrapClass(Ljava/lang/String;)Ljava/lang/Class;| (name)
   (%find-bootstrap-class name))
 
-(defvar *native-url-strings* (make-hash-table :test #'eq)
+(defvar *native-url-strings* (make-hash-table :test #'eq :weakness :key)
   "URL strings attached to resource URLs constructed by OpenLDK.")
 
 (defun %make-url-from-string (url-string)
