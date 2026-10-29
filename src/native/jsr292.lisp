@@ -94,7 +94,7 @@ MemberName: field access through a method handle asks on every call."
          (class-name (substitute #\/ #\. (lstring (slot-value clazz '|name|))))
          (ldk-class (get-ldk-class-for-java-class clazz)))
     (%clinit ldk-class)
-    (symbol-value (intern (format nil "+static-~A+" class-name) (ldk-class-package ldk-class)))))
+    (%class-static-instance ldk-class)))
 
 (defun %member-invoke (member args)
   "Apply what MEMBER (a MemberName) names to ARGS: call a method or

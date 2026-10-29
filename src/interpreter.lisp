@@ -108,8 +108,7 @@ outer JIT to reenter it. Unsupported instructions fail explicitly."
                           (object (if static
                                       (progn
                                         (%clinit declaring)
-                                        (symbol-value (intern (format nil "+static-~A+" (name declaring))
-                                                              (ldk-class-package declaring))))
+                                        (%class-static-instance declaring))
                                       (take-value)))
                           (slot (%field-slot-symbol declaring field (ldk-loader declaring)))
                           (volatile (logtest #x40 (access-flags field))))

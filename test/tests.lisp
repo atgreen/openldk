@@ -490,3 +490,55 @@ nothing behind when it refuses."
 
 (test floating-remainder-exact-reference
   (is (= 201058 (openldk::%check-remainder-functions))))
+
+(defun %owned-entry-probe (function &optional keep-owner)
+  "A loader-owned function graph with no Java runtime needed."
+  (let* ((loader (openldk::make-ldk-class-loader))
+         (class (make-instance 'openldk::<class> :name "OwnershipProbe" :ldk-loader loader))
+         (symbol (gensym "OWNED-ENTRY")))
+    (openldk::%install-owned-java-function class symbol function 0)
+    (sb-sys:with-pinned-objects (class)
+      (values (sb-ext:make-weak-pointer class) (fdefinition symbol)
+              (when keep-owner (vector class))))))
+
+(declaim (notinline %ownership-probe-live-p))
+(defun %ownership-probe-live-p (reference)
+  "Do not expose a class object to the assertion library's result storage."
+  (not (null (sb-ext:weak-pointer-value reference))))
+
+(test owned-method-entry-does-not-root-class
+  (multiple-value-bind (reference function) (%owned-entry-probe (lambda () 42))
+    ;; Keeping the process entry point itself must not keep a class alive.
+    (dotimes (i 3) (sb-ext:gc :full t))
+    (is (not (%ownership-probe-live-p reference)))
+    (is (functionp function))))
+
+(test executing-owned-method-retains-class
+  (let ((lock (sb-thread:make-mutex))
+        (condition (sb-thread:make-waitqueue))
+        (entered nil) (release nil))
+    (multiple-value-bind (reference function keeper)
+        (%owned-entry-probe
+         (lambda ()
+           (sb-thread:with-mutex (lock)
+             (setf entered t)
+             (sb-thread:condition-notify condition)
+             (loop until release do (sb-thread:condition-wait condition lock)))
+           42) t)
+      (let ((worker (sb-thread:make-thread function)))
+        (unwind-protect
+             (progn
+               (sb-thread:with-mutex (lock)
+                 (loop until entered
+                       do (unless (sb-thread:condition-wait condition lock :timeout 15)
+                            (unless entered (error "Owned method did not enter")))))
+               (setf (aref keeper 0) nil)
+               (dotimes (i 3) (sb-ext:gc :full t))
+               (is (%ownership-probe-live-p reference)))
+          (setf (aref keeper 0) nil)
+          (sb-thread:with-mutex (lock)
+            (setf release t)
+            (sb-thread:condition-notify condition)))
+        (is (= 42 (sb-thread:join-thread worker))))
+      (dotimes (i 3) (sb-ext:gc :full t))
+      (is (not (%ownership-probe-live-p reference))))))

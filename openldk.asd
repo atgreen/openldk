@@ -122,6 +122,7 @@
                (:file "src/openldk")
                (:file "src/jni")
                (:file "src/native-access")
+               (:file "src/unloading")
                (:file "src/foreign")
                (:static-file "src/SourceCompiler.java")
                (:file "src/cli"))

@@ -311,10 +311,9 @@ the storage object does not (yet) exist."
          (pkg (%java-class-package clazz))
          (name (format nil "+static-~A+" bin-name)))
     (if errorp
-        (symbol-value (intern name pkg))
+        (%java-static-value (intern name pkg))
         (let ((sym (find-symbol name pkg)))
-          (when (and sym (boundp sym))
-            (symbol-value sym))))))
+          (when sym (ignore-errors (%java-static-value sym)))))))
 
 (defun %unsafe-field-owner-and-key (object offset)
   (let ((field (gethash offset *field-offset-table*)))

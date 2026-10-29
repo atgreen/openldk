@@ -39,8 +39,12 @@
 
 (in-package :openldk)
 
-(defclass/std |java/lang/Object| ()
-  ())
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  ;; Use the current image's symbol; a dumped gensym in a cached FASL would
+  ;; not be EQ to the private slot symbol freshly created by global-state.
+  (eval `(defclass |java/lang/Object| () ; lint:suppress eval-usage
+           ((,*java-loader-owner-slot* :initform nil))
+           (:documentation "Java Object with private runtime loader ownership."))))
 
 (defclass/std |java/lang/Cloneable| ()
   ())

@@ -55,12 +55,17 @@
 (defvar *next-loader-id* 0)
 (defvar *next-loader-id-lock* (bordeaux-threads:make-lock "loader-id-lock"))
 
+(defvar *java-loader-owner-slot* (make-symbol "JAVA-LOADER-OWNER")
+  "Private, uninterned instance slot retaining a Java object's defining loader.")
+
 ;; Class loader structure for per-loader package support
 ;; Each class loader has its own Lisp package where class/method symbols are interned
 (defclass/std <ldk-class-loader> ()
   ((id :std 0)                            ; unique identifier
    (pkg :std nil)                         ; Lisp package for this loader
    (parent-loader :std nil)               ; parent <ldk-class-loader> for delegation (or NIL)
+   (unload-resources :std nil)
+   (initiated-classes :std (make-hash-table :test #'equal))
    (java-loader :std nil)                 ; corresponding java.lang.ClassLoader object
    (ldk-classes-by-bin-name :std nil)     ; per-loader hash table for LDK classes
    (ldk-classes-by-fq-name :std nil)      ; per-loader hash table by FQ name
@@ -71,7 +76,7 @@
   (print-unreadable-object (loader out :type t)
     (format out "~A pkg=~A" (slot-value loader 'id) (slot-value loader 'pkg))))
 
-(defvar *ldk-loaders-by-package* (make-hash-table :test #'eq :synchronized t)
+(defvar *ldk-loaders-by-package* (make-hash-table :test #'eq :weakness :value :synchronized t)
   "Lisp package -> the <ldk-class-loader> whose classes are named in it.")
 
 (defun make-ldk-class-loader (&key parent-loader java-loader package-name)
@@ -107,6 +112,7 @@
                                 :java-classes-by-bin-name (make-hash-table :test #'equal :synchronized t)
                                 :java-classes-by-fq-name (make-hash-table :test #'equal :synchronized t))))
     (setf (gethash pkg *ldk-loaders-by-package*) loader)
+    (when (fboundp '%register-loader-resources) (%register-loader-resources loader))
     loader))
 
 (defun %ldk-loader-for-symbol (symbol)
@@ -125,7 +131,7 @@ or NIL for the boot loader's packages."
 ;; Map from java.lang.ClassLoader objects to <ldk-class-loader> objects
 (defvar *java-loader-map-lock* (bt:make-recursive-lock "Java loader identities"))
 
-(defvar *java-to-ldk-loaders* (make-hash-table :test #'eq :synchronized t))
+(defvar *java-to-ldk-loaders* (make-hash-table :test #'eq :weakness :key :synchronized t))
 
 (defun jdk-class-p (classname)
   "Return T if CLASSNAME is a JDK/system class that should be loaded by boot loader."

@@ -170,8 +170,7 @@
       (let* ((name (lstring (slot-value jclass '|name|)))
              (pkg (class-package "gnu/bytecode/Type"))
              (static-sym (find-symbol "+static-gnu/bytecode/Type+" pkg))
-             (static-holder (when (and static-sym (boundp static-sym))
-                              (symbol-value static-sym)))
+             (static-holder (when static-sym (ignore-errors (%java-static-value static-sym))))
              (field-name (cond
                            ((string= name "void")    "voidType")
                            ((string= name "int")     "intType")
