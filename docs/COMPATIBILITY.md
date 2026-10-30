@@ -123,6 +123,25 @@ Run `make check-concurrency` for JDK/OpenLDK comparisons. These checks use the
 existing virtual-thread backend; they do not establish virtual-thread scalability
 or validate the optional SBCL fiber backend.
 
+## AWT and X11
+
+Buffered images use the JDK's Java drawing pipelines with Lisp compositing.
+The Linux X11 backend calls the system Xlib, Xext, and XTest libraries for
+window peers, display formats, input methods, Robot input, and screen capture.
+Window backing rasters follow peer resizing and preserve their stored samples.
+
+The [AWT probes](../test/awt/README.md) compare rendering, window events,
+keyboard/mouse injection, and disposal with JDK 25. Display checks cover
+24-bit TrueColor and 8-bit indexed, gray, and byte TrueColor visuals on Xvfb.
+Capture checks include foreign clients' private colormaps, stacking, borders,
+clipped children, and shaped windows. This is a software rendering backend;
+color-management and affine-image operations still have recorded failures in
+the [failure catalog](../testsuite/FAILURES.md).
+
+Save application images before opening an X11 display. The save preflight
+rejects a live display connection before changing threads or native resources;
+initialize display peers after restarting the image.
+
 ## Remaining limitations
 
 Volatile fields and ordered Unsafe/VarHandle accesses use a conservative

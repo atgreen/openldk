@@ -41,3 +41,36 @@ with Java font files and CL-owned glyph-cache memory.
 
 `make check-font-image` checks cached glyph bounds and new glyph rendering
 after saving and restarting an application image.
+
+For display-backed checks, start an isolated X server such as Xvfb and run:
+
+```sh
+python3 test/awt/check-x11.py --display :4 --runtime ./openldk
+python3 test/awt/check-x11.py --display :5 --runtime ./openldk --all-visuals
+```
+
+The first command checks actual server pixels, window and Robot input events,
+disposal, image-save preflight, callback recovery, and screen capture. The
+second paints and captures each advertised visual, comparing color-model types
+and primary-color samples with JDK 25 by physical visual ID. A full StaticGray
+ramp additionally checks custom colors, copying, curves, alpha, and image
+uploads exactly. Other indexed palettes can allocate different legal colors;
+those extra samples are logged for inspection. Enumeration order can differ
+between runtimes. An 8-bit server exercises private colormaps, grayscale and
+byte TrueColor; a 24-bit server checks ordinary TrueColor. Testing every visual
+can take longer on servers advertising many configurations.
+
+Run the foreign-client capture fixture separately with:
+
+```sh
+python3 test/awt/check-capture.py --display :5 --runtime ./openldk
+```
+
+It checks all 16,800 pixels of overlapping windows with private colormaps,
+borders, children clipped by their parent, and an L-shaped bounding region.
+Expected pixels come from the independently defined fixture geometry. Both
+runtimes must match rectangular-window expectations. For shaped windows,
+OpenLDK must match the geometry; JDK reference differences are reported because
+its [multiVis capture implementation](https://github.com/openjdk/jdk/blob/jdk-25-ga/src/java.desktop/unix/native/libawt_xawt/awt/multiVis.c)
+uses rectangular window regions without consulting XShape. The fixture uses
+ordinary system Xlib/Xext, and does not load JDK native libraries into OpenLDK.

@@ -651,6 +651,7 @@ kill other threads, drop process-local handles, and give every lock a fresh
 mutex.  Call this last, right before saving, after any build-time runs of
 Java code (warmups)."
   (%jni-check-save)
+  (%x11-check-save)
   (%fasl-cache-stop-build)
   ;; Force ProcessEnvironment to re-initialize at runtime so it reads
   ;; the actual runtime environment, not stale warmup state.
@@ -992,6 +993,7 @@ resetting its classpath.  Skipped, with a note, without a javac."
    DEFAULT-MAINCLASS: The Java class to run when no class is given on the CLI.
    CLASSPATH:         Classpath string to bake in. If nil, reads CLASSPATH env var."
   (%jni-check-save)
+  (%x11-check-save)
   (initialize)
   (let ((cp (or classpath (uiop:getenv "CLASSPATH") ".")))
     (setf *default-mainclass* default-mainclass)

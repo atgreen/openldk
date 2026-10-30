@@ -94,6 +94,12 @@ the saved thread registry and interruption state are cleared. Run
 `make check-thread-image` to check retained identities, main-thread liveness,
 and pipe communication across a warm-image restart.
 
+Save an image before opening an X11 display. Xlib connections and Java
+window peers retain native addresses and sockets that cannot survive a
+restart. The save preflight rejects an open display before stopping threads
+or changing resources; initialize the display after restarting the image.
+Loaded JNI libraries have a similar save restriction.
+
 ### Example: `make abcl`
 
 `make abcl` downloads ABCL 1.9.2, compiles its entry point, and runs

@@ -167,9 +167,69 @@
                   (setf pixel (logior pixel (ash (min 255 (floor (+ .5d0 channel))) shift)))))
               (if (logbitp 31 pixel) (- pixel #x100000000) pixel)))))))
 
+(defvar *graphics-surface-images* (make-hash-table :test #'eq :weakness :key :synchronized t)
+  "Java SurfaceData -> the buffered image retained by a software display backend.")
+
+(defvar *graphics-surface-image-refreshers* (make-hash-table :test #'eq :weakness :key :synchronized t)
+  "Optional SURFACE -> function keeping a display backing image current.")
+
+(defvar *graphics-physical-gray-images* (make-hash-table :test #'eq :weakness :key :synchronized t)
+  "Byte-gray display rasters whose samples denote physical intensities.
+Their advertised CS_GRAY model describes image color conversion, while the
+Java2D display primitives operate directly on stored gray intensities.")
+
+(defun %graphics-gray-argb (sample)
+  "Expand a stored byte-gray intensity without a color-space conversion."
+  (%as-int (logior #xff000000 (* #x010101 sample))))
+
+(defun %graphics-packed-int-pixels (image x y width height)
+  "Snapshot standard integer RGB/ARGB storage without per-pixel Java calls."
+  (let ((type (|getType()I| image)))
+    (when (and (member type '(1 2))
+               ;; coerceData can change premultiplication without changing
+               ;; BufferedImage.getType; those images need color conversion.
+               (zerop (|isAlphaPremultiplied()Z| image))
+               (<= 0 x) (<= 0 y) (<= 0 width) (<= 0 height)
+               (<= (+ x width) (|getWidth()I| image))
+               (<= (+ y height) (|getHeight()I| image)))
+      (let ((raster (|getRaster()Ljava/awt/image/WritableRaster;| image))
+            (class (find-class '|sun/awt/image/IntegerComponentRaster| nil)))
+        (when (and class (typep raster class))
+          (let* ((storage (java-array-data (|getDataStorage()[I| raster)))
+                 (stride (|getScanlineStride()I| raster))
+                 (step (|getPixelStride()I| raster))
+                 (start (+ (|getDataOffset(I)I| raster 0) (* y stride) (* x step)))
+                 (pixels (make-array (* width height) :element-type '(signed-byte 32))))
+            (dotimes (row height)
+              (dotimes (column width)
+                (let ((pixel (aref storage (+ start (* row stride) (* column step)))))
+                  (setf (aref pixels (+ (* row width) column))
+                        (if (= type 1) (%as-int (logior #xff000000 pixel)) pixel)))))
+            pixels))))))
+
+(defun %graphics-image-pixels (image x y width height)
+  "Snapshot rendering pixels, retaining physical gray intensities on displays."
+  (if (gethash image *graphics-physical-gray-images*)
+      (map 'vector #'%graphics-gray-argb
+           (java-array-data
+            (|getSamples(IIIII[I)[I| (|getRaster()Ljava/awt/image/WritableRaster;| image)
+                                    x y width height 0 nil)))
+      (or (%graphics-packed-int-pixels image x y width height)
+          (java-array-data (|getRGB(IIII[III)[I| image x y width height nil 0 width)))))
+
+(defun %graphics-byte-gray (argb)
+  "Java2D byte-gray transfer quantization (ByteGray.h)."
+  (floor (+ (* 77 (ldb (byte 8 16) argb))
+            (* 150 (ldb (byte 8 8) argb))
+            (* 29 (ldb (byte 8 0) argb)) 128) 256))
+
 (defun %graphics-surface-image (surface)
   "Return the Java buffered image backing a software rendering SURFACE."
   (or (and (slot-exists-p surface '|bufImg|) (slot-value surface '|bufImg|))
+      (when-let ((image (gethash surface *graphics-surface-images*)))
+        (if-let ((refresh (gethash surface *graphics-surface-image-refreshers*)))
+          (funcall refresh surface)
+          image))
       (%throw '|java/lang/UnsupportedOperationException| "Only Java buffered-image surfaces are supported")))
 
 (defun %graphics-composite-rectangle (image composite clip x y width height source mask offset stride)
@@ -178,7 +238,9 @@
         (extra-alpha (coerce (slot-value composite '|extraAlpha|) 'double-float))
         (image-width (|getWidth()I| image))
         (image-height (|getHeight()I| image))
-        (mask-data (and mask (java-array-data mask))))
+        (mask-data (and mask (java-array-data mask)))
+        (gray-raster (and (gethash image *graphics-physical-gray-images*)
+                          (|getRaster()Ljava/awt/image/WritableRaster;| image))))
     (loop for dy from (max 0 y) below (min image-height (+ y height))
           do (loop for dx from (max 0 x) below (min image-width (+ x width))
                    when (or (null clip) (not (zerop (|contains(II)Z| clip dx dy))))
@@ -187,17 +249,26 @@
                                                                (+ offset (* (- dy y) stride) (- dx x))))
                                             255)))
                           (unless (zerop coverage)
-                            (|setRGB(III)V| image dx dy
-                             (%graphics-blend (funcall source (- dx x) (- dy y))
-                                              (|getRGB(II)I| image dx dy)
-                                              rule extra-alpha coverage))))))))
+                            (let* ((src (funcall source (- dx x) (- dy y)))
+                                   (destination (if gray-raster
+                                                    (%graphics-gray-argb (|getSample(III)I| gray-raster dx dy 0))
+                                                    (|getRGB(II)I| image dx dy)))
+                                   (pixel (%graphics-blend
+                                           (if gray-raster
+                                               (%as-int (logior (logand src #xff000000)
+                                                                 (* #x010101 (%graphics-byte-gray src))))
+                                               src)
+                                           destination rule extra-alpha coverage)))
+                              (if gray-raster
+                                  (|setSample(IIII)V| gray-raster dx dy 0 (ldb (byte 8 0) pixel))
+                                  (|setRGB(III)V| image dx dy pixel)))))))))
 
 (defun %graphics-blit (source destination composite clip sx sy dx dy width height mask offset stride)
   "Copy and composite Java image surfaces, snapshotting overlapping source pixels."
   (when (and (plusp width) (plusp height))
     (let* ((src (%graphics-surface-image source))
            (dst (%graphics-surface-image destination))
-           (pixels (java-array-data (|getRGB(IIII[III)[I| src sx sy width height nil 0 width))))
+           (pixels (%graphics-image-pixels src sx sy width height)))
       (%graphics-composite-rectangle
        dst composite clip dx dy width height
        (lambda (x y) (aref pixels (+ x (* y width)))) mask offset stride))))
