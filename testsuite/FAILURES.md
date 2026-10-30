@@ -177,6 +177,17 @@ without reading outside the requested range. `MismatchProbe` covers primitive
 scales, NaNs, signed zero, mixed array storage, native slices, and heap/direct
 buffer comparisons against JDK 25.
 
+The byte-array character accessor now returns a numeric UTF-16 code unit,
+matching the JVM primitive calling convention. Returning a Lisp character had
+made data-stream character comparisons fail despite reading the correct bytes.
+Fresh isolated comparisons pass the `DataInputStream/ReadReference` and
+`DataOutputStream/WriteRead` cases, with 27 assertions on each runtime. Removing
+these two expectations leaves **164 runtime expectations**. `DataCharacterProbe`
+checks stream character promotion and arithmetic, boxing, unsigned shorts,
+unaligned heap/direct buffers in both byte orders, object-stream characters,
+and modified UTF including NUL and surrogate code units. The pre-fix runtime
+fails this probe at its first numeric character comparison.
+
 ## Results
 
 | Suite audited | Passes | OpenLDK-only differences | Legacy version parser | Rejected by javac 25 | Reference failure | Reference timeout | Helpers without a main |

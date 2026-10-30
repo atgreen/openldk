@@ -686,9 +686,9 @@ mauve/gnu/testlet/java/io/BufferedReader/MarkReset.java	pass	0	0	0	5d4c5bed72fa5
 mauve/gnu/testlet/java/io/ByteArrayInputStream/ProtectedVars.java	pass	0	0	0	388c8c09648c2c95e66ce4ff0ee478206ed434685c0eb433755bf8a7f60e8df7	Passes its assertions or the current JDK 25 comparison.
 mauve/gnu/testlet/java/io/CharArrayReader/MarkReset.java	pass	0	0	0	f1c18246146bc1c20c25f24548d2bd1a628dd69d64f4c4434e5f45f5dc25c101	Passes its assertions or the current JDK 25 comparison.
 mauve/gnu/testlet/java/io/CharArrayReader/ProtectedVars.java	pass	0	0	0	0b4f7a5e534a75fc5104e7dc6782171a3da62c5e2000f61c54d0424b042b5e92	Passes its assertions or the current JDK 25 comparison.
-mauve/gnu/testlet/java/io/DataInputStream/ReadReference.java	runtime-failure	0	0	1	f5f64c5f57e071765cb5cb3e525e7e78351fe55fb1abfff1f11d081cbe17622f	FAIL: gnu.testlet.java.io.DataInputStream.ReadReference: readChar() (number 0)
+mauve/gnu/testlet/java/io/DataInputStream/ReadReference.java	pass	0	0	0	f5f64c5f57e071765cb5cb3e525e7e78351fe55fb1abfff1f11d081cbe17622f	Passes fresh JDK 25 comparison after ByteArray.getChar returns numeric UTF-16 units (27 assertions across two cases).
 mauve/gnu/testlet/java/io/DataInputStream/ReadReference2.java	pass	0	0	0	e3433793d030baa61188ce0853857afb8c7d1f587291ea997570ae3224c5288b	Passes its assertions or the current JDK 25 comparison.
-mauve/gnu/testlet/java/io/DataOutputStream/WriteRead.java	runtime-failure	0	0	1	aed92d7b7b2852485801c474e7ab581530cd7e51bde527a70577073391ed92b2	FAIL: gnu.testlet.java.io.DataOutputStream.WriteRead: readChar() (number 0)
+mauve/gnu/testlet/java/io/DataOutputStream/WriteRead.java	pass	0	0	0	aed92d7b7b2852485801c474e7ab581530cd7e51bde527a70577073391ed92b2	Passes fresh JDK 25 comparison after ByteArray.getChar returns numeric UTF-16 units (27 assertions across two cases).
 mauve/gnu/testlet/java/io/DataOutputStream/WriteRead2.java	pass	0	0	0	c01ea2f032cb8522a95c68fd35a3272f9a221c81839045fc07e51977aea11d34	Passes its assertions or the current JDK 25 comparison.
 mauve/gnu/testlet/java/io/File/ExecuteMethods.java	pass	0	0	0	7744d3ab45f5982caa64a53ed97da37d139a9747de1c0a60d68fdadbafd7f7fe	Passes its assertions or the current JDK 25 comparison.
 mauve/gnu/testlet/java/io/File/ReadMethods.java	pass	0	0	0	9b60a5cd3878a9117020ca2a217e780e97cb6862eb312ea4acb8c176302ba309	Passes its assertions or the current JDK 25 comparison.

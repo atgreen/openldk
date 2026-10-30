@@ -151,8 +151,6 @@ XFAIL: mauve/gnu/testlet/java/awt/image/PixelGrabber/SimpleGrabber.java executio
 XFAIL: mauve/gnu/testlet/java/awt/image/RescaleOp/filterImage.java execution test
 XFAIL: mauve/gnu/testlet/java/beans/SimpleBeanInfo/loadImage.java execution test
 XFAIL: mauve/gnu/testlet/java/beans/XMLDecoder/jdk14.java execution test
-XFAIL: mauve/gnu/testlet/java/io/DataInputStream/ReadReference.java execution test
-XFAIL: mauve/gnu/testlet/java/io/DataOutputStream/WriteRead.java execution test
 XFAIL: mauve/gnu/testlet/java/io/ObjectInputOutput/Compat1.java execution test
 XFAIL: mauve/gnu/testlet/java/io/RandomAccessFile/setLength.java execution test
 XFAIL: mauve/gnu/testlet/java/lang/ClassLoader/BootDefinedPackages.java execution test

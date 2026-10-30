@@ -74,7 +74,7 @@
     (flet ((reg (sig fn)
              (setf (gethash (format nil "~A.~A" class sig) *native-overrides*) fn)))
       (reg "getBoolean([BI)Z" (lambda (a i) (if (zerop (%byte-array-load a i 1 be)) 0 1)))
-      (reg "getChar([BI)C" (lambda (a i) (code-char (%byte-array-load a i 2 be))))
+      (reg "getChar([BI)C" (lambda (a i) (%byte-array-load a i 2 be)))
       (reg "getShort([BI)S" (lambda (a i) (%signed-of-width (%byte-array-load a i 2 be) 16)))
       (reg "getUnsignedShort([BI)I" (lambda (a i) (%byte-array-load a i 2 be)))
       (reg "getInt([BI)I" (lambda (a i) (%signed-of-width (%byte-array-load a i 4 be) 32)))

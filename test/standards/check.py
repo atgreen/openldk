@@ -37,6 +37,7 @@ PROBES = {
     'MainJoinProbe': (25,),
     'DatagramProbe': (25,),
     'MismatchProbe': (25,),
+    'DataCharacterProbe': (25,),
     'CryptoProbe': (25,),
     'VectorProbe': (25,),
     'ReferenceProbe': (25,),
