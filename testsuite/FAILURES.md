@@ -250,6 +250,23 @@ missing-file/invalid-descriptor errors, and 160 failed lock attempts under a
 user's preferences untouched. Build, zero-issue lint, 840 unit checks, and
 165 interop checks pass.
 
+Application classes loaded internally now enter their defining loader's Java
+package map, using the same private bookkeeping operation as `postDefineClass`.
+Package metadata and identity remain scoped to the defining loader; delegation
+does not define a package on the child. Empty class-loader names no longer
+reach Lisp assertions, synthetic primitive classes cannot escape through
+`ClassLoader` APIs, and definitions reject a binary name that differs from
+the class file. Hidden and anonymous definitions retain their explicit
+renaming path. Both historical ClassLoader cases pass on JDK 25 and OpenLDK,
+removing two expectations and leaving **158 runtime expectations**.
+`ClassLoaderPackageProbe` adds 59 differential checks for package enumeration,
+inherited/explicit packages, metadata, independent loaders, invalid names,
+correct exception types, and recovery after a rejected definition. Validation
+passes: image build, zero-issue lint, 840 unit checks, 165 interop checks,
+76 standards comparisons, and 20 compatibility comparisons. A cold base-image
+Clojure startup and arithmetic evaluation also succeeds after the package
+and class-name changes.
+
 ## Results
 
 | Suite audited | Passes | OpenLDK-only differences | Legacy version parser | Rejected by javac 25 | Reference failure | Reference timeout | Helpers without a main |

@@ -2095,9 +2095,26 @@ without running the compiler, since most methods are never called."
               (%throw '|java/lang/IncompatibleClassChangeError|
                       (format nil "~A cannot inherit from sealed type ~A" (name class) (name parent))))))))))
 
-(defun %classload-from-stream (classname classfile-stream class-loader ldk-loader)
+(defun %record-app-class-package (class)
+  "Record internally loaded app classes using ClassLoader's Java bookkeeping."
+  (when (eq (ldk-loader class) *app-ldk-class-loader*)
+    (let* ((klass (java-class class))
+           (loader (slot-value klass '|classLoader|)))
+      ;; Early bootstrap can precede the system loader's packages map.  User
+      ;; loaders already run postDefineClass through their Java defineClass.
+      (when (and loader (slot-value loader '|packages|))
+        (let* ((*context* nil)
+               (name (name class))
+               (slash (position #\/ name :from-end t))
+               (package-name (if slash (substitute #\. #\/ (subseq name 0 slash)) "")))
+          (invoke-special '|getNamedPackage(Ljava/lang/String;Ljava/lang/Module;)Ljava/lang/NamedPackage;|
+                          '|java/lang/ClassLoader|
+                          (list loader (jstring package-name) (slot-value klass '|module|))))))))
+
+(defun %classload-from-stream (classname classfile-stream class-loader ldk-loader &optional allow-renaming)
   "Load a class from a stream. CLASS-LOADER is the java.lang.ClassLoader object.
-   LDK-LOADER is the <ldk-class-loader> to use for this class."
+   LDK-LOADER is the <ldk-class-loader> to use for this class.
+   ALLOW-RENAMING is reserved for hidden/anonymous class definitions."
   ;; Check if CLOS class already defined in the loader's package
   ;; This handles user loaders that share the same package
   ;; Search up the loader hierarchy to find the class from parent loaders
@@ -2121,6 +2138,9 @@ without running the compiler, since most methods are never called."
                 (let ((c (handler-case (read-classfile classfile-stream)
                            (bytecode-verification-error (condition)
                              (%throw-verification-error condition)))))
+                  (unless (or allow-renaming (string= (name c) classname))
+                    (%throw '|java/lang/NoClassDefFoundError|
+                            (format nil "~A (wrong name: ~A)" classname (name c))))
                   (setf (name c) classname)
                   (setf (slot-value c 'ldk-loader) ldk-loader)
                   (setf definition c)
@@ -2293,6 +2313,8 @@ without running the compiler, since most methods are never called."
                do (classload (slot-value (slot-value field 'class) 'name)))
 
          (setf completed t)
+         (unless allow-renaming
+           (%record-app-class-package class))
          class)
       (close classfile-stream)
       (when (and definition (not completed))

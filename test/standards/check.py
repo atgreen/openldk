@@ -13,6 +13,7 @@ BUILD = ROOT / '.cache/standards-test'
 JDK = Path(os.environ['JAVA_HOME'])
 PROBES = {
     'LoaderConstraintProbe': (25,),
+    'ClassLoaderPackageProbe': (25,),
     'ArrayReflectionProbe': (25,),
     'ArrayExceptionProbe': (25,),
     'ReflectionConversionProbe': (25,),
@@ -105,7 +106,9 @@ def main():
             subprocess.run([str(JDK / 'bin/javac'), '--release', str(release)] + flags
                            + ['-g', '-d', str(directory), str(ROOT / 'test/standards' / (probe + '.java'))]
                            + ([str(p) for p in sorted((ROOT / 'test/standards/dispatch').rglob('*.java'))]
-                              if probe == 'ReflectionDispatchProbe' else []),
+                              if probe == 'ReflectionDispatchProbe' else [])
+                           + ([str(p) for p in sorted((ROOT / 'test/standards/packages').rglob('*.java'))]
+                              if probe == 'ClassLoaderPackageProbe' else []),
                            check=True, timeout=60)
             reference_output = None
             for engine in engines:

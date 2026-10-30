@@ -680,7 +680,10 @@ name after its package, $ and all."
     ;; findLoadedClass includes delegated classes for which this loader was
     ;; recorded as an initiating loader; it must not search arbitrary parents.
     (when-let ((class (%initiated-class bin-name ldk-loader)))
-      (java-class class))))
+      ;; Descriptor resolution records synthetic primitives internally, but
+      ;; Java ClassLoader APIs can only return reference classes.
+      (unless (eql 1 (|isPrimitive()Z| (java-class class)))
+        (java-class class)))))
 
 (defun %classfile-name (bytes offset length)
   "The binary name the class file in BYTES (from OFFSET, LENGTH long)
@@ -740,14 +743,15 @@ MethodHandles.classData().")
    <clinit>; distinct spins that share a name resolve to one CLOS class, which
    is harmless because the bytecode body is never executed. CLASS-DATA is stashed
    for MethodHandles.classData(). When INITIALIZE is true, runs <clinit>."
-  (declare (ignore lookup-class pd flags))
+  (declare (ignore lookup-class pd))
   (let* ((ldk-loader (get-ldk-loader-for-java-loader loader))
          (class-name (if name
                          (substitute #\/ #\. (lstring name))
                          (format nil "hidden/~A" (gensym "class-"))))
          (stream (make-instance 'byte-array-input-stream
                                 :array bytes :start offset :end (+ offset len)))
-         (result (%classload-from-stream class-name stream loader ldk-loader)))
+         (result (%classload-from-stream class-name stream loader ldk-loader
+                                         (or (null name) (logbitp 1 flags)))))
     (unless result
       (let ((exc (%make-java-instance "java/lang/NoClassDefFoundError")))
         (|<init>(Ljava/lang/String;)V| exc (or name (jstring class-name)))
@@ -1762,11 +1766,40 @@ present.  Consumed by Thread.getState()/start()/getThreadGroup()."
 parent delegation is the Java caller's job)."
   (|java/lang/ClassLoader.findLoadedClass0(Ljava/lang/String;)Ljava/lang/Class;| loader name))
 
+(defun %binary-class-name-p (name)
+  "Whether NAME can be searched by the system class loader."
+  ;; Empty names must not reach CLASSLOAD's internal assertion.  Slash and
+  ;; array descriptors are not binary names.  Other names still go through
+  ;; the classpath: a matching file with a different declared name must
+  ;; produce NoClassDefFoundError rather than ClassNotFoundException.
+  (and (plusp (length name))
+       (not (find (char name 0) '(#\[ #\.)))
+       (not (find #\Null name))
+       (not (find #\/ name))))
+
 (defmethod |findClass(Ljava/lang/String;)Ljava/lang/Class;| :around ((loader |java/lang/ClassLoader|) name)
   "Serve the application classpath only for OpenLDK's system loader."
   (if (eq loader *boot-class-loader*)
-      (let ((class (%classload-system (substitute #\/ #\. (lstring name)))))
-        (if class (java-class class) (%throw '|java/lang/ClassNotFoundException| (lstring name))))
+      (let* ((text (lstring (%non-null name)))
+             (illegal-name (and (plusp (length text))
+                                (not (find (char text 0) '(#\. #\/)))
+                                (not (find #\Null text))
+                                (or (char= (char text 0) #\[) (find #\/ text)))))
+        ;; The JDK's classpath search can find bytes for an illegal slash or
+        ;; array name.  preDefineClass then throws NoClassDefFoundError.  A
+        ;; missing file still produces ClassNotFoundException.  Runtime-image
+        ;; resources are not application-classpath candidates here.
+        (when (and illegal-name
+                   (some (lambda (entry)
+                           (and (typep entry '(or dir-classpath-entry jar-classpath-entry))
+                                (get-resource-url entry (format nil "~A.class" (substitute #\/ #\. text)))))
+                         *classpath*))
+          (%throw '|java/lang/NoClassDefFoundError| (format nil "IllegalName: ~A" text)))
+        (let ((class (and (%binary-class-name-p text)
+                          (%classload-system (substitute #\/ #\. text)))))
+          (if (and class (not (eql 1 (|isPrimitive()Z| (java-class class)))))
+              (java-class class)
+              (%throw '|java/lang/ClassNotFoundException| text))))
       (call-next-method)))
 
 (defun %find-bootstrap-class (name)

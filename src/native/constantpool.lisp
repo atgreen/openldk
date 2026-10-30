@@ -506,7 +506,10 @@ not searched -- VarHandle/MethodHandle field access targets declared fields)."
   (let* ((stream (make-instance 'byte-array-input-stream :array data :start 0 :end (java-array-length data)))
          (java-loader (slot-value clazz '|classLoader|))
          (ldk-loader (get-ldk-loader-for-java-loader java-loader))
-         (result (%classload-from-stream (format nil "~A/~A" (substitute #\/ #\. (lstring (slot-value clazz '|name|))) (gensym "anonymous-class-")) stream java-loader ldk-loader)))
+         (result (%classload-from-stream
+                  (format nil "~A/~A" (substitute #\/ #\. (lstring (slot-value clazz '|name|)))
+                          (gensym "anonymous-class-"))
+                  stream java-loader ldk-loader t)))
     (unless result
       (let ((exc (%make-java-instance "java/lang/NoClassDefFoundError")))
         (|<init>(Ljava/lang/String;)V| exc (slot-value clazz '|name|))
