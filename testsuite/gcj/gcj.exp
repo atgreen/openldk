@@ -11,7 +11,7 @@ set expected_output ""
 
 proc openldk_load { classfile } {
 
-    global testargs
+    global testargs testname
     # Most of a run is JIT compilation; leave room for a loaded machine.
     set timeout 60
     verbose "load $classfile"
@@ -35,7 +35,7 @@ proc openldk_load { classfile } {
     verbose "STATUS = $status"
 
     if { $status != 0 } {
-        if {[is_expected_failure $classname]} {
+        if {[is_expected_failure $testname]} {
             return [list "xfail" $run_output]
         } else {
             return [list "fail" $run_output]
@@ -87,14 +87,14 @@ proc openldk_load { classfile } {
         if { $run_output_cleaned == $expected_cleaned } {
             return [list "pass" "Output matches expected"]
         } else {
-            if { [is_expected_failure $classname] == 0 } {
+            if { [is_expected_failure $testname] == 0 } {
                 return [list "fail" "Output does not match expected"]
             } else {
                 return [list "xfail" "Output does not match expected"]
             }
         }
     } else {
-        if {[is_expected_failure $classname]} {
+        if {[is_expected_failure $testname]} {
             return [list "xpass" $run_output]
         } else {
             return [list "pass" $run_output]
@@ -104,7 +104,7 @@ proc openldk_load { classfile } {
 
 proc openldk-dg-test { prog do_what extra_tool_flags } {
 
-    global testargs
+    global testargs testname
     set timeout 5
 
     verbose "prog $prog" 2
@@ -135,6 +135,11 @@ set tlist [lsort [glob -nocomplain -- gcj/*.java]]
 foreach test $tlist {
 
  		verbose "Testing $test"
+    set reason [unsupported_test_reason $test]
+    if {$reason != ""} {
+        unsupported "$test ([lindex $reason 1])"
+        continue
+    }
     set testname "$test"
 		dg-test $test "" ""
 

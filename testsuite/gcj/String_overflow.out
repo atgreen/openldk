@@ -1,1 +1,4 @@
-ok
+getChars	java.lang.StringIndexOutOfBoundsException: Range [2147483647, 2147483647 + 5) out of bounds for length 3
+regionMatches	Should not return true
+regionMatchesCase	Should not return true
+valueOf	java.lang.StringIndexOutOfBoundsException: Range [4, 4 + 2147483647) out of bounds for length 5

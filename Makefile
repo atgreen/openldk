@@ -260,7 +260,7 @@ BUILDDIR := $(shell pwd)
 testsuite/mauve/gnu/testlet/config.class: testsuite/mauve/gnu/testlet/config.java.in Makefile
 	sed -e 's|@SRCDIR@|$(SRCDIR)|g' \
 	    -e 's|@BUILDDIR@|$(BUILDDIR)|g' \
-	    -e 's|@TMPDIR@|/tmp)|g' \
+	    -e 's|@TMPDIR@|/tmp|g' \
 	    < testsuite/mauve/gnu/testlet/config.java.in > testsuite/mauve/gnu/testlet/config.java
 	(cd testsuite/mauve; $(JAVAC) gnu/testlet/config.java)
 
