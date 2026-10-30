@@ -222,6 +222,18 @@ can break program semantics.
 
 ## Testing Strategy
 
+Run `make check` to run through the
+[dejagnu](https://www.gnu.org/software/dejagnu/dejagnu)-based testsuite.
+`make check-regression` runs its core suites and fails if any test that
+passes in `testsuite/baseline.sum` no longer does: run it before sending
+a change. `make check-reference-image` checks collection and queue delivery
+of references created before saving an application image.
+`make check-verifier` compares generated valid and malformed classfiles with
+HotSpot, checking both acceptance and Java verification exceptions.
+`make check-jni` builds C/C++ JNI libraries and runs identical integration probes
+on HotSpot and OpenLDK. `make check-jni-zstd` also downloads a checksum-pinned
+zstd-jni release and tests byte-array and direct-buffer compression round trips.
+
 1. **Run specific test**: `make check RUNTESTFLAGS="Hello.exp"`
 2. **Check expected failures**: `testsuite/expected-failures.txt`
 3. **Enable debug output**: `LDK_DEBUG=bctux ./openldk ClassName`
@@ -253,7 +265,7 @@ LDK_DEBUG=L ./kawa
 
 - **SBCL only**: Uses SBCL-specific features (sb-ext, sb-debug)
 - **JDK 25**: Class file parser supports JDK 25 class files
-- **JAVA_HOME**: Should point to a JDK 25 (e.g., `/usr/lib/jvm/java-25-openjdk`). If it doesn't, `openldk` searches the usual install locations and, failing that, downloads one (see README.md).
+- **JAVA_HOME**: Should point to a JDK 25 (e.g., `/usr/lib/jvm/java-25-openjdk`). If it doesn't, `openldk` searches the usual install locations and, failing that, downloads one (see [Building and Running](RUNNING.md)).
 - **ocicl**: Package manager - run `ocicl install` before building
 - **Build targets**: `make` builds openldk and javacl; `make kawa` and `make abcl` build warm Kawa and ABCL images; `make check` runs the test suite
 
