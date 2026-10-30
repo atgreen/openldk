@@ -105,36 +105,159 @@
   (bt:with-lock-held ((gethash zip *zipfile-read-locks*))
     (zip:zipfile-entry-contents entry)))
 
+(defun %zip-read-exact (stream length &optional (limit (file-length stream)))
+  "Read a bounded ZIP record, rejecting truncated data before decoding it."
+  (unless (<= 0 length (- limit (file-position stream)))
+    (%throw '|java/util/zip/ZipException| "Truncated ZIP record"))
+  (let ((bytes (make-array length :element-type '(unsigned-byte 8))))
+    (unless (= length (read-sequence bytes stream))
+      (%throw '|java/util/zip/ZipException| "Truncated ZIP record"))
+    bytes))
+
+(defun %zip-end-record (stream)
+  "Find a complete END record, skipping false signatures in the archive comment."
+  (let* ((size (file-length stream))
+         (start (max 0 (- size 65557))))
+    (file-position stream start)
+    (let ((tail (%zip-read-exact stream (- size start) size)))
+      (loop for i downfrom (- (length tail) 22) to 0
+            when (= (zip::get-int tail i) #x06054b50)
+              do (let* ((position (+ start i))
+                        (end (+ position 22 (zip::get-short tail (+ i 20))))
+                        (central-size (zip::get-int tail (+ i 12)))
+                        (central-offset (zip::get-int tail (+ i 16)))
+                        (central-position (- position central-size))
+                        (prefix (- central-position central-offset)))
+                   ;; Like the JDK, allow trailing padding only if the implied
+                   ;; central/local headers confirm this is a real END record.
+                   (when (or (= end size)
+                             (and (<= end size) (<= 0 prefix central-position)
+                                  (<= (+ central-position 4) size)
+                                  (progn
+                                    (file-position stream central-position)
+                                    (= (zip::get-int (%zip-read-exact stream 4 size) 0) #x02014b50))
+                                  (progn
+                                    (file-position stream prefix)
+                                    (= (zip::get-int (%zip-read-exact stream 4 size) 0) #x04034b50))))
+                     (return-from %zip-end-record
+                       (values (subseq tail i (+ i 22)) position)))))
+      (%throw '|java/util/zip/ZipException| "ZIP END header not found"))))
+
+(defun %zip-uint64 (bytes offset)
+  (logior (zip::get-int bytes offset) (ash (zip::get-int bytes (+ offset 4)) 32)))
+
+(defun %zip-central-layout (stream end position)
+  "Use a consistent ZIP64 end record when its locator is present."
+  (let ((count (zip::end/total-files end))
+        (size (zip::end/central-directory-size end))
+        (offset (zip::end/central-directory-offset end)))
+    (when (>= position 20)
+      (file-position stream (- position 20))
+      (let* ((locator (%zip-read-exact stream 20 position))
+             (location (%zip-uint64 locator 8)))
+        (when (and (= (zip::get-int locator 0) #x07064b50) (<= (+ location 56) (- position 20)))
+          (file-position stream location)
+          (let* ((record (%zip-read-exact stream 56 position))
+                 (count64 (%zip-uint64 record 32))
+                 (size64 (%zip-uint64 record 40))
+                 (offset64 (%zip-uint64 record 48)))
+            (when (and (= (zip::get-int record 0) #x06064b50)
+                       (>= (%zip-uint64 record 4) 44)
+                       (or (= count #xffff) (= count count64))
+                       (or (= size #xffffffff) (= size size64))
+                       (or (= offset #xffffffff) (= offset offset64)))
+              (setf count count64 size size64 offset offset64 position location))))))
+    (values position size offset count)))
+
+(defun %zip-entry-values (header extra)
+  "Decode bounded ZIP64 entry fields in their specified size/offset order."
+  (let ((size (zip::cd/size header))
+        (compressed (zip::cd/compressed-size header))
+        (offset (zip::cd/offset header))
+        (zip64 nil))
+    (loop for i = 0 then (+ i 4 (zip::get-short extra (+ i 2)))
+          while (<= (+ i 4) (length extra))
+          do (let ((end (+ i 4 (zip::get-short extra (+ i 2)))))
+               (unless (<= end (length extra))
+                 (%throw '|java/util/zip/ZipException| "Invalid ZIP extra field length"))
+               (when (= (zip::get-short extra i) 1)
+                 (setf zip64 t)
+                 (let ((position (+ i 4)))
+                   (flet ((field (value)
+                            (if (/= value #xffffffff)
+                                value
+                                (progn
+                                  (unless (<= (+ position 8) end)
+                                    (%throw '|java/util/zip/ZipException| "Truncated ZIP64 entry field"))
+                                  (let ((result (%zip-uint64 extra position)))
+                                    (unless (< result (ash 1 63))
+                                      (%throw '|java/util/zip/ZipException| "Negative ZIP64 entry field"))
+                                    (incf position 8)
+                                    result)))))
+                     (setf size (field size) compressed (field compressed) offset (field offset)))))))
+    (when (and (not zip64) (member #xffffffff (list size compressed offset)))
+      (%throw '|java/util/zip/ZipException| "Missing ZIP64 entry fields"))
+    (values size compressed offset)))
+
+(defun %read-java-zipfile (stream)
+  "Read validated central-directory entries and retain their original CRCs."
+  (multiple-value-bind (end end-position) (%zip-end-record stream)
+    (multiple-value-bind (position central-size central-offset count)
+        (%zip-central-layout stream end end-position)
+      (let* ((central-position (- position central-size))
+             (prefix (- central-position central-offset))
+             (entries (make-hash-table :test 'equal))
+             (metadata (make-hash-table)))
+        (unless (and (<= 0 prefix central-position position)
+                     (<= count (floor central-size 46)))
+          (%throw '|java/util/zip/ZipException| "Invalid ZIP central directory bounds"))
+        (file-position stream central-position)
+        (loop while (< (file-position stream) position)
+              do (unless (<= (+ (file-position stream) 46) position)
+                   (%throw '|java/util/zip/ZipException| "Truncated ZIP central header"))
+                 (let* ((header (%zip-read-exact stream 46 position))
+                        (name-length (zip::cd/name-length header))
+                        (extra-length (zip::cd/extra-length header))
+                        (comment-length (zip::cd/comment-length header)))
+                   (unless (and (= (zip::cd/signature header) #x02014b50)
+                                (not (logtest (zip::cd/flags header) 1))
+                                (member (zip::cd/method header) '(0 8))
+                                (<= (+ (file-position stream) name-length extra-length comment-length) position))
+                     (%throw '|java/util/zip/ZipException| "Invalid ZIP central header"))
+                   (let* ((name (%zip-read-exact stream name-length position))
+                          (extra (%zip-read-exact stream extra-length position))
+                          (comment (%zip-read-exact stream comment-length position))
+                          (utf8 (logtest (zip::cd/flags header) 2048)))
+                     (multiple-value-bind (size compressed offset) (%zip-entry-values header extra)
+                       (let ((entry (zip::make-zipfile-entry
+                                      :name (zip::decode-name name utf8) :stream stream :offset (+ prefix offset)
+                                      :size size :compressed-size compressed
+                                      :comment (when (plusp comment-length) (zip::decode-name comment utf8))
+                                      :date (zip::cd/date header) :mode (ash (zip::cd/external-attributes header) -16))))
+                         (setf (gethash (zip:zipfile-entry-name entry) entries) entry
+                               (gethash (+ prefix offset) metadata)
+                               (cons (zip::cd/crc header) (zip::cd/method header))))))))
+        (let ((zip (zip::make-zipfile :stream stream :entries entries)))
+          (setf (gethash zip *zipfile-entry-metadata*) metadata
+                (gethash zip *zipfile-read-locks*) (bt:make-lock "Java ZIP input stream"))
+          zip)))))
+
 (defun %open-java-zipfile (path)
-  "Open PATH and retain central-directory metadata omitted by the zip library.
-Read the stored CRC, rather than computing it from the data: URLClassLoader
-uses this value to detect corrupted entries, including streamed ZIP entries
-whose local headers contain zero CRCs."
-  (let* ((zip (zip:open-zipfile path))
-         (stream (zip::zipfile-stream zip))
-         (position (file-position stream))
-         (metadata (make-hash-table)))
-    (handler-case
+  "Open PATH with Java exceptions and close failed parses synchronously."
+  (handler-case
+      (let ((stream (open (sb-ext:parse-native-namestring path) :element-type '(unsigned-byte 8)))
+            (success nil))
         (unwind-protect
-             (progn
-               (zip::seek-to-end-header stream)
-               (let ((end (zip::make-end-header stream)))
-                 (file-position stream (zip::end/central-directory-offset end))
-                 (dotimes (index (zip::end/total-files end))
-                   (let ((header (zip::make-directory-entry stream)))
-                     (setf (gethash (zip::cd/offset header) metadata)
-                           (cons (zip::cd/crc header) (zip::cd/method header)))
-                     (file-position stream (+ (file-position stream)
-                                              (zip::cd/name-length header)
-                                              (zip::cd/extra-length header)
-                                              (zip::cd/comment-length header))))))
-               (setf (gethash zip *zipfile-entry-metadata*) metadata
-                     (gethash zip *zipfile-read-locks*) (bt:make-lock "Java ZIP input stream"))
-               zip)
-          (file-position stream position))
-      (error (condition)
-        (zip:close-zipfile zip)
-        (error condition)))))
+             (prog1 (%read-java-zipfile stream) (setf success t))
+          (unless success (close stream))))
+    (sb-ext:file-does-not-exist () (%throw '|java/nio/file/NoSuchFileException| path))
+    (file-error (condition)
+      (%throw (if (equal (%file-error-message condition) (sb-int:strerror sb-posix:eacces))
+                  '|java/nio/file/AccessDeniedException| '|java/nio/file/FileSystemException|)
+              path))
+    (stream-error (condition) (%throw '|java/io/IOException| (princ-to-string condition)))
+    (babel:character-decoding-error (condition)
+      (%throw '|java/util/zip/ZipException| (princ-to-string condition)))))
 
 (defun %zipfile-name (zip-file)
   "Return the retained Java pathname of ZIP-FILE."
@@ -183,6 +306,7 @@ of the JavaUtilZipFileAccess bridge: JarFile.entries() goes through it."
 
 (defun %zipfile-open (zip-file name)
   "Open NAME for ZIP-FILE and arrange fallback cleanup for an abandoned archive."
+  (%non-null name)
   (%check-not-directory name)
   (bt:with-recursive-lock-held ((%zipfile-lock zip-file))
     (let ((zip (%open-java-zipfile (lstring name))))
@@ -191,7 +315,7 @@ of the JavaUtilZipFileAccess bridge: JarFile.entries() goes through it."
 
 (defmethod |<init>(Ljava/io/File;I)V| ((this |java/util/zip/ZipFile|) file mode)
   (assert (= mode 1)) ; only support read for now
-  (%zipfile-open this (|getPath()| file)))
+  (%zipfile-open this (|getPath()| (%non-null file))))
 
 (defmethod |<init>(Ljava/io/File;)V| ((this |java/util/zip/ZipFile|) file)
   (|<init>(Ljava/io/File;I)V| this file 1))

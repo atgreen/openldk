@@ -1712,6 +1712,6 @@ mauve/gnu/testlet/java/util/zip/Deflater/PR27435.java	pass	0	0	0	77fe3e63fd8e223
 mauve/gnu/testlet/java/util/zip/GZIPInputStream/PR24461.java	pass	0	0	0	861ad52aacdc0aa649fe9eb477768447784f744d9389aaf1a07d3b13cea2e1c9	Passes its assertions or the current JDK 25 comparison.
 mauve/gnu/testlet/java/util/zip/GZIPInputStream/basic.java	pass	0	0	0	6d44241714999873876710f478a5ec00239c1b7347c3588890dc3adb5ffb4517	Passes its assertions or the current JDK 25 comparison.
 mauve/gnu/testlet/java/util/zip/InflaterInputStream/basic.java	compile-rejected	1	-	-	c38208ff76bbad17cc20578a6b1a1de459f78f6a78cdae0bf20ea89d32d8b870	JDK 25 compilation rejected: underscore not allowed here
-mauve/gnu/testlet/java/util/zip/ZipFile/newZipFile.java	runtime-failure	0	0	1	a9f40f12d2f00c9392a35e2cd8dc2dfb1a205c2ef7fedf7092eb5d3ce858be44	OpenLDK execution fails while JDK 25 passes.
+mauve/gnu/testlet/java/util/zip/ZipFile/newZipFile.java	pass	0	0	0	a9f40f12d2f00c9392a35e2cd8dc2dfb1a205c2ef7fedf7092eb5d3ce858be44	Passes fresh JDK 25 comparison after bounded ZIP parsing and Java exception translation (5 assertions).
 mauve/gnu/testlet/java/util/zip/ZipInputStream/basic.java	pass	0	0	0	505df881bb16dfbdc1d4e856796f429376e54f4e58bda60dbd9b210c177bc4e9	Passes its assertions or the current JDK 25 comparison.
 mauve/gnu/testlet/java/util/zip/ZipInputStream/close.java	pass	0	0	0	1f97e922a9153589760e4ade5bf846b484cf966805be74fc303e6bb439e73ce3	Passes its assertions or the current JDK 25 comparison.

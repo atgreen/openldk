@@ -39,6 +39,8 @@ PROBES = {
     'MismatchProbe': (25,),
     'DataCharacterProbe': (25,),
     'RandomAccessLengthProbe': (25,),
+    'ZipFailureProbe': (25,),
+    'FileDescriptorCloseProbe': (25,),
     'CryptoProbe': (25,),
     'VectorProbe': (25,),
     'ReferenceProbe': (25,),

@@ -163,4 +163,3 @@ XFAIL: mauve/gnu/testlet/java/net/URLConnection/getPermission.java execution tes
 XFAIL: mauve/gnu/testlet/java/nio/channels/FileChannel/map.java execution test
 XFAIL: mauve/gnu/testlet/java/text/DateFormatSymbols/SanityCheck.java execution test
 XFAIL: mauve/gnu/testlet/java/util/prefs/PreferenceTest.java execution test
-XFAIL: mauve/gnu/testlet/java/util/zip/ZipFile/newZipFile.java execution test

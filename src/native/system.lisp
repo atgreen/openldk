@@ -1047,11 +1047,19 @@ descriptor in *FD-STREAMS*, otherwise FD unchanged (0, 1, 2 or a stream)."
       fd))
 
 (defun %close-file-descriptor (fd)
-  "Close FD's stream and forget its integer registration."
+  "Close FD's Lisp stream or raw OS descriptor and forget its registration."
   (let ((stream (%resolve-fd fd)))
     (unwind-protect
-         (when (and (streamp stream) (open-stream-p stream))
-           (close stream))
+         (cond
+           ((and (streamp stream) (open-stream-p stream)) (close stream))
+           ((and (integerp stream) (not (minusp stream)))
+            (handler-case (sb-posix:close stream)
+              (sb-posix:syscall-error (condition)
+                ;; Linux closes the descriptor even when close reports EINTR.
+                ;; Retrying could close a descriptor just reused by another thread.
+                (unless (= (sb-posix:syscall-errno condition) sb-posix:eintr)
+                  (%throw '|java/io/IOException|
+                          (sb-int:strerror (sb-posix:syscall-errno condition))))))))
       (when (integerp fd)
         ;; Do not discard a different stream registered concurrently.
         (sb-ext:with-locked-hash-table (*fd-streams*)
@@ -1203,8 +1211,12 @@ its FileDescriptor's fd (or its own fd slot), resolved by %RESOLVE-FD."
   "Native close for file streams."
   (when (slot-exists-p this '|fd|)
     (let* ((holder (slot-value this '|fd|))
-           (fd (if (and holder (slot-exists-p holder '|fd|))
-                   (slot-value holder '|fd|) holder)))
+           (owner (if (and (typep holder 'standard-object) (slot-exists-p holder '|fd|))
+                      holder this))
+           (fd (slot-value owner '|fd|)))
+      ;; Invalidate the shared FileDescriptor before close can release its OS
+      ;; number for reuse. Repeated closes must not affect an unrelated file.
+      (setf (slot-value owner '|fd|) -1)
       (%close-file-descriptor fd)))
   nil)
 

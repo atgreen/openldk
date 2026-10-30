@@ -198,6 +198,27 @@ invalidation, pending output, unchanged-length pointer clamping, shared
 channel positions, unchanged state after failures, and sparse lengths above
 2 GiB.
 
+ZIP archive opens now validate complete END and central-directory records
+before decoding entries and report malformed archives as Java `ZipException`.
+Failed parses close their underlying Lisp streams synchronously. Parsing keeps
+the stored CRC metadata, handles ZIP64 end records and entry fields, skips false
+END signatures in archive comments, and accounts for prepended archive stubs.
+The historical `ZipFile/newZipFile` case passes all five assertions on both
+runtimes. Removing its expectation leaves **162 runtime expectations**.
+`ZipFailureProbe` checks malformed lengths/signatures/methods/flags, UTF-8 names,
+null paths, missing files, ordinary and ZIP64 archives, comments and padding,
+stubs, and repeated failed opens under a 128-descriptor limit.
+
+The low-descriptor check also exposed raw NIO descriptors being ignored by
+`FileDescriptor.close0`. The native close now closes raw OS descriptors as well
+as Lisp-backed streams and invalidates the shared descriptor before releasing
+its OS number. `FileDescriptorCloseProbe` checks repeated NIO open/read/write
+and close operations, descriptor counts, shared-descriptor validity, and safe
+repeated closes after descriptor reuse. The pre-fix runtime grows from 23 to
+663 open descriptors in the probe; the repaired runtime passes both normally
+and under the 128-descriptor limit. Process pipes, NIO transfer/lock checks, and
+ZIP saved-image restart also pass with the repaired close implementation.
+
 ## Results
 
 | Suite audited | Passes | OpenLDK-only differences | Legacy version parser | Rejected by javac 25 | Reference failure | Reference timeout | Helpers without a main |
