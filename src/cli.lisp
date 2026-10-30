@@ -492,22 +492,25 @@ if the class has not been loaded."
 
 (defvar *file-streams-to-reopen* nil
   "Files open in Java objects when the image was saved, as
-(object path direction position), reopened when the image starts.")
+(object path direction position original-stream), reopened when the image starts.")
 
 (defun %reopen-saved-file-streams ()
   "SB-EXT:*INIT-HOOKS* function: reopen the files Java objects held open
 when the image was saved, at the position they had, and store the new
 streams where the old ones were."
-  (dolist (entry *file-streams-to-reopen*)
-    (destructuring-bind (object path direction position) entry
-      (let ((stream (ignore-errors
-                     (open path :element-type '(unsigned-byte 8)
-                                :direction direction
-                                :if-exists (if (eq direction :input) nil :append)))))
-        (when stream
-          (when position
-            (ignore-errors (file-position stream position)))
-          (setf (slot-value object '|fd|) stream)))))
+  (let ((reopened (make-hash-table :test 'eq)))
+    (dolist (entry *file-streams-to-reopen*)
+      (destructuring-bind (object path direction position original) entry
+        (let ((stream (or (gethash original reopened)
+                          (let ((new (ignore-errors
+                                       (open path :element-type '(unsigned-byte 8)
+                                                  :direction direction
+                                                  :if-exists (if (eq direction :input) nil :append)))))
+                            (when new
+                              (when position (ignore-errors (file-position new position)))
+                              (setf (gethash original reopened) new))))))
+          (when stream
+            (setf (slot-value object '|fd|) stream))))))
   (setf *file-streams-to-reopen* nil))
 
 (defun %record-file-streams-to-reopen ()
@@ -531,7 +534,7 @@ SAVE-LISP-AND-DIE."
                              (cond ((and (input-stream-p stream) (output-stream-p stream)) :io)
                                    ((output-stream-p stream) :output)
                                    (t :input))
-                             (ignore-errors (file-position stream)))
+                             (ignore-errors (file-position stream)) stream)
                        entries)))))))
      :all)
     (setf *file-streams-to-reopen* entries)
@@ -674,6 +677,7 @@ Java code (warmups)."
   (setf *java-loader-map-lock* (bt:make-recursive-lock "Java loader identities"))
   (setf *native-allocation-lock* (bt:make-lock "Native allocations"))
   (setf *java-reference-lock* (bt:make-lock "Java references"))
+  (setf *jar-file-cache-lock* (bt:make-recursive-lock "JarURLConnection cache"))
   (setf *java-reference-processor* nil)
   (setf *scoped-value-cache* nil)
   ;; Let the restarted image stamp its own start time.

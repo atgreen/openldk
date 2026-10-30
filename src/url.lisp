@@ -128,8 +128,7 @@ target does not exist, or :FALLTHROUGH for other protocols."
     (cond
       ;; Handle jar: URLs
       ((starts-with? "jar:" url-string)
-       (when-let (stream (%open-jar-url-stream url-string))
-         (make-instance '<resource-input-stream> :lisp-stream stream)))
+       (%jar-connection-input-stream (%open-url-connection-1 url)))
       ;; Handle file: URLs
       ((starts-with? "file:" url-string)
        (let ((path (subseq url-string 5)))  ; Skip "file:"
@@ -235,6 +234,38 @@ protocol field, or parse it out of the URL's string form."
 (defvar *connection-urls* (make-hash-table :test #'eq :weakness :key :synchronized t)
   "Synthetic URLConnection -> its java.net.URL.")
 
+(defvar *connection-use-caches* (make-hash-table :test 'eq :weakness :key :synchronized t))
+(defvar *connection-jar-files* (make-hash-table :test 'eq :weakness :key :synchronized t))
+(defvar *connection-jar-entries* (make-hash-table :test 'eq :weakness :key :synchronized t))
+(defvar *jar-file-cache* (make-hash-table :test 'equal :synchronized t))
+(defvar *cached-jar-paths* (make-hash-table :test 'eq :weakness :key :synchronized t))
+(defvar *jar-file-cache-lock* (bt:make-recursive-lock "JarURLConnection cache"))
+
+(defun %default-url-use-caches (protocol)
+  "Read the JDK's actual global/per-protocol defaults, including Java setters."
+  (let ((class (classload "java/net/URLConnection")))
+    (%clinit class)
+    (not (zerop
+          (funcall (static-method-symbol
+                    "java/net/URLConnection.getDefaultUseCaches(Ljava/lang/String;)Z"
+                    (ldk-class-package class)) (jstring protocol))))))
+
+(defun %initialize-synthetic-connection (conn url protocol)
+  (let ((use-caches (%default-url-use-caches protocol)))
+    (setf (gethash conn *connection-urls*) url
+          (gethash conn *connection-use-caches*) use-caches)
+    (when (slot-exists-p conn '|url|) (setf (slot-value conn '|url|) url))
+    (when (slot-exists-p conn '|useCaches|)
+      (setf (slot-value conn '|useCaches|) (if use-caches 1 0))))
+  conn)
+
+(defun %connection-connected-p (conn)
+  (and (slot-exists-p conn '|connected|) (slot-boundp conn '|connected|)
+       (not (zerop (slot-value conn '|connected|)))))
+
+(defun %mark-connection-connected (conn)
+  (when (slot-exists-p conn '|connected|) (setf (slot-value conn '|connected|) 1)))
+
 (defun %url-string-of (url)
   (or (gethash url *native-url-strings*) (lstring (|toString()Ljava/lang/String;| url))))
 
@@ -248,7 +279,8 @@ scanning walks a jar from its directory's URL this way)."
     (put '|url| url)
     (multiple-value-bind (jar-path entry-path) (%parse-jar-url url-string)
       (when jar-path
-        (put '|jarFileURL| (%make-url-from-string (format nil "file:~A" jar-path)))
+        (put '|jarFileURL| (%make-url-from-string
+                             (subseq url-string 4 (search "!/" url-string))))
         (put '|entryName| (when (plusp (length entry-path))
                             (jstring entry-path)))))))
 
@@ -258,12 +290,12 @@ scanning walks a jar from its directory's URL this way)."
     (cond
       ((starts-with? "jar:" url-string)
        (let ((conn (%make-java-instance "java/net/JarURLConnection")))
-         (setf (gethash conn *connection-urls*) url)
+         (%initialize-synthetic-connection conn url "jar")
          (%set-jar-connection-fields conn url url-string)
          conn))
       ((or (starts-with? "file:" url-string) (starts-with? "jrt:" url-string))
        (let ((conn (%make-java-instance "java/net/JarURLConnection")))
-         (setf (gethash conn *connection-urls*) url)
+         (%initialize-synthetic-connection conn url (subseq url-string 0 (position #\: url-string)))
          conn))
       (t :fallthrough))))
 
@@ -283,11 +315,13 @@ scanning walks a jar from its directory's URL this way)."
 ;; synthetic connections and defer to that default for any other connection.
 (defmethod |getInputStream()Ljava/io/InputStream;| :around ((conn |java/net/URLConnection|))
   (if-let ((url (gethash conn *connection-urls*)))
-    (let ((s (%open-url-stream-1 url)))
-      (case s
-        (:fallthrough (call-next-method))
-        ((nil) (%throw-file-not-found url))
-        (t s)))
+    (if (starts-with? "jar:" (%url-string-of url))
+        (%jar-connection-input-stream conn)
+        (let ((stream (%open-url-stream-1 url)))
+          (case stream
+            (:fallthrough (call-next-method))
+            ((nil) (%throw-file-not-found url))
+            (t (%mark-connection-connected conn) stream))))
     (call-next-method)))
 
 (defun %throw-file-not-found (url)
@@ -313,21 +347,27 @@ combination signals NO-PRIMARY-METHOD if only the :around above applies."
 ;; (Groovy's class-file reader turns caching off).  The synthetic connection
 ;; is an instance of the stub class above until java.net.URLConnection is
 ;; loaded, whose methods then replace these.
-(defmethod |setUseCaches(Z)V| ((conn |java/net/URLConnection|) use-caches)
-  (declare (ignore conn use-caches))
-  nil)
+(defmethod |setUseCaches(Z)V| :around ((conn |java/net/URLConnection|) use-caches)
+  (if (gethash conn *connection-urls*)
+      (progn
+        (when (%connection-connected-p conn)
+          (%throw '|java/lang/IllegalStateException| "Already connected"))
+        (setf (gethash conn *connection-use-caches*) (not (zerop use-caches)))
+        (when (slot-exists-p conn '|useCaches|) (setf (slot-value conn '|useCaches|) use-caches))
+        nil)
+      (call-next-method)))
 
-(defmethod |getUseCaches()Z| ((conn |java/net/URLConnection|))
-  (declare (ignore conn))
-  0)
+(defmethod |getUseCaches()Z| :around ((conn |java/net/URLConnection|))
+  (if (gethash conn *connection-urls*)
+      (if (gethash conn *connection-use-caches*) 1 0)
+      (call-next-method)))
 
-(defmethod |setDefaultUseCaches(Z)V| ((conn |java/net/URLConnection|) use-caches)
-  (declare (ignore conn use-caches))
-  nil)
-
-(defmethod |connect()V| ((conn |java/net/URLConnection|))
-  (declare (ignore conn))
-  nil)
+(defmethod |connect()V| :around ((conn |java/net/URLConnection|))
+  (if-let ((url (gethash conn *connection-urls*)))
+      (if (starts-with? "jar:" (%url-string-of url))
+          (progn (%connect-jar-connection conn) nil)
+          (%mark-connection-connected conn))
+      (call-next-method)))
 
 (defmethod |setConnectTimeout(I)V| ((conn |java/net/URLConnection|) timeout)
   (declare (ignore conn timeout))
@@ -348,14 +388,62 @@ combination signals NO-PRIMARY-METHOD if only the :around above applies."
   (declare (ignore conn))
   -1)
 
+(defun %new-java-jar-file (path)
+  (classload "java/util/jar/JarFile")
+  (let ((jar-file (%make-java-instance "java/util/jar/JarFile")))
+    (|<init>(Ljava/lang/String;)V| jar-file (jstring path))
+    jar-file))
+
+(defun %uncache-jar-file (jar-file)
+  "Remove only this cached instance, without holding any ZipFile object lock."
+  (when (gethash jar-file *cached-jar-paths*)
+    (bt:with-recursive-lock-held (*jar-file-cache-lock*)
+      (when-let ((path (gethash jar-file *cached-jar-paths*)))
+        (when (eq jar-file (gethash path *jar-file-cache*)) (remhash path *jar-file-cache*))
+        (remhash jar-file *cached-jar-paths*)))))
+
+(defun %connect-jar-connection (conn)
+  "Publish one validated connection and share its archive only when caching is on."
+  (bt:with-recursive-lock-held (*jar-file-cache-lock*)
+    (or (gethash conn *connection-jar-files*)
+        (when-let ((url (gethash conn *connection-urls*)))
+          (multiple-value-bind (jar-path entry-path) (%parse-jar-url (%url-string-of url))
+            (unless jar-path (%throw-file-not-found url))
+            (let* ((path (handler-case (namestring (truename jar-path))
+                           (file-error () (%throw-file-not-found url))))
+                   (use-caches (gethash conn *connection-use-caches*))
+                   (cached (and use-caches (gethash path *jar-file-cache*)))
+                   (jar-file (or cached (%new-java-jar-file path)))
+                   (entry (when (plusp (length entry-path))
+                            (|getJarEntry(Ljava/lang/String;)Ljava/util/jar/JarEntry;|
+                             jar-file (jstring entry-path)))))
+              (unless (or entry (zerop (length entry-path)))
+                (unless cached (|close()V| jar-file))
+                (%throw-file-not-found url))
+              (when (and use-caches (null cached))
+                (setf (gethash path *jar-file-cache*) jar-file
+                      (gethash jar-file *cached-jar-paths*) path))
+              (setf (gethash conn *connection-jar-files*) jar-file)
+              (when entry (setf (gethash conn *connection-jar-entries*) entry))
+              (%mark-connection-connected conn)
+              jar-file))))))
+
+(defun %jar-connection-input-stream (conn)
+  "Give uncached entry streams ownership of their archive's lifetime."
+  (let* ((jar-file (%connect-jar-connection conn))
+         (entry (gethash conn *connection-jar-entries*)))
+    (unless entry (%throw '|java/io/IOException| "No entry name specified"))
+    (handler-case
+        (let ((stream (|getInputStream(Ljava/util/zip/ZipEntry;)Ljava/io/InputStream;| jar-file entry)))
+          (if (gethash conn *connection-use-caches*) stream (%zip-stream-own-zipfile stream)))
+      (error (condition)
+        (unless (gethash conn *connection-use-caches*) (|close()V| jar-file))
+        (error condition)))))
+
 (defmethod |getJarFile()Ljava/util/jar/JarFile;| ((conn |java/net/JarURLConnection|))
-  (when-let ((url (gethash conn *connection-urls*)))
-    (multiple-value-bind (jar-path entry-path) (%parse-jar-url (%url-string-of url))
-      (declare (ignore entry-path))
-      (when jar-path
-        ;; A real JarFile, so its entries(), getJarEntry() and manifest
-        ;; work as for one the program opened itself.
-        (classload "java/util/jar/JarFile")
-        (let ((jf (%make-java-instance "java/util/jar/JarFile")))
-          (|<init>(Ljava/lang/String;)V| jf (jstring jar-path))
-          jf)))))
+  (%connect-jar-connection conn))
+
+(defmethod |getJarEntry()Ljava/util/jar/JarEntry;| :around ((conn |java/net/JarURLConnection|))
+  (if (gethash conn *connection-urls*)
+      (progn (%connect-jar-connection conn) (gethash conn *connection-jar-entries*))
+      (call-next-method)))

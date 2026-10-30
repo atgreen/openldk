@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Anthony Green <green@moxielogic.com>
+#
 # SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 """Check stored ZIP metadata, streamed entries, and URLClassLoader CRC diagnostics."""
 import argparse
@@ -6,6 +8,7 @@ import io
 import os
 from pathlib import Path
 import struct
+import resource
 import subprocess
 import zipfile
 
@@ -28,8 +31,25 @@ def main():
     options = parser.parse_args()
     BUILD.mkdir(parents=True, exist_ok=True)
     subprocess.run([str(JDK / 'bin/javac'), '-d', str(BUILD)]
-                   + [str(ROOT / 'test/zip' / name) for name in ['ZipMetadataProbe.java', 'ZipPayload.java', 'ZipCallback.java', 'ArrayLoaderProbe.java', 'ZipConcurrentProbe.java', 'BufferLoaderProbe.java', 'JarManifestProbe.java']],
+                   + [str(ROOT / 'test/zip' / name) for name in ['ZipMetadataProbe.java', 'ZipPayload.java', 'ZipCallback.java', 'ArrayLoaderProbe.java', 'ZipConcurrentProbe.java', 'BufferLoaderProbe.java', 'JarManifestProbe.java', 'ZipImage.java']],
                    check=True, timeout=60)
+    resource_probes = ['jarurlcache', 'jarurlstream', 'jarurlfds']
+    subprocess.run([str(JDK / 'bin/javac'), '-d', str(BUILD)]
+                   + [str(ROOT / 'testsuite/aaa' / (name + '.java'))
+                      for name in resource_probes], check=True, timeout=60)
+    for engine in [JDK / 'bin/java', options.runtime.resolve()]:
+        for probe in resource_probes:
+            # Low descriptor limits make leaks and abandoned-stream recovery
+            # reproducible without opening thousands of files on the host.
+            def limit_descriptors():
+                soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+                resource.setrlimit(resource.RLIMIT_NOFILE, (min(128, soft), hard))
+            result = subprocess.run([str(engine), '-cp', str(BUILD), 'aaa.' + probe],
+                                    cwd=ROOT, capture_output=True, text=True,
+                                    timeout=180, preexec_fn=limit_descriptors)
+            if result.returncode or result.stdout.strip() != 'OK':
+                raise RuntimeError(f'{engine} {probe}:\n{result.stdout}\n{result.stderr}')
+            print(f'{engine.name}: {probe} passed (128 descriptors)', flush=True)
     with zipfile.ZipFile(BUILD / 'manifest.jar', 'w') as archive:
         archive.writestr('META-INF/MANIFEST.MF', b'Manifest-Version: 1.0\r\n\r\n')
     for streamed in [False, True]:
@@ -93,6 +113,20 @@ def main():
         if result.returncode or 'Concurrent ZIP reads passed' not in result.stdout:
             raise RuntimeError(f'{engine}:\n{result.stdout}\n{result.stderr}')
         print(f'{engine.name}: {result.stdout.strip()}', flush=True)
+
+
+    environment = dict(os.environ, LDK_ZIP_IMAGE_DIR=str(BUILD))
+    subprocess.run(['sbcl', '--dynamic-space-size', '8192', '--disable-debugger',
+                    '--eval', '(progn (push (uiop:getcwd) asdf:*central-registry*) '
+                              '(asdf:load-system :openldk))',
+                    '--load', str(ROOT / 'test/zip/image.lisp')],
+                   cwd=ROOT, env=environment, check=True, timeout=600,
+                   stdout=(BUILD / 'image-build.log').open('w'), stderr=subprocess.STDOUT)
+    result = subprocess.run([str(BUILD / 'zip-image')], cwd=ROOT,
+                            capture_output=True, text=True, timeout=180)
+    if result.returncode or 'ZIP image passed' not in result.stdout:
+        raise RuntimeError(f'ZIP image:\n{result.stdout}\n{result.stderr}')
+    print('ZIP image passed', flush=True)
 
 
 if __name__ == '__main__':

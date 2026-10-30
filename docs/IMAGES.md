@@ -239,7 +239,11 @@ Things to watch for:
   the warmup left them.
 - **Open jars reopen.**  A `java.util.zip.ZipFile` the program opened
   during a warmup reopens its file on first use in the image, so keep the
-  file where it was.
+  file where it was. Partially read ZIP entry streams retain their unread
+  contents in the image; saving materializes those remaining bytes, even
+  though ordinary ZIP reads stream compressed data in bounded buffers.
+  File descriptors shared by streams and their cleanup objects reopen as
+  one shared handle, preserving the file position.
 - **Threads don't survive.**  Any thread a warmup started is killed before
   saving.  A thread pool the warmup created keeps believing in its dead
   workers, and a task handed to one never runs, so with `:reset-classes

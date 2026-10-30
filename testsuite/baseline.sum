@@ -1,5 +1,5 @@
 # Core regression baseline, 2026-10-30.
-# 774 PASS, 1 XFAIL, 7 UNSUPPORTED. See FAILURES.md.
+# 783 PASS, 1 XFAIL, 7 UNSUPPORTED. See FAILURES.md.
 
 PASS: jikestst/derek/ok/exec/TestArithmetic.e
 PASS: jikestst/derek/ok/exec/TestArrayAccess.e
@@ -646,6 +646,15 @@ PASS: aaa/jarentry.java output pattern test
 PASS: aaa/jarscan.java (test for excess errors)
 PASS: aaa/jarscan.java execution test
 PASS: aaa/jarscan.java output pattern test
+PASS: aaa/jarurlcache.java (test for excess errors)
+PASS: aaa/jarurlcache.java execution test
+PASS: aaa/jarurlcache.java output pattern test
+PASS: aaa/jarurlfds.java (test for excess errors)
+PASS: aaa/jarurlfds.java execution test
+PASS: aaa/jarurlfds.java output pattern test
+PASS: aaa/jarurlstream.java (test for excess errors)
+PASS: aaa/jarurlstream.java execution test
+PASS: aaa/jarurlstream.java output pattern test
 PASS: aaa/jitwake.java (test for excess errors)
 PASS: aaa/jitwake.java execution test
 PASS: aaa/jitwake.java output pattern test

@@ -72,6 +72,34 @@
 (defvar *zipfile-read-locks* (make-hash-table :test #'eq :weakness :key :synchronized t)
   "Open zip -> lock protecting its shared seekable input stream.")
 
+(defvar *zipfile-input-streams* (make-hash-table :test 'eq :weakness :key :synchronized t)
+  "Java ZipFile -> weak set of its open entry streams.")
+(defvar *zipfile-object-locks* (make-hash-table :test 'eq :weakness :key :synchronized t))
+(defvar *zipfile-registry-lock* (bt:make-lock "Java ZIP registry"))
+(defvar *zipfile-cleanup-tokens* (make-hash-table :test 'eq :weakness :key :synchronized t))
+(defstruct zipfile-cleanup-token)
+
+(defun %zipfile-lock (zip-file)
+  (bt:with-lock-held (*zipfile-registry-lock*)
+    (or (gethash zip-file *zipfile-object-locks*)
+        (setf (gethash zip-file *zipfile-object-locks*) (bt:make-recursive-lock "Java ZipFile")))))
+
+(defun %cancel-zipfile-cleanup (zip-file)
+  (when-let ((token (gethash zip-file *zipfile-cleanup-tokens*)))
+    (trivial-garbage:cancel-finalization token)
+    (remhash zip-file *zipfile-cleanup-tokens*)))
+
+(defun %finalize-java-zipfile (zip-file zip)
+  "Finalize an owned token, without cancelling any user finalizers on ZIP-FILE."
+  (%cancel-zipfile-cleanup zip-file)
+  (let ((token (make-zipfile-cleanup-token))
+        (lock (gethash zip *zipfile-read-locks*)))
+    (trivial-garbage:finalize token
+      (lambda ()
+        (ignore-errors
+          (bt:with-lock-held (lock) (zip:close-zipfile zip)))))
+    (setf (gethash zip-file *zipfile-cleanup-tokens*) token)))
+
 (defun %java-zip-entry-contents (zip entry)
   "Read ENTRY atomically with respect to other readers of ZIP's file stream."
   (bt:with-lock-held ((gethash zip *zipfile-read-locks*))
@@ -113,21 +141,31 @@ whose local headers contain zero CRCs."
   (first (gethash zip-file *zipfile-state*)))
 
 (defun %zipfile-zip (zip-file)
-  "The open zip:zipfile for ZIP-FILE, reopening it if a saved image has
-restarted since it was opened."
-  (when-let ((state (gethash zip-file *zipfile-state*)))
-    (or (rest state)
-        (setf (rest state) (%open-java-zipfile (lstring (first state)))))))
+  "Return the native ZIP, reopening an image-retained archive once."
+  (bt:with-recursive-lock-held ((%zipfile-lock zip-file))
+    (when-let ((state (gethash zip-file *zipfile-state*)))
+      (or (rest state)
+          (let ((zip (%open-java-zipfile (lstring (first state)))))
+            (%finalize-java-zipfile zip-file zip)
+            (setf (rest state) zip))))))
 
 (defun %zipfile-reset-for-save ()
-  "Close every open zip, keeping its path: file descriptors don't survive
-SAVE-LISP-AND-DIE, so each one reopens on first use after a restart."
-  (maphash (lambda (zip-file state)
-             (declare (ignore zip-file))
-             (when (rest state)
-               (ignore-errors (zip:close-zipfile (rest state)))
-               (setf (rest state) nil)))
-           *zipfile-state*))
+  "Snapshot live entry streams and close native ZIP handles before image saving."
+  (maphash
+   (lambda (zip-file state)
+     (bt:with-recursive-lock-held ((%zipfile-lock zip-file))
+       (when-let ((streams (gethash zip-file *zipfile-input-streams*)))
+         (maphash (lambda (stream ignored)
+                    (declare (ignore ignored))
+                    (%snapshot-zip-input-stream stream)) streams))
+       (%cancel-zipfile-cleanup zip-file)
+       (when (rest state)
+         (bt:with-lock-held ((gethash (rest state) *zipfile-read-locks*))
+           (zip:close-zipfile (rest state)))
+         (setf (rest state) nil))))
+   *zipfile-state*)
+  (clrhash *zipfile-object-locks*)
+  (setf *zipfile-registry-lock* (bt:make-lock "Java ZIP registry")))
 
 
 (defun |java/util/zip/ZipFile.<clinit>()V| ()
@@ -144,10 +182,12 @@ of the JavaUtilZipFileAccess bridge: JarFile.entries() goes through it."
   "Default constructor stub (no-op).")
 
 (defun %zipfile-open (zip-file name)
-  "Open the zip file at path NAME (a Java string) for ZIP-FILE."
+  "Open NAME for ZIP-FILE and arrange fallback cleanup for an abandoned archive."
   (%check-not-directory name)
-  (setf (gethash zip-file *zipfile-state*)
-        (cons name (%open-java-zipfile (lstring name)))))
+  (bt:with-recursive-lock-held ((%zipfile-lock zip-file))
+    (let ((zip (%open-java-zipfile (lstring name))))
+      (setf (gethash zip-file *zipfile-state*) (cons name zip))
+      (%finalize-java-zipfile zip-file zip))))
 
 (defmethod |<init>(Ljava/io/File;I)V| ((this |java/util/zip/ZipFile|) file mode)
   (assert (= mode 1)) ; only support read for now
@@ -309,11 +349,14 @@ finds them: META-INF/*.SF, *.RSA, *.DSA, *.EC and SIG-*, not in subdirectories."
         (if (%zipfile-zip zip-file) 1 0)))
 
 (defmethod |size()I| ((this |java/util/zip/ZipFile|))
-  (let ((count 0))
-    (zip:do-zipfile-entries (name ze (%zipfile-zip this))
-      (declare (ignore name ze))
-      (incf count))
-    count))
+  (bt:with-recursive-lock-held ((%zipfile-lock this))
+    (let ((zip (%zipfile-zip this))
+          (count 0))
+      (unless zip (%throw '|java/lang/IllegalStateException| "ZipFile closed"))
+      (zip:do-zipfile-entries (name ze zip)
+        (declare (ignore name ze))
+        (incf count))
+      count)))
 
 (defmethod |getMetaInfEntryNames()| ((this |java/util/jar/JarFile|))
   (let ((meta-entries (list)))
@@ -325,25 +368,160 @@ finds them: META-INF/*.SF, *.RSA, *.DSA, *.EC and SIG-*, not in subdirectories."
      :component-class (%get-java-class-by-bin-name "java/lang/String")
      :initial-contents meta-entries)))
 
+(defclass/std <zip-entry-source-stream> (|java/io/InputStream|)
+  ((zip-file) (compressed-position) (remaining) (closed)))
+
 (defclass/std <zip-input-stream> (|java/io/InputStream|)
-  ((zip-file)
-   (entry)
-   (buffer)
-   (index)))
+  ((zip-file) (delegate) (inflater) (close-owner) (closed) (remaining)))
 
-(defmethod |getInputStream(Ljava/util/zip/ZipEntry;)Ljava/io/InputStream;| ((this |java/util/zip/ZipFile|) zip-entry)
-  (make-instance '<zip-input-stream> :zip-file this :entry zip-entry))
+(defun %zip-entry-data-position (zip entry)
+  "Find ENTRY's local payload using its own header, not central-directory lengths."
+  (bt:with-lock-held ((gethash zip *zipfile-read-locks*))
+    (let ((stream (zip::zipfile-stream zip)))
+      (file-position stream (zip::zipfile-entry-offset entry))
+      (let ((header (zip::make-local-header stream)))
+        (unless (= (zip::file/signature header) #x04034b50)
+          (%throw '|java/util/zip/ZipException| "invalid LOC header"))
+        (+ (file-position stream) (zip::file/name-length header) (zip::file/extra-length header))))))
 
-(defmethod |read()| ((this <zip-input-stream>))
-  (with-slots (zip-file entry buffer index) this
-    (unless buffer
+(defun %check-zip-read-buffer (array offset length)
+  "Check the entire requested range before allocation, I/O, or position changes."
+  (unless array (%throw '|java/lang/NullPointerException|))
+  (unless (<= 0 offset (+ offset length) (length (java-array-data array)))
+    (%throw '|java/lang/IndexOutOfBoundsException|)))
+
+(defun %zip-entry-source-read (source memory length)
+  "Read compressed bytes with a bounded pread while excluding archive close."
+  (with-slots (zip-file compressed-position remaining closed) source
+    (bt:with-recursive-lock-held ((%zipfile-lock zip-file))
+      (when closed (%throw '|java/io/IOException| "Stream closed"))
+      (when (zerop length) (return-from %zip-entry-source-read 0))
+      (when (zerop remaining) (return-from %zip-entry-source-read -1))
       (let ((zip (%zipfile-zip zip-file)))
-        (setf buffer (%java-zip-entry-contents zip (zip:get-zipfile-entry (lstring (slot-value entry '|name|))
-                                                                        zip))))
-      (setf index -1))
-    (if (< index (1- (length buffer)))
-        (aref buffer (incf index))
-        -1)))
+        (unless zip (%throw '|java/io/IOException| "ZipFile closed"))
+        (bt:with-lock-held ((gethash zip *zipfile-read-locks*))
+          (let ((fd (sb-sys:fd-stream-fd (zip::zipfile-stream zip))))
+            (loop
+              (let ((result (%libc "pread" sb-alien:long
+                              (sb-alien:int fd) ((* sb-alien:unsigned-char) memory)
+                              (sb-alien:unsigned-long (min length remaining))
+                              (sb-alien:long compressed-position))))
+                (cond
+                  ((plusp result)
+                   (incf compressed-position result) (decf remaining result)
+                   (return result))
+                  ((zerop result) (%throw '|java/io/EOFException| "Truncated ZIP entry"))
+                  ((/= (sb-alien:get-errno) sb-posix:eintr)
+                   (%throw-errno '|java/io/IOException| (sb-alien:get-errno))))))))))))
+
+(defmethod |read()| ((source <zip-entry-source-stream>))
+  (let ((memory (sb-alien:make-alien sb-alien:unsigned-char 1)))
+    (unwind-protect
+         (if (minusp (%zip-entry-source-read source memory 1)) -1 (sb-alien:deref memory 0))
+      (sb-alien:free-alien memory))))
+
+(defmethod |read([BII)I| ((source <zip-entry-source-stream>) array offset length)
+  (%check-zip-read-buffer array offset length)
+  (let ((memory (sb-alien:make-alien sb-alien:unsigned-char (max 1 (min length 65536)))))
+    (unwind-protect
+         (let ((count (%zip-entry-source-read source memory (min length 65536))))
+           (when (plusp count) (%zlib-alien-to-array memory array offset count))
+           count)
+      (sb-alien:free-alien memory))))
+
+(defmethod |available()I| ((source <zip-entry-source-stream>))
+  (if (slot-value source 'closed) 0 (min 2147483647 (slot-value source 'remaining))))
+(defmethod |close()| ((source <zip-entry-source-stream>)) (setf (slot-value source 'closed) t))
+(defmethod |close()V| ((source <zip-entry-source-stream>)) (|close()| source))
+
+(defun %register-zip-input-stream (zip-file stream)
+  "Track an entry weakly; the entry itself retains its owning ZipFile."
+  (let ((streams (or (gethash zip-file *zipfile-input-streams*)
+                     (setf (gethash zip-file *zipfile-input-streams*)
+                           (make-hash-table :test 'eq :weakness :key)))))
+    (setf (gethash stream streams) t))
+  stream)
+
+(defun %close-zip-input-stream (stream &optional close-owner)
+  (with-slots (zip-file delegate inflater closed) stream
+    (bt:with-recursive-lock-held ((%zipfile-lock zip-file))
+      (unless closed
+        (setf closed t)
+        (unwind-protect
+             (when delegate (|close()| delegate))
+          (unwind-protect
+               (when inflater (|end()V| inflater))
+            (when-let ((streams (gethash zip-file *zipfile-input-streams*)))
+              (remhash stream streams))
+            (when close-owner (|close()V| zip-file)))))))
+  nil)
+
+(defun %zip-stream-own-zipfile (stream)
+  (setf (slot-value stream 'close-owner) t)
+  stream)
+
+(defun %snapshot-zip-input-stream (stream)
+  "Keep the unread bytes of a live entry independently of native inflater state."
+  (unless (slot-value stream 'closed)
+    (let ((bytes (|readAllBytes()[B| stream)))
+      (when-let ((delegate (slot-value stream 'delegate))) (|close()| delegate))
+      (when-let ((inflater (slot-value stream 'inflater))) (|end()V| inflater))
+      (setf (slot-value stream 'delegate)
+            (make-instance '<resource-input-stream> :lisp-stream
+              (flexi-streams:make-in-memory-input-stream
+                (%convert-to-unsigned-8-bit (java-array-data bytes))))
+            (slot-value stream 'inflater) nil
+            (slot-value stream 'remaining) (length (java-array-data bytes))))))
+
+(defmethod |getInputStream(Ljava/util/zip/ZipEntry;)Ljava/io/InputStream;|
+    ((this |java/util/zip/ZipFile|) zip-entry)
+  (unless zip-entry (%throw '|java/lang/NullPointerException|))
+  (bt:with-recursive-lock-held ((%zipfile-lock this))
+    (let ((zip (%zipfile-zip this)))
+      (unless zip (%throw '|java/lang/IllegalStateException| "ZipFile closed"))
+      (let ((entry (zip:get-zipfile-entry (lstring (slot-value zip-entry '|name|)) zip)))
+        (unless entry (return-from |getInputStream(Ljava/util/zip/ZipEntry;)Ljava/io/InputStream;| nil))
+        (let* ((source (make-instance '<zip-entry-source-stream>
+                         :zip-file this :compressed-position (%zip-entry-data-position zip entry)
+                         :remaining (zip::zipfile-entry-compressed-size entry) :closed nil))
+               (method (rest (gethash (zip::zipfile-entry-offset entry)
+                                     (gethash zip *zipfile-entry-metadata*))))
+               (inflater nil)
+               (delegate
+                 (case method
+                   (0 source)
+                   (8 (classload "java/util/zip/Inflater")
+                      (classload "java/util/zip/InflaterInputStream")
+                      (setf inflater (%make-java-instance "java/util/zip/Inflater"))
+                      (|<init>(Z)V| inflater 1)
+                      (let ((input (%make-java-instance "java/util/zip/InflaterInputStream")))
+                        (|<init>(Ljava/io/InputStream;Ljava/util/zip/Inflater;I)V| input source inflater 8192)
+                        input))
+                   (t (%throw '|java/util/zip/ZipException| "invalid compression method")))))
+          (%register-zip-input-stream this
+            (make-instance '<zip-input-stream> :zip-file this :delegate delegate :inflater inflater
+                           :close-owner nil :closed nil :remaining (zip::zipfile-entry-size entry))))))))
+
+(defmethod |read()| ((stream <zip-input-stream>))
+  (bt:with-recursive-lock-held ((%zipfile-lock (slot-value stream 'zip-file)))
+    (when (slot-value stream 'closed) (%throw '|java/io/IOException| "Stream closed"))
+    (let ((byte (|read()| (slot-value stream 'delegate))))
+      (unless (minusp byte) (decf (slot-value stream 'remaining)))
+      byte)))
+
+(defmethod |read([BII)I| ((stream <zip-input-stream>) array offset length)
+  (bt:with-recursive-lock-held ((%zipfile-lock (slot-value stream 'zip-file)))
+    (when (slot-value stream 'closed) (%throw '|java/io/IOException| "Stream closed"))
+    (%check-zip-read-buffer array offset length)
+    (let ((count (|read([BII)I| (slot-value stream 'delegate) array offset length)))
+      (when (plusp count) (decf (slot-value stream 'remaining) count))
+      count)))
+
+(defmethod |available()I| ((stream <zip-input-stream>))
+  (if (slot-value stream 'closed) 0 (max 0 (min 2147483647 (slot-value stream 'remaining)))))
+(defmethod |close()| ((stream <zip-input-stream>))
+  (%close-zip-input-stream stream (slot-value stream 'close-owner)))
+(defmethod |close()V| ((stream <zip-input-stream>)) (|close()| stream))
 
 (defmethod |getName()Ljava/lang/String;| ((this |java/util/zip/ZipFile|))
   (%zipfile-name this))
@@ -358,10 +536,22 @@ finds them: META-INF/*.SF, *.RSA, *.DSA, *.EC and SIG-*, not in subdirectories."
     count))
 
 (defmethod |close()V| ((this |java/util/zip/ZipFile|))
-  (when-let ((zip (%zipfile-zip this)))
-    (bt:with-lock-held ((gethash zip *zipfile-read-locks*))
-      (zip:close-zipfile zip))
-    (remhash this *zipfile-state*)))
+  ;; Never acquire the URL cache lock inside a ZipFile lock: connection
+  ;; creation takes them in the opposite order.
+  (when (fboundp '%uncache-jar-file) (%uncache-jar-file this))
+  (bt:with-recursive-lock-held ((%zipfile-lock this))
+    (%cancel-zipfile-cleanup this)
+    (unwind-protect
+         (when-let ((streams (gethash this *zipfile-input-streams*)))
+           (dolist (stream (loop for key being the hash-keys of streams collect key))
+             (%close-zip-input-stream stream))
+           (remhash this *zipfile-input-streams*))
+      (when-let ((state (gethash this *zipfile-state*)))
+        (when (rest state)
+          (bt:with-lock-held ((gethash (rest state) *zipfile-read-locks*))
+            (zip:close-zipfile (rest state))))
+        (remhash this *zipfile-state*))))
+  nil)
 
 (defvar *crc-table*
   (make-array

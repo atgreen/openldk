@@ -916,19 +916,39 @@ directory: Lisp's OPEN opens one, and the first read fails."
           (sb-posix:syscall-error () nil))
     (%throw-file-open-error filename "Is a directory")))
 
+(defun %file-error-message (condition)
+  "SBCL's OS message for a file error, when one is available."
+  (when (and (typep condition 'sb-int:simple-file-error)
+             (slot-boundp condition 'sb-kernel::message))
+    (slot-value condition 'sb-kernel::message)))
+
+(defun %file-descriptor-exhausted-p (condition)
+  "Whether CONDITION reports process or system descriptor exhaustion."
+  (let ((message (%file-error-message condition)))
+    (and (stringp message)
+         (member message (list (sb-int:strerror sb-posix:emfile)
+                               (sb-int:strerror sb-posix:enfile)) :test #'string=))))
+
+(defun %call-with-file-open-errors (filename thunk)
+  "Translate file opens, collecting abandoned resources and retrying once on EMFILE."
+  (%check-not-directory filename)
+  (labels ((attempt (recover-p)
+             (handler-case (funcall thunk)
+               (sb-ext:file-does-not-exist ()
+                 (%throw-file-open-error filename "No such file or directory"))
+               (file-error (condition)
+                 (if (and recover-p (%file-descriptor-exhausted-p condition))
+                     (progn
+                       (sb-ext:gc :full t)
+                       (%process-java-references)
+                       (attempt nil))
+                     (%throw-file-open-error filename
+                       (or (%file-error-message condition) "Permission denied")))))))
+    (attempt t)))
+
 (defmacro %with-file-open-errors ((filename) &body body)
-  "Run BODY, which opens FILENAME, turning a failure into the JDK's
-FileNotFoundException."
-  `(progn
-     (%check-not-directory ,filename)
-     (handler-case (progn ,@body)
-       (sb-ext:file-does-not-exist ()
-         (%throw-file-open-error ,filename "No such file or directory"))
-       (file-error (e)
-         (%throw-file-open-error ,filename
-                                (let ((errno (and (typep e 'sb-int:simple-file-error)
-                                                  (find-if #'integerp (simple-condition-format-arguments e)))))
-                                  (if errno (sb-int:strerror errno) "Permission denied")))))))
+  "Open a file with Java errors and one bounded descriptor-recovery attempt."
+  `(%call-with-file-open-errors ,filename (lambda () ,@body)))
 
 (defmethod |open0(Ljava/lang/String;I)V| ((fis |java/io/RandomAccessFile|) filename mode)
   (%with-file-open-errors (filename)
@@ -1006,6 +1026,29 @@ FileNotFoundException."
 descriptor in *FD-STREAMS*, otherwise FD unchanged (0, 1, 2 or a stream)."
   (or (and (integerp fd) (gethash fd *fd-streams*))
       fd))
+
+(defun %close-file-descriptor (fd)
+  "Close FD's stream and forget its integer registration."
+  (let ((stream (%resolve-fd fd)))
+    (unwind-protect
+         (when (and (streamp stream) (open-stream-p stream))
+           (close stream))
+      (when (integerp fd)
+        ;; Do not discard a different stream registered concurrently.
+        (sb-ext:with-locked-hash-table (*fd-streams*)
+          (when (eq stream (gethash fd *fd-streams*))
+            (remhash fd *fd-streams*))))))
+  nil)
+
+(defun |java/io/FileCleanable.cleanupClose0(IJ)V| (fd handle)
+  "Native fallback for an abandoned FileDescriptor."
+  (declare (ignore handle))
+  (%close-file-descriptor fd))
+
+(setf (gethash "java/io/FileCleanable.performCleanup()V" *native-overrides*)
+      (lambda (cleanable)
+        (|java/io/FileCleanable.cleanupClose0(IJ)V|
+         (slot-value cleanable '|fd|) (slot-value cleanable '|handle|))))
 
 (defun %stream-fd (holder)
   "The fd a FileInputStream/FileOutputStream/RandomAccessFile HOLDER uses:
@@ -1140,15 +1183,10 @@ its FileDescriptor's fd (or its own fd slot), resolved by %RESOLVE-FD."
 (defmethod |close0()V| (this)
   "Native close for file streams."
   (when (slot-exists-p this '|fd|)
-    (let* ((fd-holder (slot-value this '|fd|))
-           (fd (if (and fd-holder (slot-exists-p fd-holder '|fd|))
-                   (slot-value fd-holder '|fd|)
-                   fd-holder))
-           (stream (%resolve-fd fd)))
-      (when (streamp stream)
-        (ignore-errors (close stream)))
-      (when (integerp fd)
-        (remhash fd *fd-streams*))))
+    (let* ((holder (slot-value this '|fd|))
+           (fd (if (and holder (slot-exists-p holder '|fd|))
+                   (slot-value holder '|fd|) holder)))
+      (%close-file-descriptor fd)))
   nil)
 
 (defmethod |getEnclosingMethod0()[Ljava/lang/Object;| ((this |java/lang/Class|))
@@ -1718,7 +1756,7 @@ parent delegation is the Java caller's job)."
 (defun |java/lang/ClassLoader.findBootstrapClass(Ljava/lang/String;)Ljava/lang/Class;| (name)
   (%find-bootstrap-class name))
 
-(defvar *native-url-strings* (make-hash-table :test #'eq :weakness :key)
+(defvar *native-url-strings* (make-hash-table :test #'eq :weakness :key :synchronized t)
   "URL strings attached to resource URLs constructed by OpenLDK.")
 
 (defun %make-url-from-string (url-string)
@@ -1799,12 +1837,22 @@ PathManager finds the Kotlin compiler's jar this way)."
 
 (defmethod |read()| ((this <resource-input-stream>))
   "Read a single byte from the resource stream."
+  (unless (slot-value this 'lisp-stream)
+    (%throw '|java/io/IOException| "Stream closed"))
   (let ((byte (read-byte (slot-value this 'lisp-stream) nil nil)))
     (if byte byte -1)))
 
 (defmethod |read([BII)I| ((this <resource-input-stream>) byte-array offset length)
   "Read up to LENGTH bytes into BYTE-ARRAY starting at OFFSET.
 Java byte arrays hold SIGNED bytes; read-byte yields 0..255."
+  (unless byte-array
+    (%throw '|java/lang/NullPointerException|))
+  (unless (<= 0 offset (+ offset length) (length (java-array-data byte-array)))
+    (%throw '|java/lang/IndexOutOfBoundsException|))
+  (unless (slot-value this 'lisp-stream)
+    (%throw '|java/io/IOException| "Stream closed"))
+  (when (zerop length)
+    (return-from |read([BII)I| 0))
   (let ((stream (slot-value this 'lisp-stream))
         (bytes-read 0))
     (loop for i from offset below (+ offset length)
@@ -1827,6 +1875,13 @@ Java byte arrays hold SIGNED bytes; read-byte yields 0..255."
     (when-let (stream (open-resource-on-classpath resource-name))
       (make-instance '<resource-input-stream> :lisp-stream stream))))
 
+(defun %decode-url-path (path)
+  "Use the JDK's UTF-8 percent decoder; '+' is a literal path character."
+  (let ((class (classload "sun/net/www/ParseUtil")))
+    (lstring (funcall (static-method-symbol
+                       "sun/net/www/ParseUtil.decode(Ljava/lang/String;)Ljava/lang/String;"
+                       (ldk-class-package class)) (jstring path)))))
+
 (defun %parse-jar-url (url-string)
   "Parse a jar: URL and return (jar-path entry-path) or NIL.
    Format: jar:file:/path/to/file.jar!/path/inside/jar"
@@ -1835,20 +1890,7 @@ Java byte arrays hold SIGNED bytes; read-byte yields 0..255."
       (when excl-pos
         (let ((jar-path (subseq url-string 9 excl-pos))  ; Skip "jar:file:"
               (entry-path (subseq url-string (+ excl-pos 2))))  ; Skip "!/"
-          (values jar-path entry-path))))))
-
-(defun %open-jar-url-stream (url-string)
-  "Open an InputStream for a jar: URL."
-  (multiple-value-bind (jar-path entry-path) (%parse-jar-url url-string)
-    (when (and jar-path entry-path)
-      (handler-case
-          (let ((zf (zip:open-zipfile jar-path)))
-            (when-let (ze (zip:get-zipfile-entry entry-path zf))
-              (let ((contents (zip:zipfile-entry-contents ze)))
-                (zip:close-zipfile zf)
-                (flexi-streams:make-in-memory-input-stream contents))))
-        (error ()
-          nil)))))
+          (values (%decode-url-path jar-path) (%decode-url-path entry-path)))))))
 
 ;; Note: |openStream()| for java/net/URL is defined in url.lisp after the class is loaded
 

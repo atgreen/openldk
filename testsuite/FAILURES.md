@@ -52,6 +52,17 @@ package-private method dispatch: a same-signature subclass method in another
 package incorrectly replaces the reflected declaring-class method. Its
 expectation remains until Java overriding rules are enforced for that call.
 
+
+The JAR resource-management port adds nine core assertions covering URL
+cache identity, uncached archive ownership, stored/deflated streaming,
+invalid reads, parent closure, and repeated resource opens. The core gate
+now passes **783 PASS, 1 XFAIL, 7 UNSUPPORTED**, all pinned in the baseline.
+The ZIP differential suite also passes with a 128-descriptor limit,
+abandoned file streams, concurrent archive reads, and saved-image restart
+of partially read entries and an ordinary file stream. Build, lint, 818
+unit checks, 165 interop checks, 50 standards comparisons, 20 compatibility
+comparisons, and a cold Clojure startup smoke test pass.
+
 ## Results
 
 | Suite audited | Passes | OpenLDK-only differences | Legacy version parser | Rejected by javac 25 | Reference failure | Reference timeout | Helpers without a main |

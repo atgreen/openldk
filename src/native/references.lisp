@@ -92,11 +92,17 @@
   "Deliver collected references outside the GC and registry lock; return the count."
   (let ((pending (%collect-java-references)))
     (dolist (reference pending)
-      ;; Use the internal queue operation, not overridable Reference.enqueue().
-      ;; The legacy Cleaner has no queue: ReferenceHandler invokes clean directly.
-      (if (%java-reference-kind-p reference "jdk/internal/ref/Cleaner")
-          (|clean()V| reference)
-          (|enqueue(Ljava/lang/ref/Reference;)Z| (slot-value reference '|queue|) reference)))
+      ;; Only internal descriptor cleanup runs synchronously for resource
+      ;; recovery. User Cleaner actions stay on their associated Java thread.
+      ;; A failed cleanup must not drop the rest of this already-claimed batch.
+      (handler-case
+          (if (or (%java-reference-kind-p reference "jdk/internal/ref/Cleaner")
+                  (%java-reference-kind-p reference "java/io/FileCleanable"))
+              (|clean()V| reference)
+              (|enqueue(Ljava/lang/ref/Reference;)Z| (slot-value reference '|queue|) reference))
+        (error (condition)
+          (when *debug-exceptions*
+            (format *error-output* "~&Reference delivery failed: ~A~%" condition)))))
     (length pending)))
 
 (defun %run-java-reference-processor ()
