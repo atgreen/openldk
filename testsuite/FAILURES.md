@@ -16,6 +16,30 @@ are in [failure-audit.tsv](failure-audit.tsv). Raw compiler/runtime logs and
 resumable JSON results are generated under `.cache/failure-audit/` and are
 not committed. They are reproducible using `audit-failures.py`.
 
+## X11 follow-up (2026-10-31)
+
+A fresh run of all 156 remaining expectations and all 85 Jikes cases
+(240 unique IDs) against the runtime committed as `f9ae7b4` produced
+205 passing cases, 20 runtime failures, 13 legacy golden-output differences,
+and two non-executable fixtures. Both engines used JDK 25.0.4.1+1,
+independent Xvfb displays, and 65-second execution deadlines.
+
+Of the 156 expectations, **136 now pass and have been removed**, leaving
+**20 runtime expectations**. This includes graphical layout, painting,
+input, and focus cases repaired by the software X11 backend and glyph fix.
+Passing results in this run do not establish that intermittent failures
+or performance problems are absent.
+
+The per-case results are in [x11-failure-audit.tsv](x11-failure-audit.tsv).
+Raw logs are under `.cache/x11-final-failure-audit-20261030/`. Reproduce
+with a built runtime and four independent displays:
+
+```sh
+python3 testsuite/audit-failures.py \
+  --inventory testsuite/x11-failure-audit.tsv \
+  --jobs 4 --displays :97,:98,:99,:100 --fresh
+```
+
 ## Fixes after the audit
 
 The cloning and array fixes resolve five audited failures:
