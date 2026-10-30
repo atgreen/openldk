@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2024, 2025  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2024, 2025, 2026  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 ;;;
@@ -36,7 +36,6 @@
 ;;; this library, you may extend this exception to your version of the
 ;;; library, but you are not obligated to do so.  If you do not wish
 ;;; to do so, delete this exception statement from your version.
-
 
 (in-package :openldk)
 
