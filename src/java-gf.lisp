@@ -53,6 +53,8 @@
    ;; that keep an entry of their own (INVOKE-SPECIAL-AT) see it is stale.
    (invoke-special-version :initform 0 :type fixnum
                            :accessor java-gf-invoke-special-version)
+   (dispatch-version :initform 0 :type integer
+                     :accessor java-gf-dispatch-version)
    ;; First specializer -> its methods, for %JAVA-APPLICABLE-METHODS: NIL
    ;; until built, or :COMPLEX for methods it can't serve.
    (method-index :initform nil :accessor java-gf-method-index)
@@ -211,6 +213,7 @@ applicable-method set.  Non-class specializers flush everything."
                (dolist (k stale) (remhash k table))
                stale)))
       (bordeaux-threads:with-lock-held ((java-gf-cache-lock gf))
+        (incf (java-gf-dispatch-version gf))
         (cond
           ((typep specializer 'class)
            (remove-subtypes cache)
@@ -420,3 +423,51 @@ startup.  Run once the natives are loaded."
                 (remove-method gf method)
                 (add-method new method))
               (setf (fdefinition symbol) new))))))))
+
+;;; A call site's last receiver bypasses the shared dispatch hash table.
+;;; Entries are immutable snapshots; weak references must not keep a loader
+;;; alive after its methods and the shared GF cache have been cleared.
+(defstruct java-virtual-site name entry)
+(defstruct java-virtual-entry gf class function version)
+
+(defun %virtual-call-function (site receiver)
+  "Resolve a call-site entry, observing method changes and GF replacement."
+  (let* ((gf (fdefinition (java-virtual-site-name site)))
+         (class (class-of receiver))
+         (entry (java-virtual-site-entry site)))
+    (sb-thread:barrier (:read))
+    (when (and entry (typep gf 'java-generic-function)
+               (eq gf (sb-ext:weak-pointer-value (java-virtual-entry-gf entry)))
+               (eql (java-gf-dispatch-version gf) (java-virtual-entry-version entry))
+               (eq class (sb-ext:weak-pointer-value (java-virtual-entry-class entry))))
+      (when-let ((function (sb-ext:weak-pointer-value (java-virtual-entry-function entry))))
+        (return-from %virtual-call-function function)))
+    (unless (typep gf 'java-generic-function)
+      (return-from %virtual-call-function gf))
+    (bordeaux-threads:with-recursive-lock-held ((java-gf-method-lock gf))
+      ;; EQL and non-Java method combinations need their ordinary dispatcher.
+      (when (eql :complex (bordeaux-threads:with-lock-held ((java-gf-cache-lock gf))
+                           (%java-gf-method-index gf)))
+        (return-from %virtual-call-function gf))
+      (multiple-value-bind (function applicable-p)
+          (if-let ((cached (gethash class (java-gf-dispatch-cache gf))))
+            (values cached t)
+            (%compute-java-effective-method gf class))
+        (when applicable-p
+          (bordeaux-threads:with-lock-held ((java-gf-cache-lock gf))
+            (setf (gethash class (java-gf-dispatch-cache gf)) function))
+          (let ((snapshot (make-java-virtual-entry
+                           :gf (sb-ext:make-weak-pointer gf)
+                           :class (sb-ext:make-weak-pointer class)
+                           :function (sb-ext:make-weak-pointer function)
+                           :version (java-gf-dispatch-version gf))))
+            (sb-thread:barrier (:write))
+            (setf (java-virtual-site-entry site) snapshot)))
+        function))))
+
+(defmacro %invoke-virtual-at (site receiver &rest arguments)
+  "Fixed-arity invocation through a receiver-class cache."
+  (let ((cache (gensym "SITE")) (object (gensym "RECEIVER"))
+        (args (loop repeat (length arguments) collect (gensym "ARG"))))
+    `(let ((,cache ,site) (,object ,receiver) ,@(mapcar #'list args arguments))
+       (funcall (%virtual-call-function ,cache ,object) ,object ,@args))))

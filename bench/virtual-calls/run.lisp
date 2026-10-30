@@ -1,0 +1,33 @@
+;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+;;; From the repository root:
+;;; CL_SOURCE_REGISTRY="$PWD//:" sbcl --dynamic-space-size 8192 \
+;;;   --script bench/virtual-calls/run.lisp
+(require :asdf)
+(asdf:load-system :openldk)
+(defclass pic-bench-object () ())
+(let* ((object (make-instance 'pic-bench-object))
+       (gf (ensure-generic-function 'pic-bench-call :generic-function-class 'openldk::java-generic-function :lambda-list '(object)))
+       (method (make-instance 'standard-method :lambda-list '(object) :specializers (list (find-class 'pic-bench-object))
+                             :function (lambda (args next) (declare (ignore args next)) 7)))
+       (body (lambda (object) (declare (ignore object)) 7))
+       (site (openldk::make-java-virtual-site :name 'pic-bench-call)))
+  (add-method gf method)
+  (setf (gethash method openldk::*method-bodies*) body)
+  (let ((baseline (compile nil '(lambda (gf object site)
+                                 (declare (ignore site) (optimize (speed 3) (safety 1)))
+                                 (let ((sum 0)) (declare (fixnum sum))
+                                   (dotimes (i 1000000 sum) (incf sum (the fixnum (funcall gf object))))))))
+        (cached (compile nil '(lambda (gf object site)
+                               (declare (ignore gf) (optimize (speed 3) (safety 1)))
+                               (let ((sum 0)) (declare (fixnum sum))
+                                 (dotimes (i 1000000 sum) (incf sum (the fixnum (openldk::%invoke-virtual-at site object)))))))))
+    (dolist (entry (list (cons :baseline baseline) (cons :cached cached)))
+      (funcall (cdr entry) gf object site)
+      (dotimes (trial 3)
+        (let* ((start (get-internal-real-time)) (bytes (sb-ext:get-bytes-consed))
+               (result (funcall (cdr entry) gf object site)))
+          (assert (= 7000000 result))
+          (assert (< (- (sb-ext:get-bytes-consed) bytes) 65536))
+          (format t "~&PIC ~S trial=~D seconds=~,6F bytes=~D result=~D~%" (car entry) trial
+                  (/ (- (get-internal-real-time) start) internal-time-units-per-second)
+                  (- (sb-ext:get-bytes-consed) bytes) result))))))

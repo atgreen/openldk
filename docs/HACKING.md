@@ -57,6 +57,20 @@ and enabled, checks boundary cases and checksums, and reports time and allocated
 bytes for ten million iterations. It asserts that the optimized loop does not
 allocate per iteration. Timing is informational and depends on the host.
 
+### Virtual Call-Site Caches
+
+Each generated virtual call keeps its last receiver class and effective
+function. A hit bypasses the generic function's shared dispatch hash table.
+Method addition or removal increments a generation; replacing the generic
+function also invalidates the site. Around methods remain part of the cached
+effective function, and complex dispatch uses the ordinary dispatcher.
+
+Sites hold weak references to classes, generic functions and effective
+functions so a caller in a permanent loader cannot retain a receiver's loader.
+The concurrent replacement tests exercise a cache miss during the temporary
+method-removal gap. `bench/virtual-calls/run.lisp` compares the site cache with
+shared generic-function dispatch, checking results and allocation.
+
 ### Compiled Method-Handle Graphs
 
 `src/native/lambda-compiler.lisp` compiles LambdaForm wiring into a Lisp

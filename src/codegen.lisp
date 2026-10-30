@@ -1590,12 +1590,11 @@ JVMS 5.4.6 selects that method independently of the receiver's class."
                                              ',(%call-site-gf method-name nargs) ',private-owner))
                                            (list ,null-checked-receiver
                                                  ,@(mapcar (lambda (a) (code (codegen a context))) (cdr args)))))
-                                        ((eq nargs 1)
-                                         (list (%call-site-gf method-name nargs) null-checked-receiver))
                                         (t
-                                         `(funcall (function ,(%call-site-gf method-name nargs))
-                                                   ,null-checked-receiver
-                                                   ,@(mapcar (lambda (a) (code (codegen a context))) (cdr args)))))))
+                                         `(%invoke-virtual-at
+                                           (load-time-value (make-java-virtual-site :name ',(%call-site-gf method-name nargs)))
+                                           ,null-checked-receiver
+                                           ,@(mapcar (lambda (a) (code (codegen a context))) (cdr args)))))))
                            call))))
 
 (defparameter *invokedynamic-cache* (make-hash-table :test #'eq :weakness :key))
