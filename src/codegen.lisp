@@ -436,13 +436,14 @@ result always stays in range (bitwise ops, floats, doubles)."
                opcodes)))
 
 (%define-binop-codegen-methods
-  (ir-dmul '* :DOUBLE :PLAIN)
-  (ir-dadd '+ :DOUBLE :PLAIN)
-  (ir-dsub '- :DOUBLE :PLAIN)
-  (ir-fadd '+ :FLOAT :PLAIN)
-  (ir-fdiv '/ :FLOAT :PLAIN)
-  (ir-fmul '* :FLOAT :PLAIN)
-  (ir-fsub '- :FLOAT :PLAIN)
+  (ir-ddiv '%java-ddiv :DOUBLE :PLAIN)
+  (ir-dmul '%java-dmul :DOUBLE :PLAIN)
+  (ir-dadd '%java-dadd :DOUBLE :PLAIN)
+  (ir-dsub '%java-dsub :DOUBLE :PLAIN)
+  (ir-fadd '%java-fadd :FLOAT :PLAIN)
+  (ir-fdiv '%java-fdiv :FLOAT :PLAIN)
+  (ir-fmul '%java-fmul :FLOAT :PLAIN)
+  (ir-fsub '%java-fsub :FLOAT :PLAIN)
   (ir-iadd '+ :INTEGER :WRAPPING)
   (ir-imul '* :INTEGER :WRAPPING)
   (ir-isub '- :INTEGER :WRAPPING)
@@ -963,34 +964,6 @@ class is a self-reference to the class currently being compiled."
                              (list 'division-by-zero ()
                                    (list '%throw (list 'quote '|java/lang/ArithmeticException|) "/ by zero")))
                  :expression-type :LONG))
-
-(defmethod codegen ((insn ir-fdiv) context)
-  ;; FIXME - handle all weird conditions
-  (make-instance '<expression>
-                 :insn insn
-                 :code `(let ((value2 ,(code (codegen (value2 insn) context)))
-                              (value1 ,(code (codegen (value1 insn) context))))
-                          (if (eq value2 0.0)
-                              (cond
-                                ((< value1 0.0) float-features:single-float-negative-infinity)
-                                ((> value1 0.0) float-features:single-float-positive-infinity)
-                                (t float-features:single-float-nan))
-                              (/ value1 value2)))
-                 :expression-type :FLOAT))
-
-(defmethod codegen ((insn ir-ddiv) context)
-  ;; FIXME - handle all weird conditions
-  (make-instance '<expression>
-                 :insn insn
-                 :code `(let ((value2 ,(code (codegen (value2 insn) context)))
-                              (value1 ,(code (codegen (value1 insn) context))))
-                          (if (eq value2 0.0d0)
-                              (cond
-                                ((< value1 0.0d0) float-features:double-float-negative-infinity)
-                                ((> value1 0.0d0) float-features:double-float-positive-infinity)
-                                (t float-features:double-float-nan))
-                              (/ value1 value2)))
-                 :expression-type :DOUBLE))
 
 (defmethod codegen ((insn ir-frem) context)
   (%codegen-binop insn '%java-frem :FLOAT context))

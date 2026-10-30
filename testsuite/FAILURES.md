@@ -71,6 +71,22 @@ of partially read entries and an ordinary file stream. Build, lint, 818
 unit checks, 165 interop checks, 50 standards comparisons, 20 compatibility
 comparisons, and a cold Clojure startup smoke test pass.
 
+The floating-point lowering fix resolves all 21 remaining audited Math and
+StrictMath expectations, including `MathTest` and the inverse/trigonometric
+functions with and without `strictfp`. Fresh isolated JDK 25 comparisons
+pass all 788 assertions. Removing those expectations leaves **305 runtime
+expectations**. `FloatingArithmeticProbe` adds 3,612 differential results
+covering NaNs, signed zeros, infinities, subnormals, ordinary arithmetic,
+self-expressions, and StrictMath calls. Unit checks cover reentrant interpreter
+arithmetic and allocation-free typed loops. On x86-64, one million single- and
+double-precision additions each allocate zero bytes in standalone checks.
+Expanded Math/StrictMath validation passes all 50 runnable historical cases;
+the other six retain their reference-side or obsolete-version-parser results.
+Full validation passes: build, lint, 840 unit checks, 165 interop checks,
+54 standards comparisons, 20 compatibility comparisons, and 2,153 Clojure
+checks in a rebuilt image. The core gate retains 783 PASS, 1 XFAIL, and
+7 UNSUPPORTED without regressions.
+
 ## Results
 
 | Suite audited | Passes | OpenLDK-only differences | Legacy version parser | Rejected by javac 25 | Reference failure | Reference timeout | Helpers without a main |

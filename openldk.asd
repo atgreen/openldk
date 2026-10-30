@@ -75,6 +75,7 @@
                (:file "src/strings")
                (:file "src/arrays")
                (:file "src/math")
+               (:file "src/floating")
                (:file "src/opcodes")
                (:file "src/ir")
                (:file "src/bc-to-ir")

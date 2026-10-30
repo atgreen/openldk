@@ -17,6 +17,7 @@ PROBES = {
     'ArrayExceptionProbe': (25,),
     'ReflectionConversionProbe': (25,),
     'ReflectionDispatchProbe': (25,),
+    'FloatingArithmeticProbe': (25,),
     'FieldTypeProbe': (25,),
     'PrimitiveOptimizationProbe': (25,),
     'PrimitiveResultProbe': (25,),

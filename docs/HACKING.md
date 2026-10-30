@@ -57,6 +57,21 @@ and result arithmetic disabled and enabled, checks boundary cases and checksums,
 and reports time and allocated bytes for ten million iterations. It asserts that the optimized loop does not
 allocate per iteration. Timing is informational and depends on the host.
 
+Floating-point binary bytecodes use the primitives in `src/floating.lisp`.
+SBCL's ordinary CL arithmetic optimizations can change IEEE 754 behavior:
+for example, its type inference derives `(- x x)` as zero even when `x` is
+NaN. Increasing `float-accuracy` does not disable that inference. The Java
+primitives have explicit floating result types and lower to scalar SSE
+instructions on x86-64, retaining unboxed register arithmetic. Other SBCL
+backends use out-of-line functions whose operands remain independent during
+optimization. Java threads already mask floating-point traps at entry.
+Do not replace these calls with ordinary CL operators or add constant-folding
+attributes without checking NaNs, signed zeros, infinities, and subnormals
+against [JVM floating-point semantics](https://docs.oracle.com/javase/specs/jvms/se25/html/jvms-2.html#jvms-2.8).
+Run `python3 test/standards/check.py --probe FloatingArithmeticProbe` for the
+differential checks; the unit suite also checks interpreter arithmetic and
+allocation in typed floating-point loops.
+
 `src/primitive-results.lisp` restores useful primitive types when opaque call
 results enter arithmetic. It checks the actual operands before using typed
 operations, preserving the original arithmetic as the fallback. Type facts

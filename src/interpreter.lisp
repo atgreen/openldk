@@ -210,9 +210,15 @@ outer JIT to reenter it. Unsupported instructions fail explicitly."
                       (when (and (member type '(:int :long)) (>= operation 3) (zerop right))
                         (%throw '|java/lang/ArithmeticException| "/ by zero"))
                       (put (%interpreter-number
-                            (case operation (0 (+ left right)) (1 (- left right)) (2 (* left right))
-                              (3 (if (member type '(:int :long)) (truncate left right) (/ left right)))
-                              (4 (rem left right))) type) type)))
+                            (case type
+                              (:float
+                               (funcall (aref #(%java-fadd %java-fsub %java-fmul %java-fdiv %java-frem)
+                                              operation) left right))
+                              (:double
+                               (funcall (aref #(%java-dadd %java-dsub %java-dmul %java-ddiv %java-drem)
+                                              operation) left right))
+                              (t (case operation (0 (+ left right)) (1 (- left right)) (2 (* left right))
+                                   (3 (truncate left right)) (4 (rem left right))))) type) type)))
                    ((<= 116 opcode 119)
                     (let ((type (aref #(:int :long :float :double) (- opcode 116))))
                       (put (%interpreter-number (- (take-value)) type) type)))

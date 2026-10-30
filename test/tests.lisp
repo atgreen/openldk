@@ -526,6 +526,55 @@ nothing behind when it refuses."
       (when first (openldk::%free-unsafe-memory first))
       (when second (openldk::%free-unsafe-memory second)))))
 
+(test floating-arithmetic-ieee-semantics
+  (sb-int:with-float-traps-masked (:invalid :divide-by-zero :overflow :underflow :inexact)
+    (dolist (entry '((single-float openldk::%java-fsub openldk::%java-fdiv
+                     float-features:bits-single-float #x7fc12345 #x80000000)
+                    (double-float openldk::%java-dsub openldk::%java-ddiv
+                     float-features:bits-double-float #x7ff8123456789abc #x8000000000000000)))
+      (destructuring-bind (type subtract divide from-bits nan-bits sign-bit) entry
+        (let* ((self (compile nil `(lambda (x) (declare (type ,type x)) (,subtract x x))))
+               (nan (funcall from-bits nan-bits))
+               (infinity (funcall divide (coerce 1 type) (coerce 0 type))))
+          (is (float-features:float-nan-p (funcall self nan)))
+          (is (float-features:float-nan-p (funcall self infinity)))
+          (is (float-features:float-nan-p
+               (funcall divide (coerce 0 type) (coerce 0 type))))
+          (is (minusp (float-sign (funcall divide (coerce 1 type) (funcall from-bits sign-bit))))))))))
+
+#+x86-64
+(test floating-arithmetic-unboxed-loops
+  (dolist (entry '((double-float openldk::%java-dadd) (single-float openldk::%java-fadd)))
+    (destructuring-bind (type operator) entry
+      (let* ((one (coerce 1 type))
+             (loop-function
+               (compile nil `(lambda (n)
+                               (declare (fixnum n) (optimize (speed 3) (safety 3)))
+                               (let ((x ,one))
+                                 (declare (type ,type x))
+                                 (dotimes (i n) (setf x (,operator x ,one)))
+                                 (= x ,(coerce 1000001 type)))))))
+        (funcall loop-function 10)
+        (let* ((before (sb-ext:get-bytes-consed))
+               (correct (funcall loop-function 1000000))
+               (bytes (- (sb-ext:get-bytes-consed) before)))
+          (is (eq t correct))
+          (is (< bytes 65536)))))))
+
+(test interpreter-floating-arithmetic
+  (sb-int:with-float-traps-masked (:invalid :divide-by-zero :overflow :underflow :inexact)
+    (dolist (double-p '(nil t))
+      (let ((nan (if double-p float-features:double-float-nan float-features:single-float-nan))
+            (zero (if double-p 0d0 0f0)))
+        (dolist (opcode '(98 102 106 110 114))
+          (let ((class (%verification-fixture
+                        (if double-p (vector 38 40 (1+ opcode) 175) (vector 34 35 opcode 174))
+                        :descriptor (if double-p "(DD)D" "(FF)F"))))
+            (openldk::verify-class-structure class)
+            (openldk::verify-class-bytecode class)
+            (is (float-features:float-nan-p
+                 (openldk::%execute-verified-bytecode class 1 nil (list nan zero))))))))))
+
 (test floating-remainder-exact-reference
   (is (= 201058 (openldk::%check-remainder-functions))))
 
