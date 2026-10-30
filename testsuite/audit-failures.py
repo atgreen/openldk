@@ -107,12 +107,32 @@ def compare_legacy(reference, actual, golden, jikes=False):
     return 'reference-failure'
 
 
+def runtime_diagnostics(result):
+    """Report failed GUI infrastructure even when the test's main returns zero."""
+    if 'log' not in result:
+        return set()
+    output = text(result)
+    markers = {name for name, pattern in [
+        ('peer-initialization', r'(?m)^WARNING: Exception during peer initialization'),
+        ('peer-disposal', r'(?m)^Exception during disposal:'),
+        ('lisp-thread-error', r'(?m)^Thread #<[^\n]+> terminated with error:'),
+        ('memory-corruption', r'(?m)^CORRUPTION WARNING'),
+    ] if re.search(pattern, output)}
+    # Java listener tests may deliberately throw on the event thread. Match
+    # the exception kind against the reference rather than rejecting it all.
+    markers.update('awt-uncaught:' + name for name in re.findall(
+        r'Exception in thread "AWT[^"\n]*"\s+([\w.$]+)', output))
+    return markers
+
+
 def classify_mauve(reference, actual):
     if reference['status'] == 'timeout':
         return 'reference-timeout'
     if reference['status'] != 0:
         return 'reference-failure'
-    return 'stale-pass' if actual['status'] == 0 else 'runtime-failure'
+    if actual['status'] != 0 or runtime_diagnostics(actual) - runtime_diagnostics(reference):
+        return 'runtime-failure'
+    return 'stale-pass'
 
 
 def classify_obsolete_source(result, source):
@@ -182,6 +202,7 @@ def main():
         if harness['status'] != 0:
             raise SystemExit('Harness compilation failed: ' + harness['log'])
     metadata = {'java_home': str(jdk), 'runtime_sha256': hashlib.sha256(runtime.read_bytes()).hexdigest(),
+                'auditor_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                 'manifest_sha256': hashlib.sha256(args.manifest.read_bytes()).hexdigest(),
                 'timeout': args.timeout, 'displays': displays,
                 'verbose_checks': args.verbose_checks,

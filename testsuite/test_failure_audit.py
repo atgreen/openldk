@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Anthony Green <green@moxielogic.com>
+#
 # SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 """Regression checks for legacy-test accounting, independent of the VM."""
 import importlib.util
@@ -51,6 +53,30 @@ class AccountingTests(unittest.TestCase):
         self.assertEqual('reference-timeout', audit.classify_mauve({'status': 'timeout'}, {'status': 0}))
         self.assertEqual('runtime-failure', audit.classify_mauve({'status': 0}, {'status': 1}))
         self.assertEqual('stale-pass', audit.classify_mauve({'status': 0}, {'status': 0}))
+
+    def test_gui_background_failures_are_not_mauve_passes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            reference, actual = Path(directory) / 'jdk.log', Path(directory) / 'openldk.log'
+            reference.write_text('Checks: 2, failures: 0\n')
+            ref = {'status': 0, 'log': str(reference)}
+            out = {'status': 0, 'log': str(actual)}
+            for failure in [
+                    'WARNING: Exception during peer initialization\njava.lang.UnsatisfiedLinkError: nativePeer\n',
+                    'Exception during disposal:\njava.lang.NullPointerException\n',
+                    'Thread #<java/awt/EventDispatchThread {123}> terminated with error: internal error\n',
+                    'CORRUPTION WARNING in SBCL\n']:
+                actual.write_text(failure + 'Checks: 2, failures: 0\n')
+                self.assertEqual('runtime-failure', audit.classify_mauve(ref, out))
+
+    def test_matching_intentional_gui_listener_exceptions_remain_passes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            reference, actual = Path(directory) / 'jdk.log', Path(directory) / 'openldk.log'
+            reference.write_text('Exception in thread "AWT-EventQueue-0" java.lang.IllegalStateException: expected\nChecks: 1, failures: 0\n')
+            actual.write_text('Exception in thread "AWT-EventQueue-1"\njava.lang.IllegalStateException: expected\nChecks: 1, failures: 0\n')
+            ref, out = {'status': 0, 'log': str(reference)}, {'status': 0, 'log': str(actual)}
+            self.assertEqual('stale-pass', audit.classify_mauve(ref, out))
+            actual.write_text(actual.read_text().replace('IllegalStateException', 'UnsatisfiedLinkError'))
+            self.assertEqual('runtime-failure', audit.classify_mauve(ref, out))
 
     def test_obsolete_version_parser_is_not_a_reflection_failure(self):
         with tempfile.TemporaryDirectory() as directory:
