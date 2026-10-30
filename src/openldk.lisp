@@ -483,7 +483,8 @@ return T.  Instance methods are installed as CLOS methods so other classes'
 methods on the same generic function survive."
   (when-let ((native-fn (gethash method-key *native-overrides*)))
     (let ((fn-symbol (intern (%method-fn-name class method)
-                             (%class-loader-package class)))
+                             (if (static-p method) (%class-loader-package class)
+                                 (find-package :openldk))))
           (owned-p (%user-ldk-loader-p (ldk-loader class))))
       (if (static-p method)
           (if owned-p
@@ -1988,6 +1989,13 @@ the new one."
 bytecode to compile: a function for a static method, a method on its
 generic function for an instance method.  The stubs are closures, made
 without running the compiler, since most methods are never called."
+  ;; Registered Lisp bodies can implement native methods as well as replace
+  ;; bytecode methods. Native declarations have no lazy bytecode stub to
+  ;; reach %INSTALL-NATIVE-OVERRIDE later.
+  (loop for method across (methods class)
+        when (native-p method)
+          do (%install-native-override
+              class method (format nil "~A.~A~A" (name class) (name method) (descriptor method))))
   (%install-jni-method-stubs class ldk-loader)
   (unless (equal (name class) "java/util/zip/ZipFile")
     (let ((pkg (loader-package ldk-loader))

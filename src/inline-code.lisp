@@ -47,6 +47,11 @@
 
 (defun %note-java-inline-function (class method)
   "Record an original Java stub or successful compilation, using weak identities."
+  ;; A lazy stub may install a registered Lisp body on its first invocation.
+  ;; Its original bytecode is therefore not a valid inline implementation.
+  (when (gethash (format nil "~A.~A~A" (name class) (name method) (descriptor method))
+                 *native-overrides*)
+    (return-from %note-java-inline-function nil))
   (when-let ((function
           (if (static-p method)
               (let ((symbol (static-method-symbol (format nil "~A.~A~A" (name class) (name method) (descriptor method))
