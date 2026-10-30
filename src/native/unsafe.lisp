@@ -988,22 +988,42 @@ runs out (LockSupport.park)."
         (declare (ignore unsafe))
         (%cas-byte-field obj offset expected new-val)))
 
-;;; ArraysSupport.vectorizedMismatch — the JDK implementation reads arrays
-;;; as raw longs via Unsafe.getLongUnaligned, which doesn't work with CLOS
-;;; arrays.  Compare elements directly instead.
+(defun %vectorized-mismatch (a a-offset b b-offset length log2-scale)
+  "Compare primitive or native storage and return the first differing element."
+  (unless (and (<= 0 length) (<= 0 log2-scale 3))
+    (%throw '|java/lang/IllegalArgumentException| "Invalid mismatch length or scale"))
+  (let* ((a-data (and a (java-array-data a)))
+         (b-data (and b (java-array-data b)))
+         (byte-count (ash length log2-scale)))
+    (loop for data in (list a-data b-data) for offset in (list a-offset b-offset)
+          when data
+            do (unless (%primitive-data-p data)
+                 (%throw '|java/lang/IllegalArgumentException| "Mismatch requires primitive storage"))
+               (%check-array-bytes data offset byte-count))
+    (sb-sys:with-pinned-objects (a-data b-data)
+      (let ((left (if a-data (sb-sys:sap+ (sb-sys:vector-sap a-data) a-offset)
+                      (sb-sys:int-sap a-offset)))
+            (right (if b-data (sb-sys:sap+ (sb-sys:vector-sap b-data) b-offset)
+                       (sb-sys:int-sap b-offset)))
+            (offset 0))
+        ;; Word equality is endian-independent. Inspect a differing word by
+        ;; bytes, then scale the byte position back to a logical element index.
+        ;; Never read a word past the supplied range, especially native slices.
+        (loop while (<= (+ offset 8) byte-count)
+              do (unless (= (sb-sys:sap-ref-64 left offset) (sb-sys:sap-ref-64 right offset))
+                   (dotimes (i 8)
+                     (unless (= (sb-sys:sap-ref-8 left (+ offset i))
+                                (sb-sys:sap-ref-8 right (+ offset i)))
+                       (return-from %vectorized-mismatch (ash (+ offset i) (- log2-scale))))))
+                 (incf offset 8))
+        (loop for i from offset below byte-count
+              unless (= (sb-sys:sap-ref-8 left i) (sb-sys:sap-ref-8 right i))
+                do (return-from %vectorized-mismatch (ash i (- log2-scale))))
+        ;; Everything, including the tail, was compared: no scalar retry.
+        -1))))
+
 (setf (gethash "jdk/internal/util/ArraysSupport.vectorizedMismatch(Ljava/lang/Object;JLjava/lang/Object;JII)I" *native-overrides*)
-      (lambda (a a-offset b b-offset length log2-scale)
-        (declare (ignore log2-scale))
-        ;; a-offset/b-offset are byte offsets; for OpenLDK ARRAY_*_BASE_OFFSET=0,
-        ;; so they are element indices (for byte arrays).
-        ;; Compare element by element and return first mismatch index,
-        ;; or ~length (= -(length+1)) meaning "all matched".
-        (let ((a-data (slot-value a 'data))
-              (b-data (slot-value b 'data)))
-          (dotimes (i length (lognot length))
-            (unless (eql (aref a-data (+ a-offset i))
-                         (aref b-data (+ b-offset i)))
-              (return i))))))
+      #'%vectorized-mismatch)
 
 ;;; Reflective constructor invocation — JDK 21 uses
 ;;; DirectConstructorHandleAccessor$NativeAccessor.newInstance0 (native).

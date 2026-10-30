@@ -158,6 +158,25 @@ isolated comparisons pass all 35 assertions on both runtimes within the normal
 65-second limit. Removing those four expectations leaves **172 runtime
 expectations**.
 
+Linux UDP support resolves six more expectations: the three `DatagramPacket`
+receive/offset cases, `DatagramSocketTest`, binding a datagram socket, and
+`MulticastSocketTest`. Fresh serial comparisons pass all 37 assertions on
+both runtimes within the normal 65-second limit. Removing these expectations
+leaves **166 runtime expectations**. Native socket-address layout queries,
+scalar and vector datagram I/O, disconnect, and IPv4 multicast membership
+use libc; no HotSpot networking library is loaded.
+
+`DatagramProbe` additionally checks offsets, truncation, packet boundaries,
+empty packets, nonblocking reads, receive timeouts, direct/heap scatter-gather
+buffers, oversized-packet rejection and subsequent recovery, disconnect and
+rebinding, multicast interface/TTL settings, source filtering, and TCP accept.
+Socket-address comparison also exposed an `ArraysSupport.vectorizedMismatch`
+override that assumed byte arrays. It now honors byte offsets and element
+widths for primitive storage, accepts native addresses, and compares tails
+without reading outside the requested range. `MismatchProbe` covers primitive
+scales, NaNs, signed zero, mixed array storage, native slices, and heap/direct
+buffer comparisons against JDK 25.
+
 ## Results
 
 | Suite audited | Passes | OpenLDK-only differences | Legacy version parser | Rejected by javac 25 | Reference failure | Reference timeout | Helpers without a main |

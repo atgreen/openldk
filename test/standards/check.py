@@ -35,6 +35,8 @@ PROBES = {
     'ThreadFailureProbe': (25,),
     'MainThreadProbe': (25,),
     'MainJoinProbe': (25,),
+    'DatagramProbe': (25,),
+    'MismatchProbe': (25,),
     'CryptoProbe': (25,),
     'VectorProbe': (25,),
     'ReferenceProbe': (25,),

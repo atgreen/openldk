@@ -111,6 +111,7 @@
                (:file "src/native/unsafe-tail")
                (:file "src/native/process")
                (:file "src/native/net")
+               (:file "src/native/datagram")
                (:file "src/native/ordering")
                (:file "src/native/graphics")
                (:file "src/native/shape-spans")

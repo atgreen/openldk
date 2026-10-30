@@ -157,12 +157,6 @@ XFAIL: mauve/gnu/testlet/java/io/ObjectInputOutput/Compat1.java execution test
 XFAIL: mauve/gnu/testlet/java/io/RandomAccessFile/setLength.java execution test
 XFAIL: mauve/gnu/testlet/java/lang/ClassLoader/BootDefinedPackages.java execution test
 XFAIL: mauve/gnu/testlet/java/lang/ClassLoader/loadClass.java execution test
-XFAIL: mauve/gnu/testlet/java/net/DatagramPacket/DatagramPacketOffset.java execution test
-XFAIL: mauve/gnu/testlet/java/net/DatagramPacket/DatagramPacketReceive.java execution test
-XFAIL: mauve/gnu/testlet/java/net/DatagramPacket/DatagramPacketReceive2.java execution test
-XFAIL: mauve/gnu/testlet/java/net/DatagramSocket/DatagramSocketTest.java execution test
-XFAIL: mauve/gnu/testlet/java/net/DatagramSocket/bind.java execution test
-XFAIL: mauve/gnu/testlet/java/net/MulticastSocket/MulticastSocketTest.java execution test
 XFAIL: mauve/gnu/testlet/java/net/ServerSocket/AcceptGetLocalPort.java execution test
 XFAIL: mauve/gnu/testlet/java/net/ServerSocket/AcceptTimeout.java execution test
 XFAIL: mauve/gnu/testlet/java/net/Socket/jdk13.java execution test
