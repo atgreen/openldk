@@ -218,6 +218,10 @@ repeated closes after descriptor reuse. The pre-fix runtime grows from 23 to
 663 open descriptors in the probe; the repaired runtime passes both normally
 and under the 128-descriptor limit. Process pipes, NIO transfer/lock checks, and
 ZIP saved-image restart also pass with the repaired close implementation.
+The final descriptor-close core recheck passes **783 PASS, 1 XFAIL, and
+7 UNSUPPORTED**, with no dropped passes or new failures. Clojure startup from
+the base runtime also completes successfully on both the preceding baseline
+and repaired builds; the initial four-minute cutoff was too short for both.
 
 The mapped-memory lifecycle natives now use Linux `mincore`, `madvise`, and
 synchronous `msync` through libc. The JDK's `MappedMemoryUtils` initializer
