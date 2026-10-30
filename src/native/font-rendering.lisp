@@ -294,9 +294,15 @@
            (%font-native-call "cairo_surface_flush" sb-alien:void ((* t) surface))
            (let* ((stride (%font-native-call "cairo_image_surface_get_stride" sb-alien:int ((* t) surface)))
                   (data (%font-native-call "cairo_image_surface_get_data" (* t) ((* t) surface)))
-                  (pixels (make-array (* height stride) :element-type '(unsigned-byte 8))))
-             (dotimes (i (length pixels)) (setf (aref pixels i) (sb-sys:sap-ref-8 (sb-alien:alien-sap data) i)))
-             (list extents left top width height stride pixels)))
+                  (pixels (make-array (* height width) :element-type '(unsigned-byte 8))))
+             ;; Cairo aligns A8 scanlines, but DrawGlyphList's Java fallback
+             ;; indexes its coverage mask using the glyph width as the stride.
+             ;; Publish packed rows in both the pixels and GlyphInfo.rowBytes.
+             (dotimes (row height)
+               (dotimes (column width)
+                 (setf (aref pixels (+ (* row width) column))
+                       (sb-sys:sap-ref-8 (sb-alien:alien-sap data) (+ (* row stride) column)))))
+             (list extents left top width height width pixels)))
       (%font-native-call "cairo_font_options_destroy" sb-alien:void ((* t) options))
       (%font-native-call "cairo_destroy" sb-alien:void ((* t) target))
       (%font-native-call "cairo_surface_destroy" sb-alien:void ((* t) surface)))))
