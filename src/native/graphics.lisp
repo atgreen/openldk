@@ -54,6 +54,7 @@
 
 (%define-graphics-id-initializers
  "java/awt/AWTEvent.initIDs()V"
+ "java/awt/Event.initIDs()V"
  "java/awt/Checkbox.initIDs()V"
  "java/awt/CheckboxMenuItem.initIDs()V"
  "java/awt/Choice.initIDs()V"

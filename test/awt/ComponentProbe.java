@@ -29,6 +29,10 @@ public class ComponentProbe {
         ComponentEvent event = new ComponentEvent(box, ComponentEvent.COMPONENT_MOVED);
         check(event.getComponent() == box && event.getID() == ComponentEvent.COMPONENT_MOVED);
         Object replacement = new Object(); event.setSource(replacement); check(event.getSource() == replacement);
+        Event legacy = new Event(box, Event.MOUSE_DOWN, "legacy");
+        legacy.x = 2; legacy.y = 3; legacy.translate(5, -1);
+        check(legacy.target == box && legacy.id == Event.MOUSE_DOWN
+              && legacy.x == 7 && legacy.y == 2 && "legacy".equals(legacy.arg));
         Panel panel = new Panel(new BorderLayout(3, 5));
         Box center = new Box(10, 20), east = new Box(20, 20);
         panel.add(center, BorderLayout.CENTER); panel.add(east, BorderLayout.EAST);
