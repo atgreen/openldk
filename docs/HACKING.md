@@ -57,6 +57,38 @@ and enabled, checks boundary cases and checksums, and reports time and allocated
 bytes for ten million iterations. It asserts that the optimized loop does not
 allocate per iteration. Timing is informational and depends on the host.
 
+### Small Leaves and Guarded Array Loops
+
+`src/inline-code.lisp` recognizes short, straight-line integer expressions
+in static, private and final Java methods. Primitive argument guards and the current function
+identity select the inline path; native replacements use the original call.
+Receiver caches and method generations also guard instance inlining. Lisp
+replacements and around methods use the original dispatch, while private
+selection stays on the defining class. The original linkage, access and
+class-initialization checks remain in place.
+The caller owns the inline site and its statically resolved class dependency.
+The process registry holds only weak function keys and weak method identities.
+
+`src/array-loops.lisp` versions closed primitive reduction loops with an index
+initialized to zero and incremented by one up to an array's length. Nonthrowing
+guards check backing-vector types, a signed-32-bit bound and the lengths of all
+accessed arrays. A successful guard hoists vectors and length, and proves each
+loop-body index is in range. Only those array reads use local safety-zero code;
+initializers, code after the loop and all unrecognized control flow retain
+their checks. The complete original loop is the fallback, including for null
+arrays, short secondary arrays and zero-iteration cases.
+
+`InlineLeafProbe`, `InstanceInlineProbe` and `ArrayLoopProbe` compare boundary
+values and exception timing with JDK 25. Interop tests also replace methods,
+add subclass and around methods, and pass opaque Lisp values through integer
+descriptors. Benchmark actual generated Java methods with these two
+optimizations disabled and enabled using:
+
+```sh
+CL_SOURCE_REGISTRY="$PWD//:" LDK_CODE_CACHE=off \
+  sbcl --dynamic-space-size 8192 --script bench/generated-code/run.lisp
+```
+
 ### Virtual Call-Site Caches
 
 Each generated virtual call keeps its last receiver class and effective

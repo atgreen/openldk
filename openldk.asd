@@ -84,6 +84,8 @@
                (:file "src/codegen")
                (:file "src/descriptors")
                (:file "src/primitive-code")
+               (:file "src/inline-code")
+               (:file "src/array-loops")
                (:file "src/classfile")
                (:file "src/verifier")
                (:file "src/interpreter")

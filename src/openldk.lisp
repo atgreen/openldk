@@ -869,9 +869,10 @@ the alist TYPES so VALUE passes through that type's normalizer."
                                         (t (list symbol (if (consp type) 0 (coerce 0 type))))))
                 ,@(when types `((declare ,@(loop for (symbol . type) in types collect `(type ,type ,symbol)))))
                 ,@(%omit-safe-leaf-handlers (%normalize-typed-assignments body types) types))))
-      (if *enable-word-longs*
-          (%lower-word-longs form (loop for (symbol . type) in types when (equal type '(signed-byte 64)) collect symbol))
-          form))))
+      (%specialize-array-loops
+       (if *enable-word-longs*
+           (%lower-word-longs form (loop for (symbol . type) in types when (equal type '(signed-byte 64)) collect symbol))
+           form)))))
 
 (defun %prune-unused-bindings (bindings body)
   "BINDINGS less those with no initial value that BODY never mentions."
@@ -1532,6 +1533,7 @@ classes with the same name."
                                  (round (* 1000 (/ (- (get-internal-real-time) compile-start-time)
                                                    internal-time-units-per-second))))
                          (force-output)))))
+                 (%note-java-inline-function class method)
                  (setf compilation-completed t))
              (|condition-java/lang/LinkageError| (condition)
                ;; Eager linking during compilation is still a Java linkage
@@ -1992,7 +1994,8 @@ without running the compiler, since most methods are never called."
                  (if (static-p m)
                      ;; Static methods: function name in loader's package (includes class name)
                      (let ((fn-symbol (intern (format nil "~A.~A" (slot-value class 'name) method-name) pkg)))
-                       (setf (fdefinition fn-symbol) (%static-method-stub class-ref method-index fn-symbol)))
+                       (setf (fdefinition fn-symbol) (%static-method-stub class-ref method-index fn-symbol))
+                       (%note-java-inline-function class m))
                      ;; Instance methods: generic function name in :openldk for dispatch,
                      ;; class specializer in loader's package for isolation.
                      (let* ((method-symbol (intern method-name :openldk))

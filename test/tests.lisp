@@ -945,3 +945,109 @@ nothing behind when it refuses."
         (remove-method #'remove-method hook)
         (fmakunbound gf-name)
         (setf (find-class child-name) nil (find-class base-name) nil)))))
+
+(test small-integer-method-recognition
+  (multiple-value-bind (expression success)
+      (openldk::%small-integer-method-expression #(26 27 96 172) '(a b))
+    (is (eq t success))
+    (let ((function (compile nil `(lambda (a b) ,expression))))
+      (is (= 42 (funcall function 19 23)))
+      (is (= -2147483648 (funcall function 2147483647 1)))))
+  (dolist (bytes '(#(26 27 108 172) #(26 153 0 4 172) #(184 0 1 172)
+                   #(178 0 1 172) #(26) #(96 172) #(29 172) #(26 172 0)))
+    (is (null (nth-value 1 (openldk::%small-integer-method-expression bytes '(a b))))))
+  (multiple-value-bind (expression success)
+      (openldk::%small-integer-method-expression #(26 145 172) '(a))
+    (is (eq t success))
+    (is (= -1 (funcall (compile nil `(lambda (a) ,expression)) 255)))))
+
+(test inline-static-target-observes-replacement
+  (let* ((name (gensym "INLINE-TARGET"))
+         (method (list :method))
+         (original (lambda (a) a))
+         (replacement (lambda (a) (+ a 1)))
+         (site (openldk::make-java-inline-site :name name :class method :method method))
+         (openldk::*java-inline-functions* (make-hash-table :test 'eq :weakness :key)))
+    (unwind-protect
+         (progn
+           (setf (fdefinition name) original
+                 (gethash original openldk::*java-inline-functions*) (sb-ext:make-weak-pointer method))
+           (is (eq t (openldk::%inline-static-target-p site)))
+           (is (eq t (openldk::%inline-static-target-p site)))
+           (setf (fdefinition name) replacement)
+           (is (null (openldk::%inline-static-target-p site)))
+           ;; A new Java compilation of the same method may refresh a site.
+           (setf (gethash replacement openldk::*java-inline-functions*) (sb-ext:make-weak-pointer method))
+           (is (eq t (openldk::%inline-static-target-p site))))
+      (fmakunbound name))))
+
+(defun %array-loop-fixture ()
+  '(tagbody
+      (setf sum (openldk::%as-int 0))
+      (setf i (openldk::%as-int 0))
+    again
+      (progn
+        (when (>= i (openldk::%as-int
+                     (let ((arrayref a))
+                       (if (openldk::java-array-p arrayref)
+                           (length (openldk::java-array-data arrayref))
+                           (openldk::%array-length-slow arrayref)))))
+          (go done)))
+      (setf sum (openldk::%as-int
+                 (sb-c::mask-signed-field 32
+                   (+ sum (let ((index i) (arrayref b))
+                            (aref (the (simple-array (signed-byte 32) (*))
+                                       (openldk::java-array-data arrayref)) index))))))
+      (setf i (openldk::%as-int (sb-c::mask-signed-field 32 (+ i 1))))
+      (go again)
+    done
+      (return-from result sum)))
+
+(defun %compile-array-loop-fixture (form)
+  (compile nil `(lambda (a b)
+                  (block result
+                    (let ((i 0) (sum 0))
+                      (declare (type (signed-byte 32) i sum))
+                      ,form)))))
+
+(defun %array-loop-outcome (function a b)
+  (handler-case (list :value (funcall function a b))
+    (error (condition) (list :error (type-of condition)))))
+
+(test guarded-array-loop-boundaries
+  (let ((original (%array-loop-fixture)))
+    (multiple-value-bind (lowered success) (openldk::%version-array-tagbody original)
+      (is (eq t success))
+      (let ((before (%compile-array-loop-fixture original))
+            (after (%compile-array-loop-fixture lowered)))
+        (dolist (a-length '(0 1 2 3 5))
+          (let ((a (openldk::make-java-array-default :data (make-array a-length))))
+            (dolist (b-length '(0 1 2 3 5))
+              (let ((b (openldk::make-java-array-default
+                        :data (make-array b-length :element-type '(signed-byte 32) :initial-element 7))))
+                (is (equal (%array-loop-outcome before a b) (%array-loop-outcome after a b)))))
+            ;; No iteration may touch a missing second array.
+            (when (zerop a-length) (is (= 0 (funcall after a nil)))))))))
+  (let* ((original (%array-loop-fixture))
+         (load '(let ((index i) (arrayref b))
+                  (aref (the (simple-array (signed-byte 32) (*)) (openldk::java-array-data arrayref)) index)))
+         (empty (openldk::make-java-array-default :data (make-array 0 :element-type '(signed-byte 32)))))
+    ;; Prefix and suffix array reads retain bounds checks, even when the
+    ;; loop itself has no iterations and the fast range guard succeeds.
+    (dolist (form (list (cons 'tagbody (cons `(setf sum ,load) (cddr original)))
+                       (append (butlast original) (list `(return-from result ,load)))))
+      (multiple-value-bind (lowered success) (openldk::%version-array-tagbody form)
+        (is (eq t success))
+        (let ((before (%array-loop-outcome (%compile-array-loop-fixture form) empty empty))
+              (after (%array-loop-outcome (%compile-array-loop-fixture lowered) empty empty)))
+          (is (eq :error (first before)))
+          (is (equal before after)))))))
+
+(test guarded-array-loop-rejections
+  (let* ((form (%array-loop-fixture))
+         (forms (cdr form)))
+    (dolist (bad (list '(tagbody a b)
+                      (append (butlast form) '((go again)))
+                      (cons 'tagbody (cons '(setf a b) forms))
+                      (cons 'tagbody (cons '(funcall native-hook) forms))))
+      (is (equal bad (openldk::%version-array-tagbody bad))))))

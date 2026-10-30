@@ -733,7 +733,7 @@ take the method's arguments followed by the MemberName."
                                          (cons method-sym
                                                (reverse (mapcar (lambda (a) (code (codegen a context))) args)))))))
                            (if resolved
-                               call
+                               (%maybe-inline-static-form call declaring method-name)
                                ;; A class that isn't there: the call throws
                                ;; NoClassDefFoundError when it runs, after its
                                ;; arguments, which the JVM has already pushed.
@@ -1595,7 +1595,10 @@ JVMS 5.4.6 selects that method independently of the receiver's class."
                                            (load-time-value (make-java-virtual-site :name ',(%call-site-gf method-name nargs)))
                                            ,null-checked-receiver
                                            ,@(mapcar (lambda (a) (code (codegen a context))) (cdr args)))))))
-                           call))))
+                           (if reference-class
+                               (%maybe-inline-instance-form call (%resolve-class-in-context reference-class) method-name
+                                                            :private (not (null private-owner)))
+                               call)))))
 
 (defparameter *invokedynamic-cache* (make-hash-table :test #'eq :weakness :key))
 
@@ -2249,7 +2252,7 @@ type."
                        :expression-type :REFERENCE)))
     (let* ((class-name (slot-value class 'name))
            ;; Ensure class is loaded before package lookup
-           (_ (%resolve-class-in-context class-name))
+           (resolved (%resolve-class-in-context class-name))
            (pkg (class-package class-name))
            ;; Method symbol goes in :openldk - constructors are generic functions
            ;; shared across loaders for CLOS dispatch, like instance methods
@@ -2259,10 +2262,12 @@ type."
            (arg-code (mapcar (lambda (a) (code (codegen a context))) args)))
       (make-instance '<expression>
                      :insn insn
-                     :code `(openldk::invoke-special-at
+                     :code (%maybe-inline-instance-form
+                            `(openldk::invoke-special-at
                              (load-time-value
                               (openldk::make-invoke-special-site ',method-symbol ',owner-symbol))
-                             (list ,@arg-code))))))
+                             (list ,@arg-code))
+                            resolved method-name :private t)))))
 
 (defun %resolve-field-slot (ref-class member-name)
   "Resolve a Fieldref (REF-CLASS, MEMBER-NAME) to its CLOS slot
