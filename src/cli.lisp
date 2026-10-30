@@ -70,6 +70,7 @@
   (format *error-output* "    -D<name>=<value>~%")
   (format *error-output* "                  set a system property~%")
   (format *error-output* "    --add-modules <modules>~%                  resolve additional root modules (comma separated)~%")
+  (format *error-output* "    --add-exports <module/package=targets>~%                  export a package to additional modules~%")
   (format *error-output* "    --enable-native-access <modules>~%                  permit JNI/FFM access (or ALL-UNNAMED)~%")
   (format *error-output* "    --illegal-native-access=<allow|warn|deny>~%                  control unpermitted JNI/FFM access (default: warn)~%")
   (format *error-output* "    --enable-preview~%                  enable Java 25 preview features~%")
@@ -174,7 +175,7 @@
         (program-args nil)
         (properties nil)
         (i 0))
-    (setf *enable-preview* nil *cli-add-modules* nil
+    (setf *enable-preview* nil *cli-add-modules* nil *cli-add-exports* nil
           *cli-enable-native-access* nil *cli-illegal-native-access* "warn")
     (setf *source-launch-p* nil *source-launch-version* nil)
     ;; Parse options until we hit mainclass
@@ -200,6 +201,16 @@
                     (format *error-output* "Invalid --illegal-native-access value: ~A~%" mode)
                     (uiop:quit 1))
                   (setf *cli-illegal-native-access* mode))
+                (incf i))
+               ((or (string= arg "--add-exports") (starts-with? "--add-exports=" arg))
+                (let ((exports (if (string= arg "--add-exports")
+                                   (nth (incf i) raw-args)
+                                   (subseq arg 14))))
+                  (unless (and exports (plusp (length exports))
+                               (not (char= (char exports 0) #\-)))
+                    (format *error-output* "--add-exports requires module/package=targets~%")
+                    (uiop:quit 1))
+                  (push exports *cli-add-exports*))
                 (incf i))
                ((or (string= arg "--add-modules") (starts-with? "--add-modules=" arg))
                 (let ((modules (if (string= arg "--add-modules")
@@ -331,8 +342,11 @@
                       (process (uiop:launch-program
                                 (append (list (namestring java) (namestring helper)
                                               (namestring (truename mainclass)) (namestring classes) cp
-                                              (if *enable-preview* "true" "false") (or *source-launch-version* "25"))
-                                        (reverse *cli-add-modules*))
+                                              (if *enable-preview* "true" "false") (or *source-launch-version* ""))
+                                        (loop for modules in (reverse *cli-add-modules*)
+                                              append (list "--add-modules" modules))
+                                        (loop for exports in (reverse *cli-add-exports*)
+                                              append (list "--add-exports" exports)))
                                 :environment (remove-if (lambda (entry) (starts-with? "JDK_JAVA_OPTIONS=" entry))
                                                         (sb-ext:posix-environ))
                                 :output *standard-output* :error-output *error-output*)))

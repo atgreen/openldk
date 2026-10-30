@@ -2700,11 +2700,15 @@ properties, and *CLASSPATH* construction."
                              (make-instance 'jar-classpath-entry :jarfile cpe)
                              (make-instance 'dir-classpath-entry :dir cpe)))
            (discover-jmod-classpath-entries))))
-  (when *cli-add-modules* (%reset-boot-module-layer))
+  (when (or *cli-add-modules* *cli-add-exports*) (%reset-boot-module-layer))
   (loop for modules in (reverse *cli-add-modules*)
         for index from 0
         do (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;|
             (jstring (format nil "jdk.module.addmods.~D" index)) (jstring modules)))
+  (loop for exports in (reverse *cli-add-exports*)
+        for index from 0
+        do (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;|
+            (jstring (format nil "jdk.module.addexports.~D" index)) (jstring exports)))
   ;; Resolve the boot graph before application loading/JIT compilation can
   ;; reenter module initialization through an access check.
   (%boot-module-layer)

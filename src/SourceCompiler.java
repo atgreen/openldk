@@ -1,3 +1,4 @@
+/* Copyright (C) 2026 Anthony Green <green@moxielogic.com> */
 /* SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0 */
 import com.sun.source.tree.ClassTree;
 import com.sun.source.util.JavacTask;
@@ -24,13 +25,15 @@ class SourceCompiler {
         };
         JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
         try (var files = compiler.getStandardFileManager(null, null, StandardCharsets.UTF_8)) {
-            var options = new ArrayList<>(List.of("-proc:none", "--release", args[4], "-d", output.toString(),
+            var options = new ArrayList<>(List.of("-proc:none", "-d", output.toString(),
                     "-classpath", args[2], "-encoding", "UTF-8"));
-            if (preview) options.add("--enable-preview");
-            for (int i = 5; i < args.length; i++) {
-                options.add("--add-modules");
-                options.add(args[i]);
+            if (!args[4].isEmpty()) options.addAll(List.of("--release", args[4]));
+            if (preview) {
+                options.add("--enable-preview");
+                if (args[4].isEmpty())
+                    options.addAll(List.of("--release", Integer.toString(Runtime.version().feature())));
             }
+            options.addAll(Arrays.asList(args).subList(5, args.length));
             DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
             JavacTask task = (JavacTask)compiler.getTask(null, files, diagnostics, options, null, List.of(input));
             var unit = task.parse().iterator().next();

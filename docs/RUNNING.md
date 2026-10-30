@@ -81,6 +81,13 @@ files dynamically through reflection is not implemented.
 Run `make check-launcher` and `make check-source-launcher` to compare compiled
 and source entry-point behavior with JDK 25.
 
+Use `--add-exports java.desktop/sun.awt=ALL-UNNAMED` to export a module's
+package to additional modules. The `--add-exports=module/package=targets`
+form and repeated options are supported. Source launches pass these options
+to the compiler as well as applying them to the runtime module graph.
+Explicit `--source` releases retain the JDK compiler's restrictions on
+exporting internal packages.
+
 ## Code cache
 
 `openldk` keeps the methods it compiles in a cache, `code/` in the

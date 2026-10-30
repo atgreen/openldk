@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 BUILD = ROOT / '.cache/standards-test'
 JDK = Path(os.environ['JAVA_HOME'])
 PROBES = {
+    'ModuleExportsProbe': (25,),
     'LoaderConstraintProbe': (25,),
     'ClassLoaderPackageProbe': (25,),
     'ArrayReflectionProbe': (25,),
@@ -86,6 +87,51 @@ def check_module_launches(engines):
     return failures
 
 
+def check_export_launches(engines):
+    """Compare launcher exports and real reflection access with the reference."""
+    directory = BUILD / 'ModuleExportsProbe-25'
+    program = ['-cp', str(directory), 'ModuleExportsProbe']
+    export = 'java.base/jdk.internal.misc=ALL-UNNAMED'
+    cases = {
+        'equals': (['--add-exports=' + export, *program, 'exported'], True),
+        'separate': (['--add-exports', export, *program, 'exported'], True),
+        'repeated': (['--add-exports', export, '--add-exports',
+                      'java.desktop/sun.awt=ALL-UNNAMED', *program, 'exported', 'desktop'], True),
+        'named-target': (['--add-exports=java.base/jdk.internal.misc=java.desktop', *program], True),
+        'source': (['--add-exports=' + export,
+                    str(ROOT / 'test/standards/ModuleExportsProbe.java'), 'exported'], True),
+        'source-direct': (['--add-exports=' + export,
+                           str(ROOT / 'test/standards/ModuleExportsDirectSource.java')], True),
+        'source-explicit-release': (['--source', '25', '--add-exports=' + export,
+                                     str(ROOT / 'test/standards/ModuleExportsDirectSource.java')], False),
+        'missing-argument': (['--add-exports'], False),
+        'malformed': (['--add-exports=java.base/jdk.internal.misc', *program], False),
+    }
+    failures = []
+    for name, (arguments, success) in cases.items():
+        reference = None
+        for engine in engines:
+            try:
+                result = subprocess.run([str(engine), *arguments], capture_output=True,
+                                        text=True, timeout=240)
+                output = result.stdout + result.stderr
+                passed = (result.returncode == 0) == success
+                if success:
+                    passed = passed and 'Module export checks passed:' in result.stdout
+                    if reference is None:
+                        reference = result.stdout
+                    else:
+                        passed = passed and result.stdout == reference
+            except subprocess.TimeoutExpired:
+                output, passed = 'TIMEOUT', False
+            (directory / f'{engine.name}-exports-{name}.log').write_text(output)
+            print(f'{engine.name} module export {name}: {"PASS" if passed else "FAIL"}', flush=True)
+            if not passed:
+                print(output, flush=True)
+                failures.append(f'{engine.name} module export {name}')
+    return failures
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--runtime', type=Path, default=ROOT / 'openldk')
@@ -133,6 +179,8 @@ def main():
                     failures.append(f'{engine.name} --release {release} {probe}')
     if args.probe in (None, 'VectorProbe'):
         failures.extend(check_module_launches(engines))
+    if args.probe in (None, 'ModuleExportsProbe'):
+        failures.extend(check_export_launches(engines))
     if failures:
         raise SystemExit('Failed comparisons: ' + ', '.join(failures))
 
