@@ -48,15 +48,17 @@
 ;;;  - a direct method handle calls its MemberName: a method, a
 ;;;    constructor, or a field access;
 ;;;  - any other handle (bound, delegating, a combinator's) interprets its
-;;;    LambdaForm, as LambdaForm.interpretWithArguments would: each Name
+;;;    LambdaForm through a cached compiled graph: each Name
 ;;;    applies its NamedFunction to earlier Names' values, and a function
 ;;;    that is itself a method handle intrinsic (invokeBasic, linkTo*)
-;;;    recurses here.
+;;;    recurses here. The interpreter remains available for comparisons.
 ;;;
 ;;; LambdaForm.compileToBytecode does nothing, and prepare() gives a form
 ;;; without a vmentry the marker *LF-INTERPRET-ENTRY*.
 
 (in-package :openldk)
+
+(defvar *enable-compiled-lambda-forms* t)
 
 (defvar *lf-interpret-entry* nil
   "The vmentry of LambdaForms OpenLDK interprets: a MemberName naming nothing.")
@@ -176,7 +178,10 @@ arguments), as LambdaForm.interpretWithArguments does."
     ((%java-class-p mh "java/lang/invoke/DirectMethodHandle")
      (%member-invoke (slot-value mh '|member|) args))
     (t
-     (%lf-interpret (slot-value mh '|form|) (cons mh args)))))
+     (if *enable-compiled-lambda-forms*
+         (let ((form (slot-value mh '|form|)))
+           (apply (%lf-compiled-function form) form mh args))
+         (%lf-interpret (slot-value mh '|form|) (cons mh args))))))
 
 ;;; MethodHandle.invoke: asType to the call site's type, then invokeExact.
 

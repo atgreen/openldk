@@ -57,6 +57,30 @@ and enabled, checks boundary cases and checksums, and reports time and allocated
 bytes for ten million iterations. It asserts that the optimized loop does not
 allocate per iteration. Timing is informational and depends on the host.
 
+### Compiled Method-Handle Graphs
+
+`src/native/lambda-compiler.lisp` compiles LambdaForm wiring into a Lisp
+function with ordinary temporaries. Shared fixed-arity dispatchers call each
+NamedFunction without building argument lists or unboxing lists. Mutable
+call-site targets, resolved handles and method symbols are read at invocation
+time, so Java call-site updates and Lisp function replacement remain visible.
+
+The cache has weak form keys. Its compiled functions contain no Java object
+constants: they receive the live form as an argument and read constants through
+it. This matters because SBCL weak-key hash tables can retain a key when their
+value points back to it. Capturing a form's constants could retain the form
+and its defining loader indefinitely.
+
+`MethodHandleGraphProbe` compares combinators, mutable targets, fields,
+constructors, boxing and mixed primitive arguments with JDK 25. To compare
+graph interpretation and compilation with matching checksums and allocation
+measurements, run:
+
+```sh
+CL_SOURCE_REGISTRY="$PWD//:" LDK_CODE_CACHE=off \
+  sbcl --dynamic-space-size 8192 --script bench/method-handles/run.lisp
+```
+
 ### Static Class Instances
 
 Java static members are handled via special CLOS instances:

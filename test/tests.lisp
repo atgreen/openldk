@@ -785,3 +785,57 @@ nothing behind when it refuses."
                         (openldk::%as-long unknown)))
     (let ((body `((openldk::with-java-conditions (:arrays nil) ,expression))))
       (is (equal body (openldk::%omit-safe-leaf-handlers body '((x . (signed-byte 64)))))))))
+
+(defclass test-lf-member ()
+  ((openldk::|flags| :initform (ash 6 24))
+   (openldk::|clazz| :initform nil)))
+(defclass test-lf-function ()
+  ((openldk::|member| :initarg :member)
+   (openldk::|resolvedHandle| :initform nil)))
+
+(test compiled-lambda-dispatch-observes-replacement
+  (let* ((member (make-instance 'test-lf-member))
+         (function (make-instance 'test-lf-function :member member))
+         (symbol (gensym "TARGET"))
+         (openldk::*member-name-invoke-cache* (make-hash-table :test 'eq))
+         (openldk::*last-member-plan* (cons nil nil))
+         (entry (symbol-function (openldk::%lf-fixed-invoker 1))))
+    (unwind-protect
+         (progn
+           (setf (symbol-function symbol) (lambda (x) (+ x 1))
+                 (gethash member openldk::*member-name-invoke-cache*)
+                 (list :static symbol nil #\I nil))
+           (is (= 43 (funcall entry function 42)))
+           ;; Fixed-arity dispatch must consult the symbol's current function.
+           (setf (symbol-function symbol) (lambda (x) (+ x 7)))
+           (is (= 49 (funcall entry function 42))))
+      (fmakunbound symbol))))
+
+(defclass test-lf-name ()
+  ((openldk::|index| :initform 0)
+   (openldk::|function$| :initarg :function)
+   (openldk::|arguments| :initarg :arguments)))
+(defclass test-lf-form ()
+  ((openldk::|names| :initform nil)
+   (openldk::|arity| :initform 0)
+   (openldk::|result| :initform 0)))
+
+(defun %weak-lambda-cache-fixture (table)
+  (let* ((key (make-instance 'test-lf-form))
+         (name (make-instance 'test-lf-name
+                             :function (make-instance 'test-lf-function :member (make-instance 'test-lf-member))
+                             :arguments (openldk::make-java-array-default :data (vector key)))))
+    ;; A constant points back to the form. Capturing it in compiled code
+    ;; would turn the weak-key cache into a permanent loader root.
+    (setf (slot-value key 'openldk::|names|) (openldk::make-java-array-default :data (vector name)))
+    (let ((function (openldk::%compile-lambda-form key (find-class 'test-lf-name))))
+      (setf (gethash key table) function)
+      (values (sb-ext:make-weak-pointer key) function))))
+
+(test compiled-lambda-cache-does-not-root-forms
+  (let ((table (make-hash-table :test 'eq :weakness :key :synchronized t)))
+    (multiple-value-bind (reference function) (%weak-lambda-cache-fixture table)
+      (dotimes (i 3) (sb-ext:gc :full t))
+      (is (functionp function))
+      (is (null (sb-ext:weak-pointer-value reference)))
+      (is (zerop (hash-table-count table))))))

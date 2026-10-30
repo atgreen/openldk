@@ -102,6 +102,7 @@
                (:file "src/native/system")
                (:file "src/native/files")
                (:file "src/native/constantpool")
+               (:file "src/native/lambda-compiler")
                (:file "src/native/methodhandles")
                (:file "src/native/unsafe-tail")
                (:file "src/native/process")
