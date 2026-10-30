@@ -14,6 +14,7 @@ PROBES = {
     'ArrayReflectionProbe': (25,),
     'FieldTypeProbe': (25,),
     'PrimitiveOptimizationProbe': (25,),
+    'PrimitiveResultProbe': (25,),
     'MethodHandleGraphProbe': (25,),
     'InlineLeafProbe': (25,),
     'InstanceInlineProbe': (25,),

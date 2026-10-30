@@ -1051,3 +1051,47 @@ nothing behind when it refuses."
                       (cons 'tagbody (cons '(setf a b) forms))
                       (cons 'tagbody (cons '(funcall native-hook) forms))))
       (is (equal bad (openldk::%version-array-tagbody bad))))))
+
+(defun %primitive-arithmetic-outcome (function a b)
+  (handler-case
+      (let ((value (funcall function a b)))
+        (if (typep value 'double-float)
+            (list :double (float-features:double-float-bits value))
+            (list :value value)))
+    (error (condition) (list :error (type-of condition)))))
+
+(test guarded-primitive-result-arithmetic
+  (dolist (body '((sb-c::mask-signed-field 32 (+ value1 value2))
+                  (sb-c::mask-signed-field 64 (* value1 value2))
+                  (openldk::%long-word (- value1 value2))
+                  (openldk::%as-double (+ value1 value2))))
+    (let* ((form `(let ((value2 b) (value1 a)) ,body))
+           (lowered (openldk::%specialize-primitive-result-arithmetic form nil))
+           (before (compile nil `(lambda (a b) ,form)))
+           (after (compile nil `(lambda (a b) ,lowered))))
+      (is (not (equal form lowered)))
+      (dolist (a '(0 1 -1 2147483647 -2147483648 9223372036854775807 -9223372036854775808
+                   1208925819614629174706176 1.5d0 -0.0d0 2.5f0 1/3 :opaque))
+        (dolist (b '(1 -1 3 2.5d0 :opaque))
+          (is (equalp (%primitive-arithmetic-outcome before a b)
+                      (%primitive-arithmetic-outcome after a b))))))))
+
+(test primitive-result-operands-evaluated-once
+  (let* ((form '(let ((value2 (progn (push :second events) b))
+                     (value1 (progn (push :first events) a)))
+                 (sb-c::mask-signed-field 32 (+ value1 value2))))
+         (lowered (openldk::%specialize-primitive-result-arithmetic form nil))
+         (function (compile nil `(lambda (a b)
+                                   (let ((events nil))
+                                     (handler-case ,lowered (type-error () nil))
+                                     events)))))
+    (is (equal '(:first :second) (funcall function 1 2)))
+    (is (equal '(:first :second) (funcall function :opaque 2)))))
+
+(test primitive-result-proven-types-skip-guards
+  (let ((form '(let ((value2 b) (value1 a))
+                 (declare (type (signed-byte 32) value1 value2))
+                 (sb-c::mask-signed-field 32 (+ value1 value2)))))
+    (is (equal form (openldk::%specialize-primitive-result-arithmetic form nil)))
+    (let ((openldk::*enable-primitive-result-arithmetic* nil))
+      (is (eq form (openldk::%specialize-primitive-result-arithmetic form nil))))))

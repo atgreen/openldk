@@ -19,6 +19,7 @@
   ;; Disable disk caching even when the caller omitted LDK_CODE_CACHE=off.
   (let ((openldk::*enable-word-longs* optimized)
         (openldk::*enable-primitive-entries* optimized)
+        (openldk::*enable-primitive-result-arithmetic* optimized)
         (openldk::*fasl-cache-directory* nil))
     (openldk.interop:java-static class "loop(JI)J" 1 100)
     (symbol-function

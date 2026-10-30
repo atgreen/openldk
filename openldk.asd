@@ -86,6 +86,7 @@
                (:file "src/primitive-code")
                (:file "src/inline-code")
                (:file "src/array-loops")
+               (:file "src/primitive-results")
                (:file "src/classfile")
                (:file "src/verifier")
                (:file "src/interpreter")

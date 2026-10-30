@@ -1,0 +1,58 @@
+;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+;;; CL_SOURCE_REGISTRY="$PWD//:" LDK_CODE_CACHE=off sbcl --dynamic-space-size 8192 \
+;;;   --script bench/primitive-results/run.lisp
+(require :asdf)
+(asdf:load-system :openldk/interop)
+
+(let* ((directory (asdf:system-relative-pathname :openldk ".cache/bench/primitive-results/"))
+       (source (uiop:read-file-string (asdf:system-relative-pathname :openldk "test/standards/PrimitiveResultProbe.java")))
+       (paths nil))
+  (ensure-directories-exist directory)
+  (dolist (suffix '("Baseline" "Optimized"))
+    (let* ((name (concatenate 'string "PrimitiveResultProbe" suffix))
+           (path (merge-pathnames (concatenate 'string name ".java") directory)))
+      (with-open-file (out path :direction :output :if-exists :supersede)
+        (write-string (str:replace-all "PrimitiveResultProbe" name source) out))
+      (push (namestring path) paths)))
+  (uiop:run-program
+   (append (list (namestring (merge-pathnames "bin/javac" (uiop:ensure-directory-pathname (uiop:getenv "JAVA_HOME"))))
+                 "--release" "25" "-d" (namestring directory)) paths)
+   :output t :error-output t)
+  (openldk.interop:start-runtime :classpath (list directory)))
+
+(defun result-bench-entry (signature arguments optimized)
+  (let* ((class (if optimized "PrimitiveResultProbeOptimized" "PrimitiveResultProbeBaseline"))
+         (openldk::*enable-primitive-result-arithmetic* optimized)
+         (openldk::*fasl-cache-directory* nil))
+    (apply #'openldk.interop:java-static class signature arguments)
+    (symbol-function (openldk::static-method-symbol
+                      (concatenate 'string class "." signature)
+                      (openldk::ldk-class-package (openldk.interop:java-load class))))))
+
+(dolist (spec '(("ints(II)I" (-2147483648 -2147483648))
+                ("longs(JJ)J" (9223372036854775807 4611686018427387905))
+                ("floats(FF)F" (1.5f0 -2.25f0))
+                ("doubles(DD)D" (1.5d0 -2.25d0))))
+  (destructuring-bind (signature arguments) spec
+    (let* ((baseline (result-bench-entry signature arguments nil))
+           (optimized (result-bench-entry signature arguments t))
+           (expected (apply baseline arguments))
+           (baseline-bytes nil))
+      (assert (= expected (apply optimized arguments)))
+      (dolist (entry (list (cons :baseline baseline) (cons :optimized optimized)))
+        (dotimes (trial 3)
+          (sb-ext:gc :full t)
+          (let ((before (sb-ext:get-bytes-consed)) (start (get-internal-real-time)))
+            (dotimes (i 100000) (assert (= expected (apply (cdr entry) arguments))))
+            (let ((bytes (- (sb-ext:get-bytes-consed) before)))
+              (if (eql (car entry) :baseline)
+                  (setf baseline-bytes (if baseline-bytes (min baseline-bytes bytes) bytes))
+                  (progn
+                    ;; Ordinary Lisp double/long return values can need boxes;
+                    ;; specialization must not add per-call boxing.
+                    (assert (<= bytes (+ baseline-bytes 262144)))
+                    (when (member signature '("ints(II)I" "floats(FF)F") :test #'string=)
+                      (assert (< bytes 262144)))))
+              (format t "~&~A ~S trial=~D seconds=~,6F bytes=~D checksum=~S~%"
+                      signature (car entry) trial (/ (- (get-internal-real-time) start) internal-time-units-per-second)
+                      bytes expected))))))))

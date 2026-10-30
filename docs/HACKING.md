@@ -52,10 +52,28 @@ CL_SOURCE_REGISTRY="$PWD//:" LDK_CODE_CACHE=off \
   sbcl --dynamic-space-size 8192 --script bench/primitive-code/run.lisp
 ```
 
-This compiles identical Java loops with primitive entry/word lowering disabled
-and enabled, checks boundary cases and checksums, and reports time and allocated
-bytes for ten million iterations. It asserts that the optimized loop does not
+This compiles identical Java loops with primitive entry guards, word storage
+and result arithmetic disabled and enabled, checks boundary cases and checksums,
+and reports time and allocated bytes for ten million iterations. It asserts that the optimized loop does not
 allocate per iteration. Timing is informational and depends on the host.
+
+`src/primitive-results.lisp` restores useful primitive types when opaque call
+results enter arithmetic. It checks the actual operands before using typed
+operations, preserving the original arithmetic as the fallback. Type facts
+come from canonical entry guards, checked conversions and specialized arrays;
+a native call's descriptor alone never becomes an unchecked Lisp declaration.
+Both operands are evaluated in their original order before a new guard runs.
+Known long operands use explicit unsigned-word modular operations.
+
+Ordinary Lisp call boundaries can still box long and double return values.
+The pass removes avoidable arithmetic allocation while keeping those public
+calling conventions and opaque-value passthrough intact. To compare generated
+callers of non-inlineable primitive methods with this pass off and on, run:
+
+```sh
+CL_SOURCE_REGISTRY="$PWD//:" LDK_CODE_CACHE=off \
+  sbcl --dynamic-space-size 8192 --script bench/primitive-results/run.lisp
+```
 
 ### Small Leaves and Guarded Array Loops
 

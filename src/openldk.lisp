@@ -869,10 +869,11 @@ the alist TYPES so VALUE passes through that type's normalizer."
                                         (t (list symbol (if (consp type) 0 (coerce 0 type))))))
                 ,@(when types `((declare ,@(loop for (symbol . type) in types collect `(type ,type ,symbol)))))
                 ,@(%omit-safe-leaf-handlers (%normalize-typed-assignments body types) types))))
-      (%specialize-array-loops
-       (if *enable-word-longs*
-           (%lower-word-longs form (loop for (symbol . type) in types when (equal type '(signed-byte 64)) collect symbol))
-           form)))))
+      (%specialize-primitive-result-arithmetic
+       (%specialize-array-loops
+        (if *enable-word-longs*
+            (%lower-word-longs form (loop for (symbol . type) in types when (equal type '(signed-byte 64)) collect symbol))
+            form)) types))))
 
 (defun %prune-unused-bindings (bindings body)
   "BINDINGS less those with no initial value that BODY never mentions."
@@ -1178,6 +1179,9 @@ BLOCKS-AFTER-DCE: generate each block's code, then wrap it with debug
 tracing, the NPE/array-bounds handler-binds, and ACC_SYNCHRONIZED monitor
 entry/exit as required."
   (let* ((*method-primitive-parameters* (%primitive-parameter-types method))
+         (*method-primitive-return-type*
+           (when-let ((category (%jtype-category (get-return-type (descriptor method)))))
+             (%primitive-lisp-type category)))
          (lisp-code
            (%fold-stack-variables
             (list (list* 'block nil
