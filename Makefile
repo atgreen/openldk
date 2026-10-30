@@ -53,6 +53,9 @@ all: jni openldk javacl
 
 JNI_OS = $(shell uname -s | tr A-Z a-z)
 JNI_BRIDGE = libopenldk-jni.so
+PKG_CONFIG ?= pkg-config
+LIBFFI_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags libffi 2>/dev/null)
+LIBFFI_LIBS ?= $(or $(shell $(PKG_CONFIG) --libs libffi 2>/dev/null),-lffi)
 .PHONY: jni
 jni: $(JNI_BRIDGE)
 
@@ -61,9 +64,9 @@ jni: $(JNI_BRIDGE)
 	python3 $< "$(JAVA_HOME)/include/jni.h" $@
 
 $(JNI_BRIDGE): src/jni/bridge.c src/jni/ffi.c .cache/jni/table.inc
-	$(CC) $(CPPFLAGS) $(CFLAGS) -std=c11 -D_GNU_SOURCE -fPIC -shared -Wall -Wextra -Werror \
+	$(CC) $(CPPFLAGS) $(LIBFFI_CFLAGS) $(CFLAGS) -std=c11 -D_GNU_SOURCE -fPIC -shared -Wall -Wextra -Werror \
 	  -I"$(JAVA_HOME)/include" -I"$(JAVA_HOME)/include/$(JNI_OS)" -I.cache/jni \
-	  src/jni/bridge.c src/jni/ffi.c $(LDFLAGS) -lffi -ldl -o $@
+	  src/jni/bridge.c src/jni/ffi.c $(LDFLAGS) $(LIBFFI_LIBS) -ldl -o $@
 
 # Fail fast when JAVA_HOME is not a JDK 25 (e.g. the environment exports an
 # older JDK) instead of erroring deep inside the Lisp build.  Order-only

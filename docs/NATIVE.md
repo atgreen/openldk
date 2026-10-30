@@ -10,6 +10,17 @@ included in `make`). This requires a C compiler, Python 3, JDK 25 headers, and
 the libffi development package. The current bridge targets 64-bit little-endian
 Linux and uses the platform C ABI.
 
+The build discovers libffi's compiler and linker flags through `pkg-config`.
+`LIBFFI_CFLAGS` and `LIBFFI_LIBS` can override the discovered flags. For a
+nonstandard installation, add its `lib/pkgconfig` directory to
+`PKG_CONFIG_PATH`. For example, Homebrew's
+[keg-only libffi package](https://formulae.brew.sh/formula/libffi) needs:
+
+```sh
+brew install libffi pkgconf
+PKG_CONFIG_PATH="$(brew --prefix libffi)/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" make jni
+```
+
 Java code can use `System.load("/absolute/path/libexample.so")`, or
 `System.loadLibrary("example")` with `-Djava.library.path=/path/to/libraries`.
 The bridge is loaded lazily from `libopenldk-jni.so` in the build directory;

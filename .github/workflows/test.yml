@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText:  Copyright 2025 Anthony Green
+# SPDX-FileCopyrightText:  Copyright 2025, 2026 Anthony Green
 # SPDX-License-Identifier: MIT
 #
 # Project:  openldk
@@ -44,13 +44,15 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-          brew install sbcl ocicl dejagnu
+          brew install sbcl ocicl dejagnu libffi pkgconf
+          echo "PKG_CONFIG_PATH=$(brew --prefix libffi)/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
           ocicl setup >> ~/.sbclrc
 
       - name: Setup SBCL and ocicl (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install sbcl ocicl dejagnu
+          brew install sbcl ocicl dejagnu libffi pkgconf
+          echo "PKG_CONFIG_PATH=$(brew --prefix libffi)/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
           ocicl setup >> ~/.sbclrc
 
       - uses: actions/cache@v4
