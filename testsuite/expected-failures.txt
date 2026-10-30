@@ -152,7 +152,6 @@ XFAIL: mauve/gnu/testlet/java/awt/image/RescaleOp/filterImage.java execution tes
 XFAIL: mauve/gnu/testlet/java/beans/SimpleBeanInfo/loadImage.java execution test
 XFAIL: mauve/gnu/testlet/java/beans/XMLDecoder/jdk14.java execution test
 XFAIL: mauve/gnu/testlet/java/io/ObjectInputOutput/Compat1.java execution test
-XFAIL: mauve/gnu/testlet/java/io/RandomAccessFile/setLength.java execution test
 XFAIL: mauve/gnu/testlet/java/lang/ClassLoader/BootDefinedPackages.java execution test
 XFAIL: mauve/gnu/testlet/java/lang/ClassLoader/loadClass.java execution test
 XFAIL: mauve/gnu/testlet/java/net/ServerSocket/AcceptGetLocalPort.java execution test

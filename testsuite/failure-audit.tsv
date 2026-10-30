@@ -736,7 +736,7 @@ mauve/gnu/testlet/java/io/PrintWriter/jdk11.java	pass	0	0	0	6f6bd17d25c0dff8c25b
 mauve/gnu/testlet/java/io/RandomAccessFile/jdk11.java	pass	0	0	0	588d3b010724f9793e8e7d33bcad52a8579d584900e93ed1cdb238534952ac87	Passes its assertions or the current JDK 25 comparison.
 mauve/gnu/testlet/java/io/RandomAccessFile/randomaccessfile.java	pass	0	0	0	aefa8c5a706916adb32bccbb73b893c215b4e699faa5ed8f39636b10e421d201	Passes its assertions or the current JDK 25 comparison.
 mauve/gnu/testlet/java/io/RandomAccessFile/security.java	reference-failure	0	1	1	e5ce95e9fce16028b942f8d0de483d04fea5d06cd7a76fd57ac3dd80c0436a6b	Fails on JDK 25; requires test/environment investigation: FAIL: gnu.testlet.java.io.RandomAccessFile.security: Unexpected exception (number 0)
-mauve/gnu/testlet/java/io/RandomAccessFile/setLength.java	runtime-failure	0	0	1	a06c576da423832ac8eca87e861b94bcd8e47fae99668de161a51780dd93e7a3	OpenLDK execution fails while JDK 25 passes.
+mauve/gnu/testlet/java/io/RandomAccessFile/setLength.java	pass	0	0	0	a06c576da423832ac8eca87e861b94bcd8e47fae99668de161a51780dd93e7a3	Passes fresh JDK 25 comparison after RandomAccessFile.setLength0 support (16 assertions).
 mauve/gnu/testlet/java/io/Serializable/readResolve.java	pass	0	0	0	23c45adbab9add764b2849bca5e770cf4dd5b20f79e0307ef2406b2a4b0cbf4b	Passes its assertions or the current JDK 25 comparison.
 mauve/gnu/testlet/java/io/StreamTokenizer/misc.java	pass	0	0	0	211e1eff39f86657edad43eb31442c46a514fce4190496cbc9909689ab32cf7f	Passes its assertions or the current JDK 25 comparison.
 mauve/gnu/testlet/java/io/Utf8Encoding/WriteRead.java	pass	0	0	0	13c13d96171dbb696767d0a28d714055382684ffd7d89769c82cd52b560c1fb6	Passes its assertions or the current JDK 25 comparison.

@@ -188,6 +188,16 @@ unaligned heap/direct buffers in both byte orders, object-stream characters,
 and modified UTF including NUL and surrogate code units. The pre-fix runtime
 fails this probe at its first numeric character comparison.
 
+`RandomAccessFile.setLength0` now resizes the OS file after synchronizing
+Lisp stream buffers and clamps the file pointer to the new length. Invalid
+sizes, read-only files, and closed streams report Java `IOException`.
+The historical `RandomAccessFile/setLength` case passes all 16 assertions
+on both runtimes and its expectation is removed, leaving **163 runtime
+expectations**. `RandomAccessLengthProbe` additionally checks read-ahead
+invalidation, pending output, unchanged-length pointer clamping, shared
+channel positions, unchanged state after failures, and sparse lengths above
+2 GiB.
+
 ## Results
 
 | Suite audited | Passes | OpenLDK-only differences | Legacy version parser | Rejected by javac 25 | Reference failure | Reference timeout | Helpers without a main |

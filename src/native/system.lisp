@@ -973,6 +973,25 @@ directory: Lisp's OPEN opens one, and the first read fails."
     (force-output s)
     (file-length s)))
 
+(defmethod |setLength0(J)V| ((raf |java/io/RandomAccessFile|) length)
+  "Resize RAF and clamp its logical pointer, invalidating Lisp stream buffers."
+  (let ((stream (%raf-stream raf)))
+    (unless (and (typep stream 'sb-sys:fd-stream) (open-stream-p stream))
+      (%throw '|java/io/IOException| "Stream Closed"))
+    (when (minusp length)
+      (%throw '|java/io/IOException| "Invalid argument"))
+    (handler-case
+        (let ((position (file-position stream)))
+          ;; Synchronize buffered output/read-ahead with the shared OS fd.
+          (file-position stream position)
+          (sb-posix:ftruncate (sb-sys:fd-stream-fd stream) length)
+          (file-position stream (min position length)))
+      (sb-posix:syscall-error (condition)
+        (%throw '|java/io/IOException| (sb-int:strerror (sb-posix:syscall-errno condition))))
+      (stream-error (condition)
+        (%throw '|java/io/IOException| (princ-to-string condition)))))
+  nil)
+
 (defmethod |getFilePointer()J| ((raf |java/io/RandomAccessFile|))
   (file-position (%raf-stream raf)))
 
