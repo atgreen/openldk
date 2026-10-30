@@ -87,6 +87,36 @@ Full validation passes: build, lint, 840 unit checks, 165 interop checks,
 checks in a rebuilt image. The core gate retains 783 PASS, 1 XFAIL, and
 7 UNSUPPORTED without regressions.
 
+The AWT field-ID initializer fix resolves **127 additional expectations**.
+Quiet harness reporting additionally resolves the exhaustive color test,
+leaving **177 runtime expectations**. A fresh audit of all 276 remaining
+AWT-related cases used four independent Xvfb displays with graphical mode
+enabled. Those 127 cases pass 1,522 assertions on both JDK 25 and OpenLDK;
+constructors, geometry, layouts, listeners, events, and reflection over AWT
+classes now proceed through their Java implementations. The initializer
+entry points only cache native field/method IDs, which CLOS storage does not
+require; no HotSpot AWT library is loaded.
+
+The other 148 AWT cases remain recorded: 146 reach the missing
+`X11GraphicsEnvironment.initDisplay` and two require LCMS profile loading.
+`ColorClass/brighter` initially timed out while logging successful checks.
+With pass-line formatting disabled, all 786,432 assertions complete in under
+four seconds, within the original timeout. The runners request quiet pass
+reporting; failures, debug messages, assertion totals, and exit statuses are
+preserved. `--verbose-checks` restores individual PASS lines in the auditor.
+Audit cache identities now include harness sources and reporting mode. `ComponentProbe` adds 14 geometry, event,
+and layout checks in each headless mode, and both modes run without an X
+server. The complete Java2D pixel, clip, convolution, and font suite passes
+with `DISPLAY` unset, as do 840 unit and 165 interop checks. A second audit
+with the final quiet harness verifies all 128 resolved cases, preserving
+787,954 checks per runtime and the exact counts of every prior verbose run.
+Two negative controls retain their native-link failures. `python3 test/harness/check.py` runs twelve harness
+checks preserving success/failure accounting, checkpoints, debug output, and
+uncaught exceptions on both runtimes; six audit accounting tests pass, and
+reporting-mode changes invalidate cached results. The normal DejaGNU runner
+also passes the exhaustive color case. Build and lint pass, and the full
+core gate retains 783 PASS, 1 XFAIL, and 7 UNSUPPORTED without regressions.
+
 ## Results
 
 | Suite audited | Passes | OpenLDK-only differences | Legacy version parser | Rejected by javac 25 | Reference failure | Reference timeout | Helpers without a main |

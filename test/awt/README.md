@@ -3,6 +3,17 @@ The same probes check integer RGB/ARGB/BGR pixels, bulk transfers, shared
 subimages, and Java2D drawing on both runtimes. No display is required.
 Font family discovery uses the system Fontconfig library (`libfontconfig.so.1`).
 
+`ComponentProbe` checks copied geometry, event sources, containment, and
+BorderLayout calculations in both headless modes. Its components have no
+native peers, so the graphical-mode class initializers can be checked without
+connecting to a display server. The same suite still requires no display.
+The component and widget `initIDs` entry points only cache field/method IDs
+for native peers (many are empty in OpenJDK's Unix implementation). OpenLDK's
+CLOS storage accesses fields directly, so these initializers need no native
+cache. The source duties are visible in OpenJDK's
+[XToolkit initializers](https://github.com/openjdk/jdk25u/blob/master/src/java.desktop/unix/native/libawt_xawt/xawt/XToolkit.c)
+and [shared Unix initializers](https://github.com/openjdk/jdk25u/blob/master/src/java.desktop/unix/native/libawt/awt/initIDs.c).
+
 The rendering probe covers opaque rectangles, antialiased curves, gradients,
 transforms, rectangular clips, all twelve Porter-Duff rules, and image
 transfers. Rendered pixels are compared with HotSpot, allowing two levels

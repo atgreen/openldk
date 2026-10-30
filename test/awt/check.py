@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Anthony Green <green@moxielogic.com>
+#
 # SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 """Compare Java buffered-image operations with the JDK without native AWT libraries."""
 import argparse
@@ -37,6 +39,15 @@ def main():
                     *[str(p) for p in (ROOT / 'test/awt').glob('*.java')]], check=True, timeout=60)
     font_metrics = []
     for engine in [JDK / 'bin/java', options.runtime.resolve()]:
+        for headless in [True, False]:
+            result = subprocess.run([str(engine), '-Djava.awt.headless=' + str(headless).lower(),
+                                     '-cp', str(BUILD), 'ComponentProbe'], cwd=ROOT,
+                                    capture_output=True, text=True, timeout=120)
+            (BUILD / (engine.name + '-components-' + str(headless) + '.log')).write_text(
+                result.stdout + result.stderr)
+            if result.returncode or 'AWT component geometry, events, and layouts passed:' not in result.stdout:
+                raise RuntimeError(f'{engine} headless={headless}:\n{result.stdout}\n{result.stderr}')
+            print(f'{engine.name} headless={headless}: {result.stdout.strip()}', flush=True)
         result = subprocess.run([str(engine), '-Djava.awt.headless=true', '-cp',
                                  str(BUILD), 'BufferedImageProbe'], cwd=ROOT,
                                 capture_output=True, text=True, timeout=120)

@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Anthony Green <green@moxielogic.com>
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 package mauve;
 
 import java.io.BufferedReader;
@@ -17,6 +19,9 @@ public class openldkHarness extends gnu.testlet.TestHarness
     private String className;
     private boolean verbose = false;
     private int exit_code = 0;
+    private boolean quietPasses;
+    private long totalChecks;
+    private long failedChecks;
 
     private String last_check;
 
@@ -28,12 +33,18 @@ public class openldkHarness extends gnu.testlet.TestHarness
 
     public void check(boolean result)
     {
-        String message = (result ? "PASS" : "FAIL") + ": " + className
-            + ((last_check == null) ? "" : (": " + last_check))
-            + " (number " + count++ + ")";
-        System.out.println(message);
-        if (! result)
+        int number = count++;
+        totalChecks++;
+        if (!result) {
             exit_code = 1;
+            failedChecks++;
+        }
+        if (!quietPasses || !result) {
+            String message = (result ? "PASS" : "FAIL") + ": " + className
+                + ((last_check == null) ? "" : (": " + last_check))
+                + " (number " + number + ")";
+            System.out.println(message);
+        }
     }
 
     public Reader getResourceReader(String name) throws ResourceNotFoundException
@@ -126,7 +137,10 @@ public class openldkHarness extends gnu.testlet.TestHarness
         Class<?> clazz = Class.forName(args[0]);
         Testlet t = (Testlet) clazz.newInstance();
         openldkHarness harness = new openldkHarness(t, false);
+        harness.quietPasses = args.length > 1 && args[1].equals("--quiet-passes");
         t.test(harness);
+        if (harness.quietPasses)
+            System.out.println("Checks: " + harness.totalChecks + ", failures: " + harness.failedChecks);
         System.exit(harness.exit_code);
     }
 }

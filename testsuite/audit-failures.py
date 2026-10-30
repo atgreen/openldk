@@ -7,7 +7,8 @@
 Results and raw logs are resumable under --output. Jikes cases are all audited:
 its historical harness reused Test.class even for sources declaring other mains.
 Use one X display per worker for independent graphical tests, or omit --displays
-for headless operation. No expectation files are changed by this command.
+for headless operation. Quiet pass reporting retains totals and failures;
+--verbose-checks restores each PASS line. No expectation files are changed.
 """
 import argparse
 import concurrent.futures
@@ -136,6 +137,8 @@ def main():
     parser.add_argument('--timeout', type=int, default=65)
     parser.add_argument('--displays', default='')
     parser.add_argument('--fresh', action='store_true')
+    parser.add_argument('--verbose-checks', action='store_true',
+                        help='print each successful Mauve assertion instead of only totals')
     parser.add_argument('--case', help='audit one source or Jikes expectation path')
     parser.add_argument('--inventory', type=Path, help='include all test IDs from a prior audit TSV')
     args = parser.parse_args()
@@ -180,7 +183,13 @@ def main():
             raise SystemExit('Harness compilation failed: ' + harness['log'])
     metadata = {'java_home': str(jdk), 'runtime_sha256': hashlib.sha256(runtime.read_bytes()).hexdigest(),
                 'manifest_sha256': hashlib.sha256(args.manifest.read_bytes()).hexdigest(),
-                'timeout': args.timeout, 'displays': displays}
+                'timeout': args.timeout, 'displays': displays,
+                'verbose_checks': args.verbose_checks,
+                'harness_sha256': hashlib.sha256(b''.join(
+                    path.read_bytes() for path in [SUITE / 'mauve/openldkHarness.java',
+                    SUITE / 'mauve/gnu/testlet/TestHarness.java',
+                    SUITE / 'mauve/gnu/testlet/Testlet.java',
+                    SUITE / 'mauve/gnu/testlet/ResourceNotFoundException.java', config])).hexdigest()}
     (output / 'environment.json').write_text(json.dumps(metadata, indent=2) + '\n')
 
     def audit(entry):
@@ -228,6 +237,8 @@ def main():
                     # Resource lookups need the source tree, after compiled classes.
                     cp += os.pathsep + str(SUITE / 'mauve')
                     arguments = ['mauve.openldkHarness', entry[len('mauve/'): -len('.java')].replace('/', '.')]
+                    if not args.verbose_checks:
+                        arguments.append('--quiet-passes')
                 else:
                     candidates = [str(p.relative_to(classes).with_suffix('')).replace('/', '.')
                                   for p in classes.rglob('*.class') if '$' not in p.name]

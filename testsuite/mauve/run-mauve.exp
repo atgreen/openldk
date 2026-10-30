@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Anthony Green <green@moxielogic.com>
+# SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
 load_lib dg.exp
 load_lib openldk.exp
 
@@ -64,6 +67,7 @@ proc openldk-dg-test { prog do_what extra_tool_flags } {
     set classname [string map {".java" ""} $prog]
 
     set testargs [string map {"/" "."} [string map {"mauve/" ""} $classname]]
+    append testargs " --quiet-passes"
 
     return [list "" "[file join $classdir [string range $classname 6 end]].class"]
 }
