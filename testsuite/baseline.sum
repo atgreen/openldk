@@ -1,5 +1,5 @@
-# Core regression baseline audited against JDK 25, 2026-10-30.
-# 771 PASS, 4 XFAIL, 7 UNSUPPORTED. See FAILURES.md.
+# Core regression baseline, 2026-10-30.
+# 774 PASS, 1 XFAIL, 7 UNSUPPORTED. See FAILURES.md.
 
 PASS: jikestst/derek/ok/exec/TestArithmetic.e
 PASS: jikestst/derek/ok/exec/TestArrayAccess.e
@@ -37,18 +37,18 @@ PASS: jikestst/hpj/ok/exec/Trychk3.e
 PASS: jikestst/hpj/ok/exec/Trychk6.e
 PASS: jikestst/hpj/ok/exec/Trychk7.e
 PASS: jikestst/hpj/ok/exec/Trychk8.e
-XFAIL: jikestst/hpj/ok/exec/Tryexcept.e
+PASS: jikestst/hpj/ok/exec/Tryexcept.e
 PASS: jikestst/hpj/ok/exec/array2.e
 PASS: jikestst/hpj/ok/exec/array3.e
 PASS: jikestst/hpj/ok/exec/array4.e
-XFAIL: jikestst/hpj/ok/exec/array5.e
+PASS: jikestst/hpj/ok/exec/array5.e
 PASS: jikestst/hpj/ok/exec/arraymethod.e
 PASS: jikestst/hpj/ok/exec/bigi.e
 PASS: jikestst/hpj/ok/exec/callmm.e
 PASS: jikestst/hpj/ok/exec/checkarray.e
 PASS: jikestst/hpj/ok/exec/checkcast1.e
 PASS: jikestst/hpj/ok/exec/checkcast2.e
-XFAIL: jikestst/hpj/ok/exec/checkcast6.e
+PASS: jikestst/hpj/ok/exec/checkcast6.e
 PASS: jikestst/hpj/ok/exec/checkcast7.e
 PASS: jikestst/hpj/ok/exec/checkcastjp.e
 UNSUPPORTED: jikestst/hpj/ok/exec/cinit.e (helper source has no executable main)

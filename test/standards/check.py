@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Anthony Green <green@moxielogic.com>
+#
 # SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 """Compare runtime standards behavior with the installed JDK 25 reference runtime."""
 import argparse
@@ -12,6 +14,7 @@ JDK = Path(os.environ['JAVA_HOME'])
 PROBES = {
     'LoaderConstraintProbe': (25,),
     'ArrayReflectionProbe': (25,),
+    'ArrayExceptionProbe': (25,),
     'FieldTypeProbe': (25,),
     'PrimitiveOptimizationProbe': (25,),
     'PrimitiveResultProbe': (25,),

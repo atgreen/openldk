@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2024, 2025  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2024, 2025, 2026  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 ;;;
@@ -36,7 +36,6 @@
 ;;; this library, you may extend this exception to your version of the
 ;;; library, but you are not obligated to do so.  If you do not wish
 ;;; to do so, delete this exception statement from your version.
-
 
 (in-package :openldk)
 
@@ -319,6 +318,11 @@ NullPointerException."
 (defun %array-data-form (arrayref-form element-type)
   `(the (simple-array ,element-type (*)) (java-array-data ,arrayref-form)))
 
+(defun %array-subscript-form (index)
+  "Reject a negative Java index before SBCL's unsigned AREF index check.
+The array-data argument is evaluated first, preserving null precedence."
+  `(if (minusp ,index) (%throw-array-index-error ,index) ,index))
+
 (defun %codegen-array-store (insn element-type value-form context)
   "Codegen a primitive xASTORE into an ELEMENT-TYPE array, storing
 VALUE-FORM (which may refer to VALUE, the operand).  Compact code calls
@@ -331,7 +335,7 @@ the generic (SETF JAREF), which normalizes the value itself."
                                 (arrayref ,(code (codegen arrayref context))))
                             ,(if (compact-p context)
                                  '(setf (jaref arrayref index) value)
-                                 `(setf (aref ,(%array-data-form 'arrayref element-type) index)
+                                 `(setf (aref ,(%array-data-form 'arrayref element-type) ,(%array-subscript-form 'index))
                                         ,value-form))))))
 
 (defmethod codegen ((insn ir-iastore) context)
@@ -799,7 +803,7 @@ The first check stays before initialization; labels end the proof."
                                 (arrayref ,(code (codegen arrayref context))))
                             ,(if (compact-p context)
                                  '(jaref arrayref index)
-                                 `(aref ,(%array-data-form 'arrayref element-type) index)))
+                                 `(aref ,(%array-data-form 'arrayref element-type) ,(%array-subscript-form 'index))))
                    :expression-type jtype)))
 
 (defmethod codegen ((insn ir-caload) context)

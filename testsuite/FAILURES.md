@@ -16,6 +16,26 @@ are in [failure-audit.tsv](failure-audit.tsv). Raw compiler/runtime logs and
 resumable JSON results are generated under `.cache/failure-audit/` and are
 not committed. They are reproducible using `audit-failures.py`.
 
+## Fixes after the audit
+
+The cloning and array fixes resolve five audited failures:
+
+- `Tryexcept.e`: non-Cloneable objects now throw `CloneNotSupportedException`.
+- `array5.e`: negative primitive indexes throw `ArrayIndexOutOfBoundsException`.
+- `checkcast6.e` and Mauve `java/lang/System/arraycopy.java`: arraycopy checks
+  primitive kinds and reference elements, preserving a copied prefix on failure.
+- Mauve `java/lang/Object/ObjectTest.java`: cloning behavior now matches the JDK.
+
+These cases pass fresh JDK 25 comparisons and have been removed from the
+expectation file, leaving **332 runtime expectations**. The original audit
+inventory below is retained as historical evidence. `ArrayExceptionProbe`
+adds 217 differential checks, including all primitive kinds, null/bounds
+precedence, partial copies, overlap, and shallow cloning. The full core gate
+passes with **774 PASS, 1 XFAIL, 7 UNSUPPORTED**; the pinned baseline includes
+all 774 passing assertions. Unit checks (818), interop checks (165), and all
+48 runtime-standards comparisons pass. Optimized generated-code benchmarks
+retain allocation-free array loops.
+
 ## Results
 
 | Suite audited | Passes | OpenLDK-only differences | Legacy version parser | Rejected by javac 25 | Reference failure | Reference timeout | Helpers without a main |
@@ -24,7 +44,7 @@ not committed. They are reproducible using `audit-failures.py`.
 | All Jikes cases | 79 | 4 | 0 | 0 | 0 | 0 | 2 |
 | Listed/unresolved GCJ cases | 26 | 0 | 0 | 3 | 2 | 0 | 0 |
 
-`expected-failures.txt` now contains only the **337 verified OpenLDK-only
+At audit completion, `expected-failures.txt` contained **337 verified OpenLDK-only
 runtime differences**, replacing 1,623 historical entries and embedded CI
 log fragments. Test IDs are exact and case-sensitive.
 
@@ -42,9 +62,9 @@ explicit golden-output assertions; its thread scheduling tests can also
 be flaky on the reference. Those individual reference statuses remain in
 the inventory.
 
-The corrected core regression gate passes with **771 PASS, 4 XFAIL, and
+At audit completion, the corrected core gate passed with **771 PASS, 4 XFAIL, and
 7 UNSUPPORTED**, with no unexpected failures or unresolved cases. The
-pinned baseline now includes all 771 passing assertions. The seven exclusions
+baseline then included all 771 passing assertions. The seven exclusions
 are the five legacy GCJ cases below and two helper-only Jikes sources.
 
 ## Genuine core differences
@@ -56,7 +76,9 @@ are the five legacy GCJ cases below and two helper-only Jikes sources.
 | `jikestst/hpj/ok/exec/checkcast6.e` | `System.arraycopy` accepts incompatible reference elements instead of throwing `ArrayStoreException`. The JDK prints/exits 3; OpenLDK prints/exits 11. Instrumentation confirms the casts themselves reject correctly; the incompatible copy returns normally. |
 | `jikestst/derek/ok/exec/TestStackTrace.e` | Stack traces omit source locations (`Unknown Source`). This is a diagnostic compatibility gap, distinct from the three exception/array semantics problems above. |
 
-These are recorded as explicit XFAILs. The audit does not fix VM behavior.
+The audit recorded all four as XFAILs. The subsequent cloning/array fixes
+resolve the three semantic failures; the stack-trace source-location gap
+remains expected to fail.
 
 ## Mauve runtime differences
 

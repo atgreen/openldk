@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2024, 2025  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2024, 2025, 2026  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 ;;;
@@ -55,7 +55,8 @@
 
 (defmethod |clone()Ljava/lang/Object;| ((|this| |java/lang/Object|))
   "Default implementation of clone for CLONEABLE objects."
-  (assert (typep |this| '|java/lang/Cloneable|))
+  (unless (typep |this| '|java/lang/Cloneable|)
+    (%throw '|java/lang/CloneNotSupportedException|))
   (let ((copy (allocate-instance (class-of |this|))))
     (dolist (slot (mapcar #'sb-mop:slot-definition-name
                           (sb-mop:class-slots (class-of |this|))))

@@ -2,9 +2,6 @@
 # See FAILURES.md and failure-audit.tsv. Passing, obsolete, and reference-failing
 # cases do not belong here. Test IDs are exact and case-sensitive.
 XFAIL: jikestst/derek/ok/exec/TestStackTrace.e execution test
-XFAIL: jikestst/hpj/ok/exec/Tryexcept.e execution test
-XFAIL: jikestst/hpj/ok/exec/array5.e execution test
-XFAIL: jikestst/hpj/ok/exec/checkcast6.e execution test
 XFAIL: mauve/gnu/testlet/java/awt/AWTKeyStroke/getAWTKeyStroke.java execution test
 XFAIL: mauve/gnu/testlet/java/awt/BorderLayout/PaintTestBiggerGap.java execution test
 XFAIL: mauve/gnu/testlet/java/awt/BorderLayout/PaintTestBiggerHGap.java execution test
@@ -301,7 +298,6 @@ XFAIL: mauve/gnu/testlet/java/lang/Math/strictfp_modifier/cos.java execution tes
 XFAIL: mauve/gnu/testlet/java/lang/Math/strictfp_modifier/sin.java execution test
 XFAIL: mauve/gnu/testlet/java/lang/Math/strictfp_modifier/tan.java execution test
 XFAIL: mauve/gnu/testlet/java/lang/Math/tan.java execution test
-XFAIL: mauve/gnu/testlet/java/lang/Object/ObjectTest.java execution test
 XFAIL: mauve/gnu/testlet/java/lang/StrictMath/acos.java execution test
 XFAIL: mauve/gnu/testlet/java/lang/StrictMath/acos_strictfp.java execution test
 XFAIL: mauve/gnu/testlet/java/lang/StrictMath/asin.java execution test
@@ -312,7 +308,6 @@ XFAIL: mauve/gnu/testlet/java/lang/StrictMath/sin.java execution test
 XFAIL: mauve/gnu/testlet/java/lang/StrictMath/sin_strictfp.java execution test
 XFAIL: mauve/gnu/testlet/java/lang/StrictMath/tan.java execution test
 XFAIL: mauve/gnu/testlet/java/lang/StrictMath/tan_strictfp.java execution test
-XFAIL: mauve/gnu/testlet/java/lang/System/arraycopy.java execution test
 XFAIL: mauve/gnu/testlet/java/lang/Thread/daemon.java execution test
 XFAIL: mauve/gnu/testlet/java/lang/Thread/interrupt.java execution test
 XFAIL: mauve/gnu/testlet/java/lang/Thread/isAlive.java execution test

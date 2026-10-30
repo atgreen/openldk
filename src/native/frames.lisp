@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2024, 2025  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2024, 2025, 2026  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 ;;;
@@ -484,35 +484,43 @@ Clock.currentInstant, and so Instant.now()."
   "Copies LENGTH elements from SRC-ARRAY starting at SRC-POS
    to DEST-ARRAY starting at DEST-POS.
    Handles overlapping regions correctly even within the same array."
-  (let ((src-array (java-array-data src-array))
-        (dest-array (java-array-data dest-array)))
-
-    (declare (type array src-array dest-array)
-             (type fixnum src-pos dest-pos length))
-
-    ;; Validate arguments
+  (when (or (null src-array) (null dest-array))
+    (%throw '|java/lang/NullPointerException|))
+  (unless (and (java-array-p src-array) (java-array-p dest-array))
+    (%throw '|java/lang/ArrayStoreException|))
+  (let* ((src-component (%array-component-class src-array))
+         (dest-component (%array-component-class dest-array))
+         (src-primitive (not (eq t (%component-element-type src-component))))
+         (dest-primitive (not (eq t (%component-element-type dest-component))))
+         (src-data (java-array-data src-array))
+         (dest-data (java-array-data dest-array)))
+    ;; Array kinds are checked even for zero-length copies, before bounds.
+    ;; byte[] and boolean[] share Lisp storage but are distinct Java types.
+    (when (or (not (eq src-primitive dest-primitive))
+              (and src-primitive (not (eq src-component dest-component))))
+      (%throw '|java/lang/ArrayStoreException|))
     (when (< length 0)
       (%throw-arraycopy-index-error "length ~A" length))
-
     (when (< src-pos 0)
       (%throw-arraycopy-index-error "source position ~A" src-pos))
-
     (when (< dest-pos 0)
       (%throw-arraycopy-index-error "destination position ~A" dest-pos))
-
-    (when (> (+ src-pos length) (array-total-size src-array))
+    (when (> (+ src-pos length) (length src-data))
       (%throw-arraycopy-index-error "source size=~A, access=~A"
-                                    (array-total-size src-array) (+ src-pos length -1)))
-
-    (when (> (+ dest-pos length) (array-total-size dest-array))
+                                    (length src-data) (+ src-pos length -1)))
+    (when (> (+ dest-pos length) (length dest-data))
       (%throw-arraycopy-index-error "destination size=~A, access=~A"
-                                    (array-total-size dest-array) (+ dest-pos length -1)))
-
-    ;; REPLACE copies overlapping regions of one array correctly, and is a
-    ;; block move when both arrays have the same specialized element type.
-    (replace dest-array src-array
-             :start1 dest-pos :end1 (+ dest-pos length)
-             :start2 src-pos)
+                                    (length dest-data) (+ dest-pos length -1)))
+    (if (or src-primitive (eq src-component dest-component)
+            (eq t (%array-store-check dest-component)))
+        ;; Keep block moves for primitive arrays and known-safe reference
+        ;; types. REPLACE also preserves memmove semantics for overlap.
+        (replace dest-data src-data :start1 dest-pos :end1 (+ dest-pos length)
+                                    :start2 src-pos)
+        ;; On an incompatible element Java requires the compatible prefix
+        ;; to remain copied, with the rest of the destination untouched.
+        (dotimes (i length)
+          (%aastore dest-array (+ dest-pos i) (aref src-data (+ src-pos i)))))
     nil))
 
 (defmethod |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedAction;)Ljava/lang/Object;| (action)
