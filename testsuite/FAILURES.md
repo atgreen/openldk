@@ -60,6 +60,14 @@ the fixture's two-second accept deadline, so its expectation remains.
 This fixes a confirmed race without claiming that all socket failures are
 resolved.
 
+The subsequent rerun of all 19 remaining Mauve expectations records
+17 runtime failures, one reference timeout, and one pass (`AcceptTimeout`).
+The socket expectation remains because of its earlier cold-run failure;
+passing once does not resolve its timing sensitivity. No expectations were
+removed in this follow-up. Per-case results are in
+[publication-failure-audit.tsv](publication-failure-audit.tsv); raw logs are
+under `.cache/publication-mauve-audit-20261031/`.
+
 ## Fixes after the audit
 
 The cloning and array fixes resolve five audited failures:

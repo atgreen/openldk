@@ -1,0 +1,25 @@
+# Audit completed 2026-10-31; VM source commit: 403184e.
+# JDK 25.0.4.1+1; SBCL 2.6.9; Linux x86-64; four independent Xvfb displays.
+# Scope: all 19 remaining Mauve expectations; 65-second engine deadlines.
+# Runtime SHA256: 7d509b2d8eed408c059480d098ca4fc8b4a499d93e0c11eaeac5b20a7b50c8ce
+# A pass here does not supersede the separately observed cold-start socket timeout.
+test	classification	compile	jdk	openldk
+mauve/gnu/testlet/java/awt/ColorClass/constructors.java	runtime-failure	0	0	1
+mauve/gnu/testlet/java/awt/Desktop/PR34580.java	runtime-failure	0	0	1
+mauve/gnu/testlet/java/awt/TextArea/MouseListenerTest.java	runtime-failure	0	0	timeout
+mauve/gnu/testlet/java/awt/TextArea/MouseWheelListenerTest.java	runtime-failure	0	0	timeout
+mauve/gnu/testlet/java/awt/dnd/DragSource/Constructors.java	runtime-failure	0	0	timeout
+mauve/gnu/testlet/java/awt/dnd/DragSource/CreateDragGestureRecognizerTest.java	runtime-failure	0	0	timeout
+mauve/gnu/testlet/java/awt/dnd/DragSource/FlavourMapTest.java	runtime-failure	0	0	timeout
+mauve/gnu/testlet/java/awt/dnd/DragSource/isDragImageSupportedTest.java	runtime-failure	0	0	timeout
+mauve/gnu/testlet/java/awt/image/AffineTransformOp/filterImage.java	runtime-failure	0	0	1
+mauve/gnu/testlet/java/awt/image/AffineTransformOp/filterRaster.java	runtime-failure	0	0	1
+mauve/gnu/testlet/java/awt/image/ColorConvertOp/filterImage.java	runtime-failure	0	0	1
+mauve/gnu/testlet/java/awt/image/ColorConvertOp/filterRaster.java	runtime-failure	0	0	1
+mauve/gnu/testlet/java/awt/image/ConvolveOp/filterImage.java	runtime-failure	0	0	1
+mauve/gnu/testlet/java/awt/image/PixelGrabber/SimpleGrabber.java	runtime-failure	0	0	1
+mauve/gnu/testlet/java/awt/image/RescaleOp/filterImage.java	runtime-failure	0	0	1
+mauve/gnu/testlet/java/beans/SimpleBeanInfo/loadImage.java	runtime-failure	0	0	timeout
+mauve/gnu/testlet/java/net/ServerSocket/AcceptTimeout.java	stale-pass	0	0	0
+mauve/gnu/testlet/java/net/URLConnection/getHeaderFields.java	reference-timeout	0	timeout	timeout
+mauve/gnu/testlet/java/text/DateFormatSymbols/SanityCheck.java	runtime-failure	0	0	timeout
