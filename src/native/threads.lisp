@@ -420,6 +420,18 @@ name is recorded in the Java thread already, so there is nothing to do."
 
 ;;; Fiber-based start0 for virtual threads (when SBCL has fiber support).
 ;;; Creates a fiber instead of an OS thread for BaseVirtualThread instances.
+(defun %dispatch-java-thread-error (thread condition)
+  "Deliver an escaping Java throwable before publishing thread termination."
+  (if (typep condition '|condition-java/lang/Throwable|)
+      (handler-case
+          (invoke-special '|dispatchUncaughtException(Ljava/lang/Throwable;)V|
+                          '|java/lang/Thread| (list thread (slot-value condition '|objref|)))
+        (error (handler-error)
+          ;; Exceptions from uncaught-exception handlers are ignored by the VM.
+          (format *error-output* "~&Uncaught exception handler failed for ~A: ~A~%"
+                  thread handler-error)))
+      (format *error-output* "~&Thread ~A terminated with error: ~A~%" thread condition)))
+
 (defun %run-java-thread-exit (thread)
   "Run Java's VM exit hook before publishing termination, even after a failed task."
   (handler-case
@@ -448,7 +460,7 @@ name is recorded in the Java thread already, so there is nothing to do."
                            (handler-case
                                (|run()V| thread)
                              (error (e)
-                               (format *error-output* "~&VThread ~A terminated with error: ~A~%" thread e))))
+                               (%dispatch-java-thread-error thread e))))
                       ;; Cleanup mappings
                       (%run-java-thread-exit thread)
                       (remhash (uiop:symbol-call :sb-thread :current-fiber) *fiber-to-java-threads*)

@@ -117,6 +117,20 @@ reporting-mode changes invalidate cached results. The normal DejaGNU runner
 also passes the exhaustive color case. Build and lint pass, and the full
 core gate retains 783 PASS, 1 XFAIL, and 7 UNSUPPORTED without regressions.
 
+The X11 investigation also uncovered two independent runtime defects.
+Registered Lisp bodies now implement native declarations directly, including
+private and instance methods, and lazy stubs with replacements cannot inline
+the original Java bytecode. `test/native/check-registered.py` exercises these
+paths in a fresh ASDF runtime. Escaping Java thread exceptions now reach the
+thread's uncaught-exception handler before termination is published.
+`ThreadFailureProbe` checks default, custom, group, and virtual-thread
+handlers, handler failures, and `join()` waiting for handler completion.
+The full build, zero-issue lint, 840 unit checks, 165 interop checks, 56
+standards comparisons, and ordinary JNI and FFM probes pass. The core gate
+retains 783 PASS, 1 XFAIL, and 7 UNSUPPORTED without regressions. These runtime
+fixes do not remove any of the remaining 177 historical expectations; the
+X11 backend is still being implemented and validated separately.
+
 ## Results
 
 | Suite audited | Passes | OpenLDK-only differences | Legacy version parser | Rejected by javac 25 | Reference failure | Reference timeout | Helpers without a main |

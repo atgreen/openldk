@@ -1556,7 +1556,7 @@ present.  Consumed by Thread.getState()/start()/getThreadGroup()."
                                     :stream *error-output* :count 60)))))
                           (|run()V| thread))
                       (error (e)
-                        (format *error-output* "~&Thread ~A terminated with error: ~A~%" thread e)))
+                        (%dispatch-java-thread-error thread e)))
                  ;; The VM must run Thread.exit after run(), including for
                  ;; BoundVirtualThread. Its container notification lets a
                  ;; structured task scope observe completion of its children.
