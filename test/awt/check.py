@@ -56,6 +56,13 @@ def main():
             raise RuntimeError(f'{engine}:\n{result.stdout}\n{result.stderr}')
         print(f'{engine.name}: {result.stdout.strip()}', flush=True)
         result = subprocess.run([str(engine), '-Djava.awt.headless=true', '-cp',
+                                 str(BUILD), 'IndexedGraphicsProbe'], cwd=ROOT,
+                                capture_output=True, text=True, timeout=120)
+        (BUILD / (engine.name + '-indexed-graphics.log')).write_text(result.stdout + result.stderr)
+        if result.returncode or 'Indexed grayscale, colored, and transparent rendering passed' not in result.stdout:
+            raise RuntimeError(f'{engine}:\n{result.stdout}\n{result.stderr}')
+        print(f'{engine.name}: {result.stdout.strip()}', flush=True)
+        result = subprocess.run([str(engine), '-Djava.awt.headless=true', '-cp',
                                  str(BUILD), 'BufferedImageProbe'], cwd=ROOT,
                                 capture_output=True, text=True, timeout=120)
         (BUILD / (engine.name + '.log')).write_text(result.stdout + result.stderr)

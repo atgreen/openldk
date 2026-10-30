@@ -98,6 +98,10 @@
     (%clinit (get-ldk-class-for-java-class class)))
   nil)
 
+(defun |sun/java2d/SurfaceData.isOpaqueGray(Ljava/awt/image/IndexColorModel;)Z| (model)
+  "Use the IndexColorModel property retained by Java, as the JDK native does."
+  (if model (slot-value model '|allgrayopaque|) 0))
+
 (defmethod |initRaster(Ljava/lang/Object;IIIIIILjava/awt/image/IndexColorModel;)V|
     (this data offset bit-offset width height pixel-stride scanline-stride palette)
   "Retain Java raster storage; CL loops do not allocate native SurfaceDataOps."
