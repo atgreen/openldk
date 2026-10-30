@@ -41,6 +41,23 @@ use `make DYNAMIC_SPACE_SIZE=4096` for a 4 GB heap.
 See [Building and Running](docs/RUNNING.md) for JDK discovery, offline
 setup, launcher options, source-file execution, and the code cache.
 
+## Clojure in the Lisp REPL
+
+Load the interop system and enable its reader syntax. `#[ ... ]` accepts
+Clojure source, and Clojure functions can be called with Lisp's `funcall`
+and `mapcar`:
+
+```lisp
+CL-USER> (asdf:load-system :openldk/clojure)
+CL-USER> (openldk.clojure:enable-syntax)
+CL-USER> (funcall #[(fn [x] (+ x 4))] 4)
+8
+CL-USER> (mapcar #[#(* % %)] '(1 2 3 4))
+(1 4 9 16)
+```
+
+See [Language interop](docs/INTEROP.md) for setup and more examples.
+
 ## Status
 
 OpenLDK targets Java 25 and can run applications including javac, JVM
@@ -52,8 +69,7 @@ See [Applications](docs/APPLICATIONS.md) for examples and
 OpenLDK is under development and is not performance-competitive with modern
 JVMs. Bytecode verification is incomplete, so it is not a security boundary
 for untrusted class files. Java finalization and object resurrection are
-not implemented. Known test failures are tracked in
-[expected-failures.txt](testsuite/expected-failures.txt).
+not implemented.
 
 ## Documentation
 
