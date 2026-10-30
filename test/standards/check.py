@@ -15,6 +15,7 @@ PROBES = {
     'LoaderConstraintProbe': (25,),
     'ArrayReflectionProbe': (25,),
     'ArrayExceptionProbe': (25,),
+    'ReflectionConversionProbe': (25,),
     'FieldTypeProbe': (25,),
     'PrimitiveOptimizationProbe': (25,),
     'PrimitiveResultProbe': (25,),

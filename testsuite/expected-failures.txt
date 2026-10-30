@@ -276,9 +276,7 @@ XFAIL: mauve/gnu/testlet/java/awt/image/ConvolveOp/filterImage.java execution te
 XFAIL: mauve/gnu/testlet/java/awt/image/PixelGrabber/SimpleGrabber.java execution test
 XFAIL: mauve/gnu/testlet/java/awt/image/RescaleOp/filterImage.java execution test
 XFAIL: mauve/gnu/testlet/java/awt/testName.java execution test
-XFAIL: mauve/gnu/testlet/java/beans/Expression/check.java execution test
 XFAIL: mauve/gnu/testlet/java/beans/SimpleBeanInfo/loadImage.java execution test
-XFAIL: mauve/gnu/testlet/java/beans/Statement/check.java execution test
 XFAIL: mauve/gnu/testlet/java/beans/XMLDecoder/jdk14.java execution test
 XFAIL: mauve/gnu/testlet/java/io/DataInputStream/ReadReference.java execution test
 XFAIL: mauve/gnu/testlet/java/io/DataOutputStream/WriteRead.java execution test
@@ -312,9 +310,6 @@ XFAIL: mauve/gnu/testlet/java/lang/Thread/daemon.java execution test
 XFAIL: mauve/gnu/testlet/java/lang/Thread/interrupt.java execution test
 XFAIL: mauve/gnu/testlet/java/lang/Thread/isAlive.java execution test
 XFAIL: mauve/gnu/testlet/java/lang/Thread/join.java execution test
-XFAIL: mauve/gnu/testlet/java/lang/reflect/Array/set.java execution test
-XFAIL: mauve/gnu/testlet/java/lang/reflect/Constructor/newInstance.java execution test
-XFAIL: mauve/gnu/testlet/java/lang/reflect/Field/promotion.java execution test
 XFAIL: mauve/gnu/testlet/java/lang/reflect/Method/invoke.java execution test
 XFAIL: mauve/gnu/testlet/java/lang/reflect/Proxy/check13.java execution test
 XFAIL: mauve/gnu/testlet/java/net/DatagramPacket/DatagramPacketOffset.java execution test

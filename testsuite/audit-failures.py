@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Anthony Green <green@moxielogic.com>
+#
 # SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 """Recheck expected failures in isolated directories against OpenLDK and JDK 25.
 
@@ -124,6 +126,8 @@ def classify_obsolete_source(result, source):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--runtime', type=Path, default=ROOT / 'openldk',
+                        help='OpenLDK executable to compare (default: repository image)')
     parser.add_argument('--manifest', type=Path, default=SUITE / 'expected-failures.txt')
     parser.add_argument('--summary', type=Path, default=SUITE / 'openldk.sum')
     parser.add_argument('--output', type=Path, default=ROOT / '.cache/failure-audit')
@@ -138,6 +142,9 @@ def main():
     displays = args.displays.split(',') if args.displays else []
     if args.jobs < 1 or (displays and len(displays) < args.jobs):
         parser.error('provide a separate display for each worker')
+    runtime = args.runtime.resolve()
+    if not runtime.is_file():
+        parser.error('--runtime must name an existing executable')
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     jdk = Path(os.environ['JAVA_HOME'])
@@ -171,7 +178,7 @@ def main():
                       output / 'harness.log', args.timeout, os.environ)
         if harness['status'] != 0:
             raise SystemExit('Harness compilation failed: ' + harness['log'])
-    metadata = {'java_home': str(jdk), 'runtime_sha256': hashlib.sha256((ROOT / 'openldk').read_bytes()).hexdigest(),
+    metadata = {'java_home': str(jdk), 'runtime_sha256': hashlib.sha256(runtime.read_bytes()).hexdigest(),
                 'manifest_sha256': hashlib.sha256(args.manifest.read_bytes()).hexdigest(),
                 'timeout': args.timeout, 'displays': displays}
     (output / 'environment.json').write_text(json.dumps(metadata, indent=2) + '\n')
@@ -231,7 +238,7 @@ def main():
                 if not arguments[0]:
                     result['classification'] = 'non-executable-fixture'
                 else:
-                    for engine, executable in [('jdk', jdk / 'bin/java'), ('openldk', ROOT / 'openldk')]:
+                    for engine, executable in [('jdk', jdk / 'bin/java'), ('openldk', runtime)]:
                         cwd = work / engine
                         if cwd.exists():
                             shutil.rmtree(cwd)

@@ -180,7 +180,7 @@ or one of #\\Z #\\B #\\S #\\I #\\J #\\F #\\D #\\C for primitives."
   "Box a primitive VALUE according to the return type descriptor character."
   (case ret-char
     (#\Z (let ((b (%make-java-instance "java/lang/Boolean")))
-           (setf (slot-value b '|value|) (if (and (integerp value) (zerop value)) 0 1))
+           (setf (slot-value b '|value|) (if (or (null value) (eql value 0)) 0 1))
            b))
     (#\B (let ((b (%make-java-instance "java/lang/Byte")))
            (setf (slot-value b '|value|) value) b))

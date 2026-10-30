@@ -74,6 +74,22 @@
         (|<init>(Ljava/lang/Throwable;)V| wrapper (slot-value condition '|objref|))
         (error (%lisp-condition wrapper))))))
 
+(defun %reflection-arguments (parameters arguments)
+  "Return validated arguments without changing the caller's Object array."
+  (let ((count (if parameters (length (java-array-data parameters)) 0))
+        (supplied (if arguments (length (java-array-data arguments)) 0)))
+    (unless (= count supplied)
+      (%throw '|java/lang/IllegalArgumentException| "Wrong number of arguments"))
+    (loop for i below count
+          collect (%reflection-convert-value (jaref arguments i) (jaref parameters i)))))
+
+(defun %reflection-receiver (declaring receiver)
+  "Check an instance member's receiver before inspecting its arguments."
+  (unless receiver (%throw '|java/lang/NullPointerException|))
+  (unless (eql 1 (|isInstance(Ljava/lang/Object;)Z| declaring receiver))
+    (%throw '|java/lang/IllegalArgumentException| "Wrong receiver class"))
+  receiver)
+
 (defun |jdk/internal/reflect/NativeMethodAccessorImpl.invoke0(Ljava/lang/reflect/Method;Ljava/lang/Object;[Ljava/lang/Object;)|
     (method obj args)
   "Native reflective method invocation for JDK 9+."
@@ -85,19 +101,6 @@
          (is-static (not (zerop (logand modifiers #x0008))))
          (descriptor (%build-method-descriptor return-type param-types))
          (lispized (lispize-method-name (format nil "~A~A" method-name descriptor))))
-    ;; Unbox wrapper arguments where the target parameter is a primitive: the
-    ;; Lisp method expects a raw value, not a java.lang.{Integer,Long,...}.
-    ;; (The sun.reflect invoke0 does the same.) Without this, reflective calls to
-    ;; primitive-signature methods -- e.g. clojure Numbers.shiftLeft(long,long) --
-    ;; receive boxed wrappers and NPE inside the callee.
-    (when (and args param-types)
-      (dotimes (i (length (java-array-data args)))
-        (let ((arg (jaref args i))
-              (param-type (jaref param-types i)))
-          (when (and arg param-type
-                     (eq 1 (|isPrimitive()Z| param-type))
-                     (slot-exists-p arg '|value|))
-            (setf (jaref args i) (slot-value arg '|value|))))))
     (let* ((class-name (substitute #\/ #\. (lstring (slot-value declaring-class '|name|))))
            (fn-name (if is-static
                         (format nil "~A.~A" class-name lispized)
@@ -111,9 +114,8 @@
                fn-name class-name is-static))
       (if is-static
           (%clinit (get-ldk-class-for-java-class declaring-class))
-          (unless obj (%throw '|java/lang/NullPointerException|)))
-      (let* ((lisp-args (when args
-                          (coerce (java-array-data args) 'list)))
+          (%reflection-receiver declaring-class obj))
+      (let* ((lisp-args (%reflection-arguments param-types args))
              (result (%invoke-reflection-target sym (if is-static lisp-args (cons obj lisp-args))))
              ;; Return descriptor char is the one just past the ')'.
              (ret-char (char descriptor (1+ (position #\) descriptor)))))
@@ -155,9 +157,7 @@
       (let ((instance (%make-java-instance allocated-name
                                           (get-ldk-loader-for-java-loader
                                            (slot-value allocated-class '|classLoader|))))
-            ;; Constructor.newInstance passes primitives boxed.
-            (lisp-args (when args
-                        (%unbox-args-for-descriptor descriptor (coerce (java-array-data args) 'list)))))
+            (lisp-args (%reflection-arguments param-types args)))
         (if (and sym (fboundp sym))
             (%invoke-reflection-target #'invoke-special
                                        (list sym (intern class-name (%java-class-package declaring-class))
@@ -298,7 +298,7 @@ initialize the declaring class, as the JVM does before reflective access."
         (when class
           (%clinit class))
         (%unsafe-static-storage field :errorp nil))
-      obj))
+      (%reflection-receiver (slot-value field '|clazz|) obj)))
 
 (defun %check-reflective-access (member object caller &optional constructor-p)
   "Run the JDK's AccessibleObject access checks before our native accessor.
@@ -332,12 +332,9 @@ The override flag only bypasses checks after setAccessible has authorized it."
 
 (defun %reflective-field-set (field obj value)
   (%check-reflective-access field obj (%java-caller-class '%reflective-field-set))
-  (let* ((char (%field-primitive-char (slot-value field '|type$|)))
-         (slot-key (%field-object-slot field))
+  (let* ((slot-key (%field-object-slot field))
          (storage (%field-slot-storage field obj))
-         ;; Unbox primitive wrapper arguments before storing their value.
-         (v (if (and char value (slot-exists-p value '|value|))
-                (slot-value value '|value|) value)))
+         (v (%reflection-convert-value value (slot-value field '|type$|))))
     (when (and storage (slot-exists-p storage slot-key))
       (setf (slot-value storage slot-key) v))
     nil))

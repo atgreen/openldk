@@ -417,6 +417,34 @@ NullPointerException; a Lisp string serves as a char[]."
               (#\B "SIJFD") (#\S "IJFD") (#\C "IJFD")
               (#\I "JFD") (#\J "FD") (#\F "D")))))
 
+(defun %reflection-wrapper-type (value)
+  "Descriptor of VALUE's actual boxed primitive class, never its numeric range."
+  (typecase value
+    (|java/lang/Boolean| #\Z) (|java/lang/Byte| #\B)
+    (|java/lang/Short| #\S) (|java/lang/Character| #\C)
+    (|java/lang/Integer| #\I) (|java/lang/Long| #\J)
+    (|java/lang/Float| #\F) (|java/lang/Double| #\D)))
+
+(defun %reflection-convert-value (value target)
+  "Validate reflection assignment and unbox/widen to TARGET's representation."
+  (let ((primitive (%field-primitive-char target)))
+    (if primitive
+        (let ((source (%reflection-wrapper-type value)))
+          (unless (and source (%array-widening-p source primitive))
+            (%throw '|java/lang/IllegalArgumentException| "Invalid primitive conversion"))
+          (let* ((raw (%maybe-unbox value))
+                 (number (if (characterp raw) (char-code raw) raw)))
+            (case primitive
+              (#\Z (if (or (null raw) (eql raw 0)) 0 1))
+              (#\F (float number 1f0)) (#\D (float number 1d0))
+              (t number))))
+        (progn
+          (unless (or (null value)
+                      (eql 1 (|isAssignableFrom(Ljava/lang/Class;)Z|
+                              target (|getClass()Ljava/lang/Class;| value))))
+            (%throw '|java/lang/IllegalArgumentException| "Invalid reference conversion"))
+          value))))
+
 (defun %reflective-array-primitive-type (array)
   (%check-reflective-array array)
   (%field-primitive-char (%array-component-class array)))
@@ -459,11 +487,18 @@ NullPointerException; a Lisp string serves as a char[]."
 
 (defun |java/lang/reflect/Array.get(Ljava/lang/Object;I)Ljava/lang/Object;| (array index)
   "java.lang.reflect.Array.get implementation."
-  (jaref array index))
+  (%check-reflective-array array)
+  (let ((value (jaref array index))
+        (primitive (%field-primitive-char (%array-component-class array))))
+    (if primitive (%box-primitive-return value primitive) value)))
 
 (defun |java/lang/reflect/Array.set(Ljava/lang/Object;ILjava/lang/Object;)V| (array index value)
   "java.lang.reflect.Array.set implementation."
-  (setf (jaref array index) value))
+  (%check-reflective-array array)
+  (jaref array index)
+  (setf (jaref array index)
+        (%reflection-convert-value value (%array-component-class array)))
+  nil)
 
 ;; Arrays inherit Object.equals: identity (the Kotlin compiler compares
 ;; arrays so).

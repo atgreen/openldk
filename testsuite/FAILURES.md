@@ -27,7 +27,7 @@ The cloning and array fixes resolve five audited failures:
 - Mauve `java/lang/Object/ObjectTest.java`: cloning behavior now matches the JDK.
 
 These cases pass fresh JDK 25 comparisons and have been removed from the
-expectation file, leaving **332 runtime expectations**. The original audit
+expectation file, leaving 332 runtime expectations before the reflection fixes below. The original audit
 inventory below is retained as historical evidence. `ArrayExceptionProbe`
 adds 217 differential checks, including all primitive kinds, null/bounds
 precedence, partial copies, overlap, and shallow cloning. The full core gate
@@ -35,6 +35,22 @@ passes with **774 PASS, 1 XFAIL, 7 UNSUPPORTED**; the pinned baseline includes
 all 774 passing assertions. Unit checks (818), interop checks (165), and all
 48 runtime-standards comparisons pass. Optimized generated-code benchmarks
 retain allocation-free array loops.
+
+The reflection conversion fixes additionally resolve Mauve `Array/set`,
+`Field/promotion`, `Constructor/newInstance`, and the Beans `Expression/check`
+and `Statement/check` cases. Five fresh comparisons pass with the isolated
+reflection image. They have been removed from the expectation file, leaving
+**327 runtime expectations**. `ReflectionConversionProbe` covers 329 checks
+of primitive widening, rejected narrowing/nulls, exact boxing classes,
+reference assignment, receiver/arity checks, unchanged argument arrays, and
+exception wrapping. Validation passes: build, 818 unit checks, 165 interop
+checks, 50 standards comparisons, 20 compatibility comparisons, and 2,153
+Clojure checks. The full core gate retains 774 PASS, 1 XFAIL, 7 UNSUPPORTED.
+
+Mauve `Method/invoke` now passes its conversion checks but still fails
+package-private method dispatch: a same-signature subclass method in another
+package incorrectly replaces the reflected declaring-class method. Its
+expectation remains until Java overriding rules are enforced for that call.
 
 ## Results
 
