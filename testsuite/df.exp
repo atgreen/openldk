@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Anthony Green <green@moxielogic.com>
+# SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+
 load_lib dg.exp
 load_lib openldk.exp
 
@@ -18,11 +21,23 @@ proc openldk_load { classfile } {
     # inherited path (see gcj/gcj.exp for the cross-suite class-shadowing this
     # avoids).
     setenv "LDK_CLASSPATH" ".:./df"
-    set classname [string map {".class" ""} $classfile]
+    # These fixtures declare default-package classes. Their directory is a
+    # classpath entry, rather than part of the class's binary name.
+    set classname [file rootname [file tail $classfile]]
     set result [local_exec "../openldk $classname $testargs" "" "" $timeout]
     verbose "result = $result"
     set status [lindex $result 0]
     set output [lindex $result 1]
+    set reference [local_exec "[getenv JAVA_HOME]/bin/java -cp .:./df $classname $testargs" "" "" $timeout]
+    set reference_status [lindex $reference 0]
+    set reference_output [lindex $reference 1]
+    if { $reference_status != 0 } {
+        set status 1
+        append output "\nJDK 25 reference failed: $reference_output"
+    } elseif { $status == 0 && [string trim [string map {"\r\n" "\n"} $output]] ne [string trim [string map {"\r\n" "\n"} $reference_output]] } {
+        set status 1
+        append output "\nJDK 25 reference output: $reference_output"
+    }
     verbose "STATUS = $status"
 
     # Check if the test is in the expected failures file
