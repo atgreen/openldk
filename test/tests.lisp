@@ -690,3 +690,98 @@ nothing behind when it refuses."
                (is (eql t cleaned))
                condition))))
     (is (eq emergency caught))))
+
+(test word-long-lowering
+  (let* ((x 'x) (n 'n)
+         (body '(let ((x initial) (i 0))
+                  (declare (type (signed-byte 64) x) (type (signed-byte 32) i))
+                  (tagbody again
+                     (when (>= i n) (go done))
+                     (setf x (sb-c::mask-signed-field 64
+                              (+ (sb-c::mask-signed-field 64 (* x 3)) 1)))
+                     (incf i) (go again) done)
+                  x))
+         (lowered (openldk::%lower-word-longs body (list x)))
+         (function (compile nil `(lambda (initial ,n)
+                                   (declare (optimize (speed 3) (safety 1))
+                                            (type (signed-byte 64) initial) (type (signed-byte 32) ,n))
+                                   ,lowered))))
+    (dolist (initial '(0 1 -1 9223372036854775807 -9223372036854775808 4611686018427387904))
+      (dolist (count '(0 1 2 63 1000))
+        (let ((expected initial))
+          (dotimes (i count) (setf expected (sb-c::mask-signed-field 64 (+ (* expected 3) 1))))
+          (is (= expected (funcall function initial count))))))
+    (funcall function 1 100)
+    (let ((before (sb-ext:get-bytes-consed)))
+      (funcall function 1 100000)
+      ;; Allow a return-value box/allocation-region accounting granularity;
+      ;; a boxed accumulator would allocate megabytes instead.
+      (is (< (- (sb-ext:get-bytes-consed) before) 65536)))
+    (dolist (expression '((< x 0) (ash x -1) (truncate x 3) (rem x 3)
+                          (coerce x 'double-float) (coerce x 'single-float)))
+      (let* ((original `(let ((x initial)) (declare (type (signed-byte 64) x)) ,expression))
+             (lowered (openldk::%lower-word-longs original '(x)))
+             (before (compile nil `(lambda (initial) ,original)))
+             (after (compile nil `(lambda (initial) ,lowered))))
+        (dolist (initial '(0 1 -1 9223372036854775807 -9223372036854775808))
+          (is (equalp (multiple-value-list (funcall before initial))
+                      (multiple-value-list (funcall after initial)))))))))
+
+(test primitive-entry-native-fallback
+  (let* ((openldk::*context* (make-instance 'openldk::<context>))
+         (openldk::*method-primitive-parameters* '((x . :int)))
+         (form (openldk::%method-let '((x argument)) '(x)))
+         (function (compile nil `(lambda (argument) ,form))))
+    (is (= 42 (funcall function 42)))
+    (is (eq t (funcall function t)))
+    (is (null (funcall function nil)))
+    (is (string= "opaque native value" (funcall function "opaque native value")))))
+
+(test word-long-native-normalization
+  (let* ((form '(let ((x 0))
+                 (declare (type (signed-byte 64) x))
+                 (setf x (openldk::%as-long argument))
+                 x))
+         (lowered (openldk::%lower-word-longs form '(x)))
+         (function (compile nil `(lambda (argument) ,lowered))))
+    (loop for argument in '(nil t #\A 18446744073709551615)
+          for expected in '(0 1 65 -1)
+          do (is (= expected (funcall function argument))))))
+
+(test word-long-operand-order
+  (let* ((form '(let ((x initial))
+                 (declare (type (signed-byte 64) x))
+                 (sb-c::mask-signed-field 64
+                   (let ((value2 (progn (push :second events) operand))
+                         (value1 (progn (push :first events) x)))
+                     (* value1 value2)))))
+         (lowered (openldk::%lower-word-longs form '(x)))
+         (function (compile nil `(lambda (initial operand)
+                                   (let ((events nil))
+                                     (handler-case ,lowered (type-error () nil))
+                                     events)))))
+    ;; Invalid foreign operands must not fail before the remaining operand
+    ;; has executed, even though canonical operands use modular words.
+    (is (equal '(:first :second) (funcall function 1 'invalid)))))
+
+(test safe-integer-leaf-handlers
+  (let* ((safe '(openldk::with-java-conditions (:arrays nil)
+                  (block done
+                    (tagbody
+                      (return-from done
+                        (let ((a x) (b 1))
+                          (sb-c::mask-signed-field 32 (+ a b))))))))
+         (types '((x . (signed-byte 32))))
+         (lowered (openldk::%omit-safe-leaf-handlers (list safe) types)))
+    (is (eq 'block (caar lowered)))
+    (is (= -2147483648
+           (funcall (compile nil `(lambda (x) ,@lowered)) 2147483647)))
+    ;; An unknown parameter must retain native error translation.
+    (is (equal (list safe) (openldk::%omit-safe-leaf-handlers (list safe) nil)))
+    (let ((openldk::*enable-safe-leaves* nil))
+      (is (equal (list safe) (openldk::%omit-safe-leaf-handlers (list safe) types)))))
+  (dolist (expression '((truncate x 0) (ash x y) (aref x 0)
+                        (slot-value x 'field) (funcall x)
+                        (openldk::%as-long unknown)))
+    (let ((body `((openldk::with-java-conditions (:arrays nil) ,expression))))
+      (is (equal body (openldk::%omit-safe-leaf-handlers body '((x . (signed-byte 64)))))))))

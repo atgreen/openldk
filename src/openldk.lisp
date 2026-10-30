@@ -850,35 +850,28 @@ the alist TYPES so VALUE passes through that type's normalizer."
     (t (cons (%normalize-typed-assignments (car form) types)
              (%normalize-typed-assignments (cdr form) types)))))
 
-(defun %typed-let (bindings body)
-  "The LET binding a method's BINDINGS around BODY, declaring the type of
-every variable whose values all have one primitive category."
+(defun %typed-let (bindings body &optional parameter-types)
+  "Declare canonical primitive storage, retaining opaque native values on the slow path."
   (when (compact-p *context*)
     (return-from %typed-let `(let ,bindings ,@body)))
-  (let ((sources (variable-sources *context*)))
-    ;; THIS and the parameters' locals start out holding values of unknown
-    ;; type: callers pass whatever Java fields hold.
+  (let ((sources (alexandria:copy-hash-table (variable-sources *context*))))
     (loop for (symbol init) in bindings
-          when init do (%note-variable-source symbol nil *context*))
+          when init do (push (cdr (assoc symbol parameter-types)) (gethash symbol sources)))
     (let* ((categories (%variable-categories sources))
            (types (loop for (symbol) in bindings
                         for category = (gethash symbol categories)
-                        when category
-                          collect (cons symbol (ecase category
-                                                 (:int '(signed-byte 32))
-                                                 (:long '(signed-byte 64))
-                                                 (:float 'single-float)
-                                                 (:double 'double-float))))))
-      (if (null types)
-          `(let ,bindings ,@body)
-          `(let ,(loop for (symbol init) in bindings
-                       for type = (cdr (assoc symbol types))
-                       collect (cond
-                                 ((null type) (if init (list symbol init) (list symbol)))
-                                 (t (list symbol (if (consp type) 0 (coerce 0 type))))))
-             (declare ,@(loop for (symbol . type) in types
-                              collect `(type ,type ,symbol)))
-             ,@(%normalize-typed-assignments body types))))))
+                        when category collect (cons symbol (%primitive-lisp-type category))))
+           (form
+             `(let ,(loop for (symbol init) in bindings
+                          for type = (cdr (assoc symbol types))
+                          collect (cond ((null type) (if init (list symbol init) (list symbol)))
+                                        (init (list symbol init))
+                                        (t (list symbol (if (consp type) 0 (coerce 0 type))))))
+                ,@(when types `((declare ,@(loop for (symbol . type) in types collect `(type ,type ,symbol)))))
+                ,@(%omit-safe-leaf-handlers (%normalize-typed-assignments body types) types))))
+      (if *enable-word-longs*
+          (%lower-word-longs form (loop for (symbol . type) in types when (equal type '(signed-byte 64)) collect symbol))
+          form))))
 
 (defun %prune-unused-bindings (bindings body)
   "BINDINGS less those with no initial value that BODY never mentions."
@@ -893,11 +886,17 @@ every variable whose values all have one primitive category."
                bindings)))
 
 (defun %method-let (bindings body)
-  "The LET binding a compiled method's variables around BODY.  BINDINGS
-covers every local slot, stack variable and exception-handler variable
-the method might use; those with no initial value that BODY never
-mentions are dropped, and %TYPED-LET declares the types of the rest."
-  (%typed-let (%prune-unused-bindings bindings body) body))
+  "Use a guarded typed entry for canonical Java parameters, with the old ABI as fallback."
+  (let* ((bindings (%prune-unused-bindings bindings body))
+         (parameters (and *enable-primitive-entries* (not (compact-p *context*))
+                          (remove-if-not (lambda (p) (second (assoc (car p) bindings)))
+                                         *method-primitive-parameters*))))
+    (if parameters
+        `(if (and ,@(loop for (local . category) in parameters
+                          collect `(typep ,(second (assoc local bindings)) ',(%primitive-lisp-type category))))
+             ,(%typed-let bindings body parameters)
+             ,(%typed-let bindings body))
+        (%typed-let bindings body))))
 
 ;;; Folding single-use stack variables.  Bytecode passes nearly every
 ;;; value through a stack variable: (setf s{5} (call ...)) followed by a
@@ -1177,7 +1176,8 @@ when STATEMENTS can't be flat: some tag twice, or a handler not emitted."
 BLOCKS-AFTER-DCE: generate each block's code, then wrap it with debug
 tracing, the NPE/array-bounds handler-binds, and ACC_SYNCHRONIZED monitor
 entry/exit as required."
-  (let* ((lisp-code
+  (let* ((*method-primitive-parameters* (%primitive-parameter-types method))
+         (lisp-code
            (%fold-stack-variables
             (list (list* 'block nil
                          (or (and (plusp (length (exception-table *context*)))

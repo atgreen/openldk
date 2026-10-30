@@ -83,6 +83,7 @@
                (:file "src/basic-block")
                (:file "src/codegen")
                (:file "src/descriptors")
+               (:file "src/primitive-code")
                (:file "src/classfile")
                (:file "src/verifier")
                (:file "src/interpreter")

@@ -448,22 +448,17 @@ result always stays in range (bitwise ops, floats, doubles)."
   (ir-iand 'logand :INTEGER :PLAIN)
   (ir-ior 'logior :INTEGER :PLAIN)
   (ir-ixor 'logxor :INTEGER :PLAIN)
-  (ir-land 'logand :LONG :PLAIN)
-  (ir-lxor 'logxor :LONG :PLAIN))
+  (ir-land 'logand :LONG :WRAPPING)
+  (ir-lxor 'logxor :LONG :WRAPPING))
 
 (defmethod codegen ((insn ir-lor) context)
-  ;; Unlike LAND/LXOR, LOR masks its operands to their unsigned 64-bit
-  ;; representation before combining; some producers hand it non-canonical
-  ;; (unsigned) long values.  The result is a signed long again: left
-  ;; unsigned, FLAG | n with FLAG's sign bit set compared as positive (Kawa's
-  ;; SimpleVector.isVerySimple, info < 0).
+  ;; Preserve this opcode's operand evaluation order and normalize the
+  ;; result even when a native producer supplies an unsigned long.
   (make-instance '<expression>
                  :insn insn
-                 :code `(let ((result (logior (logand ,(code (codegen (value1 insn) context)) #xFFFFFFFFFFFFFFFF)
-                                              (logand ,(code (codegen (value2 insn) context)) #xFFFFFFFFFFFFFFFF))))
-                          (if (> result 9223372036854775807)
-                              (- result 18446744073709551616)
-                              result))
+                 :code `(let ((value1 ,(code (codegen (value1 insn) context)))
+                              (value2 ,(code (codegen (value2 insn) context))))
+                          (sb-c::mask-signed-field 64 (logior value1 value2)))
                  :expression-type :LONG))
 
 (defmethod codegen ((insn ir-array-length) context)

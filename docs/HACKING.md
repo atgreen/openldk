@@ -28,6 +28,35 @@
    - Compiles generated Lisp to native code via SBCL
    - Replaces method stub with compiled version
 
+### Primitive Storage and Entry Guards
+
+`%method-let` emits a guarded branch when a method has primitive parameters.
+Canonical signed integers and single/double floats enter `%typed-let` with
+parameter type information. Other Lisp values use the generic branch. Keep
+this fallback: native implementations can place Lisp objects in nominally
+primitive Java fields and pass them through Java methods.
+
+`src/primitive-code.lisp` lowers known long locals to unsigned 64-bit storage.
+Modular arithmetic uses `ldb` so SBCL can keep intermediate values unboxed.
+Signed uses, including comparisons, division, right shifts, conversions and
+Java/Lisp boundaries, decode the word with `%signed-long`. An opaque producer
+still runs through the primitive normalizer; do not remove that conversion
+without proving its input is a canonical integer. Preserve operand evaluation
+order when introducing word conversions, including on the exceptional path.
+
+The differential `PrimitiveOptimizationProbe` checks these boundaries against
+JDK 25. For a generated-code allocation benchmark, run from the repository root:
+
+```sh
+CL_SOURCE_REGISTRY="$PWD//:" LDK_CODE_CACHE=off \
+  sbcl --dynamic-space-size 8192 --script bench/primitive-code/run.lisp
+```
+
+This compiles identical Java loops with primitive entry/word lowering disabled
+and enabled, checks boundary cases and checksums, and reports time and allocated
+bytes for ten million iterations. It asserts that the optimized loop does not
+allocate per iteration. Timing is informational and depends on the host.
+
 ### Static Class Instances
 
 Java static members are handled via special CLOS instances:

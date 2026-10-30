@@ -13,6 +13,7 @@ PROBES = {
     'LoaderConstraintProbe': (25,),
     'ArrayReflectionProbe': (25,),
     'FieldTypeProbe': (25,),
+    'PrimitiveOptimizationProbe': (25,),
     'LoaderLifetimeProbe': (25,),
     'LinkageProbe': (25,),
     'MemoryModelProbe': (25,),
