@@ -28,6 +28,154 @@
    - Compiles generated Lisp to native code via SBCL
    - Replaces method stub with compiled version
 
+### Primitive Storage and Entry Guards
+
+`%method-let` emits a guarded branch when a method has primitive parameters.
+Canonical signed integers and single/double floats enter `%typed-let` with
+parameter type information. Other Lisp values use the generic branch. Keep
+this fallback: native implementations can place Lisp objects in nominally
+primitive Java fields and pass them through Java methods.
+
+`src/primitive-code.lisp` lowers known long locals to unsigned 64-bit storage.
+Modular arithmetic uses `ldb` so SBCL can keep intermediate values unboxed.
+Signed uses, including comparisons, division, right shifts, conversions and
+Java/Lisp boundaries, decode the word with `%signed-long`. An opaque producer
+still runs through the primitive normalizer; do not remove that conversion
+without proving its input is a canonical integer. Preserve operand evaluation
+order when introducing word conversions, including on the exceptional path.
+
+The differential `PrimitiveOptimizationProbe` checks these boundaries against
+JDK 25. For a generated-code allocation benchmark, run from the repository root:
+
+```sh
+CL_SOURCE_REGISTRY="$PWD//:" LDK_CODE_CACHE=off \
+  sbcl --dynamic-space-size 8192 --script bench/primitive-code/run.lisp
+```
+
+This compiles identical Java loops with primitive entry guards, word storage
+and result arithmetic disabled and enabled, checks boundary cases and checksums,
+and reports time and allocated bytes for ten million iterations. It asserts that the optimized loop does not
+allocate per iteration. Timing is informational and depends on the host.
+
+`src/primitive-results.lisp` restores useful primitive types when opaque call
+results enter arithmetic. It checks the actual operands before using typed
+operations, preserving the original arithmetic as the fallback. Type facts
+come from canonical entry guards, checked conversions and specialized arrays;
+a native call's descriptor alone never becomes an unchecked Lisp declaration.
+Both operands are evaluated in their original order before a new guard runs.
+Known long operands use explicit unsigned-word modular operations.
+Initializer and branch-test facts apply only to locals with no writes in the
+generated form, including writes captured by nested functions. Reassigned
+locals require fresh operand guards unless an explicit storage declaration
+already constrains their representation. Unmodeled lexical binding forms
+remain unchanged so outer facts cannot leak into shadowed variables.
+
+Ordinary Lisp call boundaries can still box long and double return values.
+The pass removes avoidable arithmetic allocation while keeping those public
+calling conventions and opaque-value passthrough intact. To compare generated
+callers of non-inlineable primitive methods with this pass off and on, run:
+
+```sh
+CL_SOURCE_REGISTRY="$PWD//:" LDK_CODE_CACHE=off \
+  sbcl --dynamic-space-size 8192 --script bench/primitive-results/run.lisp
+```
+
+### Redundant Member Checks
+
+Code generation omits class access to the caller itself. A member reference
+whose owner and actual declaration are both the caller also needs no loader
+constraint check: its descriptor is interpreted by the same defining loader.
+Inherited declarations retain their checks, even when the constant-pool owner
+names the caller. Adjacent repeated checks of the same constant member site
+reuse the first successful check; control-flow labels end that proof. The
+first check stays before class initialization so linkage failures keep their
+original timing.
+
+Own-class initialization checks can be omitted at ordinary Java application
+and library method entries, where invocation or construction already ensures
+initialization (or the current thread is running the initializer). Instance
+interface methods retain the checks. Bootstrap classes also retain them:
+bootstrap natives can call JDK Lisp functions before Java initialization.
+Do not infer permanence from INITIALIZED-P during compilation: saved-image
+warmup deliberately resets selected JDK classes.
+
+Compare identical generated call loops with only this optimization toggled:
+
+```sh
+CL_SOURCE_REGISTRY="$PWD//:" LDK_CODE_CACHE=off \
+  sbcl --dynamic-space-size 8192 --script bench/call-checks/run.lisp
+```
+
+### Small Leaves and Guarded Array Loops
+
+`src/inline-code.lisp` recognizes short, straight-line integer expressions
+in static, private and final Java methods. Primitive argument guards and the current function
+identity select the inline path; native replacements use the original call.
+Receiver caches and method generations also guard instance inlining. Lisp
+replacements and around methods use the original dispatch, while private
+selection stays on the defining class. The original linkage, access and
+class-initialization checks remain in place.
+The caller owns the inline site and its statically resolved class dependency.
+The process registry holds only weak function keys and weak method identities.
+
+`src/array-loops.lisp` versions closed primitive reduction loops with an index
+initialized to zero and incremented by one up to an array's length. Nonthrowing
+guards check backing-vector types, a signed-32-bit bound and the lengths of all
+accessed arrays. A successful guard hoists vectors and length, and proves each
+loop-body index is in range. Only those array reads use local safety-zero code;
+initializers, code after the loop and all unrecognized control flow retain
+their checks. The complete original loop is the fallback, including for null
+arrays, short secondary arrays and zero-iteration cases.
+
+`InlineLeafProbe`, `InstanceInlineProbe` and `ArrayLoopProbe` compare boundary
+values and exception timing with JDK 25. Interop tests also replace methods,
+add subclass and around methods, and pass opaque Lisp values through integer
+descriptors. Benchmark actual generated Java methods with these two
+optimizations disabled and enabled using:
+
+```sh
+CL_SOURCE_REGISTRY="$PWD//:" LDK_CODE_CACHE=off \
+  sbcl --dynamic-space-size 8192 --script bench/generated-code/run.lisp
+```
+
+### Virtual Call-Site Caches
+
+Each generated virtual call keeps its last receiver class and effective
+function. A hit bypasses the generic function's shared dispatch hash table.
+Method addition or removal increments a generation; replacing the generic
+function also invalidates the site. Around methods remain part of the cached
+effective function, and complex dispatch uses the ordinary dispatcher.
+
+Sites hold weak references to classes, generic functions and effective
+functions so a caller in a permanent loader cannot retain a receiver's loader.
+The concurrent replacement tests exercise a cache miss during the temporary
+method-removal gap. `bench/virtual-calls/run.lisp` compares the site cache with
+shared generic-function dispatch, checking results and allocation.
+
+### Compiled Method-Handle Graphs
+
+`src/native/lambda-compiler.lisp` compiles LambdaForm wiring into a Lisp
+function with ordinary temporaries. Shared fixed-arity dispatchers call each
+NamedFunction without building argument lists or unboxing lists. Mutable
+call-site targets, resolved handles and method symbols are read at invocation
+time, so Java call-site updates and Lisp function replacement remain visible.
+
+The cache has weak form keys. Its compiled functions contain no Java object
+constants: they receive the live form as an argument and read constants through
+it. This matters because SBCL weak-key hash tables can retain a key when their
+value points back to it. Capturing a form's constants could retain the form
+and its defining loader indefinitely.
+
+`MethodHandleGraphProbe` compares combinators, mutable targets, fields,
+constructors, boxing and mixed primitive arguments with JDK 25. To compare
+graph interpretation and compilation with matching checksums and allocation
+measurements, run:
+
+```sh
+CL_SOURCE_REGISTRY="$PWD//:" LDK_CODE_CACHE=off \
+  sbcl --dynamic-space-size 8192 --script bench/method-handles/run.lisp
+```
+
 ### Static Class Instances
 
 Java static members are handled via special CLOS instances:
@@ -233,6 +381,9 @@ HotSpot, checking both acceptance and Java verification exceptions.
 `make check-jni` builds C/C++ JNI libraries and runs identical integration probes
 on HotSpot and OpenLDK. `make check-jni-zstd` also downloads a checksum-pinned
 zstd-jni release and tests byte-array and direct-buffer compression round trips.
+
+See the [failure audit](../testsuite/FAILURES.md) for verified runtime gaps,
+legacy test exclusions, and commands to reproduce the audit.
 
 1. **Run specific test**: `make check RUNTESTFLAGS="Hello.exp"`
 2. **Check expected failures**: `testsuite/expected-failures.txt`

@@ -1,14 +1,50 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
+;;;
+;;; Copyright (C) 2026  Anthony Green <green@moxielogic.com>
+;;;
 ;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+;;;
+;;; This file is part of OpenLDK.
+
+;;; OpenLDK is free software; you can redistribute it and/or modify it
+;;; under the terms of the GNU General Public License as published by
+;;; the Free Software Foundation; either version 3, or (at your
+;;; option) any later version.
+
+;;; OpenLDK is distributed in the hope that it will be useful, but
+;;; WITHOUT ANY WARRANTY; without even the implied warranty of
+;;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+;;; General Public License for more details.
+
+;;; You should have received a copy of the GNU General Public License
+;;; along with OpenLDK; see the file COPYING.  If not, please see
+;;; <http://www.gnu.org/licenses/>.
+
+;;; Linking this library statically or dynamically with other modules is
+;;; making a combined work based on this library.  Thus, the terms and
+;;; conditions of the GNU General Public License cover the whole
+;;; combination.
+
+;;; As a special exception, the copyright holders of this library give
+;;; you permission to link this library with independent modules to
+;;; produce an executable, regardless of the license terms of these
+;;; independent modules, and to copy and distribute the resulting
+;;; executable under terms of your choice, provided that you also
+;;; meet, for each linked independent module, the terms and conditions
+;;; of the license of that module.  An independent module is a module
+;;; which is not derived from or based on this library.  If you modify
+;;; this library, you may extend this exception to your version of the
+;;; library, but you are not obligated to do so.  If you do not wish
+;;; to do so, delete this exception statement from your version.
+
 ;;;
 ;;; Boot module metadata is built by the JDK's Java implementation. Native
 ;;; registration connects those modules to OpenLDK's existing Class objects.
-
 (in-package :openldk)
 
 (defvar *module-access-ready* nil
   "True after runtime startup has constructed the boot module graph.")
-(defvar *defined-package-modules* (make-hash-table :test #'equal :synchronized t)
+(defvar *defined-package-modules* (make-hash-table :test #'eq :weakness :key :synchronized t)
   "(defining Java loader . slash package name) -> application named module.")
 
 (defvar *boot-module-layer-initializing* nil
@@ -32,7 +68,7 @@
 (defun %defining-class-module (name ldk-loader java-loader)
   "A runtime module, or the unnamed module owned by the defining Java loader."
   (or (when-let ((slash (position #\/ name :from-end t)))
-        (gethash (cons java-loader (subseq name 0 slash)) *defined-package-modules*)) ; lint:suppress use-serapeum-take
+        (gethash (subseq name 0 slash) (%owner-cache-table *defined-package-modules* java-loader))) ; lint:suppress use-serapeum-take
       (%runtime-class-module name ldk-loader)
       (and java-loader
            (slot-exists-p java-loader '|unnamedModule|)
@@ -44,8 +80,8 @@
   "Associate an application's named MODULE with its defining loader and packages."
   (let ((loader (slot-value module '|loader|)))
     (loop for package across (java-array-data packages)
-          do (setf (gethash (cons loader (substitute #\/ #\. (lstring package))) ; lint:suppress substitute-use
-                           *defined-package-modules*) module)))
+          do (setf (gethash (substitute #\/ #\. (lstring package)) ; lint:suppress substitute-use
+                           (%owner-cache-table *defined-package-modules* loader)) module)))
   nil)
 
 (defun %register-boot-module (module packages)
@@ -82,20 +118,35 @@
                     (setf (slot-value system '|bootLayer|)
                           (|jdk/internal/module/ModuleBootstrap.boot()Ljava/lang/ModuleLayer;|))))))))))
 
-(defvar *class-access-cache* (make-hash-table :test #'equal :synchronized t)
-  "(caller Class . referenced Class) -> :allowed or :denied symbolic resolution.")
+(defvar *class-access-cache* (make-hash-table :test #'eq :weakness :key :synchronized t)
+  "Weak caller Class -> weak referenced Class -> access resolution outcome.")
 (defvar *checking-class-access* nil
   "Access checking and boot graph construction are trusted runtime operations.")
+
+(defun %reset-boot-module-layer ()
+  "Discard the image's warmed graph before resolving launch-time module roots."
+  (when (slot-value |+static-java/lang/System+| '|bootLayer|)
+    (dolist (loader (list (|jdk/internal/loader/ClassLoaders.bootLoader()Ljdk/internal/loader/BuiltinClassLoader;|)
+                          (|jdk/internal/loader/ClassLoaders.platformClassLoader()Ljava/lang/ClassLoader;|)
+                          (|jdk/internal/loader/ClassLoaders.appClassLoader()Ljava/lang/ClassLoader;|)))
+      (|clear()V| (slot-value loader '|nameToModule|))
+      (|clear()V| (slot-value loader '|moduleToReader|))
+      (setf (slot-value loader '|resourceCache|) nil))
+    (|clear()V| (|jdk/internal/loader/BuiltinClassLoader.packageToModule()Ljava/util/Map;|))
+    (clrhash *class-access-cache*)
+    (clrhash *boot-modules*)
+    (clrhash *runtime-package-modules*)
+    (setf (slot-value |+static-java/lang/System+| '|bootLayer|) nil)))
 
 (defun %check-bytecode-class-access (caller target)
   "Check runtime package/module class access, retaining failed resolutions.
 Graph updates affect fresh references, not a reference which already failed."
   (when (and *module-access-ready* (not *boot-module-layer-initializing*)
              (not *checking-class-access*) (not (eq caller target)))
-    (let* ((key (cons caller target))
-           (outcome (or (gethash key *class-access-cache*)
+    (let* ((table (%owner-cache-table *class-access-cache* caller 'eq :key))
+           (outcome (or (gethash target table)
                         (let ((*checking-class-access* t))
-                          (setf (gethash key *class-access-cache*)
+                          (setf (gethash target table)
                                 (if (eql 1 (|sun/invoke/util/VerifyAccess.isClassAccessible(Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Class;I)Z|
                                             target caller nil #x1f))
                                     :allowed :denied))))))

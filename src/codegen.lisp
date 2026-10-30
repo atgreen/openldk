@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2024, 2025  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2024, 2025, 2026  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 ;;;
@@ -36,7 +36,6 @@
 ;;; this library, you may extend this exception to your version of the
 ;;; library, but you are not obligated to do so.  If you do not wish
 ;;; to do so, delete this exception statement from your version.
-
 
 (in-package :openldk)
 
@@ -319,6 +318,11 @@ NullPointerException."
 (defun %array-data-form (arrayref-form element-type)
   `(the (simple-array ,element-type (*)) (java-array-data ,arrayref-form)))
 
+(defun %array-subscript-form (index)
+  "Reject a negative Java index before SBCL's unsigned AREF index check.
+The array-data argument is evaluated first, preserving null precedence."
+  `(if (minusp ,index) (%throw-array-index-error ,index) ,index))
+
 (defun %codegen-array-store (insn element-type value-form context)
   "Codegen a primitive xASTORE into an ELEMENT-TYPE array, storing
 VALUE-FORM (which may refer to VALUE, the operand).  Compact code calls
@@ -331,7 +335,7 @@ the generic (SETF JAREF), which normalizes the value itself."
                                 (arrayref ,(code (codegen arrayref context))))
                             ,(if (compact-p context)
                                  '(setf (jaref arrayref index) value)
-                                 `(setf (aref ,(%array-data-form 'arrayref element-type) index)
+                                 `(setf (aref ,(%array-data-form 'arrayref element-type) ,(%array-subscript-form 'index))
                                         ,value-form))))))
 
 (defmethod codegen ((insn ir-iastore) context)
@@ -448,22 +452,17 @@ result always stays in range (bitwise ops, floats, doubles)."
   (ir-iand 'logand :INTEGER :PLAIN)
   (ir-ior 'logior :INTEGER :PLAIN)
   (ir-ixor 'logxor :INTEGER :PLAIN)
-  (ir-land 'logand :LONG :PLAIN)
-  (ir-lxor 'logxor :LONG :PLAIN))
+  (ir-land 'logand :LONG :WRAPPING)
+  (ir-lxor 'logxor :LONG :WRAPPING))
 
 (defmethod codegen ((insn ir-lor) context)
-  ;; Unlike LAND/LXOR, LOR masks its operands to their unsigned 64-bit
-  ;; representation before combining; some producers hand it non-canonical
-  ;; (unsigned) long values.  The result is a signed long again: left
-  ;; unsigned, FLAG | n with FLAG's sign bit set compared as positive (Kawa's
-  ;; SimpleVector.isVerySimple, info < 0).
+  ;; Preserve this opcode's operand evaluation order and normalize the
+  ;; result even when a native producer supplies an unsigned long.
   (make-instance '<expression>
                  :insn insn
-                 :code `(let ((result (logior (logand ,(code (codegen (value1 insn) context)) #xFFFFFFFFFFFFFFFF)
-                                              (logand ,(code (codegen (value2 insn) context)) #xFFFFFFFFFFFFFFFF))))
-                          (if (> result 9223372036854775807)
-                              (- result 18446744073709551616)
-                              result))
+                 :code `(let ((value1 ,(code (codegen (value1 insn) context)))
+                              (value2 ,(code (codegen (value2 insn) context))))
+                          (sb-c::mask-signed-field 64 (logior value1 value2)))
                  :expression-type :LONG))
 
 (defmethod codegen ((insn ir-array-length) context)
@@ -634,6 +633,51 @@ take the method's arguments followed by the MemberName."
                 :openldk)
         method-sym)))
 
+(defvar *enable-redundant-linkage-elision* t)
+(defvar *method-entry-initialized-class* nil
+  "Class whose initialization is guaranteed by this method's Java entry.")
+
+(defun %self-declared-member-p (caller index)
+  "Self access has no class-access or cross-loader descriptor constraint.
+Inherited members still need their defining loader's constraints."
+  (multiple-value-bind (owner member descriptor)
+      (%v-member (constant-pool caller) index
+                 '(or constant-field-reference constant-method-reference constant-interface-method-reference))
+    (and (string= owner (name caller))
+         (if (typep (aref (constant-pool caller) index) 'constant-field-reference)
+             (find-if (lambda (field) (and (string= member (name field))
+                                           (string= descriptor (descriptor field)))) (fields caller))
+             (gethash (concatenate 'string member descriptor) (%class-method-name-table caller))))))
+
+(defun %elide-adjacent-member-checks (form)
+  "Reuse a successful, unconditional check immediately preceding an instruction.
+The first check stays before initialization; labels end the proof."
+  (labels ((constant-site-p (site)
+             (and (consp site) (eql (first site) 'load-time-value)
+                  (consp (second site)) (eql (first (second site)) '%member-linkage-site)
+                  (typep (second (second site)) '<class>) (integerp (third (second site)))))
+           (strip (x site)
+             (cond ((atom x) x)
+                   ((member (first x) '(quote function load-time-value)) x)
+                   ((and (eql (first x) '%with-member-constraints) (equal (second x) site))
+                    (strip (third x) site))
+                   (t (mapcar (lambda (part) (strip part site)) x))))
+           (walk (x)
+             (cond ((atom x) x)
+                   ((member (first x) '(quote function load-time-value)) x)
+                   ((eql (first x) 'tagbody)
+                    (let ((previous nil))
+                      `(tagbody ,@(loop for statement in (rest x)
+                                        for current = (walk statement)
+                                        for result = (if previous (strip current previous) current)
+                                        do (setf previous
+                                                 (and (consp current) (eql (first current) '%with-member-constraints)
+                                                      (constant-site-p (second current))
+                                                      (second current)))
+                                        collect result))))
+                   (t (mapcar #'walk x)))))
+    (if *enable-redundant-linkage-elision* (walk form) form)))
+
 (defmacro %with-class-access (caller target form)
   `(progn (%check-bytecode-class-access ,caller ,target) ,form))
 
@@ -653,27 +697,61 @@ take the method's arguments followed by the MemberName."
          (target (typecase reference
                    (ir-class (slot-value reference 'class))
                    (string (%resolve-class-in-context reference)))))
-    (when (and caller target (java-class caller) (java-class target))
+    (when (and caller target (java-class caller) (java-class target)
+               (not (and *enable-redundant-linkage-elision* (eq caller target))))
       (setf (code expression)
             `(%with-class-access ,(java-class caller) ,(java-class target) ,(code expression)))))
   expression)
 
+(defmacro %with-member-constraints (site form)
+  `(progn (%check-member-constraint-site ,site) ,form))
+
+(define-setf-expander %with-member-constraints (site place &environment environment)
+  (multiple-value-bind (temps values stores writer reader) (get-setf-expansion place environment)
+    (let ((site-temp (gensym "CONSTRAINT-SITE")))
+      (values (cons site-temp temps) (cons site values) stores
+              `(%with-member-constraints ,site-temp ,writer)
+              `(%with-member-constraints ,site-temp ,reader)))))
+
+(defun %checked-member-expression (expression insn context)
+  "Keep CP member constraint checks at execution sites, including SETF places."
+  (let* ((bytes (and context (slot-boundp context 'bytecode) (bytecode context)))
+         (pc (and (address insn) (floor (address insn)))))
+    (when (and bytes pc (<= 0 pc) (< (+ pc 2) (length bytes))
+               (<= 178 (aref bytes pc) 185))
+      (let ((index (+ (ash (aref bytes (1+ pc)) 8) (aref bytes (+ pc 2)))))
+        (unless (and *enable-redundant-linkage-elision*
+                     (%self-declared-member-p (slot-value context 'class) index))
+         (setf (code expression)
+              `(%with-member-constraints
+                   (load-time-value (%member-linkage-site ,(slot-value context 'class) ,index))
+                 ,(code expression)))))))
+  expression)
+
+(defmethod codegen :around ((insn ir-clinit) context)
+  (with-member-linkage-errors (context (address insn))
+    (%checked-member-expression (call-next-method) insn context)))
+
 (defmethod codegen :around ((insn ir-call-virtual-method) context)
-  (%checked-class-expression (call-next-method)
+  (with-member-linkage-errors (context (address insn))
+    (%checked-class-expression (%checked-member-expression (call-next-method) insn context)
                             (if (typep insn 'ir-call-static-method)
-                                (slot-value insn 'class) (reference-class insn)) context))
+                                (slot-value insn 'class) (reference-class insn)) context)))
 
 (defmethod codegen :around ((insn ir-call-special-method) context)
-  (%checked-class-expression (call-next-method) (slot-value insn 'class) context))
+  (with-member-linkage-errors (context (address insn))
+    (%checked-class-expression (%checked-member-expression (call-next-method) insn context) (slot-value insn 'class) context)))
 
 (defmethod codegen :around ((insn ir-new) context)
   (%checked-class-expression (call-next-method) (slot-value insn 'class) context))
 
 (defmethod codegen :around ((insn ir-member) context)
-  (%checked-class-expression (call-next-method) (ref-class insn) context))
+  (with-member-linkage-errors (context (address insn))
+    (%checked-class-expression (%checked-member-expression (call-next-method) insn context) (ref-class insn) context)))
 
 (defmethod codegen :around ((insn ir-static-member) context)
-  (%checked-class-expression (call-next-method) (slot-value insn 'class) context))
+  (with-member-linkage-errors (context (address insn))
+    (%checked-class-expression (%checked-member-expression (call-next-method) insn context) (slot-value insn 'class) context)))
 
 (defmethod codegen ((insn ir-call-static-method) context)
   (with-slots (class method-name args return-type) insn
@@ -707,7 +785,7 @@ take the method's arguments followed by the MemberName."
                                          (cons method-sym
                                                (reverse (mapcar (lambda (a) (code (codegen a context))) args)))))))
                            (if resolved
-                               call
+                               (%maybe-inline-static-form call declaring method-name)
                                ;; A class that isn't there: the call throws
                                ;; NoClassDefFoundError when it runs, after its
                                ;; arguments, which the JVM has already pushed.
@@ -725,7 +803,7 @@ take the method's arguments followed by the MemberName."
                                 (arrayref ,(code (codegen arrayref context))))
                             ,(if (compact-p context)
                                  '(jaref arrayref index)
-                                 `(aref ,(%array-data-form 'arrayref element-type) index)))
+                                 `(aref ,(%array-data-form 'arrayref element-type) ,(%array-subscript-form 'index))))
                    :expression-type jtype)))
 
 (defmethod codegen ((insn ir-caload) context)
@@ -1564,15 +1642,17 @@ JVMS 5.4.6 selects that method independently of the receiver's class."
                                              ',(%call-site-gf method-name nargs) ',private-owner))
                                            (list ,null-checked-receiver
                                                  ,@(mapcar (lambda (a) (code (codegen a context))) (cdr args)))))
-                                        ((eq nargs 1)
-                                         (list (%call-site-gf method-name nargs) null-checked-receiver))
                                         (t
-                                         `(funcall (function ,(%call-site-gf method-name nargs))
-                                                   ,null-checked-receiver
-                                                   ,@(mapcar (lambda (a) (code (codegen a context))) (cdr args)))))))
-                           call))))
+                                         `(%invoke-virtual-at
+                                           (load-time-value (make-java-virtual-site :name ',(%call-site-gf method-name nargs)))
+                                           ,null-checked-receiver
+                                           ,@(mapcar (lambda (a) (code (codegen a context))) (cdr args)))))))
+                           (if reference-class
+                               (%maybe-inline-instance-form call (%resolve-class-in-context reference-class) method-name
+                                                            :private (not (null private-owner)))
+                               call)))))
 
-(defparameter *invokedynamic-cache* (make-hash-table :test #'equal))
+(defparameter *invokedynamic-cache* (make-hash-table :test #'eq :weakness :key))
 
 (defun %call-bootstrap-method (bootstrap-method-name caller name args)
   "Call the bootstrap method BOOTSTRAP-METHOD-NAME (the full
@@ -1622,7 +1702,7 @@ SITE-KEY identifies the call site; CALLER is the binary name of its class."
       (setf (gethash site-key *invokedynamic-cache*)
             (%call-bootstrap-method bootstrap-method-name caller fname args))))
 
-(defvar *constant-dynamic-cache* (make-hash-table :test #'equal :synchronized t)
+(defvar *constant-dynamic-cache* (make-hash-table :test #'eq :weakness :key :synchronized t)
   "(defining Java Class . constant pool index) -> (:value . value) or (:error . throwable).")
 
 (defvar *constant-dynamic-lock* (bordeaux-threads:make-lock "constant-dynamic-publication"))
@@ -1631,9 +1711,9 @@ SITE-KEY identifies the call site; CALLER is the binary name of its class."
   "Resolve one CONSTANT_Dynamic, shared by every instruction using its pool entry.
 Bootstrap execution may race, as allowed by JVMS 5.4.3.6; publish one outcome.
 Never hold the publication lock while executing arbitrary Java bootstrap code."
-  (let* ((key (cons caller index))
+  (let* ((table (%owner-cache-table *constant-dynamic-cache* caller 'eql))
          (outcome
-           (or (gethash key *constant-dynamic-cache*)
+           (or (gethash index table)
                (let* ((*descriptor-loader* (%class-java-loader caller))
                       (computed
                         (handler-case
@@ -1651,8 +1731,8 @@ Never hold the publication lock while executing arbitrary Java bootstrap code."
                                   (setf throwable wrapper)))
                               (cons :error throwable))))))
                  (bordeaux-threads:with-lock-held (*constant-dynamic-lock*)
-                   (or (gethash key *constant-dynamic-cache*)
-                       (setf (gethash key *constant-dynamic-cache*) computed)))))))
+                   (or (gethash index table)
+                       (setf (gethash index table) computed)))))))
     (if (eql (car outcome) :error)
         (error (%lisp-condition (cdr outcome)))
         (cdr outcome))))
@@ -2062,7 +2142,7 @@ boolean prints true/false and char prints the character rather than an int."
                         `(let ((callsite (%resolve-invokedynamic ,method-name
                                                                  ,bootstrap-method-name
                                                                  ',(gensym "INDY-SITE")
-                                                                 ,(slot-value (slot-value context 'class) 'name)
+                                                                 ,(java-class (slot-value context 'class))
                                                                  ,(jstring method-name)
                                                                  ,@(remove nil (mapcar (lambda (a)
                                                                                         (when a (code (codegen a context))))
@@ -2075,7 +2155,9 @@ boolean prints true/false and char prints the character rather than an int."
     (make-instance '<expression>
                    :insn insn
                    :code (let* ((class (ir-class-class class)))
-                           (if class
+                           (if (and class
+                                    (not (and *enable-redundant-linkage-elision*
+                                              (eq class *method-entry-initialized-class*))))
                                (let* ((pkg (ldk-class-package class))
                                       (clinit (intern (format nil "%clinit-~A" (slot-value class 'name)) pkg)))
                                  ;; A class that isn't there (a stub, see EMIT of
@@ -2177,17 +2259,15 @@ type."
              (component-name (subseq type-name 1))
              (rest-dims (cdr dimensions)))
         ;; Check for negative array size
-        (when (< size 0)
+        (when (some #'minusp dimensions)
           (let ((exc (%make-java-instance "java/lang/NegativeArraySizeException")))
             (|<init>()V| exc)
             (error (%lisp-condition exc))))
         (let ((component-class (%bin-type-name-to-class component-name)))
           (if rest-dims
-              (make-java-array :size size
-                               :component-class component-class
-                               :initial-contents
-                               (loop repeat size
-                                     collect (%make-multi-array component-name rest-dims)))
+              (let ((array (make-java-array :size size :component-class component-class)))
+                (dotimes (index size array)
+                  (setf (jaref array index) (%make-multi-array component-name rest-dims))))
               (make-java-array :size size
                                :component-class component-class
                                :initial-element (%multi-array-leaf-default component-name)))))))
@@ -2226,7 +2306,7 @@ type."
                        :expression-type :REFERENCE)))
     (let* ((class-name (slot-value class 'name))
            ;; Ensure class is loaded before package lookup
-           (_ (%resolve-class-in-context class-name))
+           (resolved (%resolve-class-in-context class-name))
            (pkg (class-package class-name))
            ;; Method symbol goes in :openldk - constructors are generic functions
            ;; shared across loaders for CLOS dispatch, like instance methods
@@ -2236,10 +2316,12 @@ type."
            (arg-code (mapcar (lambda (a) (code (codegen a context))) args)))
       (make-instance '<expression>
                      :insn insn
-                     :code `(openldk::invoke-special-at
+                     :code (%maybe-inline-instance-form
+                            `(openldk::invoke-special-at
                              (load-time-value
                               (openldk::make-invoke-special-site ',method-symbol ',owner-symbol))
-                             (list ,@arg-code))))))
+                             (list ,@arg-code))
+                            resolved method-name :private t)))))
 
 (defun %resolve-field-slot (ref-class member-name)
   "Resolve a Fieldref (REF-CLASS, MEMBER-NAME) to its CLOS slot
@@ -2256,7 +2338,7 @@ own class-qualified slot recorded in *FIELD-SHADOW-SLOTS*."
           while current
           do (%note-class-dependency (name current))
           when (find member-name (fields current) :key #'name :test #'string=)
-            return (or (gethash (cons current member-name) *field-shadow-slots*) plain)
+            return (or (gethash member-name (%owner-cache-table *field-shadow-slots* current)) plain)
           finally (return plain))))
 
 (defun %volatile-field-p (ref-class member-name)

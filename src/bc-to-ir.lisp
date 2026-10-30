@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2024, 2025  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2024, 2025, 2026  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 ;;;
@@ -45,6 +45,21 @@
 ;;; operand stack held in the <CONTEXT>, and returns a list of IR nodes.
 ;;; The IR is later lowered to Lisp by codegen.lisp.
 
+(defmacro with-member-linkage-errors ((context address) &body body)
+  "Retain Java linkage failures encountered by eager translation/code generation."
+  (let ((ctx (gensym "CONTEXT")) (pc (gensym "PC")) (bytes (gensym "BYTES")) (index (gensym "CP-INDEX")))
+    `(let* ((,ctx ,context)
+            (,pc (floor ,address))
+            (,bytes (and (slot-boundp ,ctx 'bytecode) (bytecode ,ctx)))
+            (,index (when (and ,bytes (<= 0 ,pc) (< (+ ,pc 2) (length ,bytes))
+                               (<= 178 (aref ,bytes ,pc) 185))
+                      (+ (ash (aref ,bytes (1+ ,pc)) 8) (aref ,bytes (+ ,pc 2))))))
+       (handler-bind ((|condition-java/lang/LinkageError|
+                        (lambda (condition)
+                          (when ,index
+                            (%publish-member-linkage-outcome (slot-value ,ctx 'class) ,index condition)))))
+         ,@body))))
+
 (defmacro define-bytecode-transpiler (name args &body body)
   "Define transpiler function NAME for one JVM opcode.  BODY reads the
 instruction at (PC CONTEXT) and returns IR nodes; the macro records the
@@ -54,7 +69,11 @@ instruction's byte length in the context's INSN-SIZE array."
     `(defun ,name ,args
        ,(when has-declare (car body))
        (let* ((,start-pc (pc context))
-              (code (progn ,@(if has-declare (cdr body) body))))
+              (code ,(if (member name '(:GETFIELD :PUTFIELD :GETSTATIC :PUTSTATIC
+                                         :INVOKEVIRTUAL :INVOKESPECIAL :INVOKESTATIC :INVOKEINTERFACE))
+                         `(with-member-linkage-errors (context ,start-pc)
+                            ,@(if has-declare (cdr body) body))
+                         `(progn ,@(if has-declare (cdr body) body)))))
          ;; Save the size of this instruction in the INSN-SIZE array.
          (setf (aref (insn-size context) ,start-pc) (- (pc context) ,start-pc))
          code))))
@@ -1436,12 +1455,14 @@ are ordinary declared methods and use normal dispatch.")
                           (make-instance 'ir-call-virtual-method
                                          :address pc-start
                                          :return-type return-type
-                                         :method-name "%INVOKE-GENERIC"
+                                         :method-name "%INVOKE-GENERIC-AT"
                                          :args (list* (first args)
                                                       (make-instance 'ir-literal
                                                                      :address pc-start
                                                                      :value descriptor
                                                                      :type :REFERENCE)
+                                                      (make-instance 'ir-literal :address pc-start
+                                                                     :value (java-class class) :type :REFERENCE)
                                                       (rest args))))
                          ((and (string= class-name "java/lang/invoke/MethodHandle")
                                (or (string= method-simple-name "invokeExact")
@@ -1465,7 +1486,12 @@ are ordinary declared methods and use normal dispatch.")
                                          :address pc-start
                                          :return-type return-type
                                          :method-name (format nil "%VARHANDLE-OP-~A" method-simple-name)
-                                         :args args))
+                                         :args (list* (first args)
+                                                      (make-instance 'ir-literal :address pc-start
+                                                                     :value descriptor :type :REFERENCE)
+                                                      (make-instance 'ir-literal :address pc-start
+                                                                     :value (java-class class) :type :REFERENCE)
+                                                      (rest args))))
                          (t
                           (make-instance 'ir-call-virtual-method
                                          :address pc-start

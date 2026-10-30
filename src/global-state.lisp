@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2025  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2025, 2026  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 ;;;
@@ -55,12 +55,17 @@
 (defvar *next-loader-id* 0)
 (defvar *next-loader-id-lock* (bordeaux-threads:make-lock "loader-id-lock"))
 
+(defvar *java-loader-owner-slot* (make-symbol "JAVA-LOADER-OWNER")
+  "Private, uninterned instance slot retaining a Java object's defining loader.")
+
 ;; Class loader structure for per-loader package support
 ;; Each class loader has its own Lisp package where class/method symbols are interned
 (defclass/std <ldk-class-loader> ()
   ((id :std 0)                            ; unique identifier
    (pkg :std nil)                         ; Lisp package for this loader
    (parent-loader :std nil)               ; parent <ldk-class-loader> for delegation (or NIL)
+   (unload-resources :std nil)
+   (initiated-classes :std (make-hash-table :test #'equal))
    (java-loader :std nil)                 ; corresponding java.lang.ClassLoader object
    (ldk-classes-by-bin-name :std nil)     ; per-loader hash table for LDK classes
    (ldk-classes-by-fq-name :std nil)      ; per-loader hash table by FQ name
@@ -71,7 +76,10 @@
   (print-unreadable-object (loader out :type t)
     (format out "~A pkg=~A" (slot-value loader 'id) (slot-value loader 'pkg))))
 
-(defvar *ldk-loaders-by-package* (make-hash-table :test #'eq :synchronized t)
+(defvar *ldk-loaders-by-id* (make-hash-table :weakness :value :synchronized t)
+  "Loader IDs identify constraints without retaining dead loader metadata.")
+
+(defvar *ldk-loaders-by-package* (make-hash-table :test #'eq :weakness :value :synchronized t)
   "Lisp package -> the <ldk-class-loader> whose classes are named in it.")
 
 (defun make-ldk-class-loader (&key parent-loader java-loader package-name)
@@ -106,7 +114,9 @@
                                 :ldk-classes-by-fq-name (make-hash-table :test #'equal :synchronized t)
                                 :java-classes-by-bin-name (make-hash-table :test #'equal :synchronized t)
                                 :java-classes-by-fq-name (make-hash-table :test #'equal :synchronized t))))
-    (setf (gethash pkg *ldk-loaders-by-package*) loader)
+    (setf (gethash pkg *ldk-loaders-by-package*) loader
+          (gethash id *ldk-loaders-by-id*) loader)
+    (when (fboundp '%register-loader-resources) (%register-loader-resources loader))
     loader))
 
 (defun %ldk-loader-for-symbol (symbol)
@@ -123,7 +133,9 @@ or NIL for the boot loader's packages."
 (defvar *app-ldk-class-loader* nil)
 
 ;; Map from java.lang.ClassLoader objects to <ldk-class-loader> objects
-(defvar *java-to-ldk-loaders* (make-hash-table :test #'eq :synchronized t))
+(defvar *java-loader-map-lock* (bt:make-recursive-lock "Java loader identities"))
+
+(defvar *java-to-ldk-loaders* (make-hash-table :test #'eq :weakness :key :synchronized t))
 
 (defun jdk-class-p (classname)
   "Return T if CLASSNAME is a JDK/system class that should be loaded by boot loader."
@@ -136,7 +148,7 @@ or NIL for the boot loader's packages."
       (str:starts-with? "org/w3c/" classname)
       (str:starts-with? "org/ietf/" classname)))
 
-(defun get-ldk-loader-for-java-loader (java-loader)
+(defun %get-ldk-loader-for-java-loader (java-loader)
   "Get or create the <ldk-class-loader> for a java.lang.ClassLoader object.
    Returns the boot loader if JAVA-LOADER is NIL.
 
@@ -159,6 +171,14 @@ or NIL for the boot loader's packages."
                                                     :java-loader java-loader)))
             (setf (gethash java-loader *java-to-ldk-loaders*) new-loader)
             new-loader))))
+
+(defun get-ldk-loader-for-java-loader (java-loader)
+  "Return one metadata identity per Java loader, even during concurrent first use."
+  (if java-loader
+      (or (gethash java-loader *java-to-ldk-loaders*)
+          (bt:with-recursive-lock-held (*java-loader-map-lock*)
+            (%get-ldk-loader-for-java-loader java-loader)))
+      *boot-ldk-class-loader*))
 
 (defun loader-package (loader)
   "Get the Lisp package for a class loader. Uses :openldk for boot loader.
@@ -357,6 +377,8 @@ loaders, whose classes are not in the global or app loader tables."
   "Default classpath string baked into an app image by dump-app-image.")
 
 ;; Map Java Thread objects to Lisp (bordeaux) threads
+(defvar *java-thread-registry-lock* (bt:make-recursive-lock "Java thread lifecycle"))
+
 (defvar *java-threads* (make-hash-table :test #'eq :synchronized t)
   "Hash table mapping Java Thread objects to bordeaux-threads.")
 
@@ -375,10 +397,10 @@ loaders, whose classes are not in the global or app loader tables."
 (defvar *vm-start-time-millis* nil)
 
 ;; Track interrupted status for each Thread (not a field in Java 8)
-(defvar *thread-interrupted* (make-hash-table :test #'eq :synchronized t)
+(defvar *thread-interrupted* (make-hash-table :test #'eq :weakness :key :synchronized t)
   "Hash table tracking interrupted status for each Java Thread object.")
 
-(defvar *java-thread-waits* (make-hash-table :test #'eq :synchronized t)
+(defvar *java-thread-waits* (make-hash-table :test #'eq :weakness :key :synchronized t)
   "Java Thread -> (monitor identity) while inside Object.wait.")
 (defvar *java-thread-sleeping* nil
   "Thread-local permission to deliver InterruptedException into native sleep.")
@@ -405,7 +427,7 @@ loaders, whose classes are not in the global or app loader tables."
 ;; this routinely); they are distinct fields resolved by declaring class.
 ;; Shadowing fields get a class-qualified CLOS slot; this table maps
 ;; (declaring <class> . field-name) -> that slot symbol, keeping loaders distinct.
-(defvar *field-shadow-slots* (make-hash-table :test #'equal :synchronized t))
+(defvar *field-shadow-slots* (make-hash-table :test #'eq :weakness :key :synchronized t))
 
 ;; Per-class-name locks for thread-safe class loading.
 ;; Maps class binary name (string) -> recursive lock.
@@ -577,3 +599,6 @@ java.lang.Class), was defined by a user-defined class loader."
               class))
         (when-let ((parent (slot-value loader 'parent-loader)))
           (%lookup-class-with-delegation parent name slot-name)))))
+
+(defvar *cli-add-modules* nil
+  "Additional boot module roots supplied by the launcher.")

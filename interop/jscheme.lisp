@@ -76,6 +76,8 @@
            #:lookup
            #:funcall
            #:define
+           #:enable-syntax
+           #:defun-jscheme
            #:to-lisp
            #:from-lisp))
 
@@ -338,6 +340,17 @@ PREDICATE, its NIL result is #f rather than '()."
   :reader #'openldk.interop::%read-lisp-family-source-and-names)
 
 ;;; (:jscheme-file "name") ASDF components: loaded by Jscheme at LOAD-OP
+
+(defun enable-syntax (&optional (readtable *readtable*))
+  "Enable #@ source blocks and DEFUN-JSCHEME's native Scheme bodies in READTABLE."
+  (enable-source-syntax readtable))
+
+(defmacro defun-jscheme (name parameters source &optional captures forms)
+  "Define NAME with required PARAMETERS and a native Scheme body.
+ENABLE-SYNTAX reads the body as source; compile once when the definition executes."
+  (openldk.interop::%expand-function-definition name parameters source captures forms 'eval-string :scheme))
+
+(openldk.interop::%register-function-syntax 'defun-jscheme :scheme)
 
 (openldk.interop::define-foreign-file-type jscheme-file openldk.interop::loaded-foreign-file "scm"
   (openldk.interop::load-foreign-file (component source)

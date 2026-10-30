@@ -74,7 +74,9 @@
   (:use #:cl #:openldk.interop)
   (:nicknames #:scala)
   (:shadow #:eval #:funcall)
-  (:export #:startup
+  (:export #:enable-syntax
+           #:defun-scala
+           #:startup
            #:default-classpath
            #:*engine*
            #:eval
@@ -503,3 +505,63 @@ signal FOREIGN-ERROR if they don't compile."
   (openldk.interop:compile-foreign-file (component source output)
     (declare (ignore component))
     (compile-scala-files (list source) output :classpath (openldk.interop::%compiled-classpath))))
+
+;;; Definitions with typed arguments and a directly embedded native body.
+
+(defun enable-syntax (&optional (readtable *readtable*))
+  "Enable source blocks and DEFUN-SCALA native bodies in READTABLE."
+  (enable-source-syntax readtable))
+
+(defmacro defun-scala (name parameters source &optional captures forms return-type)
+  "Define NAME with (NAME TYPE) parameters and a native body, compiled at load time."
+  (openldk.interop::%expand-typed-function-definition
+   name parameters source captures forms return-type '%make-native-function))
+
+(openldk.interop::%register-function-syntax 'defun-scala :scala)
+
+(defun %make-native-function (name names types source captures values return-type)
+  (let* ((declarations (mapcar (lambda (n type) (format nil "~A: ~A" n type)) names types))
+         (definition (format nil "{ def ~A(~{~A~^, ~})~A = {~%~A~%}; ~A _ }"
+                             name declarations
+                             (if return-type (format nil ": ~A" return-type) "") source name))
+         (factory (if captures
+                      (format nil "(~{~A~^, ~}) => ~A"
+                              (mapcar (lambda (n v) (format nil "~A: ~A" n (%scala-type v)))
+                                      captures values)
+                              definition)
+                      definition)))
+    (let ((function (eval-raw factory)))
+      (when captures
+        (setf function
+              (with-foreign-errors ("Scala")
+                (apply #'java-call
+                       (format nil "apply(~{~A~})"
+                               (make-list (length values) :initial-element "Ljava/lang/Object;"))
+                       function (mapcar #'from-lisp values)))))
+      (make-foreign-function
+       function "Scala"
+       (lambda (object &rest args)
+         (to-lisp
+          (with-foreign-errors ("Scala")
+            (apply #'java-call
+                   (format nil "apply(~{~A~})"
+                           (make-list (length types) :initial-element "Ljava/lang/Object;"))
+                   object (mapcar #'%native-argument args types)))))))))
+
+(defun %native-argument (value type)
+  "Box a primitive according to its declared type, independent of VALUE's size."
+  (let ((entry (assoc type '(("Int" "java.lang.Integer" "I")
+                              ("Long" "java.lang.Long" "J")
+                              ("Short" "java.lang.Short" "S")
+                              ("Byte" "java.lang.Byte" "B")
+                              ("Double" "java.lang.Double" "D")
+                              ("Float" "java.lang.Float" "F")
+                              ("Char" "java.lang.Character" "C")
+                              ("Boolean" "java.lang.Boolean" "Z"))
+                      :test #'string=)))
+    (if entry
+        (java-static (second entry) (format nil "valueOf(~A)" (third entry))
+                     (if (member type '("Short" "Byte") :test #'string=)
+                         (round value)
+                         (%scala-argument value type)))
+        (from-lisp value))))

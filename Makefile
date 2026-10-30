@@ -260,7 +260,7 @@ BUILDDIR := $(shell pwd)
 testsuite/mauve/gnu/testlet/config.class: testsuite/mauve/gnu/testlet/config.java.in Makefile
 	sed -e 's|@SRCDIR@|$(SRCDIR)|g' \
 	    -e 's|@BUILDDIR@|$(BUILDDIR)|g' \
-	    -e 's|@TMPDIR@|/tmp)|g' \
+	    -e 's|@TMPDIR@|/tmp|g' \
 	    < testsuite/mauve/gnu/testlet/config.java.in > testsuite/mauve/gnu/testlet/config.java
 	(cd testsuite/mauve; $(JAVAC) gnu/testlet/config.java)
 
@@ -274,6 +274,10 @@ check-verifier: openldk | check-jdk
 	python3 test/verifier/check.py
 
 .PHONY: check-jni check-jni-zstd
+.PHONY: check-native-access
+check-native-access: openldk jni | check-jdk
+	python3 test/native-access/check.py
+
 check-jni: openldk jni | check-jdk
 	python3 test/jni/check.py
 
@@ -297,6 +301,13 @@ bench-remainder:
 .PHONY: check-language check-modern check-compat
 check-compat: openldk | check-jdk
 	python3 test/compat/check.py
+
+.PHONY: check-standards check-loader-constraints
+check-standards: openldk | check-jdk
+	python3 test/standards/check.py
+
+check-loader-constraints: openldk | check-jdk
+	python3 test/standards/check.py --probe LoaderConstraintProbe
 
 check-modern: openldk | check-jdk
 	python3 test/modern/check.py

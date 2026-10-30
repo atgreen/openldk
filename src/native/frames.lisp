@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2024, 2025  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2024, 2025, 2026  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 ;;;
@@ -149,6 +149,15 @@ function implementing a caller-sensitive method, which must be running."
          (callee (position-if (lambda (frame) (eq (%frame-head frame) function-name)) backtrace)))
     (and callee (some #'%frame-caller-java-class (nthcdr (1+ callee) backtrace)))))
 
+(defun |jdk/internal/misc/VM.latestUserDefinedLoader0()Ljava/lang/ClassLoader;| ()
+  "Find the nearest application loader, skipping bootstrap and platform frames."
+  (loop for frame in (%filtered-backtrace)
+        for class = (%frame-caller-java-class frame)
+        for loader = (and class (slot-value class '|classLoader|))
+        when (and loader
+                  (not (eq loader (|java/lang/ClassLoader.getPlatformClassLoader()Ljava/lang/ClassLoader;|))))
+          return loader))
+
 (defun |sun/reflect/Reflection.getCallerClass(I)| (index)
   (let ((backtrace (%filtered-backtrace)))
     (%get-java-class-by-bin-name
@@ -241,26 +250,33 @@ arrays. Resolving an array never initializes its component class."
 no class file (openldk/LambdaSupplier, a dynamic lambda class): a public
 final synthetic subclass of Object implementing the Java interfaces among
 its superclasses, made and registered on first use; or NIL for any other."
-  (let ((cname (and (symbolp class-symbol) (symbol-name class-symbol))))
-    (when (and cname (eq (symbol-package class-symbol) (find-package :openldk))
+  (let* ((cname (and (symbolp class-symbol) (symbol-name class-symbol)))
+         (loader (and cname (or (%ldk-loader-for-symbol class-symbol) *boot-ldk-class-loader*))))
+    (when (and cname (or (eq (symbol-package class-symbol) (find-package :openldk)) (%user-ldk-loader-p loader))
                (starts-with? "openldk/" cname)
                (find-class class-symbol nil))
-      (or (gethash cname *java-classes-by-bin-name*)
+      (or (gethash cname (slot-value loader 'java-classes-by-bin-name))
           (let* ((fq-name (substitute #\. #\/ cname))
                  (jclass (%make-java-instance "java/lang/Class"))
                  (lclass (make-instance '<class>))
                  (interfaces
                    (loop for super in (closer-mop:class-direct-superclasses (find-class class-symbol))
                          for super-name = (symbol-name (class-name super))
-                         for super-lclass = (gethash super-name *ldk-classes-by-bin-name*)
+                         for super-lclass = (%get-ldk-class-by-bin-name super-name t loader)
                          when (and super-lclass (logtest #x200 (or (access-flags super-lclass) 0)))
                            collect super-name)))
             (setf (slot-value jclass '|name|) (ijstring fq-name))
+            (when (%user-ldk-loader-p loader)
+              (setf (slot-value jclass *java-loader-owner-slot*) loader
+                    (slot-value jclass '|classLoader|) (java-loader loader)))
             (when (slot-exists-p jclass '|modifiers|)
               (setf (slot-value jclass '|modifiers|) #x1011))
             (when (and *unnamed-module* (slot-exists-p jclass '|module|))
-              (setf (slot-value jclass '|module|) *unnamed-module*))
+              (setf (slot-value jclass '|module|)
+                    (if (%user-ldk-loader-p loader)
+                        (%defining-class-module cname loader (java-loader loader)) *unnamed-module*)))
             (setf (name lclass) cname
+                  (ldk-loader lclass) loader
                   (super lclass) "java/lang/Object"
                   (interfaces lclass) (coerce interfaces 'vector)
                   (access-flags lclass) #x1011
@@ -270,6 +286,10 @@ its superclasses, made and registered on first use; or NIL for any other."
                   (attributes lclass) (make-hash-table :test #'equal)
                   (initialized-p lclass) t
                   (java-class lclass) jclass)
+            (setf (gethash fq-name (slot-value loader 'ldk-classes-by-fq-name)) lclass
+                  (gethash cname (slot-value loader 'ldk-classes-by-bin-name)) lclass
+                  (gethash fq-name (slot-value loader 'java-classes-by-fq-name)) jclass
+                  (gethash cname (slot-value loader 'java-classes-by-bin-name)) jclass)
             (setf (gethash fq-name *ldk-classes-by-fq-name*) lclass
                   (gethash cname *ldk-classes-by-bin-name*) lclass
                   (gethash fq-name *java-classes-by-fq-name*) jclass
@@ -378,6 +398,13 @@ its superclasses, made and registered on first use; or NIL for any other."
                                     (java-class (%get-ldk-class-by-bin-name lname)))
                                (let ((klass (classload lname)))
                                  (when klass (java-class klass))))))))
+           (when result
+             (let ((class (get-ldk-class-for-java-class result)))
+               ;; Lisp descriptor lookups also pass NIL and may use the
+               ;; compatibility tables. Such a result was not initiated by
+               ;; the bootstrap loader: preserve its actual defining loader.
+               (%record-initiating-class class (if loader (get-ldk-loader-for-java-loader loader)
+                                                  (ldk-loader class)))))
            ;; Per JVM spec: when initialize=true, ensure <clinit> has run.
            ;; Previously only the classload branch called %clinit; the findClass
            ;; and already-loaded branches skipped it, breaking autoloads that
@@ -457,35 +484,43 @@ Clock.currentInstant, and so Instant.now()."
   "Copies LENGTH elements from SRC-ARRAY starting at SRC-POS
    to DEST-ARRAY starting at DEST-POS.
    Handles overlapping regions correctly even within the same array."
-  (let ((src-array (java-array-data src-array))
-        (dest-array (java-array-data dest-array)))
-
-    (declare (type array src-array dest-array)
-             (type fixnum src-pos dest-pos length))
-
-    ;; Validate arguments
+  (when (or (null src-array) (null dest-array))
+    (%throw '|java/lang/NullPointerException|))
+  (unless (and (java-array-p src-array) (java-array-p dest-array))
+    (%throw '|java/lang/ArrayStoreException|))
+  (let* ((src-component (%array-component-class src-array))
+         (dest-component (%array-component-class dest-array))
+         (src-primitive (not (eq t (%component-element-type src-component))))
+         (dest-primitive (not (eq t (%component-element-type dest-component))))
+         (src-data (java-array-data src-array))
+         (dest-data (java-array-data dest-array)))
+    ;; Array kinds are checked even for zero-length copies, before bounds.
+    ;; byte[] and boolean[] share Lisp storage but are distinct Java types.
+    (when (or (not (eq src-primitive dest-primitive))
+              (and src-primitive (not (eq src-component dest-component))))
+      (%throw '|java/lang/ArrayStoreException|))
     (when (< length 0)
       (%throw-arraycopy-index-error "length ~A" length))
-
     (when (< src-pos 0)
       (%throw-arraycopy-index-error "source position ~A" src-pos))
-
     (when (< dest-pos 0)
       (%throw-arraycopy-index-error "destination position ~A" dest-pos))
-
-    (when (> (+ src-pos length) (array-total-size src-array))
+    (when (> (+ src-pos length) (length src-data))
       (%throw-arraycopy-index-error "source size=~A, access=~A"
-                                    (array-total-size src-array) (+ src-pos length -1)))
-
-    (when (> (+ dest-pos length) (array-total-size dest-array))
+                                    (length src-data) (+ src-pos length -1)))
+    (when (> (+ dest-pos length) (length dest-data))
       (%throw-arraycopy-index-error "destination size=~A, access=~A"
-                                    (array-total-size dest-array) (+ dest-pos length -1)))
-
-    ;; REPLACE copies overlapping regions of one array correctly, and is a
-    ;; block move when both arrays have the same specialized element type.
-    (replace dest-array src-array
-             :start1 dest-pos :end1 (+ dest-pos length)
-             :start2 src-pos)
+                                    (length dest-data) (+ dest-pos length -1)))
+    (if (or src-primitive (eq src-component dest-component)
+            (eq t (%array-store-check dest-component)))
+        ;; Keep block moves for primitive arrays and known-safe reference
+        ;; types. REPLACE also preserves memmove semantics for overlap.
+        (replace dest-data src-data :start1 dest-pos :end1 (+ dest-pos length)
+                                    :start2 src-pos)
+        ;; On an incompatible element Java requires the compatible prefix
+        ;; to remain copied, with the rest of the destination untouched.
+        (dotimes (i length)
+          (%aastore dest-array (+ dest-pos i) (aref src-data (+ src-pos i)))))
     nil))
 
 (defmethod |java/security/AccessController.doPrivileged(Ljava/security/PrivilegedAction;)Ljava/lang/Object;| (action)

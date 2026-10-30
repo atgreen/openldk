@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2025  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2025, 2026  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 ;;;
@@ -25,7 +25,7 @@
 ;;; conditions of the GNU General Public License cover the whole
 ;;; combination.
 
-;;; As a special exception, the copyright holders of the library give
+;;; As a special exception, the copyright holders of this library give
 ;;; you permission to link this library with independent modules to
 ;;; produce an executable, regardless of the license terms of these
 ;;; independent modules, and to copy and distribute the resulting
@@ -232,7 +232,7 @@ protocol field, or parse it out of the URL's string form."
   ()
   (:documentation "Stub for java.net.JarURLConnection; populated at runtime."))
 
-(defvar *connection-urls* (make-hash-table :test #'eq :synchronized t)
+(defvar *connection-urls* (make-hash-table :test #'eq :weakness :key :synchronized t)
   "Synthetic URLConnection -> its java.net.URL.")
 
 (defun %url-string-of (url)

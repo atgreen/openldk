@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2024, 2025  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2024, 2025, 2026  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 ;;;
@@ -328,6 +328,8 @@ lambda over Jackson 2 classes behind a check that they are present."
     method-name-table  ; lazy hash set of lispized name+descriptor strings
     content-hash       ; MD5 of the classfile, hex, for the FASL cache
     ldk-loader)  ; <ldk-class-loader> that loaded this class
+   (runtime-roots :std nil)
+   (static-instance :std nil)
    (verified-p :std nil)
    (verification-name :std nil)))
 

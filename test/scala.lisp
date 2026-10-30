@@ -1,8 +1,46 @@
+;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK-SCALA-TESTS; Base: 10 -*-
+;;;
+;;; Copyright (C) 2026  Anthony Green <green@moxielogic.com>
+;;;
+;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+;;;
+;;; This file is part of OpenLDK.
+
+;;; OpenLDK is free software; you can redistribute it and/or modify it
+;;; under the terms of the GNU General Public License as published by
+;;; the Free Software Foundation; either version 3, or (at your
+;;; option) any later version.
+
+;;; OpenLDK is distributed in the hope that it will be useful, but
+;;; WITHOUT ANY WARRANTY; without even the implied warranty of
+;;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+;;; General Public License for more details.
+
+;;; You should have received a copy of the GNU General Public License
+;;; along with OpenLDK; see the file COPYING.  If not, please see
+;;; <http://www.gnu.org/licenses/>.
+
+;;; Linking this library statically or dynamically with other modules is
+;;; making a combined work based on this library.  Thus, the terms and
+;;; conditions of the GNU General Public License cover the whole
+;;; combination.
+
+;;; As a special exception, the copyright holders of this library give
+;;; you permission to link this library with independent modules to
+;;; produce an executable, regardless of the license terms of these
+;;; independent modules, and to copy and distribute the resulting
+;;; executable under terms of your choice, provided that you also
+;;; meet, for each linked independent module, the terms and conditions
+;;; of the license of that module.  An independent module is a module
+;;; which is not derived from or based on this library.  If you modify
+;;; this library, you may extend this exception to your version of the
+;;; library, but you are not obligated to do so.  If you do not wish
+;;; to do so, delete this exception statement from your version.
+
 ;;;; Tests for openldk/scala: Scala from Common Lisp (FiveAM).
 ;;;;
 ;;;; Needs Scala's jars, downloaded by `make sbcl-scala`.  `make check-scala`
 ;;;; runs these in the sbcl-scala image, where Scala is already started.
-
 (defpackage :openldk-scala-tests
   (:use :cl :fiveam))
 
@@ -98,3 +136,107 @@
   ;; Typed splices: compiled with this file, when Scala runs at COMPILE-FILE.
   (let ((n 7))
     (is (= 14 #@sc{ $(the (signed-byte 32) n) * 2 }))))
+
+;;; Typed native definitions use this file's private source readtable.
+(defun-scala native_add ((a :int) (b :int))
+  a + b)
+
+(defun-scala native_greet ((name :string))
+  name.toUpperCase)
+
+(defun-scala native_factorial ((n :int)) :returns :int
+  if (n < 2) 1 else n * native_factorial(n - 1))
+
+(defun-scala native_zero ()
+  42)
+
+(defun-scala native_literal ()
+  "a ) } // /* $literal")
+
+(test native-definitions
+  (is (= 7 (native_add 3 4)))
+  (is (= 42 (funcall #'native_add 20 22)))
+  (is (equal '(2 3 4) (mapcar (lambda (n) (native_add n 1)) '(1 2 3))))
+  (is (string= "HELLO" (native_greet "hello")))
+  (is (= 120 (native_factorial 5)))
+  (is (= 42 (native_zero)))
+  (is (string= "a ) } // /* $literal" (native_literal)))
+  (signals program-error (funcall #'native_add 1)))
+
+(test native-capture-once
+  (let ((factor 3))
+    (defun-scala native_times ((n :int))
+      n * $factor)
+    (setf factor 9)
+    (is (= 21 (native_times 7)))))
+
+(test native-compile-once
+  (let* ((original (symbol-function 'scala:eval-raw))
+         (count 0)
+         (*package* (find-package :openldk-scala-tests))
+         (*readtable* (openldk.interop:enable-source-syntax (copy-readtable nil))))
+    (unwind-protect
+         (progn
+           (setf (symbol-function 'scala:eval-raw)
+                 (lambda (&rest args) (incf count) (apply original args)))
+           (eval (read-from-string "(defun-scala native_once ((n :int)) n + 1)"))
+           (is (= 1 count))
+           (is (= 5 (native_once 4)))
+           (is (= 6 (native_once 5)))
+           (is (= 1 count)))
+      (setf (symbol-function 'scala:eval-raw) original))))
+
+(test native-type-conversions
+  (defun-scala native_long ((n :long)) n + 1L)
+  (defun-scala native_double ((n :double)) n * 2.0)
+  (defun-scala native_boolean ((flag :boolean)) !flag)
+  (defun-scala native_list ((xs "List[Int]")) xs.sum)
+  (is (= 10000000001 (native_long 10000000000)))
+  (is (= 5.0d0 (native_double 2.5d0)))
+  (is (= 4.0d0 (native_double 2)))
+  (is (= 2 (native_long 1)))
+  (is (null (native_boolean t)))
+  (is (eq t (native_boolean :false)))
+  (is (eq t (native_boolean nil)))
+  (is (= 6 (native_list '(1 2 3)))))
+
+(test native-compile-file
+  (let* ((source (merge-pathnames (format nil "openldk-scala-definition-~A.lisp" (gensym))
+                                 (uiop:temporary-directory)))
+         (fasl (compile-file-pathname source))
+         (calls 0)
+         (original (symbol-function 'scala:eval-raw)))
+    (unwind-protect
+         (progn
+           (with-open-file (out source :direction :output :if-exists :supersede)
+             (format out "(in-package :openldk-scala-tests)~%(eval-when (:compile-toplevel :load-toplevel :execute) (setf *readtable* (scala:enable-syntax (copy-readtable))))~%(defun-scala native_fasl ((x :int)) x + 1)~%"))
+           (setf (symbol-function 'scala:eval-raw)
+                 (lambda (&rest args) (incf calls) (apply original args)))
+           (is (not (nth-value 2 (compile-file source))))
+           (is (= 0 calls))
+           (let ((*readtable* (copy-readtable nil))) (load fasl))
+           (is (= 1 calls))
+           (is (= 42 (funcall 'native_fasl 41)))
+           (is (= 1 calls)))
+      (setf (symbol-function 'scala:eval-raw) original)
+      (when (fboundp 'native_fasl) (fmakunbound 'native_fasl))
+      (dolist (path (list source fasl)) (when (probe-file path) (delete-file path))))))
+
+(defun-scala native_four ((a :int) (b :int) (c :int) (d :int))
+  a + b + c + d)
+
+(test native-four-arguments
+  (is (= 10 (native_four 1 2 3 4))))
+
+(test native-captured-recursion
+  (let ((factor 2))
+    (defun-scala native_recursive_capture ((n :int)) :returns :int
+      if (n < 1) $factor else n * native_recursive_capture(n - 1))
+    (is (= 48 (native_recursive_capture 4)))))
+
+(test native-captures-converted-once
+  (let ((xs (list 1 2 3)))
+    (defun-scala native_captured_list ()
+      $xs.length)
+    (setf (cdr xs) nil)
+    (is (= 3 (native_captured_list)))))

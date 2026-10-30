@@ -1,9 +1,47 @@
+;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK-CLOJURE-TESTS; Base: 10 -*-
+;;;
+;;; Copyright (C) 2026  Anthony Green <green@moxielogic.com>
+;;;
+;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+;;;
+;;; This file is part of OpenLDK.
+
+;;; OpenLDK is free software; you can redistribute it and/or modify it
+;;; under the terms of the GNU General Public License as published by
+;;; the Free Software Foundation; either version 3, or (at your
+;;; option) any later version.
+
+;;; OpenLDK is distributed in the hope that it will be useful, but
+;;; WITHOUT ANY WARRANTY; without even the implied warranty of
+;;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+;;; General Public License for more details.
+
+;;; You should have received a copy of the GNU General Public License
+;;; along with OpenLDK; see the file COPYING.  If not, please see
+;;; <http://www.gnu.org/licenses/>.
+
+;;; Linking this library statically or dynamically with other modules is
+;;; making a combined work based on this library.  Thus, the terms and
+;;; conditions of the GNU General Public License cover the whole
+;;; combination.
+
+;;; As a special exception, the copyright holders of this library give
+;;; you permission to link this library with independent modules to
+;;; produce an executable, regardless of the license terms of these
+;;; independent modules, and to copy and distribute the resulting
+;;; executable under terms of your choice, provided that you also
+;;; meet, for each linked independent module, the terms and conditions
+;;; of the license of that module.  An independent module is a module
+;;; which is not derived from or based on this library.  If you modify
+;;; this library, you may extend this exception to your version of the
+;;; library, but you are not obligated to do so.  If you do not wish
+;;; to do so, delete this exception statement from your version.
+
 ;;;; Tests for openldk/clojure: Clojure from Common Lisp (FiveAM).
 ;;;;
 ;;;; Needs Clojure's jars, downloaded by `make clojure`.  Starting Clojure
 ;;;; takes minutes, so `make check-clojure` runs these in the sbcl-clojure
 ;;;; image, where it's already started.
-
 (defpackage :openldk-clojure-tests
   (:use :cl :fiveam))
 
@@ -137,3 +175,169 @@
 
 (test clojure-syntax-is-reentrant
   (is (= 55 (clojure-countdown 10)) "each level of the recursion keeps its own N"))
+
+(defun-clojure native-clojure-add (a b)
+  (let [sum (+ a b)] {:sum sum :values [a b]}))
+
+(clojure:defun-clojure native-clojure-factorial (n)
+  (if (< n 2) 1 (* n (native-clojure-factorial (dec n)))))
+
+(defun-clojure native-clojure-case (s)
+  (.toUpperCase s))
+
+(test native-clojure-definitions
+  (is (= 7 (gethash :sum (native-clojure-add 3 4))))
+  (is (equalp #(3 4) (gethash :values (funcall #'native-clojure-add 3 4))))
+  (is (= 720 (native-clojure-factorial 6)))
+  (is (string= "HELLO" (native-clojure-case "hello")))
+  (is (equal '("A" "B") (mapcar #'native-clojure-case '("a" "b"))))
+  (signals program-error (funcall (symbol-function 'native-clojure-add) 1)))
+
+(test native-clojure-compiles-once
+  (let* ((*readtable* (clojure:enable-syntax (copy-readtable)))
+         (*package* (find-package :openldk-clojure-tests))
+         (calls 0)
+         (original (symbol-function 'clojure:eval-string)))
+    (unwind-protect
+         (progn
+           (setf (symbol-function 'clojure:eval-string)
+                 (lambda (source) (incf calls) (funcall original source)))
+           (eval (read-from-string "(defun-clojure native-once (a b) (+ a b))"))
+           (is (= 1 calls))
+           (dotimes (i 5) (is (= (+ i 2) (funcall 'native-once i 2))))
+           (is (= 1 calls)))
+      (setf (symbol-function 'clojure:eval-string) original)
+      (fmakunbound 'native-once))))
+
+(test native-clojure-lexical-capture
+  (let ((factor 3))
+    (defun-clojure native-scaled (n) (* n $factor))
+    (is (= 21 (native-scaled 7)))
+    (setf factor 9)
+    (is (= 21 (native-scaled 7)) "the foreign closure captures the value at definition time")))
+
+(test native-clojure-compile-file
+  (let* ((source (merge-pathnames (format nil "openldk-definition-~A.lisp" (gensym))
+                                  (uiop:temporary-directory)))
+         (fasl (compile-file-pathname source))
+         (calls 0)
+         (original (symbol-function 'clojure:eval-string)))
+    (unwind-protect
+         (progn
+           (with-open-file (out source :direction :output :if-exists :supersede)
+             (format out "(in-package :openldk-clojure-tests)~%(eval-when (:compile-toplevel :load-toplevel :execute) (setf *readtable* (clojure:enable-syntax (copy-readtable))))~%(defun-clojure native-fasl (x) (inc x))~%"))
+           (setf (symbol-function 'clojure:eval-string)
+                 (lambda (text) (incf calls) (funcall original text)))
+           (is (not (nth-value 2 (compile-file source))))
+           (is (= 0 calls) "COMPILE-FILE does not run the foreign compiler")
+           (let ((*readtable* (copy-readtable nil))) (load fasl))
+           (is (= 1 calls) "FASL load compiles the native function")
+           (is (= 42 (funcall 'native-fasl 41)))
+           (is (= 1 calls) "ordinary calls invoke the retained function"))
+      (setf (symbol-function 'clojure:eval-string) original)
+      (when (fboundp 'native-fasl) (fmakunbound 'native-fasl))
+      (dolist (path (list source fasl)) (when (probe-file path) (delete-file path))))))
+
+(test clojure-multiple-vector-delimiters
+  (is (equalp #(#(1 2) #(3 4))
+              #[ (let [xs [1 2] ys [3 4]] [xs ys]) ]))
+  (is (equalp #(1 2 3 4)
+              #[ (let [[a b] [1 2] [c d] [3 4]] [a b c d]) ]))
+  (is (equalp #(#(1 2) #(3 #(4 5))) #[ [[1 2] [3 [4 5]]] ]))
+  (let ((n 10))
+    (is (equalp #(#(10 11) #(12 13))
+                #[ (let [xs [$n (inc $n)] ys [(+ $n 2) (+ $n 3)]]
+                     [xs ys]) ])))
+  (is (equalp #(#(2 1) #(4 3))
+              #@clj{ (mapv (fn [[a b]] [b a]) [[1 2] [3 4]]) }))
+  (defun-clojure native-vector-destructuring (n)
+    (let [[a b] [n (inc n)] [c d] [(+ n 2) (+ n 3)]]
+      [[a b] [c d]]))
+  (is (equalp #(#(1 2) #(3 4)) (native-vector-destructuring 1))))
+
+(defun %vector-stress-source (seed depth)
+  "Deterministic Clojure forms, deliberately mixing all delimiter kinds."
+  (if (zerop depth)
+      (nth (mod seed 8)
+           '("[]" "[1 2]" "[[] []]" "\"[ ] ) }\"" "\\[" "\\]"
+             "#\"[\\[\\]]\"" "[\"escaped \\\" ]\" []]"))
+      (let ((inner (%vector-stress-source (+ (* seed 17) 11) (1- depth))))
+        (case (mod seed 6)
+          (0 (format nil "[~A [] [~D]]" inner seed))
+          (1 (format nil "{:left [~A] :right [[] []]}" inner))
+          (2 (format nil "#{[~A]}" inner))
+          (3 (format nil "(identity [~A []])" inner))
+          (4 (format nil "^:stress [~A [~D]]" inner seed))
+          (t (format nil "'[~A []]" inner))))))
+
+(test clojure-generated-vector-reader
+  (let ((*readtable* (clojure:enable-syntax (copy-readtable nil)))
+        (sources nil))
+    (dotimes (seed 1024)
+      (let* ((source (format nil "~{~A~^ ~}"
+                             (loop for sibling below (1+ (mod seed 16))
+                                   collect (%vector-stress-source (+ seed sibling) (mod seed 9)))))
+             (text (format nil "#[~A] :after" source)))
+        (push source sources)
+        (with-input-from-string (stream text)
+          (let ((form (read stream)))
+            (is (string= source (second form)) "Generated case ~D" seed)
+            (is (eq :after (read stream)) "Block boundary in case ~D" seed)))))
+    ;; Independently verify that the generated inputs are legal Clojure.
+    (is (every #'identity
+               (funcall (clojure:eval-string
+                         "(fn [sources] (mapv (fn [s] (read-string (str \"[\" s \"]\")) true) sources))")
+                        sources)))))
+
+(test clojure-comment-vector-delimiters
+  (let ((*readtable* (clojure:enable-syntax (copy-readtable nil))))
+    (dolist (comment '(";" "#!"))
+      (dolist (ending (list (string #\Newline) (string #\Return)
+                            (format nil "~C~C" #\Return #\Newline)))
+        (let* ((source (format nil "[[1 2] ~A ignored ] } ) [ $unbound~A[3 4]]" comment ending))
+               (text (format nil "#[~A] :after" source)))
+          ;; Clojure itself accepts each source, independently of our reader.
+          (is (equalp #(#(1 2) #(3 4)) (clojure:eval-string source)))
+          (with-input-from-string (stream text)
+            (let ((form (read stream)))
+              (is (eq :after (read stream)))
+              (is (equalp #(#(1 2) #(3 4)) (eval form))))))))))
+
+(test clojure-dispatch-comments-in-all-syntaxes
+  (is (equalp #(#(1 2) #(3 4))
+              #@clj{ [[1 2] #! ignore ] } ) [ $unbound
+                       [3 4]] }))
+  (defun-clojure native-comment-vectors (n)
+    (let [xs [n (inc n)] #! ignore ] } ) [ $unbound
+          ys [(+ n 2) (+ n 3)]]
+      [xs ys]))
+  (is (equalp #(#(1 2) #(3 4)) (native-comment-vectors 1))))
+
+(test clojure-generated-vector-evaluation
+  (let ((*readtable* (clojure:enable-syntax (copy-readtable nil))))
+    (labels ((build (seed depth)
+               (if (zerop depth)
+                   (values (princ-to-string seed) seed)
+                   (let ((sources nil) (values nil))
+                     (dotimes (i (1+ (mod seed 3)))
+                       (multiple-value-bind (source value) (build (+ (* seed 3) i 1) (1- depth))
+                         (push source sources) (push value values)))
+                     (values (format nil "[~{~A~^ ~}]" (nreverse sources))
+                             (coerce (nreverse values) 'vector))))))
+      ;; One compilation for the batch; expected values come from CL, not
+      ;; the Clojure adapter or its reader.
+      (let ((sources nil) (expected nil))
+        (dotimes (i 32)
+          (multiple-value-bind (source value) (build i (mod i 4))
+            (push source sources) (push value expected)))
+        (is (equalp (coerce (nreverse expected) 'vector)
+                    (eval (read-from-string
+                           (format nil "#[ [~{~A~^ ~}] ]" (nreverse sources))))))))))
+
+(test clojure-map-without-result-conversion
+  (clojure:eval-string "(defn raw-map-probe [] {:x 42})")
+  (let ((raw (openldk.interop:java-call
+              "invoke()Ljava/lang/Object;" (clojure:lookup "user/raw-map-probe"))))
+    (is (not (hash-table-p raw)))
+    (is (typep raw (openldk.interop:java-class-symbol "clojure.lang.IPersistentMap")))
+    (is (= 42 (gethash :x (clojure:to-lisp raw))))))

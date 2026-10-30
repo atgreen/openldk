@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2024, 2025  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2024, 2025, 2026  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 ;;;
@@ -43,6 +43,29 @@
 
 ;;; --- Reflective method/constructor invocation (JDK 9+: jdk/internal/reflect) ---
 
+(defun |java/io/ObjectStreamClass.hasStaticInitializer(Ljava/lang/Class;)Z| (java-class)
+  "Inspect the declared initializer without running it or searching superclasses."
+  (let ((class (get-ldk-class-for-java-class java-class)))
+    (if (and class (find "<clinit>" (methods class) :key #'name :test #'string=)) 1 0)))
+
+(defvar *serialization-constructor-classes*
+  (make-hash-table :test #'eq :weakness :key :synchronized t)
+  "Serialization constructors retain their allocation class only while live.")
+
+(defun %serialization-constructor (factory java-class constructor)
+  "Keep the superclass constructor's metadata and allocate JAVA-CLASS on invocation."
+  (declare (ignore factory))
+  (%clinit (get-ldk-class-for-java-class java-class))
+  (let ((copy (|newWithAccessor(Ljdk/internal/reflect/ConstructorAccessor;)Ljava/lang/reflect/Constructor;|
+               constructor nil)))
+    (setf (slot-value copy '|override|) 1
+          (gethash copy *serialization-constructor-classes*) java-class)
+    copy))
+
+(setf (gethash "jdk/internal/reflect/ReflectionFactory.generateConstructor(Ljava/lang/Class;Ljava/lang/reflect/Constructor;)Ljava/lang/reflect/Constructor;"
+               *native-overrides*)
+      #'%serialization-constructor)
+
 (defun %invoke-reflection-target (function arguments)
   "Wrap exceptions from the target body, after reflection's own checks and initialization."
   (handler-case (apply function arguments)
@@ -50,6 +73,22 @@
       (let ((wrapper (%make-java-instance "java/lang/reflect/InvocationTargetException")))
         (|<init>(Ljava/lang/Throwable;)V| wrapper (slot-value condition '|objref|))
         (error (%lisp-condition wrapper))))))
+
+(defun %reflection-arguments (parameters arguments)
+  "Return validated arguments without changing the caller's Object array."
+  (let ((count (if parameters (length (java-array-data parameters)) 0))
+        (supplied (if arguments (length (java-array-data arguments)) 0)))
+    (unless (= count supplied)
+      (%throw '|java/lang/IllegalArgumentException| "Wrong number of arguments"))
+    (loop for i below count
+          collect (%reflection-convert-value (jaref arguments i) (jaref parameters i)))))
+
+(defun %reflection-receiver (declaring receiver)
+  "Check an instance member's receiver before inspecting its arguments."
+  (unless receiver (%throw '|java/lang/NullPointerException|))
+  (unless (eql 1 (|isInstance(Ljava/lang/Object;)Z| declaring receiver))
+    (%throw '|java/lang/IllegalArgumentException| "Wrong receiver class"))
+  receiver)
 
 (defun |jdk/internal/reflect/NativeMethodAccessorImpl.invoke0(Ljava/lang/reflect/Method;Ljava/lang/Object;[Ljava/lang/Object;)|
     (method obj args)
@@ -62,19 +101,6 @@
          (is-static (not (zerop (logand modifiers #x0008))))
          (descriptor (%build-method-descriptor return-type param-types))
          (lispized (lispize-method-name (format nil "~A~A" method-name descriptor))))
-    ;; Unbox wrapper arguments where the target parameter is a primitive: the
-    ;; Lisp method expects a raw value, not a java.lang.{Integer,Long,...}.
-    ;; (The sun.reflect invoke0 does the same.) Without this, reflective calls to
-    ;; primitive-signature methods -- e.g. clojure Numbers.shiftLeft(long,long) --
-    ;; receive boxed wrappers and NPE inside the callee.
-    (when (and args param-types)
-      (dotimes (i (length (java-array-data args)))
-        (let ((arg (jaref args i))
-              (param-type (jaref param-types i)))
-          (when (and arg param-type
-                     (eq 1 (|isPrimitive()Z| param-type))
-                     (slot-exists-p arg '|value|))
-            (setf (jaref args i) (slot-value arg '|value|))))))
     (let* ((class-name (substitute #\/ #\. (lstring (slot-value declaring-class '|name|))))
            (fn-name (if is-static
                         (format nil "~A.~A" class-name lispized)
@@ -88,9 +114,8 @@
                fn-name class-name is-static))
       (if is-static
           (%clinit (get-ldk-class-for-java-class declaring-class))
-          (unless obj (%throw '|java/lang/NullPointerException|)))
-      (let* ((lisp-args (when args
-                          (coerce (java-array-data args) 'list)))
+          (%reflection-receiver declaring-class obj))
+      (let* ((lisp-args (%reflection-arguments param-types args))
              (result (%invoke-reflection-target sym (if is-static lisp-args (cons obj lisp-args))))
              ;; Return descriptor char is the one just past the ')'.
              (ret-char (char descriptor (1+ (position #\) descriptor)))))
@@ -115,7 +140,7 @@
    method obj args))
 
 (defun |jdk/internal/reflect/NativeConstructorAccessorImpl.newInstance0(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)|
-    (constructor args)
+    (constructor args &optional allocation-class)
   "Native reflective constructor invocation for JDK 9+."
   (let* ((declaring-class (slot-value constructor '|clazz|))
          (param-types (slot-value constructor '|parameterTypes|))
@@ -126,18 +151,20 @@
          (lispized (lispize-method-name (format nil "<init>~A" descriptor)))
          (pkg (find-package :openldk))
          (sym (find-symbol lispized pkg)))
-    (%clinit (get-ldk-class-for-java-class declaring-class))
-    (let ((instance (%make-java-instance class-name
-                                         (get-ldk-loader-for-java-loader
-                                          (slot-value declaring-class '|classLoader|))))
-          ;; Constructor.newInstance passes primitives boxed.
-          (lisp-args (when args
-                       (%unbox-args-for-descriptor descriptor (coerce (java-array-data args) 'list)))))
-      (if (and sym (fboundp sym))
-          (%invoke-reflection-target sym (cons instance lisp-args))
-          (internal-error "Reflective newInstance0: constructor ~A not found for class ~A"
-                 lispized class-name))
-      instance)))
+    (let* ((allocated-class (or allocation-class declaring-class))
+           (allocated-name (substitute #\/ #\. (lstring (slot-value allocated-class '|name|)))))
+      (%clinit (get-ldk-class-for-java-class allocated-class))
+      (let ((instance (%make-java-instance allocated-name
+                                          (get-ldk-loader-for-java-loader
+                                           (slot-value allocated-class '|classLoader|))))
+            (lisp-args (%reflection-arguments param-types args)))
+        (if (and sym (fboundp sym))
+            (%invoke-reflection-target #'invoke-special
+                                       (list sym (intern class-name (%java-class-package declaring-class))
+                                             (cons instance lisp-args)))
+            (internal-error "Reflective newInstance0: constructor ~A not found for class ~A"
+                   lispized class-name))
+        instance))))
 
 ;; JDK 21 routes Constructor.newInstance through this accessor class.
 (defun |jdk/internal/reflect/DirectConstructorHandleAccessor$NativeAccessor.newInstance0(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)Ljava/lang/Object;|
@@ -170,8 +197,7 @@
       (let* ((name (lstring (slot-value jclass '|name|)))
              (pkg (class-package "gnu/bytecode/Type"))
              (static-sym (find-symbol "+static-gnu/bytecode/Type+" pkg))
-             (static-holder (when (and static-sym (boundp static-sym))
-                              (symbol-value static-sym)))
+             (static-holder (when static-sym (ignore-errors (%java-static-value static-sym))))
              (field-name (cond
                            ((string= name "void")    "voidType")
                            ((string= name "int")     "intType")
@@ -224,18 +250,10 @@
                                                 ;; JDK 17: Field(Class, String, Class, int, boolean, int, String, byte[])
                                                 (|<init>(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;IZILjava/lang/String;[B)V|
                                                  f this (ijstring (name field))
-                                                 (let ((cn (slot-value field 'descriptor)))
-                                                   (if (eq (char cn 0) #\L)
-                                                       ;; Object types: strip L prefix and ; suffix, use lazy lookup
-                                                       ;; to avoid triggering class loading during image build.
-                                                       (let ((cn (subseq cn 1 (1- (length cn)))))
-                                                         (or (%get-java-class-by-bin-name cn t)
-                                                             (let ((njc (%make-java-instance "java/lang/Class")))
-                                                               (setf (slot-value njc '|name|) (ijstring (substitute #\. #\/ cn)))
-                                                               (setf (gethash (substitute #\. #\/ cn) *java-classes-by-fq-name*) njc)
-                                                               (setf (gethash cn *java-classes-by-bin-name*) njc))))
-                                                       ;; Primitives (I, J, Z, etc.) and arrays ([I, [Ljava/lang/String;, etc.)
-                                                       (%bin-type-name-to-class cn)))
+                                                 ;; Resolve the canonical Class without initializing it.
+                                                 ;; A name-only placeholder has no defining loader or
+                                                 ;; metadata, poisoning clients' reflection caches.
+                                                 (%bin-type-name-to-class (descriptor field))
                                                  (access-flags field)
                                                  nil  ; trustedFinal
                                                  0    ; slot
@@ -280,7 +298,7 @@ initialize the declaring class, as the JVM does before reflective access."
         (when class
           (%clinit class))
         (%unsafe-static-storage field :errorp nil))
-      obj))
+      (%reflection-receiver (slot-value field '|clazz|) obj)))
 
 (defun %check-reflective-access (member object caller &optional constructor-p)
   "Run the JDK's AccessibleObject access checks before our native accessor.
@@ -314,12 +332,9 @@ The override flag only bypasses checks after setAccessible has authorized it."
 
 (defun %reflective-field-set (field obj value)
   (%check-reflective-access field obj (%java-caller-class '%reflective-field-set))
-  (let* ((char (%field-primitive-char (slot-value field '|type$|)))
-         (slot-key (%field-object-slot field))
+  (let* ((slot-key (%field-object-slot field))
          (storage (%field-slot-storage field obj))
-         ;; Unbox primitive wrapper arguments before storing their value.
-         (v (if (and char value (slot-exists-p value '|value|))
-                (slot-value value '|value|) value)))
+         (v (%reflection-convert-value value (slot-value field '|type$|))))
     (when (and storage (slot-exists-p storage slot-key))
       (setf (slot-value storage slot-key) v))
     nil))
@@ -335,7 +350,7 @@ The override flag only bypasses checks after setAccessible has authorized it."
 (defun %reflective-constructor-new-instance (constructor args)
   (%check-reflective-access constructor nil (%java-caller-class '%reflective-constructor-new-instance) t)
   (|jdk/internal/reflect/NativeConstructorAccessorImpl.newInstance0(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)|
-         constructor args))
+         constructor args (gethash constructor *serialization-constructor-classes*)))
 
 ;; Method.invoke has the same JDK 25 problem: acquireMethodAccessor builds a
 ;; MethodHandle-based accessor that NPEs in MethodHandle.asType. OpenLDK already

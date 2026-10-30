@@ -150,6 +150,25 @@ takes minutes; `make sbcl-clojure` builds an SBCL with it started.
 (clojure:eval '(mapv square (range 5)))            ; => #(0 1 4 9 16)
 ```
 
+To retain a Clojure result without converting maps to Lisp hash tables,
+call the function's `IFn` interface directly:
+
+```lisp
+(clojure:eval-string "(defn make-map [] {:answer 42})")
+(defparameter *clj-map*
+  (openldk.interop:java-call
+   "invoke()Ljava/lang/Object;" (clojure:lookup "user/make-map")))
+
+(clojure:to-lisp *clj-map*)                 ; convert later, if wanted
+```
+
+For arguments, use the corresponding `invoke` descriptor, such as
+`"invoke(Ljava/lang/Object;)Ljava/lang/Object;"` for one argument, and
+convert each argument with `clojure:from-lisp`. For a function object
+returned by `clojure:eval-string`, use `openldk.interop:foreign-object` to
+unwrap it before `java-call`. `defun-clojure` wrappers currently convert
+results automatically and have no raw-result option.
+
 In an s-expression, Lisp vectors are Clojure vectors and hash tables are
 maps, so `(defn add3 [a b c] ...)` is written `(defn add3 #(a b c) ...)`.
 Symbols are lowercased, so a case-sensitive name, such as a Java class or
@@ -398,6 +417,113 @@ whose `doCall` calls the Lisp function.
 | `to-lisp object`, `from-lisp value` | Convert values. |
 
 Tests: `make check-groovy` runs them in `sbcl-groovy`.
+
+## Functions with native language bodies
+
+Enable a language's syntax in a copy of the current readtable, then write
+`defun-clojure`, `defun-kawa`, `defun-jscheme`, `defun-kotlin`, or
+`defun-scala`. The body goes directly to that language's reader; no `#[ ]` or `#@LANGUAGE{ }` enclosure is needed.
+
+```lisp
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (asdf:load-system "openldk/clojure"))
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (setf *readtable* (clojure:enable-syntax (copy-readtable))))
+
+(defun-clojure foo (a b)
+  (let [sum (+ a b)]
+    {:sum sum :inputs [a b]}))
+
+(gethash :sum (foo 3 4))                    ; => 7
+(funcall #'foo 3 4)                        ; => a Lisp hash table
+```
+
+For Scheme, load `openldk/kawa` or `openldk/jscheme`, then call
+`kawa:enable-syntax` or `jscheme:enable-syntax` the same way:
+
+```lisp
+(defun-kawa factorial (n)
+  (if (< n 2) 1 (* n (factorial (- n 1)))))
+
+(defun-jscheme pair (a b)
+  (if #t (vector a b) #f))
+```
+
+The definition names also have package-qualified spellings:
+`clojure:defun-clojure`, `kawa:defun-kawa`, and `jscheme:defun-jscheme`.
+`openldk.interop:enable-source-syntax` enables definitions for the loaded
+adapters along with the existing `#@` source blocks. Ordinary CL reading,
+including dotted lists, quoting, reader labels, and `#.` evaluation, is
+preserved. Changes stay within the chosen readtable.
+
+Clojure and Scheme definitions have a CL name and a list of distinct
+required CL parameters.
+Their native names are lowercase; escape a mixed-case parameter with CL's
+`|name|` syntax to preserve its case. Body spelling and native literals are
+preserved. The native function can call itself by its lowercase CL name.
+Arguments and results use the adapter's existing value conversions, and the
+resulting CL function works with `funcall`, `apply`, and `mapcar`.
+
+The native procedure is created once when the definition executes, and is
+retained by the CL function. Clojure and Kawa compile it then; JScheme
+creates its interpreted procedure then. Calls do not re-read or compile
+the source. With `compile-file`, native creation happens when the FASL is
+loaded, not while the CL file is compiled. Reloading or redefining the
+function creates a new native procedure.
+
+An explicit `$value` or `$(form)` in the body captures a CL value once when
+the definition executes. Ordinary parameters need no `$` prefix:
+
+```lisp
+(let ((factor 3))
+  (defun-clojure triple (n) (* n $factor)))
+(triple 7)                                 ; => 21
+```
+
+### Kotlin and Scala definitions
+
+Load `openldk/kotlin` or `openldk/scala` and enable `kotlin:enable-syntax`
+or `scala:enable-syntax` in a copied readtable as above. Both provide typed
+function definitions with native bodies:
+
+```lisp
+(defun-kotlin add ((a :int) (b :int))
+  a + b)
+
+(defun-scala greet ((name :string))
+  name.toUpperCase)
+
+(defun-kotlin factorial ((n :int)) :returns :int
+  if (n < 2) 1 else n * factorial(n - 1))
+
+(defun-scala factorial ((n :int)) :returns :int
+  if (n < 2) 1 else n * factorial(n - 1))
+
+(add 20 22)                                ; => 42
+(greet "hello")                            ; => "HELLO"
+```
+
+Each required parameter is `(NAME TYPE)`. Type keywords are `:int`, `:long`,
+`:short`, `:byte`, `:float`, `:double`, `:boolean`, `:char`, `:string`, and
+`:unit`. A string supplies an arbitrary native type, for example Kotlin's
+`"List<Int>"` or Scala's `"List[Int]"`. An optional `:returns TYPE` follows
+the parameter list; otherwise the native compiler infers the result type.
+Recursive Scala definitions generally need the return annotation.
+
+Names must be native identifiers (letters, digits and underscores, starting
+with a letter or underscore). Uppercase CL names become lowercase; use
+`|mixedCase|` to preserve case. Bodies accept native strings, comments,
+parentheses and brace blocks directly. Kotlin string templates and Scala
+interpolated strings retain their native meaning.
+
+As with Clojure and Scheme, `$value` or `$(form)` outside strings captures a
+Lisp value once when the definition executes. Capture types are inferred
+from those values. Required parameter types are explicit, independent of
+the first call. Arguments and results use the adapters' existing conversions.
+The native compiler runs when the definition executes or its FASL loads;
+ordinary calls use the retained compiled function without invoking it again.
+The macros are also exported as `kotlin:defun-kotlin` and `scala:defun-scala`.
+
 
 ## Source syntax: `#@scala{ }`, `#@kotlin{ }`, `#@clj{ }`
 

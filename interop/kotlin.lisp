@@ -74,7 +74,9 @@
   (:use #:cl #:openldk.interop)
   (:nicknames #:kotlin)
   (:shadow #:eval #:funcall #:compile)
-  (:export #:startup
+  (:export #:enable-syntax
+           #:defun-kotlin
+           #:startup
            #:default-classpath
            #:*output-directory*
            #:compile
@@ -519,3 +521,42 @@ own name."
   (openldk.interop:compile-foreign-file (component source output)
     (declare (ignore component))
     (compile-kotlin-files (list source) output :classpath (openldk.interop::%compiled-classpath))))
+
+;;; Definitions with typed arguments and a directly embedded native body.
+
+(defun enable-syntax (&optional (readtable *readtable*))
+  "Enable source blocks and DEFUN-KOTLIN native bodies in READTABLE."
+  (enable-source-syntax readtable))
+
+(defmacro defun-kotlin (name parameters source &optional captures forms return-type)
+  "Define NAME with (NAME TYPE) parameters and a native body, compiled at load time."
+  (openldk.interop::%expand-typed-function-definition
+   name parameters source captures forms return-type '%make-native-function))
+
+(openldk.interop::%register-function-syntax 'defun-kotlin :kotlin)
+
+(defun %make-native-function (name names types source captures values return-type)
+  (let* ((parameters (mapcar (lambda (n type) (format nil "~A: ~A" n type)) names types))
+         (declarations (append (mapcar (lambda (n v) (format nil "~A: ~A" n (%kotlin-type v)))
+                                       captures values)
+                               parameters))
+         ;; A local named function makes recursion independent of the extra
+         ;; factory parameters carrying Lisp captures.
+         (class (compile (format nil "fun lispDefinition(~{~A~^, ~}) = run {~%fun ~A(~{~A~^, ~})~A = run {~%~A~%}~%~A(~{~A~^, ~})~%}"
+                                 declarations name parameters
+                                 (if return-type (format nil ": ~A" return-type) "")
+                                 source name names))))
+    (multiple-value-bind (method owner) (%static-method class "lispDefinition" (length declarations))
+      (multiple-value-bind (argument-types result-type)
+          (%descriptor-types (openldk::descriptor method))
+        (let* ((capture-count (length captures))
+               (captured (mapcar #'%argument values (subseq argument-types 0 capture-count)))
+               (parameter-types (nthcdr capture-count argument-types))
+               (target (openldk::static-method-symbol
+                        (format nil "~A.lispDefinition~A" (openldk::name owner) (openldk::descriptor method))
+                        (openldk::ldk-class-package owner))))
+          (lambda (&rest args)
+            (%result (with-foreign-errors ("Kotlin")
+                       (apply (symbol-function target)
+                              (append captured (mapcar #'%argument args parameter-types))))
+                     result-type)))))))

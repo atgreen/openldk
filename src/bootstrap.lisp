@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2024, 2025  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2024, 2025, 2026  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 ;;;
@@ -39,8 +39,12 @@
 
 (in-package :openldk)
 
-(defclass/std |java/lang/Object| ()
-  ())
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  ;; Use the current image's symbol; a dumped gensym in a cached FASL would
+  ;; not be EQ to the private slot symbol freshly created by global-state.
+  (eval `(defclass |java/lang/Object| () ; lint:suppress eval-usage
+           ((,*java-loader-owner-slot* :initform nil))
+           (:documentation "Java Object with private runtime loader ownership."))))
 
 (defclass/std |java/lang/Cloneable| ()
   ())
@@ -51,7 +55,8 @@
 
 (defmethod |clone()Ljava/lang/Object;| ((|this| |java/lang/Object|))
   "Default implementation of clone for CLONEABLE objects."
-  (assert (typep |this| '|java/lang/Cloneable|))
+  (unless (typep |this| '|java/lang/Cloneable|)
+    (%throw '|java/lang/CloneNotSupportedException|))
   (let ((copy (allocate-instance (class-of |this|))))
     (dolist (slot (mapcar #'sb-mop:slot-definition-name
                           (sb-mop:class-slots (class-of |this|))))
@@ -176,7 +181,7 @@
                          :lambda-list '(|this|))
 
 (defmethod %lisp-condition ((throwable |java/lang/Throwable|))
-  (error (format nil "Missing %lisp-condition implementation for ~A." throwable)))
+  (make-condition '|condition-java/lang/Throwable| :|objref| throwable))
 
 (define-condition |condition-java/lang/Throwable| (error)
   ((|objref| :initarg :|objref| :initform nil)))

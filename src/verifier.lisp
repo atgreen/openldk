@@ -264,13 +264,39 @@
          (descriptor (%v-utf pool (slot-value nat 'type-descriptor-index))))
     (if method-p (%v-method-types descriptor) (%v-field-type descriptor))))
 
+(defun %v-check-member-flags (member method-p)
+  "Reject conflicting visibility and combinations forbidden by JVMS 4.5/4.6."
+  (let ((flags (access-flags member)))
+    (when (> (logcount (logand flags #x7)) 1)
+      (class-format-error "Conflicting visibility for ~A" (name member)))
+    (if method-p
+        (when (and (logbitp 10 flags) (not (zerop (logand flags #x13a))))
+          (class-format-error "Invalid abstract method flags for ~A" (name member)))
+        (when (= (logand flags #x50) #x50)
+          (class-format-error "Field ~A is both final and volatile" (name member))))))
+
+(defun %v-check-unique-members (members)
+  "A class cannot declare two members with the same name and descriptor."
+  (let ((seen (make-hash-table :test #'equal)))
+    (loop for member across members
+          for key = (cons (name member) (descriptor member))
+          do (when (gethash key seen)
+               (class-format-error "Duplicate member ~A ~A" (car key) (cdr key)))
+             (setf (gethash key seen) t))))
+
 (defun verify-class-structure (class)
   "Validate method descriptors, Code presence, and bytecode operand structure."
   (%v-check-pool class)
-  (loop for field across (fields class) do (%v-field-type (descriptor field)))
+  (when (= (logand (access-flags class) #x410) #x410)
+    (class-format-error "Class is both final and abstract"))
+  (%v-check-unique-members (fields class))
+  (%v-check-unique-members (methods class))
+  (loop for field across (fields class)
+        do (%v-field-type (descriptor field)) (%v-check-member-flags field nil))
   (loop for method across (methods class)
         for code = (gethash "Code" (attributes method))
-        do (multiple-value-bind (parameters result) (%v-method-types (descriptor method))
+        do (%v-check-member-flags method t)
+           (multiple-value-bind (parameters result) (%v-method-types (descriptor method))
              (let ((slots (+ (if (static-p method) 0 1) (%v-stack-slots parameters))))
                (when (> slots 255) (class-format-error "Method parameters exceed 255 slots"))
                (when (and code (> slots (slot-value code 'max-locals)))

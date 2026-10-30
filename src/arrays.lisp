@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2025  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2025, 2026  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 ;;;
@@ -125,6 +125,116 @@ element width as Java's narrowing stores do."
   "Lisp string of the UTF-16 code units (or characters) in char[] DATA."
   (map 'string (lambda (c) (if (characterp c) c (code-char c))) data))
 
+(defvar *array-allocation-error* nil
+  "Preconstructed Java OutOfMemoryError condition, installed after bootstrap.")
+
+(defvar *array-allocation-lock* (bt:make-recursive-lock "Java array allocation"))
+
+(defvar *array-allocation-headroom* (* 16 1024 1024)
+  "Leave space for exception handling, JIT compilation and Lisp runtime bookkeeping.")
+
+(defparameter *array-element-layouts*
+  (let ((layouts (make-hash-table :test #'equal)))
+    (loop for layout across sb-vm:*specialized-array-element-type-properties*
+          do (setf (gethash (sb-vm:saetp-specifier layout) layouts)
+                   (cons (sb-vm:saetp-n-bits layout) (sb-vm:saetp-n-pad-elements layout))))
+    layouts))
+
+(defparameter *array-wrapper-bytes* (sb-ext:primitive-object-size (make-java-array-default)))
+
+(defun %array-storage-bytes (size element-type)
+  "Actual SBCL backing-vector size, including padding, header and allocation alignment."
+  (let* ((layout (or (gethash element-type *array-element-layouts*)
+                     (gethash (upgraded-array-element-type element-type) *array-element-layouts*)))
+         (payload (ceiling (* (+ size (cdr layout)) (car layout)) 8))
+         (bytes (+ (* sb-vm:vector-data-offset sb-vm:n-word-bytes) payload)))
+    (logand (+ bytes sb-vm:lowtag-mask) (lognot sb-vm:lowtag-mask))))
+
+(defun %initialize-array-allocation-error ()
+  "Prepare an allocation-free emergency throw before running application code."
+  (let ((throwable (%make-throwable '|java/lang/OutOfMemoryError| "Java heap space")))
+    ;; Disable writable traces and suppression on this reusable emergency error.
+    ;; Neither signaling it nor filling its trace should allocate at exhaustion.
+    (dolist (slot '(|backtrace| |stackTrace| |suppressedExceptions| |cause|))
+      (setf (slot-value throwable slot) nil))
+    (setf (slot-value throwable '|depth|) 0
+          *array-allocation-error* (%lisp-condition throwable))))
+
+(defun %array-allocation-available (limit requested)
+  "Free page capacity after reserving room to copy ordinary-generation objects."
+  (let* ((high-water (sb-alien:extern-alien "next_free_page" sb-kernel::page-index-t))
+         (upper-usage (* high-water sb-vm:gencgc-page-bytes)))
+    (if (<= requested (- limit (* 2 upper-usage)))
+        ;; Even if every occupied page must move, both copies fit. Avoid a
+        ;; page-table walk on allocations far from the collection boundary.
+        (- limit (* 2 upper-usage))
+        (sb-sys:without-gcing
+          ;; Read slots directly: retaining an intermediate alien struct
+          ;; would allocate a Lisp wrapper per page during this scan.
+          (let ((occupied 0)
+                (movable 0))
+            (loop for index below
+                    (sb-alien:extern-alien "next_free_page" sb-kernel::page-index-t)
+                  for flags = (sb-alien:slot (sb-alien:deref sb-vm:page-table index)
+                                             'sb-vm::flags)
+                  unless (zerop flags)
+                    do (incf occupied)
+                       ;; GENCGC promotes large single-object pages in place.
+                       ;; Count partial single-object pages conservatively:
+                       ;; small objects on such pages can still be copied.
+                       ;; SINGLE_OBJECT_FLAG is 16 in SBCL's gencgc-impl.h.
+                       (when (and (<= (sb-alien:slot (sb-alien:deref sb-vm:page-table index)
+                                                    'sb-vm::gen)
+                                      sb-vm:+highest-normal-generation+)
+                                  (or (not (logtest 16 flags))
+                                      (< (ash (sb-alien:slot (sb-alien:deref sb-vm:page-table index)
+                                                           'sb-vm::words-used*) -1)
+                                         (/ sb-vm:gencgc-page-bytes sb-vm:n-word-bytes))))
+                         (incf movable)))
+            (- limit (* (+ occupied movable) sb-vm:gencgc-page-bytes)))))))
+
+(defun %collect-java-heap ()
+  "Reclaim ordinary generations before the saved-image mark pass needs tail space."
+  (bt:with-recursive-lock-held (*array-allocation-lock*)
+    (sb-ext:gc :gen sb-vm:+highest-normal-generation+)
+    ;; Generation 7 allocates its work queue beyond NEXT_FREE_PAGE, ignoring
+    ;; free holes below it. At a high water mark near the end it cannot run.
+    (when (<= (* (sb-alien:extern-alien "next_free_page" sb-kernel::page-index-t)
+                 sb-vm:gencgc-page-bytes)
+              (- (sb-ext:dynamic-space-size) *array-allocation-headroom*))
+      (sb-ext:gc :gen 7)
+      ;; The mark pass breaks dead core-backed chains; ordinary collection
+      ;; then makes their newly unreachable arrays available to the allocator.
+      (sb-ext:gc :gen sb-vm:+highest-normal-generation+))))
+
+(defun %check-array-allocation (size element-type)
+  "Reject impossible requests and collect before rejecting a crowded heap."
+  (when *array-allocation-error*
+    (let* ((bytes (* (+ (ceiling (%array-storage-bytes size element-type) sb-vm:gencgc-page-bytes)
+                        (ceiling *array-wrapper-bytes* sb-vm:gencgc-page-bytes))
+                     sb-vm:gencgc-page-bytes))
+           (limit (- (sb-ext:dynamic-space-size)
+                     (min *array-allocation-headroom* (ash (sb-ext:dynamic-space-size) -3)))))
+      (when (> bytes limit) (error *array-allocation-error*))
+      (when (> bytes (%array-allocation-available limit bytes))
+        (%collect-java-heap)
+        (when (> bytes (%array-allocation-available limit bytes))
+          (error *array-allocation-error*))))))
+
+(defmacro with-array-allocation-recovery (&body body)
+  "Translate recoverable SBCL exhaustion using the preconstructed Java condition."
+  (let ((escape (gensym "ALLOCATION")))
+    `(multiple-value-bind (result exhausted)
+         (block ,escape
+           (handler-bind ((sb-kernel::heap-exhausted-error
+                            (lambda (condition)
+                              (declare (ignore condition))
+                              (when *array-allocation-error*
+                                ;; Unwind the allocator before signaling Java.
+                                (return-from ,escape (values nil t))))))
+             (values (progn ,@body) nil)))
+       (if exhausted (error *array-allocation-error*) result))))
+
 (defun make-java-array (&key component-class (size 0) initial-element initial-contents
                           (element-type (%component-element-type component-class)))
   "Construct a Java-style array wrapper with COMPONENT-CLASS and DATA built
@@ -136,22 +246,27 @@ element type of DATA, defaults from COMPONENT-CLASS."
     (let ((exc (%make-java-instance "java/lang/NegativeArraySizeException")))
       (|<init>()V| exc)
       (error (%lisp-condition exc))))
-  (let ((initial-element (if (eq element-type t)
-                             initial-element
-                             (%array-value element-type (or initial-element 0)))))
-    (make-java-array-default
-     :component-class component-class
-     :data (cond
-             ((or (null initial-contents) (zerop (length initial-contents)))
-              (make-array size :element-type element-type :initial-element initial-element))
-             ((eq element-type t)
-              (make-array (length initial-contents) :initial-contents initial-contents))
-             ((typep initial-contents `(simple-array ,element-type (*)))
-              (copy-seq initial-contents))
-             (t
-              (map-into (make-array (length initial-contents) :element-type element-type)
-                        (lambda (v) (%array-value element-type v))
-                        initial-contents))))))
+  (with-array-allocation-recovery
+    (bt:with-recursive-lock-held (*array-allocation-lock*)
+      (%check-array-allocation (if (and initial-contents (plusp (length initial-contents)))
+                                  (length initial-contents) size)
+                              element-type)
+      (let ((initial-element (if (eq element-type t)
+                                 initial-element
+                                 (%array-value element-type (or initial-element 0)))))
+        (make-java-array-default
+         :component-class component-class
+         :data (cond
+                 ((or (null initial-contents) (zerop (length initial-contents)))
+                  (make-array size :element-type element-type :initial-element initial-element))
+                 ((eq element-type t)
+                  (make-array (length initial-contents) :initial-contents initial-contents))
+                 ((typep initial-contents `(simple-array ,element-type (*)))
+                  (copy-seq initial-contents))
+                 (t
+                  (map-into (make-array (length initial-contents) :element-type element-type)
+                            (lambda (v) (%array-value element-type v))
+                            initial-contents))))))))
 
 (defun %array-component-class (array)
   "Return ARRAY's component class as a |java/lang/Class| object, healing
@@ -288,22 +403,102 @@ NullPointerException; a Lisp string serves as a char[]."
   ;; Deferred due to bootstrap complexity with exception classes
   (length (java-array-data array)))
 
+(defun %check-reflective-array (array)
+  "Validate the Object argument to java.lang.reflect.Array operations."
+  (unless array (%throw '|java/lang/NullPointerException|))
+  (unless (java-array-p array)
+    (%throw '|java/lang/IllegalArgumentException| "Argument is not an array")))
+
+(defun %array-widening-p (source target)
+  "Whether reflection permits the primitive conversion SOURCE -> TARGET."
+  (or (eql source target)
+      (find target
+            (case source
+              (#\B "SIJFD") (#\S "IJFD") (#\C "IJFD")
+              (#\I "JFD") (#\J "FD") (#\F "D")))))
+
+(defun %reflection-wrapper-type (value)
+  "Descriptor of VALUE's actual boxed primitive class, never its numeric range."
+  (typecase value
+    (|java/lang/Boolean| #\Z) (|java/lang/Byte| #\B)
+    (|java/lang/Short| #\S) (|java/lang/Character| #\C)
+    (|java/lang/Integer| #\I) (|java/lang/Long| #\J)
+    (|java/lang/Float| #\F) (|java/lang/Double| #\D)))
+
+(defun %reflection-convert-value (value target)
+  "Validate reflection assignment and unbox/widen to TARGET's representation."
+  (let ((primitive (%field-primitive-char target)))
+    (if primitive
+        (let ((source (%reflection-wrapper-type value)))
+          (unless (and source (%array-widening-p source primitive))
+            (%throw '|java/lang/IllegalArgumentException| "Invalid primitive conversion"))
+          (let* ((raw (%maybe-unbox value))
+                 (number (if (characterp raw) (char-code raw) raw)))
+            (case primitive
+              (#\Z (if (or (null raw) (eql raw 0)) 0 1))
+              (#\F (float number 1f0)) (#\D (float number 1d0))
+              (t number))))
+        (progn
+          (unless (or (null value)
+                      (eql 1 (|isAssignableFrom(Ljava/lang/Class;)Z|
+                              target (|getClass()Ljava/lang/Class;| value))))
+            (%throw '|java/lang/IllegalArgumentException| "Invalid reference conversion"))
+          value))))
+
+(defun %reflective-array-primitive-type (array)
+  (%check-reflective-array array)
+  (%field-primitive-char (%array-component-class array)))
+
+(defun %reflective-array-get (array index target)
+  "Read a primitive array using reflection's widening conversion rules."
+  (let* ((source (%reflective-array-primitive-type array))
+         (value (jaref array index)))
+    (unless (and source (%array-widening-p source target))
+      (%throw '|java/lang/IllegalArgumentException| "Invalid array element conversion"))
+    (let ((number (if (characterp value) (char-code value) value)))
+      (case target
+        (#\F (float number 1f0)) (#\D (float number 1d0))
+        (t value)))))
+
+(defun %reflective-array-set (array index value source)
+  "Store a primitive value without allowing reflection to narrow its type."
+  (let ((target (%reflective-array-primitive-type array)))
+    ;; Bounds checks precede the primitive conversion check, as on the JDK.
+    (jaref array index)
+    (unless (and target (%array-widening-p source target))
+      (%throw '|java/lang/IllegalArgumentException| "Invalid array element conversion"))
+    (setf (jaref array index) value))
+  nil)
+
+(dolist (entry '(("Boolean" #\Z) ("Byte" #\B) ("Char" #\C) ("Short" #\S)
+                 ("Int" #\I) ("Long" #\J) ("Float" #\F) ("Double" #\D)))
+  (destructuring-bind (name type) entry
+    (eval `(defun ,(intern (format nil "java/lang/reflect/Array.get~A(Ljava/lang/Object;I)~A" name type))
+               (array index)
+             (%reflective-array-get array index ,type)))
+    (eval `(defun ,(intern (format nil "java/lang/reflect/Array.set~A(Ljava/lang/Object;I~A)V" name type))
+               (array index value)
+             (%reflective-array-set array index value ,type)))))
+
 (defun |java/lang/reflect/Array.getLength(Ljava/lang/Object;)I| (obj)
   "java.lang.reflect.Array.getLength implementation."
-  ;; Null check (JVM spec: throw NullPointerException)
-  (when (null obj)
-    (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|))))
-  ;; TODO: Add type check (throw IllegalArgumentException if not an array)
-  ;; Deferred due to bootstrap complexity with exception classes
+  (%check-reflective-array obj)
   (length (java-array-data obj)))
 
 (defun |java/lang/reflect/Array.get(Ljava/lang/Object;I)Ljava/lang/Object;| (array index)
   "java.lang.reflect.Array.get implementation."
-  (jaref array index))
+  (%check-reflective-array array)
+  (let ((value (jaref array index))
+        (primitive (%field-primitive-char (%array-component-class array))))
+    (if primitive (%box-primitive-return value primitive) value)))
 
 (defun |java/lang/reflect/Array.set(Ljava/lang/Object;ILjava/lang/Object;)V| (array index value)
   "java.lang.reflect.Array.set implementation."
-  (setf (jaref array index) value))
+  (%check-reflective-array array)
+  (jaref array index)
+  (setf (jaref array index)
+        (%reflection-convert-value value (%array-component-class array)))
+  nil)
 
 ;; Arrays inherit Object.equals: identity (the Kotlin compiler compares
 ;; arrays so).

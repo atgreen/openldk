@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2024, 2025  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2024, 2025, 2026  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 ;;;
@@ -124,7 +124,7 @@ TimeZone.getTimeZone does not recognize, silently defaulting to GMT."
 (defmethod |java/util/TimeZone.getSystemGMTOffsetID()Ljava/lang/String;| ()
   (jstring (local-time:format-timestring nil (local-time:now) :format '(:gmt-offset))))
 
-(defvar *field-offset-table* (make-hash-table :test #'equal))
+(defvar *field-offset-table* (make-hash-table :test #'equal :weakness :value))
 
 (defun %register-field-offset (field)
   "Return an aligned synthetic Unsafe offset and associate it with FIELD."
@@ -136,7 +136,7 @@ TimeZone.getTimeZone does not recognize, silently defaulting to GMT."
                  (unsigned-to-signed-integer
                   (cl-murmurhash:murmurhash (sxhash field)))
                  -8)))
-    (setf (gethash offset *field-offset-table*) field)
+    (setf (gethash offset *field-offset-table*) (%retain-field-offset-owner field))
     offset))
 
 (defmethod |objectFieldOffset(Ljava/lang/reflect/Field;)J| ((unsafe |sun/misc/Unsafe|) field)

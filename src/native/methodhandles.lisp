@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2024, 2025  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2024, 2025, 2026  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 ;;;
@@ -180,7 +180,7 @@ or one of #\\Z #\\B #\\S #\\I #\\J #\\F #\\D #\\C for primitives."
   "Box a primitive VALUE according to the return type descriptor character."
   (case ret-char
     (#\Z (let ((b (%make-java-instance "java/lang/Boolean")))
-           (setf (slot-value b '|value|) (if (and (integerp value) (zerop value)) 0 1))
+           (setf (slot-value b '|value|) (if (or (null value) (eql value 0)) 0 1))
            b))
     (#\B (let ((b (%make-java-instance "java/lang/Byte")))
            (setf (slot-value b '|value|) value) b))
@@ -391,7 +391,7 @@ Returns the class symbol."
             (%define-lambda-method method-sym cached param-count box-return primitive-return))
           cached)
         ;; Create new dynamic lambda class, extending the interface if known
-        (let* ((class-sym (intern class-name-str :openldk))
+        (let* ((class-sym (intern class-name-str (if (%user-ldk-loader-p loader) (loader-package loader) :openldk)))
                (method-sym (intern lispized-name :openldk))
                (superclasses (append (list '|java/lang/Object|)
                                      (when interface-sym (list interface-sym))
@@ -399,6 +399,9 @@ Returns the class symbol."
           ;; Define the class with target and captures slots
           (eval `(defclass/std ,class-sym ,superclasses
                    ((target) (captures))))
+          (when (%user-ldk-loader-p loader)
+            (bt:with-recursive-lock-held (*loader-lifecycle-lock*)
+              (pushnew class-sym (loader-resources-classes (slot-value loader 'unload-resources)))))
           ;; Define the dispatch method
           (%define-lambda-method method-sym class-sym param-count box-return primitive-return)
           (setf (gethash cache-key *dynamic-lambda-classes*) class-sym)
@@ -505,11 +508,13 @@ lambda also implements the marker interfaces they name (Serializable)."
                         ;; custom SAM like java.util.stream.Sink (accept, but
                         ;; NOT a Consumer as far as checkcast is concerned)
                         ;; must get a generated class implementing it.
-                        (unless (or markers (and interface-type-name sam-has-primitive-param))
+                        (unless (or (%user-ldk-loader-p loader) markers (and interface-type-name sam-has-primitive-param))
                           (%prebuilt-lambda-class method-str sam-param-count interface-type-name))
                         (%ensure-dynamic-lambda-class method-str sam-method-type interface-type-name
                                                       markers loader)))
          (instance (make-instance lambda-class)))
+    (when (%user-ldk-loader-p loader)
+      (setf (slot-value instance *java-loader-owner-slot*) loader))
     (setf (slot-value instance 'target) impl-handle)
     (setf (slot-value instance 'captures) captures)
     instance))
@@ -554,7 +559,7 @@ lambda also implements the marker interfaces they name (Serializable)."
 (defun |java/lang/invoke/MethodHandleNatives.objectFieldOffset(Ljava/lang/invoke/MemberName;)J| (member-name)
   (declare (ignore unsafe))
   (let ((offset (unsigned-to-signed-integer (cl-murmurhash:murmurhash (sxhash member-name)))))
-    (setf (gethash offset *field-offset-table*) member-name)
+    (setf (gethash offset *field-offset-table*) (%retain-field-offset-owner member-name))
     offset))
 
 (defun |java/lang/invoke/MethodHandleNatives.getMembers(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Class;I[Ljava/lang/invoke/MemberName;)|

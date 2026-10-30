@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2024, 2025  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2024, 2025, 2026  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 ;;;
@@ -187,40 +187,60 @@
                  (%unsafe-slot-key offset))))
       (t nil))))
 
+(defun %vh-value-equal-p (left right)
+  "Compare floating CAS operands by raw bits, including NaNs and signed zero."
+  (typecase left
+    (single-float (and (typep right 'single-float)
+                       (= (float-features:single-float-bits left)
+                          (float-features:single-float-bits right))))
+    (double-float (and (typep right 'double-float)
+                       (= (float-features:double-float-bits left)
+                          (float-features:double-float-bits right))))
+    (t (eql left right))))
+
+(defun %vh-field-value (name value)
+  "Narrow integer stores to the field's Java type, including atomic arithmetic."
+  (let ((bits (cond ((equal name "byte") 8) ((equal name "short") 16)
+                    ((equal name "int") 32) ((equal name "long") 64))))
+    (cond (bits (%signed-of-width (ldb (byte bits 0) value) bits))
+          ((equal name "char") (ldb (byte 16 0) (if (characterp value) (char-code value) value)))
+          (t value))))
+
 (defun %vh-run-op (category read write values)
   "Apply access-mode CATEGORY over a location abstracted by the thunks READ
 (no args -> current value) and WRITE (one arg -> store it).  VALUES holds the
 op's value arguments (expected/new/delta as applicable)."
   (declare (type function read write))
-  (ecase category
-    (:read  (funcall read))
-    (:write (funcall write (first values)) nil)
-    (:cas   (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
-              (if (eql (funcall read) (first values))
-                  (progn (funcall write (second values)) 1)
-                  0)))
-    (:cae   (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
-              (let ((old (funcall read)))
-                (when (eql old (first values)) (funcall write (second values)))
-                old)))
-    (:getset (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
-               (prog1 (funcall read) (funcall write (first values)))))
-    (:getadd (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
-               (let ((old (funcall read)))
-                 (funcall write (+ old (first values)))
-                 old)))
-    (:getor  (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
-               (let ((old (funcall read)))
-                 (funcall write (logior old (first values)))
-                 old)))
-    (:getand (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
-               (let ((old (funcall read)))
-                 (funcall write (logand old (first values)))
-                 old)))
-    (:getxor (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
-               (let ((old (funcall read)))
-                 (funcall write (logxor old (first values)))
-                 old)))))
+  (with-java-memory-ordering
+    (ecase category
+      (:read  (funcall read))
+      (:write (funcall write (first values)) nil)
+      (:cas   (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
+                (if (%vh-value-equal-p (funcall read) (first values))
+                    (progn (funcall write (second values)) 1)
+                    0)))
+      (:cae   (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
+                (let ((old (funcall read)))
+                  (when (%vh-value-equal-p old (first values)) (funcall write (second values)))
+                  old)))
+      (:getset (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
+                 (prog1 (funcall read) (funcall write (first values)))))
+      (:getadd (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
+                 (let ((old (funcall read)))
+                   (funcall write (+ old (first values)))
+                   old)))
+      (:getor  (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
+                 (let ((old (funcall read)))
+                   (funcall write (logior old (first values)))
+                   old)))
+      (:getand (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
+                 (let ((old (funcall read)))
+                   (funcall write (logand old (first values)))
+                   old)))
+      (:getxor (bordeaux-threads:with-recursive-lock-held (*cas-lock*)
+                 (let ((old (funcall read)))
+                   (funcall write (logxor old (first values)))
+                   old))))))
 
 (defun %vh-array-bits (array)
   "Signed width in bits of ARRAY's primitive element type, or NIL for references."
@@ -229,9 +249,87 @@ op's value arguments (expected/new/delta as applicable)."
           ((equal nm "short") 16) ((equal nm "byte") 8)
           (t nil))))
 
+(defun %vh-buffer-descriptor (category name &optional implementation)
+  "Method type for a buffer access; implementation methods erase coordinates."
+  (multiple-value-bind (nbytes kind) (%vh-byteview-spec name)
+    (let* ((value (ecase kind (:char "C") (:float "F") (:double "D")
+                        (:signed (ecase nbytes (2 "S") (4 "I") (8 "J")))))
+           (arguments (case category (:read "") ((:cas :cae) (concatenate 'string value value))
+                            (t value)))
+           (result (case category (:write "V") (:cas "Z") (t value))))
+      (format nil "(~AI~A)~A"
+              (if implementation "Ljava/lang/invoke/VarHandle;Ljava/lang/Object;" "Ljava/nio/ByteBuffer;")
+              arguments result))))
+
+(defun %vh-buffer-call (category vh args access-mode descriptor caller)
+  "Preserve exact invocation checks and ordinary MethodHandle conversions."
+  (let* ((name (%vh-classname vh))
+         (expected (%vh-buffer-descriptor category name)))
+    (if (string= expected descriptor)
+        (%vh-buffer-view category vh args access-mode name)
+        (if (not (zerop (|hasInvokeExactBehavior()Z| vh)))
+            (%throw '|java/lang/invoke/WrongMethodTypeException| "Mismatched buffer view invocation type")
+            (let* ((mode (|java/lang/invoke/VarHandle$AccessMode.valueFromMethodName(Ljava/lang/String;)Ljava/lang/invoke/VarHandle$AccessMode;|
+                          (jstring access-mode)))
+                   (handle (|toMethodHandle(Ljava/lang/invoke/VarHandle$AccessMode;)Ljava/lang/invoke/MethodHandle;| vh mode)))
+              (apply #'%invoke-generic-at handle descriptor caller args))))))
+
+(defun %vh-buffer-view (category vh args access-mode name)
+  "Execute a ByteBuffer view access with JDK 25 mode and alignment rules."
+  (multiple-value-bind (nbytes kind) (%vh-byteview-spec name)
+    (let ((buffer (first args)) (index (second args)) (values (cddr args)))
+      ;; Unsupported modes fail before coordinates are examined.
+      (when (or (and (= nbytes 2) (not (member category '(:read :write))))
+                (and (member kind '(:float :double))
+                     (member category '(:getadd :getor :getand :getxor))))
+        (%throw '|java/lang/UnsupportedOperationException| "Unsupported buffer view access mode"))
+      (when (null buffer) (%throw '|java/lang/NullPointerException|))
+      (unless (member access-mode '("get" "set") :test #'string=)
+        (when (slot-value buffer '|hb|)
+          (%throw '|java/lang/IllegalStateException| "Atomic access not supported for heap buffer")))
+      (when (and (not (eql category :read)) (not (zerop (|isReadOnly()Z| buffer))))
+        (%throw '|java/nio/ReadOnlyBufferException|))
+      (unless (<= 0 index (- (|limit()I| buffer) nbytes))
+        (%throw '|java/lang/IndexOutOfBoundsException|))
+      (unless (or (member access-mode '("get" "set") :test #'string=)
+                  (zerop (logand (+ (slot-value buffer '|address|) index) (1- nbytes))))
+        (%throw '|java/lang/IllegalStateException| "Misaligned buffer view access"))
+      (labels ((read-value ()
+                 (let ((bits 0))
+                   (dotimes (i nbytes)
+                     (setf bits (logior bits
+                                        (ash (logand #xff (|get(I)B| buffer (+ index i)))
+                                             (* 8 (if (%byte-view-be-p vh) (- nbytes i 1) i))))))
+                   (ecase kind
+                     (:char bits)
+                     (:signed (%signed-of-width bits (* 8 nbytes)))
+                     (:float (float-features:bits-single-float bits))
+                     (:double (float-features:bits-double-float bits)))))
+               (write-value (value)
+                 (let ((bits (ecase kind
+                               (:char (if (characterp value) (char-code value) value))
+                               (:signed value)
+                               (:float (float-features:single-float-bits value))
+                               (:double (float-features:double-float-bits value)))))
+                   (dotimes (i nbytes)
+                     (|put(IB)Ljava/nio/ByteBuffer;|
+                      buffer (+ index i)
+                      (%signed-of-width (ldb (byte 8 (* 8 (if (%byte-view-be-p vh) (- nbytes i 1) i))) bits) 8))))))
+        ;; Only the raw operation takes the ordering lock. Validation and
+        ;; MethodHandle adaptation may enter unrelated Java monitors.
+        (%vh-run-op category #'read-value #'write-value values)))))
+
 (defun %varhandle-invoke (category vh args &optional access-mode)
   (let ((name (%vh-classname vh)))
+    (when (or (and (search "ReadOnly" name) (not (eql category :read)))
+              (and (eql category :getadd)
+                   (or (search "Booleans" name) (search "References" name)))
+              (and (member category '(:getor :getand :getxor))
+                   (or (search "Floats" name) (search "Doubles" name) (search "References" name))))
+      (%throw '|java/lang/UnsupportedOperationException| "Unsupported VarHandle access mode"))
     (cond
+      ((search "LazyInitializing" name)
+       (%varhandle-invoke category (slot-value vh '|target|) args access-mode))
       ((or (search "IndirectVarHandle" name) (search "SegmentVarHandle" name))
        ;; Let the JDK's adapter compose filters and bound coordinates. The
        ;; resulting handle expects the direct target as its leading argument.
@@ -239,17 +337,19 @@ op's value arguments (expected/new/delta as applicable)."
                      (jstring access-mode)))
               (handle (|getMethodHandle(I)Ljava/lang/invoke/MethodHandle;| vh (|ordinal()I| mode))))
          (%mh-invoke handle (cons (|asDirect()Ljava/lang/invoke/VarHandle;| vh) args))))
-      ;; byte-array view (VarHandleByteArrayAs*$ArrayHandle): check BEFORE the
-      ;; array-element view, since its class name also contains "$Array".  Only
-      ;; get/set are meaningful, matching the prior byte-view support.
+      ((search "$ByteBufferHandle" name)
+       (%vh-buffer-view category vh args access-mode name))
+      ;; JDK 25 byte-array views support plain get/set only. ByteBuffer
+      ;; views have a different access-mode surface and must not be conflated.
       ((search "ByteArrayAs" name)
        (multiple-value-bind (nbytes kind) (%vh-byteview-spec name)
          (let ((array (first args)) (index (second args)) (values (cddr args)))
-           (case category
-             (:read  (%byte-view-get vh array index nbytes kind))
-             (:write (%byte-view-set vh array index nbytes kind (first values)) nil)
-             (otherwise
-              (internal-error "VarHandle byte-array view: ~A unsupported (ldk-304)" category))))))
+           (unless (member access-mode '("get" "set") :test #'string=)
+             (%throw '|java/lang/UnsupportedOperationException| "Unsupported byte-array view access mode"))
+           (with-java-memory-ordering
+             (case category
+               (:read (%byte-view-get vh array index nbytes kind))
+               (:write (%byte-view-set vh array index nbytes kind (first values)) nil))))))
       ;; array-element view (VarHandle*$Array): coordinates are (array index . values)
       ((search "$Array" name)
        (let* ((array (first args)) (index (second args)) (values (cddr args))
@@ -266,14 +366,18 @@ op's value arguments (expected/new/delta as applicable)."
        (multiple-value-bind (fkind storage slot) (%vh-field-place vh)
          (unless slot
            (internal-error "VarHandle: unsupported handle class ~A (ldk-304)" name))
-         (multiple-value-bind (obj values)
-             (ecase fkind
-               (:instance (values (first args) (rest args)))
-               (:static   (values storage args)))
-           (%vh-run-op category
-                       (lambda () (slot-value obj slot))
-                       (lambda (v) (setf (slot-value obj slot) v))
-                       values)))))))
+         ;; varType may intern MethodTypes and enter a ReferenceQueue monitor.
+         ;; Resolve it before the memory lock; stores below only narrow bits.
+         (let ((type-name (unless (eql category :read)
+                            (lstring (slot-value (|varType()Ljava/lang/Class;| vh) '|name|)))))
+           (multiple-value-bind (obj values)
+               (ecase fkind
+                 (:instance (values (first args) (rest args)))
+                 (:static   (values storage args)))
+             (%vh-run-op category
+                         (lambda () (slot-value obj slot))
+                         (lambda (v) (setf (slot-value obj slot) (%vh-field-value type-name v)))
+                         values))))))))
 
 ;; Register %VARHANDLE-OP-<op> for each access mode the compiler may emit.
 ;; The op name is embedded in the function symbol (bc-to-ir builds it), so no
@@ -293,9 +397,21 @@ op's value arguments (expected/new/delta as applicable)."
     (dolist (op ops)
       (let ((cat category) (access-mode op))
         (setf (symbol-function (intern (format nil "%VARHANDLE-OP-~A" op) :openldk))
-              (lambda (vh &rest args)
+              (lambda (vh descriptor caller &rest args)
                 ;; The dispatcher otherwise erases the access mode to CATEGORY.
-                ;; Conservatively order plain modes too, preserving atomicity
-                ;; of byte-array views and interoperability with volatile fields.
-                (with-java-memory-ordering
-                  (%varhandle-invoke cat vh args access-mode))))))))
+                ;; Adapters may enter JDK monitors (e.g. MethodType's reference
+                ;; queue). Never build/invoke them with the memory lock held:
+                ;; reference processing holds that monitor before volatile reads.
+                (if (search "$ByteBufferHandle" (%vh-classname vh))
+                    (%vh-buffer-call cat vh args access-mode descriptor caller)
+                    (%varhandle-invoke cat vh args access-mode))))
+        ;; MethodHandle adapters and VarHandle.toMethodHandle reach the
+        ;; implementation's static entry points instead of the bytecode
+        ;; dispatcher. Keep both paths on the same codec and ordering rules.
+        (dolist (kind '("Shorts" "Chars" "Ints" "Longs" "Floats" "Doubles"))
+          (let* ((class-name (format nil "java/lang/invoke/VarHandleByteArrayAs~A$ByteBufferHandle" kind))
+                 (signature (format nil "~A.~A~A" class-name op
+                                    (%vh-buffer-descriptor cat class-name t))))
+            (setf (gethash signature *native-overrides*)
+                  (lambda (vh &rest args)
+                    (%vh-buffer-view cat vh args access-mode class-name)))))))))

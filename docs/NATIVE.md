@@ -17,6 +17,14 @@ set `OPENLDK_JNI_BRIDGE` to its absolute path when relocating an executable.
 It uses standard JNI headers and does not load HotSpot's JDK libraries.
 Existing Lisp native implementations retain precedence.
 
+JNI and FFM use the JDK 25 native-access policy. For classpath applications,
+pass `--enable-native-access=ALL-UNNAMED`; resolved named modules can be granted
+access with a comma-separated module list. Unpermitted restricted operations
+warn by default. `--illegal-native-access=allow|warn|deny` selects the policy.
+Permissions also work through `JDK_JAVA_OPTIONS`, argument files, and an
+executable JAR's `Enable-Native-Access: ALL-UNNAMED` manifest attribute.
+Run `make check-native-access` for [policy comparisons](../test/native-access/README.md).
+
 The implementation supports native symbol lookup and registration, loader
 ownership, initialization hooks, local/global/weak references, object creation,
 Java callbacks, fields, reflection, exceptions, strings, primitive/object arrays,
@@ -24,8 +32,10 @@ direct buffers, monitors, and native-thread attachment. Strings and primitive
 arrays use native copies with release/copy-back semantics. A native thread keeps
 its Java identity across callbacks, including daemon status and monitor ownership.
 
-JNI libraries remain loaded for the process lifetime; class-loader unloading and
-`JNI_OnUnload` are not implemented. Creating or destroying a standalone JVM via
+JNI libraries owned by custom class loaders unload after their loader becomes
+unreachable, including `JNI_OnUnload` notification. JNI global references retain
+Java objects; weak references and cached method/field IDs do not prevent class
+unloading. Creating or destroying a standalone JVM via
 the Invocation API is not supported. Saved images must load JNI libraries after
 restart: saving with loaded JNI libraries is rejected because arbitrary native
 library state cannot be preserved in an SBCL image. JNI compatibility is tested

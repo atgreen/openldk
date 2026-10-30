@@ -1,8 +1,46 @@
+;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK-JSCHEME-TESTS; Base: 10 -*-
+;;;
+;;; Copyright (C) 2026  Anthony Green <green@moxielogic.com>
+;;;
+;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+;;;
+;;; This file is part of OpenLDK.
+
+;;; OpenLDK is free software; you can redistribute it and/or modify it
+;;; under the terms of the GNU General Public License as published by
+;;; the Free Software Foundation; either version 3, or (at your
+;;; option) any later version.
+
+;;; OpenLDK is distributed in the hope that it will be useful, but
+;;; WITHOUT ANY WARRANTY; without even the implied warranty of
+;;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+;;; General Public License for more details.
+
+;;; You should have received a copy of the GNU General Public License
+;;; along with OpenLDK; see the file COPYING.  If not, please see
+;;; <http://www.gnu.org/licenses/>.
+
+;;; Linking this library statically or dynamically with other modules is
+;;; making a combined work based on this library.  Thus, the terms and
+;;; conditions of the GNU General Public License cover the whole
+;;; combination.
+
+;;; As a special exception, the copyright holders of this library give
+;;; you permission to link this library with independent modules to
+;;; produce an executable, regardless of the license terms of these
+;;; independent modules, and to copy and distribute the resulting
+;;; executable under terms of your choice, provided that you also
+;;; meet, for each linked independent module, the terms and conditions
+;;; of the license of that module.  An independent module is a module
+;;; which is not derived from or based on this library.  If you modify
+;;; this library, you may extend this exception to your version of the
+;;; library, but you are not obligated to do so.  If you do not wish
+;;; to do so, delete this exception statement from your version.
+
 ;;;; Tests for openldk/jscheme: JScheme from Common Lisp (FiveAM).
 ;;;;
 ;;;; Needs JScheme's classes, built by `make jscheme`.  Run with
 ;;;; `make check-jscheme' or (asdf:test-system "openldk/jscheme").
-
 (defpackage :openldk-jscheme-tests
   (:use :cl :fiveam))
 
@@ -99,3 +137,31 @@
   (dotimes (i 3)
     (is (= (* i 10) #@jscheme{ (* $i 10) }) "evaluated once, called again"))
   (is (equal '(2 3) #@jscheme{ (map $#'1+ '(1 2)) })))
+
+(defun-jscheme native-jscheme-add (a b)
+  (if #t (vector (+ a b) a b) #f))
+
+(jscheme:defun-jscheme native-jscheme-factorial (n)
+  (if (< n 2) 1 (* n (native-jscheme-factorial (- n 1)))))
+
+(test native-jscheme-definitions
+  (is (equalp #(7 3 4) (native-jscheme-add 3 4)))
+  (is (equalp #(7 3 4) (funcall #'native-jscheme-add 3 4)))
+  (is (= 720 (native-jscheme-factorial 6)))
+  (is (equal '(1 1 2 6) (mapcar #'native-jscheme-factorial '(0 1 2 3))))
+  (signals program-error (funcall (symbol-function 'native-jscheme-add) 1)))
+
+(test native-jscheme-created-once
+  (let ((*readtable* (jscheme:enable-syntax (copy-readtable)))
+        (*package* (find-package :openldk-jscheme-tests))
+        (calls 0) (original (symbol-function 'jscheme:eval-string)))
+    (unwind-protect
+         (progn
+           (setf (symbol-function 'jscheme:eval-string)
+                 (lambda (source) (incf calls) (funcall original source)))
+           (eval (read-from-string "(defun-jscheme native-once (a b) (+ a b))"))
+           (is (= 1 calls))
+           (dotimes (i 5) (is (= (+ i 2) (funcall 'native-once i 2))))
+           (is (= 1 calls)))
+      (setf (symbol-function 'jscheme:eval-string) original)
+      (fmakunbound 'native-once))))

@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2024, 2025  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2024, 2025, 2026  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 ;;;
@@ -425,7 +425,14 @@ name is recorded in the Java thread already, so there is nothing to do."
   (handler-case
       (invoke-special '|exit()V| '|java/lang/Thread| (list thread))
     (error (condition)
-      (format *error-output* "~&Thread ~A terminated with error during exit: ~A~%" thread condition))))
+      (format *error-output* "~&Thread ~A terminated with error during exit: ~A~%" thread condition)))
+  (bt:with-recursive-lock-held (*java-thread-registry-lock*)
+    (remhash thread *java-threads*)
+    (remhash thread *thread-interrupted*)
+    (remhash thread *java-thread-waits*)
+    (let ((current (bt:current-thread)))
+      (when (eq thread (gethash current *lisp-to-java-threads*))
+        (remhash current *lisp-to-java-threads*)))))
 
 #+sb-fiber
 (defmethod |start0()V| :around ((thread |java/lang/BaseVirtualThread|))
@@ -495,9 +502,7 @@ name is recorded in the Java thread already, so there is nothing to do."
   (sb-ext:dynamic-space-size))
 
 (defmethod |gc()V| ((rt |java/lang/Runtime|))
-  ;; Generation 7 also clears dead core-backed objects. A normal full GC can
-  ;; leave warm-image referents alive through otherwise dead core objects.
-  (sb-ext:gc :gen 7)
+  (%collect-java-heap)
   nil)
 
 ;; JDK 9+: Signal native methods — no-op stubs for Terminator.setup()

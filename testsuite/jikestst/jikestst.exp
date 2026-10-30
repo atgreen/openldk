@@ -1,150 +1,29 @@
-load_lib dg.exp
+# Jikes contains independently named mains, helper-only sources, intentional
+# nonzero exits, and golden files produced by much older Java implementations.
+# Use isolated compilation and the JDK 25 reference instead of reusing Test.class
+# or treating every output mismatch as XFAIL.
 load_lib openldk.exp
 
-dg-init
-
-set dg-do-what-default run
-
-set testargs ""
-set testname ""
-
-proc openldk_load { classfile } {
-    global testargs
-    # Most of a run is JIT compilation; leave room for a loaded machine.
-    set timeout 60
-    verbose "load $classfile"
-    set ldkcp [getenv "LDK_CLASSPATH"]
-    setenv "LDK_CLASSPATH" "$ldkcp:.:jikestst/hpj/src"
-    set classname [string map {".class" ""} $classfile]
-    set result [local_exec "../openldk $classname $testargs" "" "" $timeout]
-    verbose "result = $result"
-    set status [lindex $result 0]
-    set output [lindex $result 1]
-    verbose "STATUS = $status"
-
-    if { $status == 0 } {
-        return [list "pass" $output]
-    } else {
-        return [list "fail" $output]
-    }
-}
-
-proc openldk-dg-test { prog do_what extra_tool_flags } {
-    global testargs
-    set timeout 5
-
-    verbose "prog $prog" 2
-    verbose "do_what $do_what" 2
-    verbose "extra_tool_flags $extra_tool_flags" 2
-
-    # Run the javac command
-    set JAVA_HOME [getenv "JAVA_HOME"]
-    set status [local_exec "[openldk_javac] $prog" "" "" $timeout]
-    set classname [string map {".java" ""} $prog]
-
-    set testargs "1 2 3 4 5"
-
-    return [list "" "$classname.class"]
-}
-
-proc run_test { test_file expected_output } {
-
-    set expected_failure 0
-
-    # Move the test file to the current directory and rename it to Test.java
-    file copy -force $test_file ./Test.java
-
-    # Compile the test file
-    # Run the javac command
-    set JAVA_HOME [getenv "JAVA_HOME"]
-    set compile_result [local_exec "[openldk_javac] -cp jikestst/hpj/src Test.java" "" "" 10]
-    if { [lindex $compile_result 0] != 0 } {
-        return [list "fail" "Compilation failed"]
-    }
-
-    # Run the test with OpenLDK
-    set run_result [openldk_load "Test.class"]
-    set run_status [lindex $run_result 0]
-    set run_output [lindex $run_result 1]
-
-    # Normalize line endings and remove trailing whitespace from the output
-    regsub -all {\r} $run_output "" run_output
-    set run_output_lines [split $run_output "\n"]
-    set run_output_cleaned ""
-    foreach line $run_output_lines {
-        regsub {[\s\t]+$} $line "" line ;# Remove trailing spaces and tabs
-        append run_output_cleaned "$line\n"
-    }
-
-    # Remove trailing newlines from the cleaned output
-    regsub {\n+$} $run_output_cleaned "" run_output_cleaned
-
-    # Read and normalize the expected output
-    set expected [exec cat $expected_output]
-    regsub -all {\r} $expected "" expected
-    set expected_lines [split $expected "\n"]
-    set expected_cleaned ""
-    foreach line $expected_lines {
-        regsub {[\s\t]+$} $line "" line ;# Remove trailing spaces and tabs
-        append expected_cleaned "$line\n"
-    }
-
-    # Remove trailing newlines from the cleaned expected output
-    regsub {\n+$} $expected_cleaned "" expected_cleaned
-
-    if {[catch {exec grep -q -- "$test_name" $expected_failures_file} result options]} {
-        set expected_failure 0
-    } else {
-        set expected_failure 1
-    }
-
-    # Compare the cleaned output with the cleaned expected output
-    if { $run_output_cleaned == $expected_cleaned } {
-        if { $expected_failure == 0 } {
-            return [list "pass" "Output matches expected"]
-        } else {
-            return [list "xpass" "Output matches expected"]
-        }
-    } else {
-        if { {expected_failure} == 0 } {
-            return [list "fail" "Output does not match expected"]
-        } else {
-            return [list "xfail" "Output does not match expected"]
-        }
-    }
-}
-
-# Get the list of test files and their corresponding expected output files
-# For now, let's not do jikestst/unicode/ok/exec/*.e
 set test_files [lsort [glob -nocomplain -- jikestst/derek/ok/exec/*.e jikestst/hpj/ok/exec/*.e]]
-
 foreach test_file $test_files {
-    # Get the corresponding Java source file
-    set test_name [file rootname [file tail $test_file]]
-    set java_file [file dirname $test_file]/../../src/$test_name.java
-
-    verbose "Testing $java_file with expected output $test_file"
-    set result [run_test $java_file $test_file]
-    set status [lindex $result 0]
-    set message [lindex $result 1]
-
-    if { $status == "pass" } {
-        verbose pass
+    set result [local_exec "python3 audit-failures.py --suite jikestst --case $test_file --jobs 1 --fresh --output ../.cache/jikes" "" "" 300]
+    set output [lindex $result 1]
+    verbose $output
+    if {[lindex $result 0] != 0 || ![regexp {1/1 ([a-z-]+): } $output -> category]} {
+        unresolved "$test_file (audit runner failed)"
+    } elseif {$category == "stale-pass" || $category == "stale-golden"} {
         pass $test_file
+    } elseif {$category == "non-executable-fixture"} {
+        unsupported "$test_file (helper source has no executable main)"
+    } elseif {$category == "compile-rejected"} {
+        unsupported "$test_file (JDK 25 rejects the source; see ../.cache/jikes)"
+    } elseif {$category == "reference-failure"} {
+        unsupported "$test_file (fails on JDK 25 too; see ../.cache/jikes)"
+    } elseif {$category == "reference-timeout"} {
+        unresolved "$test_file (JDK 25 reference timed out)"
+    } elseif {[is_expected_failure $test_file]} {
+        xfail $test_file
     } else {
-        if { $status == "xpass" } {
-            verbose unexpected pass
-            xpass $test_file
-        } else {
-            if { $status == "xfail" } {
-                verbose expected fail
-                xfail $test_file
-            } else {
-                verbose fail
-                fail $test_file
-            }
-        }
+        fail $test_file
     }
 }
-
-dg-finish

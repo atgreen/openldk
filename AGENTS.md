@@ -55,12 +55,17 @@ integration between Java and Common Lisp.
 ## Coding Style
 
 **SPDX License Headers:**
+All project-owned Lisp and ASDF files use the full GPL/Classpath header in
+`src/arrays.lisp`, with the appropriate package in the modeline. Preserve
+existing copyright holders and years; add the current year whenever editing
+a file. Retain original notices in imported test suites and dependencies.
+
 Place SPDX identifier below copyright notice with a blank line in between:
 ```lisp
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 ;;;
-;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2023, 2024, 2025, 2026  Anthony Green <green@moxielogic.com>
 ```
 
 **Package Prefixes:**

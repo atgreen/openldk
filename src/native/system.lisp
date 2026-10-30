@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2024, 2025  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2024, 2025, 2026  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 ;;;
@@ -677,9 +677,10 @@ name after its package, $ and all."
   (let* ((class-name (lstring name))
          (bin-name (substitute #\/ #\. class-name))
          (ldk-loader (get-ldk-loader-for-java-loader loader)))
-    ;; Check only this loader's class map (not parent - that's Java's job)
-    (when ldk-loader
-      (gethash bin-name (slot-value ldk-loader 'java-classes-by-bin-name)))))
+    ;; findLoadedClass includes delegated classes for which this loader was
+    ;; recorded as an initiating loader; it must not search arbitrary parents.
+    (when-let ((class (%initiated-class bin-name ldk-loader)))
+      (java-class class))))
 
 (defun %classfile-name (bytes offset length)
   "The binary name the class file in BYTES (from OFFSET, LENGTH long)
@@ -700,6 +701,8 @@ REPL defines its classes so)."
          (class-name (if name
                          (substitute #\/ #\. (lstring name))
                          (%classfile-name bytes offset len)))
+         (_ (when (%initiated-class class-name ldk-loader)
+              (%throw '|java/lang/LinkageError| (format nil "Duplicate class definition: ~A" class-name))))
          (stream (make-instance 'byte-array-input-stream
                                 :array bytes :start offset :end (+ offset len)))
          (result (%classload-from-stream class-name stream loader ldk-loader)))
@@ -723,7 +726,7 @@ REPL defines its classes so)."
     (|java/lang/ClassLoader.defineClass1(Ljava/lang/ClassLoader;Ljava/lang/String;[BIILjava/security/ProtectionDomain;Ljava/lang/String;)Ljava/lang/Class;|
      loader name bytes 0 length protection-domain source)))
 
-(defvar *hidden-class-data* (make-hash-table :test #'eq)
+(defvar *hidden-class-data* (make-hash-table :test #'eq :weakness :key)
   "Maps a hidden class's java.lang.Class object to the classData passed to
 MethodHandles.Lookup.defineHiddenClassWithClassData; read back by
 MethodHandles.classData().")
@@ -1492,13 +1495,16 @@ present.  Consumed by Thread.getState()/start()/getThreadGroup()."
   ;; RUNNABLE now; the cleanup below marks TERMINATED so a dead thread can't
   ;; be restarted and getThreadGroup() returns null after termination.
   (%set-thread-status thread 4)
-  (let* ((debug-codegen *debug-codegen*)
+  ;; A short-lived child must not exit before its parent publishes the mapping.
+  (bt:with-recursive-lock-held (*java-thread-registry-lock*)
+   (let* ((debug-codegen *debug-codegen*)
          (lisp-thread
           (bordeaux-threads:make-thread
            (lambda ()
              (let ((*scoped-value-cache* nil))
                ;; Register this Lisp thread with the Java Thread
-               (setf (gethash (bordeaux-threads:current-thread) *lisp-to-java-threads*) thread)
+               (bt:with-recursive-lock-held (*java-thread-registry-lock*)
+                 (setf (gethash (bordeaux-threads:current-thread) *lisp-to-java-threads*) thread))
                (unwind-protect
                     ;; Call the Thread's run() method
                     (handler-case
@@ -1530,7 +1536,7 @@ present.  Consumed by Thread.getState()/start()/getThreadGroup()."
                     (monitor-exit thread))))))
            :name (format nil "Java-Thread-~A" (slot-value thread '|name|)))))
     ;; Store the Lisp thread in our mapping
-    (setf (gethash thread *java-threads*) lisp-thread)))
+    (setf (gethash thread *java-threads*) lisp-thread))))
 
 (defmethod |interrupt0()V| ((thread |java/lang/Thread|))
   "Interrupt the thread by signaling the underlying Lisp thread (or fiber)."
@@ -1669,9 +1675,9 @@ present.  Consumed by Thread.getState()/start()/getThreadGroup()."
               components))
       (labels ((allocate (types sizes)
                  (if (cdr sizes)
-                     (make-java-array :component-class (car types) :size (car sizes)
-                                      :initial-contents (loop repeat (car sizes)
-                                                              collect (allocate (cdr types) (cdr sizes))))
+                     (let ((array (make-java-array :component-class (car types) :size (car sizes))))
+                       (dotimes (index (car sizes) array)
+                         (setf (jaref array index) (allocate (cdr types) (cdr sizes)))))
                      (make-java-array :component-class (car types) :size (car sizes)))))
         (allocate components dimensions)))))
 
@@ -1712,7 +1718,7 @@ parent delegation is the Java caller's job)."
 (defun |java/lang/ClassLoader.findBootstrapClass(Ljava/lang/String;)Ljava/lang/Class;| (name)
   (%find-bootstrap-class name))
 
-(defvar *native-url-strings* (make-hash-table :test #'eq)
+(defvar *native-url-strings* (make-hash-table :test #'eq :weakness :key)
   "URL strings attached to resource URLs constructed by OpenLDK.")
 
 (defun %make-url-from-string (url-string)
@@ -2103,3 +2109,15 @@ same-named defmethod."
 (defun |java/lang/Shutdown.beforeHalt()V| ()
   nil)
 
+
+;;; Vector API operations use the JDK's Java fallback implementations. Report
+;;; no VM vector intrinsics rather than advertising the host CPU's SIMD support.
+(defun |jdk/internal/vm/vector/VectorSupport.registerNatives()I| ()
+  0)
+
+(defun |jdk/internal/vm/vector/VectorSupport.getMaxLaneCount(Ljava/lang/Class;)I| (element-type)
+  (declare (ignore element-type))
+  -1)
+
+(defun |jdk/internal/vm/vector/VectorSupport.getCPUFeatures()Ljava/lang/String;| ()
+  (jstring ""))

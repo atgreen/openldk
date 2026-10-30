@@ -80,6 +80,7 @@
            #:define
            #:ex-data
            #:enable-syntax
+           #:defun-clojure
            #:to-lisp
            #:from-lisp))
 
@@ -403,7 +404,8 @@ var, and an alist of those names and the Lisp forms whose values they hold."
       (openldk.interop::%read-lisp-family-source
        stream close (lambda (i)
                       (declare (ignore i))
-                      (format nil "lisp-value-~D" (incf *lisp-value-counter*))))
+                      (format nil "lisp-value-~D" (incf *lisp-value-counter*)))
+       :dispatch-line-comments t)
     (values source (mapcar #'cons names forms))))
 
 (defvar *sites* (make-hash-table :test #'equal)
@@ -435,7 +437,16 @@ the block is re-entrant (recursion, threads)."
   "Make #[ ... ] read Clojure source in READTABLE (by default, the current
 one), evaluating it where it appears; see above."
   (set-dispatch-macro-character #\# #\[ #'%read-clojure-syntax readtable)
+  (openldk.interop::%enable-function-definition-syntax readtable)
   readtable)
+
+(defmacro defun-clojure (name parameters source &optional captures forms)
+  "Define NAME with required PARAMETERS and a native Clojure body.
+ENABLE-SYNTAX reads the body as source. Compile once when the definition
+executes (at FASL load time for compiled files), never on ordinary calls."
+  (openldk.interop::%expand-function-definition name parameters source captures forms 'eval-string :clojure))
+
+(openldk.interop::%register-function-syntax 'defun-clojure :clojure)
 
 ;;; (:clojure-file "name") ASDF components: loaded by Clojure at LOAD-OP
 

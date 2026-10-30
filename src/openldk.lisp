@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2024, 2025  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2024, 2025, 2026  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 ;;;
@@ -483,9 +483,12 @@ return T.  Instance methods are installed as CLOS methods so other classes'
 methods on the same generic function survive."
   (when-let ((native-fn (gethash method-key *native-overrides*)))
     (let ((fn-symbol (intern (%method-fn-name class method)
-                             (%class-loader-package class))))
+                             (%class-loader-package class)))
+          (owned-p (%user-ldk-loader-p (ldk-loader class))))
       (if (static-p method)
-          (setf (symbol-function fn-symbol) native-fn)
+          (if owned-p
+              (%install-owned-java-function class fn-symbol native-fn (count-parameters (descriptor method)))
+              (setf (symbol-function fn-symbol) native-fn))
           (let* ((class-sym (intern (slot-value class 'name)
                                     (%class-specializer-package class)))
                  (n-params (progn
@@ -493,10 +496,12 @@ methods on the same generic function survive."
                              (count-parameters (slot-value method 'descriptor))))
                  (param-names (loop for i from 1 upto n-params
                                     collect (intern (format nil "arg~A" i) :openldk)))
-                 (this-sym (intern "this" :openldk)))
+                 (this-sym (intern "this" :openldk))
+                 (entry (and owned-p (intern (format nil "%jnative:~A" method-key) (%class-loader-package class)))))
+            (when entry (%install-owned-java-function class entry native-fn (1+ n-params)))
             (%eval `(defmethod ,fn-symbol
                         ((,this-sym ,class-sym) ,@param-names)
-                      (funcall ,native-fn ,this-sym ,@param-names))))))
+                      (funcall ,(if entry `(function ,entry) native-fn) ,this-sym ,@param-names))))))
     (setf (gethash method-key *methods-being-compiled*) :done)
     t))
 
@@ -845,35 +850,30 @@ the alist TYPES so VALUE passes through that type's normalizer."
     (t (cons (%normalize-typed-assignments (car form) types)
              (%normalize-typed-assignments (cdr form) types)))))
 
-(defun %typed-let (bindings body)
-  "The LET binding a method's BINDINGS around BODY, declaring the type of
-every variable whose values all have one primitive category."
+(defun %typed-let (bindings body &optional parameter-types)
+  "Declare canonical primitive storage, retaining opaque native values on the slow path."
   (when (compact-p *context*)
     (return-from %typed-let `(let ,bindings ,@body)))
-  (let ((sources (variable-sources *context*)))
-    ;; THIS and the parameters' locals start out holding values of unknown
-    ;; type: callers pass whatever Java fields hold.
+  (let ((sources (alexandria:copy-hash-table (variable-sources *context*))))
     (loop for (symbol init) in bindings
-          when init do (%note-variable-source symbol nil *context*))
+          when init do (push (cdr (assoc symbol parameter-types)) (gethash symbol sources)))
     (let* ((categories (%variable-categories sources))
            (types (loop for (symbol) in bindings
                         for category = (gethash symbol categories)
-                        when category
-                          collect (cons symbol (ecase category
-                                                 (:int '(signed-byte 32))
-                                                 (:long '(signed-byte 64))
-                                                 (:float 'single-float)
-                                                 (:double 'double-float))))))
-      (if (null types)
-          `(let ,bindings ,@body)
-          `(let ,(loop for (symbol init) in bindings
-                       for type = (cdr (assoc symbol types))
-                       collect (cond
-                                 ((null type) (if init (list symbol init) (list symbol)))
-                                 (t (list symbol (if (consp type) 0 (coerce 0 type))))))
-             (declare ,@(loop for (symbol . type) in types
-                              collect `(type ,type ,symbol)))
-             ,@(%normalize-typed-assignments body types))))))
+                        when category collect (cons symbol (%primitive-lisp-type category))))
+           (form
+             `(let ,(loop for (symbol init) in bindings
+                          for type = (cdr (assoc symbol types))
+                          collect (cond ((null type) (if init (list symbol init) (list symbol)))
+                                        (init (list symbol init))
+                                        (t (list symbol (if (consp type) 0 (coerce 0 type))))))
+                ,@(when types `((declare ,@(loop for (symbol . type) in types collect `(type ,type ,symbol)))))
+                ,@(%omit-safe-leaf-handlers (%normalize-typed-assignments body types) types))))
+      (%specialize-primitive-result-arithmetic
+       (%specialize-array-loops
+        (if *enable-word-longs*
+            (%lower-word-longs form (loop for (symbol . type) in types when (equal type '(signed-byte 64)) collect symbol))
+            form)) types))))
 
 (defun %prune-unused-bindings (bindings body)
   "BINDINGS less those with no initial value that BODY never mentions."
@@ -888,11 +888,17 @@ every variable whose values all have one primitive category."
                bindings)))
 
 (defun %method-let (bindings body)
-  "The LET binding a compiled method's variables around BODY.  BINDINGS
-covers every local slot, stack variable and exception-handler variable
-the method might use; those with no initial value that BODY never
-mentions are dropped, and %TYPED-LET declares the types of the rest."
-  (%typed-let (%prune-unused-bindings bindings body) body))
+  "Use a guarded typed entry for canonical Java parameters, with the old ABI as fallback."
+  (let* ((bindings (%prune-unused-bindings bindings body))
+         (parameters (and *enable-primitive-entries* (not (compact-p *context*))
+                          (remove-if-not (lambda (p) (second (assoc (car p) bindings)))
+                                         *method-primitive-parameters*))))
+    (if parameters
+        `(if (and ,@(loop for (local . category) in parameters
+                          collect `(typep ,(second (assoc local bindings)) ',(%primitive-lisp-type category))))
+             ,(%typed-let bindings body parameters)
+             ,(%typed-let bindings body))
+        (%typed-let bindings body))))
 
 ;;; Folding single-use stack variables.  Bytecode passes nearly every
 ;;; value through a stack variable: (setf s{5} (call ...)) followed by a
@@ -1172,7 +1178,17 @@ when STATEMENTS can't be flat: some tag twice, or a handler not emitted."
 BLOCKS-AFTER-DCE: generate each block's code, then wrap it with debug
 tracing, the NPE/array-bounds handler-binds, and ACC_SYNCHRONIZED monitor
 entry/exit as required."
-  (let* ((lisp-code
+  (let* ((*method-entry-initialized-class*
+           ;; Bootstrap natives also call JDK functions directly from Lisp,
+           ;; before Java entry has initialized their class (notably System).
+           ;; Application/library entries use Java invocation or JAVA-LOAD.
+           (when (and (ldk-loader class) (not (zerop (id (ldk-loader class))))
+                      (or (static-p method) (not (interface-p class)))) class))
+         (*method-primitive-parameters* (%primitive-parameter-types method))
+         (*method-primitive-return-type*
+           (when-let ((category (%jtype-category (get-return-type (descriptor method)))))
+             (%primitive-lisp-type category)))
+         (lisp-code
            (%fold-stack-variables
             (list (list* 'block nil
                          (or (and (plusp (length (exception-table *context*)))
@@ -1186,7 +1202,7 @@ entry/exit as required."
             (unless (compact-p *context*)
               (%variable-categories (variable-sources *context*)))))
          (lisp-code
-           (%clean-method-body lisp-code
+           (%clean-method-body (%elide-adjacent-member-checks lisp-code)
                                (%go-targets lisp-code)
                                (and (not (static-p method))
                                     (not (%assigns-p lisp-code (intern "local-0" :openldk))))))
@@ -1325,14 +1341,14 @@ the method another way (through the FASL cache) and returns true if it did."
          (destructuring-bind (name lambda-list &rest body) (rest definition-code)
            (declare (ignore lambda-list))
            (let ((body-function (let ((sb-ext:*evaluator-mode* :interpret))
-                                  (%eval `(lambda () (block ,name ,@body))))))
+                                  (%evaluate-java-definition class `(lambda () (block ,name ,@body))))))
              ;; Not a tail call, which would leave no frame either.
-             (%eval `(defun ,name () (funcall ,body-function) nil)))))
+             (%evaluate-java-definition class `(defun ,name () (funcall ,body-function) nil)))))
         ((> length 5000)
          (let ((sb-ext:*evaluator-mode* :interpret))
-           (%eval definition-code)))
+           (%evaluate-java-definition class definition-code)))
         ((and evaluator (funcall evaluator)))
-        (t (%eval definition-code)))
+        (t (%evaluate-java-definition class definition-code)))
     (error (c)
       (format *error-output* "~&;; COMPILE-ERROR in ~A: ~A~%" method-key c)
       (force-output *error-output*)
@@ -1374,7 +1390,7 @@ the method another way (through the FASL cache) and returns true if it did."
             (force-output *error-output*)
             (handler-case
                 (let ((sb-ext:*evaluator-mode* :interpret))
-                  (eval definition-code)) ; lint:suppress eval-usage
+                  (%evaluate-java-definition class definition-code)) ; lint:suppress eval-usage
               (error (c)
                 (format *error-output*
                         "~&;; COMPILE-FALLBACK-ERROR in ~A: ~A~%"
@@ -1382,16 +1398,31 @@ the method another way (through the FASL cache) and returns true if it did."
                 (force-output *error-output*)
                 (error c)))))))))
 
-(defun %install-jit-error-stub (class method method-key)
-  "Install a function that signals on invocation, so a failed JIT compile
-doesn't leave a self-recursing compilation stub behind.  Uses plain Lisp
-errors (not Java exceptions) to avoid triggering further class loading
-during error handling."
+(defun %install-jit-error-stub (class method method-key &optional java-condition)
+  "Install a stable failure instead of leaving a self-recursing JIT stub.
+Preserve an existing Java linkage condition without entering Java to construct
+another exception; internal compiler failures continue to use Lisp errors."
   ;; Instance methods dispatch on a generic function in :openldk, where the
   ;; lazy compile stub and %build-method-definition both put them.  Interning
   ;; in the loader's package instead (OPENLDK.APP for the classpath) put the
   ;; error stub on an unrelated generic function, so the lazy stub survived and
   ;; every call looped: %compile-method returns at once for a :done method.
+  (when (%user-ldk-loader-p (ldk-loader class))
+    (let* ((count (count-parameters (descriptor method)))
+           (arguments (loop repeat (+ count (if (static-p method) 0 1)) collect (gensym "ARG")))
+           (symbol (intern (%method-fn-name class method)
+                           (if (static-p method) (ldk-class-package class) :openldk)))
+           (implementation (if (static-p method) symbol
+                               (intern (format nil "%jerror:~A" method-key) (ldk-class-package class))))
+           (function (lambda (&rest values)
+                       (declare (ignore values))
+                       (if java-condition (error java-condition)
+                           (internal-error "JIT compilation failed for ~A" method-key)))))
+      (%install-owned-java-function class implementation function)
+      (unless (static-p method)
+        (%eval `(defmethod ,symbol ((,(first arguments) ,(intern (name class) (ldk-class-package class))) ,@(rest arguments))
+                  (,implementation ,@arguments)))))
+    (return-from %install-jit-error-stub nil))
   (let ((fn-symbol (intern (%method-fn-name class method)
                            (if (static-p method)
                                (%class-loader-package class)
@@ -1401,7 +1432,8 @@ during error handling."
           (setf (symbol-function fn-symbol)
                 (lambda (&rest args)
                   (declare (ignore args))
-                  (internal-error "JIT compilation failed for ~A" method-key))))
+                  (if java-condition (error java-condition)
+                      (internal-error "JIT compilation failed for ~A" method-key)))))
         ;; Instance method: install a defmethod that throws an error.
         ;; Use CL:EVAL (not %eval) to avoid re-entering the JIT.
         (let* ((class-sym (intern (slot-value class 'name)
@@ -1413,7 +1445,8 @@ during error handling."
           (when (find-class class-sym nil)
             (eval `(defmethod ,fn-symbol ((,this-sym ,class-sym) ,@param-names)
                      (declare (ignore ,this-sym ,@param-names))
-                     (internal-error "JIT compilation failed for ~A" ,method-key))))))))
+                     (if ,java-condition (error ,java-condition)
+                         (internal-error "JIT compilation failed for ~A" ,method-key)))))))))
 
 (defun %compile-method (class-or-name method-index)
   "JIT-compile method METHOD-INDEX of CLASS-OR-NAME (a <class>, or in AOT
@@ -1433,7 +1466,7 @@ classes with the same name."
          (claim-key (let ((loader (and (slot-boundp class 'ldk-loader)
                                        (slot-value class 'ldk-loader))))
                       (if (%user-ldk-loader-p loader)
-                          (cons loader method-key)
+                          (cons (id loader) method-key)
                           method-key))))
     (%verify-class-for-java class)
     ;; Skip bytecode compilation for methods with native overrides.
@@ -1510,7 +1543,13 @@ classes with the same name."
                                  (round (* 1000 (/ (- (get-internal-real-time) compile-start-time)
                                                    internal-time-units-per-second))))
                          (force-output)))))
+                 (%note-java-inline-function class method)
                  (setf compilation-completed t))
+             (|condition-java/lang/LinkageError| (condition)
+               ;; Eager linking during compilation is still a Java linkage
+               ;; failure, not a Lisp compiler error. Preserve it on every call.
+               (%install-jit-error-stub class method method-key condition)
+               (setf compilation-completed t))
              (error (c)
                ;; Compilation failed (IR translation, codegen, or eval error).
                (format *error-output* "~&;; JIT-ERROR in ~A: ~A~%" method-key c)
@@ -1811,10 +1850,26 @@ shadows a superclass field and needs its own storage."
   (let ((mangled (mangle-field-name (slot-value field 'name))))
     (if (%field-shadows-super-p class field ldk-loader)
         (let ((sym (intern (format nil "~A$~A" mangled (slot-value class 'name)) :openldk)))
-          (setf (gethash (cons class (slot-value field 'name)) *field-shadow-slots*)
+          (setf (gethash (slot-value field 'name) (%owner-cache-table *field-shadow-slots* class))
                 sym)
           sym)
         (intern mangled :openldk))))
+
+(defun %initialize-wide-java-instance (object)
+  "Initialize many fields in a loop rather than compiling one enormous initializer."
+  (dolist (slot (closer-mop:class-slots (class-of object)))
+    (let ((name (closer-mop:slot-definition-name slot))
+          (initializer (closer-mop:slot-definition-initfunction slot)))
+      (when (and initializer (not (slot-boundp object name)))
+        (setf (slot-value object name) (funcall initializer)))))
+  object)
+
+(defun %define-wide-java-class (definition)
+  "Avoid quadratic register allocation in both DEFCLASS and its fast initializer."
+  (let ((sb-ext:*evaluator-mode* :interpret))
+    (%eval definition))
+  (%eval `(defmethod initialize-instance ((object ,(second definition)) &key)
+            (%initialize-wide-java-instance object))))
 
 (defun emit-<class> (class ldk-loader)
   "Emit the CLOS class definition for a Java class, and the defparameter
@@ -1849,21 +1904,37 @@ shadows a superclass field and needs its own storage."
                   (setf supers (substitute '|sun/misc/Unsafe| '|java/lang/Object| supers)))
                 supers)
                ;; Field names stay in :openldk (slots are inherited across packages)
-               (map 'list
+               (append (when (or (string= name "java/lang/Object") (%user-ldk-loader-p ldk-loader))
+                         (list (list *java-loader-owner-slot* :initform nil)))
+                       (map 'list
                     (lambda (f)
                       (list (%field-slot-symbol class f ldk-loader)
                             :initform (let ((cf (gethash "ConstantValue" (slot-value f 'attributes))))
                                         (if cf
-                                            (value (emit (aref (constant-pool class) cf) (constant-pool class)))
+                                            (let ((literal (emit (aref (constant-pool class) cf)
+                                                                 (constant-pool class))))
+                                              (if (typep literal 'ir-string-literal)
+                                                  (ijstring (value literal))
+                                                  (value literal)))
                                             (initform-from-descriptor (slot-value f 'descriptor))))
                             :allocation
-                            (if (eq 0 (logand 8 (slot-value f 'access-flags))) :instance :class)))
-                    fields))
-              (list
-               'defparameter (intern (format nil "+static-~A+" (intern name pkg)) pkg)
-               (list
-                'make-instance (list 'quote (intern name pkg))))))))
-    defclass-code))
+                            (if (or (eq 0 (logand 8 (slot-value f 'access-flags)))
+                                    (%user-ldk-loader-p ldk-loader)) :instance :class)))
+                    fields)))
+              (if (%user-ldk-loader-p ldk-loader)
+                  `(progn
+                     (define-symbol-macro ,(intern (format nil "+static-~A+" name) pkg)
+                       (%class-static-instance-by-symbol ',(intern name pkg)))
+                     (%register-owned-static-instance ',(intern name pkg) (make-instance ',(intern name pkg))))
+                  (list
+                   'defparameter (intern (format nil "+static-~A+" (intern name pkg)) pkg)
+                   (list
+                    'make-instance (list 'quote (intern name pkg)))))))))
+    (if (> (length (fields class)) 512)
+        `(progn
+           (%define-wide-java-class ',(second defclass-code))
+           ,(third defclass-code))
+        defclass-code)))
 
 (defvar *method-stubs* (make-hash-table :test 'eq :weakness :key :synchronized t)
   "Lazy-compilation stub methods installed by %INSTALL-METHOD-STUBS, so
@@ -1875,7 +1946,7 @@ shadows a superclass field and needs its own storage."
          (method (aref (methods class) (1- method-index)))
          (name (format nil "~A.~A~A" (name class) (name method) (descriptor method)))
          (loader (ldk-loader class))
-         (key (if (%user-ldk-loader-p loader) (cons loader name) name)))
+         (key (if (%user-ldk-loader-p loader) (cons (id loader) name) name)))
     (bt:with-lock-held (*method-compilation-lock*)
       (eq (gethash key *methods-being-compiled*) (bt:current-thread)))))
 
@@ -1883,11 +1954,12 @@ shadows a superclass field and needs its own storage."
   "A static method's lazy stub: compile method METHOD-INDEX of CLASS-REF,
 which replaces FN-SYMBOL's definition, then call the new definition."
   (lambda (&rest args)
+    (let ((class-ref (%resolve-class-reference class-ref)))
     (if (%reentrant-method-compilation-p class-ref method-index)
         (%execute-verified-bytecode class-ref method-index nil args)
         (progn
           (%compile-method class-ref method-index)
-          (apply fn-symbol args)))))
+          (apply fn-symbol args))))))
 
 (defun %instance-method-stub (gf class-ref method-index method-symbol class-symbol param-count)
   "A standard method on GF specialized on CLASS-SYMBOL whose function compiles
@@ -1902,11 +1974,12 @@ the new one."
                                                    (make-list param-count :initial-element (find-class t)))
                                :function (lambda (args next-methods)
                                            (declare (ignore next-methods))
+                                           (let ((class-ref (%resolve-class-reference class-ref)))
                                            (if (%reentrant-method-compilation-p class-ref method-index)
                                                (%execute-verified-bytecode class-ref method-index (first args) (rest args))
                                                (progn
                                                  (%compile-method class-ref method-index)
-                                                 (invoke-special method-symbol class-symbol args)))))))
+                                                 (invoke-special method-symbol class-symbol args))))))))
     (setf (gethash method *method-stubs*) t)
     method))
 
@@ -1931,7 +2004,8 @@ without running the compiler, since most methods are never called."
                  (if (static-p m)
                      ;; Static methods: function name in loader's package (includes class name)
                      (let ((fn-symbol (intern (format nil "~A.~A" (slot-value class 'name) method-name) pkg)))
-                       (setf (fdefinition fn-symbol) (%static-method-stub class-ref method-index fn-symbol)))
+                       (setf (fdefinition fn-symbol) (%static-method-stub class-ref method-index fn-symbol))
+                       (%note-java-inline-function class m))
                      ;; Instance methods: generic function name in :openldk for dispatch,
                      ;; class specializer in loader's package for isolation.
                      (let* ((method-symbol (intern method-name :openldk))
@@ -1952,6 +2026,41 @@ without running the compiler, since most methods are never called."
   (or (not (%user-ldk-loader-p loader))
       (let ((existing (gethash classname *ldk-classes-by-bin-name*)))
         (or (null existing) (%defined-by-user-loader-p existing 'ldk-classes-by-bin-name)))))
+
+(defun %same-runtime-package-p (left right)
+  "Package identity includes the defining class loader."
+  (and (eq (ldk-loader left) (ldk-loader right))
+       (string= (subseq (name left) 0 (or (position #\/ (name left) :from-end t) 0))
+                (subseq (name right) 0 (or (position #\/ (name right) :from-end t) 0)))))
+
+(defun %check-class-inheritance (class super interfaces)
+  "Enforce superclass/interface kinds and the JVM's final inheritance rules."
+  (when super
+    (when (or (logbitp 4 (access-flags super)) (interface-p super))
+      (%throw '|java/lang/IncompatibleClassChangeError|
+              (format nil "~A has invalid superclass ~A" (name class) (name super))))
+    (loop for parent = super then (and (super parent) (%resolve-class (super parent) (ldk-loader parent)))
+          while parent
+          do (loop for method across (methods class)
+                   unless (or (static-p method) (string= (name method) "<init>")
+                              (logbitp 1 (access-flags method)))
+                     do (let ((inherited (find-if
+                                          (lambda (candidate)
+                                            (and (string= (name method) (name candidate))
+                                                 (string= (descriptor method) (descriptor candidate))))
+                                          (methods parent))))
+                          (when (and inherited (logbitp 4 (access-flags inherited))
+                                     (not (static-p inherited))
+                                     (not (logbitp 1 (access-flags inherited)))
+                                     (or (not (zerop (logand (access-flags inherited) #x5)))
+                                         (%same-runtime-package-p class parent)))
+                            (%throw '|java/lang/IncompatibleClassChangeError|
+                                    (format nil "~A overrides final method ~A.~A"
+                                            (name class) (name parent) (name inherited))))))))
+  (dolist (parent interfaces)
+    (when (and parent (not (interface-p parent)))
+      (%throw '|java/lang/IncompatibleClassChangeError|
+              (format nil "~A has non-interface parent ~A" (name class) (name parent))))))
 
 (defun %check-sealed-supertypes (class parents)
   "Enforce permitted direct subtypes and runtime package/module membership."
@@ -1992,7 +2101,8 @@ without running the compiler, since most methods are never called."
         (let ((existing-ldk-class (find-class-in-loader-hierarchy classname ldk-loader)))
           (when existing-ldk-class
             (return-from %classload-from-stream existing-ldk-class))))))
-  (unwind-protect
+  (let ((definition nil) (completed nil))
+    (unwind-protect
        (let* ((publish-globally (%publish-class-globally-p classname ldk-loader))
               (pkg (loader-package ldk-loader))
               (classname-symbol (intern classname pkg))
@@ -2005,6 +2115,8 @@ without running the compiler, since most methods are never called."
                              (%throw-verification-error condition)))))
                   (setf (name c) classname)
                   (setf (slot-value c 'ldk-loader) ldk-loader)
+                  (setf definition c)
+                  (%record-initiating-class c ldk-loader)
                   ;; Store in loader's hash tables
                   (setf (gethash classname (slot-value ldk-loader 'ldk-classes-by-bin-name)) c)
                   (setf (gethash fq-classname (slot-value ldk-loader 'ldk-classes-by-fq-name)) c)
@@ -2032,7 +2144,10 @@ without running the compiler, since most methods are never called."
              (remhash fq-classname *ldk-classes-by-fq-name*))
            (return-from %classload-from-stream nil))
          (handler-case
-             (%check-sealed-supertypes class (cons super interfaces))
+             (progn
+               (%check-class-inheritance class super interfaces)
+               (%prepare-loader-constraints class)
+               (%check-sealed-supertypes class (cons super interfaces)))
            (error (condition)
              ;; A rejected definition must not poison later attempts in this loader.
              (remhash classname (slot-value ldk-loader 'ldk-classes-by-bin-name))
@@ -2051,6 +2166,8 @@ without running the compiler, since most methods are never called."
                                                           (java-loader ldk-loader)))))
                             klass))))
            (setf (java-class class) klass)
+           (when (%user-ldk-loader-p ldk-loader)
+             (setf (slot-value klass *java-loader-owner-slot*) ldk-loader))
            ;; JDK 25: Class.getModifiers(), isInterface() and isEnum() read the
            ;; `modifiers` field directly (these are no longer native methods), so
            ;; populate it from the class file's access flags.
@@ -2138,7 +2255,7 @@ without running the compiler, since most methods are never called."
                                       collect (list '%ensure-class-initialized
                                                     k-ldk-class
                                                     (list 'function clinit-function))))))
-             (%eval icc)))
+             (%evaluate-java-definition class icc)))
 
          ;; Check if this is a Throwable subclass - find Throwable in its defining package
          (let ((throwable-symbol (intern "java/lang/Throwable" (class-package "java/lang/Throwable"))))
@@ -2167,8 +2284,11 @@ without running the compiler, since most methods are never called."
          (loop for field across (fields class)
                do (classload (slot-value (slot-value field 'class) 'name)))
 
+         (setf completed t)
          class)
-    (close classfile-stream)))
+      (close classfile-stream)
+      (when (and definition (not completed))
+        (%forget-failed-class-definition definition ldk-loader)))))
 
 (defun %classload-system (classname)
   "Load CLASSNAME as the boot or app class loader would, from the JDK and
@@ -2184,7 +2304,7 @@ loader; that is never the answer here."
 (defun %stub-class-reference (class)
   "How a method stub names CLASS to %COMPILE-METHOD: the <class> itself, or
 its name in AOT output, which is written out as Lisp source."
-  (if *aot-dir* (slot-value class 'name) class))
+  (if *aot-dir* (slot-value class 'name) (%weak-class-reference class)))
 
 (defvar *classes-being-resolved* nil
   "(LDK-LOADER . CLASSNAME) pairs this thread is resolving through a Java
@@ -2210,7 +2330,7 @@ parent could also provide."
                                           (%get-ldk-class-by-bin-name (super class) t
                                                                       (ldk-loader class))))))))))
 
-(defun %resolve-class (classname ldk-loader)
+(defun %resolve-class-without-initiation (classname ldk-loader)
   "Resolve CLASSNAME through its defining LDK-LOADER, or return NIL.
 A user loader's loadClass implements its complete delegation policy; the
 application classpath must not be searched on that loader's behalf."
@@ -2240,6 +2360,12 @@ application classpath must not be searched on that loader's behalf."
               (ask-java-loader))
           (or (and ldk-loader (%get-ldk-class-by-bin-name classname t ldk-loader))
               (%classload-system classname))))))
+
+(defun %resolve-class (classname ldk-loader)
+  "Resolve through a stable initiating-loader identity, recording delegated results."
+  (or (%initiated-class classname ldk-loader)
+      (when-let ((class (%resolve-class-without-initiation classname ldk-loader)))
+        (%record-initiating-class class (or ldk-loader (ldk-loader class))))))
 
 (defun %resolve-class-in-context (classname)
   "Resolve CLASSNAME for the method being compiled: through the loader of
@@ -2509,6 +2635,7 @@ properties, and *CLASSPATH* construction."
   (when *boot-class-loader*
     (setf (gethash *boot-class-loader* *java-to-ldk-loaders*) *app-ldk-class-loader*))
   (%ensure-system-loader-packages)
+  (%enable-class-unloading)
   (%parse-ldk-debug-flags)
   ;; Enable DCE via environment variable LDK_DCE=1 (or any non-empty value)
   (let ((LDK_DCE (uiop:getenv "LDK_DCE")))
@@ -2543,9 +2670,15 @@ properties, and *CLASSPATH* construction."
                              (make-instance 'jar-classpath-entry :jarfile cpe)
                              (make-instance 'dir-classpath-entry :dir cpe)))
            (discover-jmod-classpath-entries))))
+  (when *cli-add-modules* (%reset-boot-module-layer))
+  (loop for modules in (reverse *cli-add-modules*)
+        for index from 0
+        do (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;|
+            (jstring (format nil "jdk.module.addmods.~D" index)) (jstring modules)))
   ;; Resolve the boot graph before application loading/JIT compilation can
   ;; reenter module initialization through an access check.
   (%boot-module-layer)
+  (%configure-native-access)
   (setf *module-access-ready* t))
 
 (defun %main-method-declared-by (class descriptor public-only &optional inherited-interface)
@@ -3005,5 +3138,6 @@ supplies additional system properties as (name . value) pairs."
   (%preload-lambda-interfaces "finalizing")
   (%adopt-native-short-methods)
   (%adopt-standard-java-gfs)
+  (%initialize-array-allocation-error)
   (setf *debug-load* nil)
   (setf *debug-compile* nil))

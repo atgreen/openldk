@@ -1,22 +1,57 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
-;;; Copyright (C) 2026 OpenLDK contributors
+;;;
+;;; Copyright (C) 2026  OpenLDK contributors
+;;;
 ;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+;;;
+;;; This file is part of OpenLDK.
+
+;;; OpenLDK is free software; you can redistribute it and/or modify it
+;;; under the terms of the GNU General Public License as published by
+;;; the Free Software Foundation; either version 3, or (at your
+;;; option) any later version.
+
+;;; OpenLDK is distributed in the hope that it will be useful, but
+;;; WITHOUT ANY WARRANTY; without even the implied warranty of
+;;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+;;; General Public License for more details.
+
+;;; You should have received a copy of the GNU General Public License
+;;; along with OpenLDK; see the file COPYING.  If not, please see
+;;; <http://www.gnu.org/licenses/>.
+
+;;; Linking this library statically or dynamically with other modules is
+;;; making a combined work based on this library.  Thus, the terms and
+;;; conditions of the GNU General Public License cover the whole
+;;; combination.
+
+;;; As a special exception, the copyright holders of this library give
+;;; you permission to link this library with independent modules to
+;;; produce an executable, regardless of the license terms of these
+;;; independent modules, and to copy and distribute the resulting
+;;; executable under terms of your choice, provided that you also
+;;; meet, for each linked independent module, the terms and conditions
+;;; of the license of that module.  An independent module is a module
+;;; which is not derived from or based on this library.  If you modify
+;;; this library, you may extend this exception to your version of the
+;;; library, but you are not obligated to do so.  If you do not wish
+;;; to do so, delete this exception statement from your version.
 
 (in-package :openldk)
 
 ;;; JNI references are handles, never addresses of Lisp objects. The C shim
 ;;; forwards the standard ABI into this runtime through one guarded callback.
 (defstruct jni-reference object kind environment)
-(defstruct jni-member class name descriptor static-p field-p)
+(defstruct jni-member class loader-id name descriptor static-p field-p)
 (defstruct jni-state (frames (list nil)) pending loader java-thread loading-library scoped-cache monitors)
-(defstruct jni-library path loader address (state :loading) owner registrations
+(defstruct jni-library path loader loader-id address (state :loading) owner registrations
   (mutex (bordeaux-threads:make-lock "JNI library initialization"))
   (condition (bordeaux-threads:make-condition-variable)))
 (defvar *jni-references* (make-hash-table :synchronized t))
 (defvar *jni-members* (make-hash-table :synchronized t))
-(defvar *jni-member-ids* (make-hash-table :test #'equal :synchronized t))
+(defvar *jni-member-ids* (make-hash-table :test #'eq :weakness :key :synchronized t))
 (defvar *jni-states* (make-hash-table :synchronized t))
-(defvar *jni-bindings* (make-hash-table :test #'equal :synchronized t))
+(defvar *jni-bindings* (make-hash-table :test #'eq :weakness :key :synchronized t))
 (defvar *jni-libraries* nil)
 (defvar *jni-counter* 0)
 (defvar *jni-lock* (bordeaux-threads:make-recursive-lock "JNI libraries and handles"))
@@ -140,20 +175,26 @@
       (%throw (if field-p '|java/lang/NoSuchFieldError| '|java/lang/NoSuchMethodError|)
               (format nil "~A.~A~A" (name class) member-name descriptor)))
     (bordeaux-threads:with-recursive-lock-held (*jni-lock*)
-      (let* ((key (list owner member-name descriptor static-p field-p))
-             (old (gethash key *jni-member-ids*)))
+      (let* ((table (%owner-cache-table *jni-member-ids* owner))
+             (key (list member-name descriptor static-p field-p))
+             (old (gethash key table)))
         (or old
             (let ((address (%jni-address (%jni-c "ldk_jni_member" sb-sys:system-area-pointer (sb-alien:c-string descriptor)))))
               (when (zerop address) (%throw '|java/lang/OutOfMemoryError|))
               (setf (gethash address *jni-members*)
-                    (make-jni-member :class owner :name member-name :descriptor descriptor :static-p static-p :field-p field-p)
-                    (gethash key *jni-member-ids*) address)))))))
+                    (make-jni-member :class (%weak-class-reference owner) :loader-id (id (ldk-loader owner))
+                                     :name member-name :descriptor descriptor :static-p static-p :field-p field-p)
+                    (gethash key table) address)))))))
+
+(defun %jni-member-class (member)
+  "Member IDs are valid while their declaring class is live, but do not root it."
+  (%resolve-class-reference (jni-member-class member)))
 
 (defun %jni-member-at (id)
   (or (gethash id *jni-members*) (%throw '|java/lang/IllegalArgumentException| "Invalid JNI member ID")))
 
 (defun %jni-call-method (member receiver pointer &optional nonvirtual-class)
-  (let* ((class (jni-member-class member))
+  (let* ((class (%jni-member-class member))
          (descriptor (jni-member-descriptor member))
          (parameters (%jni-descriptor-parts descriptor))
          (args (loop for type in parameters for index from 0
@@ -175,13 +216,13 @@
 
 (defun %jni-field-storage (member receiver)
   (if (jni-member-static-p member)
-      (let ((class (jni-member-class member)))
+      (let ((class (%jni-member-class member)))
         (%clinit class)
-        (symbol-value (intern (format nil "+static-~A+" (name class)) (%class-loader-package class))))
+        (%class-static-instance class))
       (or receiver (%throw '|java/lang/NullPointerException|))))
 
 (defun %jni-field-symbol (member)
-  (let* ((class (jni-member-class member))
+  (let* ((class (%jni-member-class member))
          (field (find (jni-member-name member) (fields class) :key #'name :test #'string=)))
     (unless field (%throw '|java/lang/NoSuchFieldError| (jni-member-name member)))
     (%field-slot-symbol class field (ldk-loader class))))
@@ -285,7 +326,7 @@
                           (if field-p (%class-descriptor (slot-value object '|type$|)) (descriptor member))
                           (not (zerop (logand (slot-value object '|modifiers|) 8))) field-p)))
       ((member operation '("ToReflectedMethod" "ToReflectedField") :test #'string=)
-       (let* ((member (%jni-member-at (arg 2))) (java-class (%jni-java-class (jni-member-class member)))
+       (let* ((member (%jni-member-at (arg 2))) (java-class (%jni-java-class (%jni-member-class member)))
               (field-p (jni-member-field-p member))
               (entries (cond (field-p (|getDeclaredFields0(Z)[Ljava/lang/reflect/Field;| java-class 0))
                              ((string= (jni-member-name member) "<init>") (|getDeclaredConstructors0(Z)[Ljava/lang/reflect/Constructor;| java-class 0))
@@ -385,7 +426,8 @@
       ((string= operation "GetJavaVM")
        (setf (sb-sys:sap-ref-sap (ptr 1) 0) (%jni-c "ldk_jni_vm" sb-sys:system-area-pointer)) 0)
       ((string= operation "RegisterNatives")
-       (let ((class (%jni-class (obj 1))))
+       (let* ((class (%jni-class (obj 1)))
+              (table (%owner-cache-table *jni-bindings* class)))
          (dotimes (i (int 3))
            (let* ((entry (sb-sys:sap+ (ptr 2) (* i 24)))
                   (name (%jni-cstring (sb-sys:sap-ref-64 entry 0)))
@@ -393,14 +435,13 @@
                   (method (find-if (lambda (m) (and (string= (name m) name) (string= (descriptor m) signature))) (methods class))))
              (unless (and method (native-p method)) (%throw '|java/lang/NoSuchMethodError| name))
              (when (jni-state-loading-library *jni-current-state*)
-               (push (list (list class name signature) (gethash (list class name signature) *jni-bindings*)
+               (push (list table (list name signature) (gethash (list name signature) table)
                            (sb-sys:sap-ref-64 entry 16))
                      (jni-library-registrations (jni-state-loading-library *jni-current-state*))))
-             (setf (gethash (list class name signature) *jni-bindings*) (sb-sys:sap-ref-64 entry 16))))) 0)
+             (setf (gethash (list name signature) table) (sb-sys:sap-ref-64 entry 16))))) 0)
       ((string= operation "UnregisterNatives")
        (let ((class (%jni-class (obj 1))))
-         (maphash (lambda (key value) (declare (ignore value))
-                    (when (eql (first key) class) (remhash key *jni-bindings*))) *jni-bindings*)) 0)
+         (remhash class *jni-bindings*)) 0)
       ((member operation '("GetStringLength" "GetStringUTFLength" "GetStringUTFLengthAsLong") :test #'string=)
        (let ((units (%jni-utf16 (obj 1))))
          (length (if (string= operation "GetStringLength") units (%jni-mutf8 units)))))
@@ -598,21 +639,24 @@
                    (t (write-string (string-downcase (format nil "_0~4,'0x" code)) stream))))))
 
 (defun %jni-resolve-native (class method)
-  (let* ((key (list class (name method) (descriptor method)))
-         (registered (gethash key *jni-bindings*)))
+  (let* ((table (%owner-cache-table *jni-bindings* class))
+         (key (list (name method) (descriptor method)))
+         (registered (gethash key table)))
     (or registered
         (let* ((short (format nil "Java_~A_~A" (%jni-mangle (name class)) (%jni-mangle (name method))))
                (long (format nil "~A__~A" short (%jni-mangle (subseq (descriptor method) 1 (position #\) (descriptor method)))))))
           (bordeaux-threads:with-recursive-lock-held (*jni-lock*)
             (dolist (symbol-name (list short long))
               (dolist (library *jni-libraries*)
-                (when (eq (jni-library-loader library) (ldk-loader class))
+                (when (and (member (jni-library-state library) '(:loading :loaded))
+                           (eql (jni-library-loader-id library) (id (ldk-loader class))))
                   (let ((address (%jni-address
                                   (%jni-c "ldk_jni_symbol" sb-sys:system-area-pointer
                                           (sb-sys:system-area-pointer (%jni-pointer (jni-library-address library)))
                                           (sb-alien:c-string symbol-name)))))
                     (unless (zerop address)
-                      (setf (gethash key *jni-bindings*) address)
+                      (%jni-ensure-native-access (%jni-java-class class) (%jni-java-class class) (name method) t)
+                      (setf (gethash key table) address)
                       (return-from %jni-resolve-native address)))))))
           (%throw '|java/lang/UnsatisfiedLinkError| (format nil "~A.~A~A" (name class) (name method) (descriptor method)))))))
 
@@ -632,12 +676,14 @@
     (bordeaux-threads:with-recursive-lock-held (*jni-lock*)
       (setf library (find path *jni-libraries* :key #'jni-library-path :test #'string=))
       (if library
-          (unless (eq (jni-library-loader library) loader)
+          (unless (eql (jni-library-loader-id library) (if loader (id loader) 0))
             (%throw '|java/lang/UnsatisfiedLinkError| "Native library already loaded in another class loader"))
           (let ((address (%jni-address (%jni-c "ldk_jni_open" sb-sys:system-area-pointer (sb-alien:c-string path)))))
             (when (zerop address)
               (%throw '|java/lang/UnsatisfiedLinkError| (%jni-c "ldk_jni_error" sb-alien:c-string)))
-            (setf library (make-jni-library :path path :loader loader :address address
+            (setf library (make-jni-library :path path
+                                            :loader (if (%user-ldk-loader-p loader) (sb-ext:make-weak-pointer loader) loader)
+                                            :loader-id (if loader (id loader) 0) :address address
                                             :owner (bordeaux-threads:current-thread))
                   fresh t)
             (push library *jni-libraries*))))
@@ -668,9 +714,9 @@
           (bordeaux-threads:with-recursive-lock-held (*jni-lock*)
             (setf *jni-libraries* (remove library *jni-libraries*))
             (dolist (registration (jni-library-registrations library))
-              (destructuring-bind (key old new) registration
-                (when (eql (gethash key *jni-bindings*) new)
-                  (if old (setf (gethash key *jni-bindings*) old) (remhash key *jni-bindings*))))))
+              (destructuring-bind (table key old new) registration
+                (when (eql (gethash key table) new)
+                  (if old (setf (gethash key table) old) (remhash key table))))))
           (%jni-c "ldk_jni_close" sb-alien:void (sb-sys:system-area-pointer (%jni-pointer (jni-library-address library)))))
         (bordeaux-threads:with-lock-held ((jni-library-mutex library))
           (setf (jni-library-state library) (if success :loaded :failed)
@@ -678,6 +724,51 @@
                 (jni-library-registrations library) nil)
           (sb-thread:condition-broadcast (jni-library-condition library))))))
   nil)
+
+(defun %jni-unload-library (library)
+  "Run the unload notification in an unknown loader context, outside registry locks."
+  (let* ((*jni-environment* (%jni-address (%jni-c "ldk_jni_env" sb-sys:system-area-pointer)))
+         (*jni-current-state* (%jni-state *jni-environment*))
+         (previous-loader (jni-state-loader *jni-current-state*))
+         (previous-depth (length (jni-state-frames *jni-current-state*)))
+         (previous-pending (jni-state-pending *jni-current-state*)))
+    (push nil (jni-state-frames *jni-current-state*))
+    ;; JNI specifies the system loader for FindClass during JNI_OnUnload.
+    (setf (jni-state-loader *jni-current-state*)
+          (get-ldk-loader-for-java-loader (|java/lang/ClassLoader.getSystemClassLoader()Ljava/lang/ClassLoader;|))
+          (jni-state-pending *jni-current-state*) nil)
+    (unwind-protect
+         (let ((callback (%jni-c "ldk_jni_symbol" sb-sys:system-area-pointer
+                                 (sb-sys:system-area-pointer (%jni-pointer (jni-library-address library)))
+                                 (sb-alien:c-string "JNI_OnUnload"))))
+           (unless (zerop (%jni-address callback))
+             (%jni-c "ldk_jni_onunload" sb-alien:void (sb-sys:system-area-pointer callback))))
+      (loop while (> (length (jni-state-frames *jni-current-state*)) previous-depth) do (%jni-pop-frame))
+      (setf (jni-state-loader *jni-current-state*) previous-loader
+            (jni-state-pending *jni-current-state*) previous-pending)
+      ;; Keep the path reserved until the callback and dlclose both finish.
+      (%jni-c "ldk_jni_close" sb-alien:void (sb-sys:system-area-pointer (%jni-pointer (jni-library-address library))))
+      (bordeaux-threads:with-recursive-lock-held (*jni-lock*)
+        (setf *jni-libraries* (remove library *jni-libraries*)))
+      (bordeaux-threads:with-lock-held ((jni-library-mutex library))
+        (setf (jni-library-state library) :unloaded)
+        (sb-thread:condition-broadcast (jni-library-condition library))))))
+
+(defun %jni-unload-loader-libraries (identity)
+  "Called once by loader finalization; JNI IDs do not keep that loader alive."
+  (let ((libraries nil))
+    (bordeaux-threads:with-recursive-lock-held (*jni-lock*)
+      (dolist (library *jni-libraries*)
+        (when (and (eql identity (jni-library-loader-id library)) (eql (jni-library-state library) :loaded))
+          (setf (jni-library-state library) :unloading)
+          (push library libraries))))
+    (dolist (library libraries) (%jni-unload-library library))
+    (bordeaux-threads:with-recursive-lock-held (*jni-lock*)
+      (maphash (lambda (address member)
+                 (when (eql identity (jni-member-loader-id member))
+                   (remhash address *jni-members*)
+                   (%jni-c "ldk_jni_free_member" sb-alien:void (sb-sys:system-area-pointer (%jni-pointer address)))))
+               *jni-members*))))
 
 (defun %jni-loading-class (function)
   (or (%java-caller-class function)
@@ -688,6 +779,8 @@
          (caller (or explicit-caller (%jni-loading-class '%jni-system-load))))
     (when (and caller (jdk-class-p (name (%jni-class caller))))
       (return-from %jni-system-load nil))
+    (%jni-ensure-native-access caller (%get-java-class-by-bin-name "java/lang/System") "load")
+    (unless filename (%throw '|java/lang/NullPointerException|))
     (unless (uiop:absolute-pathname-p path)
       (%throw '|java/lang/UnsatisfiedLinkError| "System.load requires an absolute path"))
     (%jni-load-library path (if caller (ldk-loader (%jni-class caller))
@@ -702,6 +795,7 @@
     ;; library notifications are fulfilled internally; user libraries use JNI.
     (when (and class (jdk-class-p (name class)))
       (return-from %jni-system-load-library nil))
+    (%jni-ensure-native-access caller (%get-java-class-by-bin-name "java/lang/System") "loadLibrary")
     (when (or (find #\/ name) (find #\\ name))
       (%throw '|java/lang/UnsatisfiedLinkError| "Library name contains a path separator"))
     (let* ((filename (format nil "lib~A.so" name))
@@ -724,26 +818,31 @@
         (declare (ignore this))
         (%jni-system-load-library name caller)))
 
+(defun %jni-method-entry (class index static-p)
+  "A global JNI stub must not retain its defining loader."
+  (let ((reference (%weak-class-reference class)))
+    (lambda (&rest args)
+      (let ((class (%resolve-class-reference reference)))
+        (sb-sys:with-pinned-objects (class)
+          (%verify-class-for-java class)
+          (%jni-call-native class (aref (methods class) index)
+                            (unless static-p (first args)) (if static-p args (rest args))))))))
+
 (defun %install-jni-method-stubs (class loader)
   "Install JNI fallbacks only where no handwritten CL native exists."
-  ;; JDK natives include bootstrapping and short-name forwarding installed later
-  ;; by %ADOPT-NATIVE-SHORT-METHODS. Keep their existing CL resolution intact.
-  ;; The fallback linker's natives are supplied by OpenLDK's own libffi shim.
+  ;; JDK natives have handwritten CL implementations, including short names.
   (when (and (jdk-class-p (name class))
              (not (string= (name class) "jdk/internal/foreign/abi/fallback/LibFallback")))
     (return-from %install-jni-method-stubs nil))
-  (loop for method across (methods class) when (native-p method)
+  (loop for method across (methods class) for index from 0 when (native-p method)
         do (let* ((signature (lispize-method-name (concatenate 'string (name method) (descriptor method))))
                   (full (format nil "~A.~A" (name class) signature)))
              (unless (gethash full *native-overrides*)
                (if (static-p method)
                    (let ((symbol (static-method-symbol full (loader-package loader))))
                      (unless (fboundp symbol)
-                       (let ((method method))
-                         (setf (fdefinition symbol)
-                               (lambda (&rest args)
-                                 (%verify-class-for-java class)
-                                 (%jni-call-native class method nil args))))))
+                       (%remember-loader-function class symbol)
+                       (setf (fdefinition symbol) (%jni-method-entry class index t))))
                    (let* ((symbol (intern signature :openldk))
                           (count (count-parameters (descriptor method)))
                           (specializer (find-class (intern (name class) (%class-specializer-package class)))))
@@ -751,15 +850,14 @@
                      (let* ((gf (fdefinition symbol))
                             (specializers (cons specializer (make-list count :initial-element (find-class t)))))
                        (unless (find-method gf nil specializers nil)
-                         (let ((method method))
+                         (let ((entry (%jni-method-entry class index nil)))
                            (add-method gf
                              (make-instance (sb-mop:generic-function-method-class gf)
                                :qualifiers nil :lambda-list (cons 'this (loop for i below count collect (gensym "ARG")))
                                :specializers specializers
                                :function (lambda (args next)
                                            (declare (ignore next))
-                                           (%verify-class-for-java class)
-                                           (%jni-call-native class method (first args) (rest args))))))))))))))
+                                           (apply entry args)))))))))))))
 
 (defun %jni-check-save ()
   "External libraries may own arbitrary C state, which an SBCL core cannot save."

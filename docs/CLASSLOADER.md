@@ -83,3 +83,32 @@ compiling gets an error instead of waiting on itself.
 
 All three make classes that exist only inside a loader by renaming a nested
 class's bytecode to another name of the same length.
+
+## Loader constraints
+
+OpenLDK records initiating-loader identities separately from defining-loader
+class tables. A delegated result therefore becomes visible to that loader's
+`findLoadedClass`, and later attempts to define a different class of the same
+name fail with `LinkageError`.
+
+Descriptor constraints follow JVMS 5.3.4 and 5.4: reference element names in
+field and method descriptors are joined into equivalence sets during member
+resolution and overriding/interface preparation. Primitive types add no
+constraints, and reference array ranks are stripped to the element class name.
+Checks inspect existing initiations without loading unresolved descriptor types.
+A later definition must satisfy every applicable transitive constraint.
+
+Registry updates are serialized, and rejected additions leave the previous
+sets intact. Class-loader callbacks execute outside the constraint lock.
+Failed member resolutions are retained by defining class and constant-pool
+index, including linkage errors encountered during lazy JIT compilation.
+Compiled code shares a resolution cell for each entry, so established outcomes
+do not require a hash-table lookup or a runtime-wide lock on every field access
+or method call.
+
+Run `make check-loader-constraints` with `JAVA_HOME` set to JDK 25 for focused
+comparisons; these are also included in `make check-standards`.
+The probes include different definitions with identical names, shared delegated
+types, inherited members, arrays, delayed definitions, rollback, concurrent
+constraints, and a custom loader whose policy changes after a failed resolution.
+These checks do not establish complete JVM linking or access-control conformance.

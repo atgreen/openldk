@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2024, 2025  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2024, 2025, 2026  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 ;;;
@@ -284,23 +284,14 @@ BYTE-OFFSET lie within DATA."
 
 (defvar *unsafe-reference-memory-table* (make-hash-table))
 
-(defvar *unsafe-slot-keys* (make-hash-table :synchronized t)
-  "Unsafe offset -> %UNSAFE-SLOT-KEY of it.  Atomics and concurrent
-collections reach every CAS through here; mangling and interning the
-field's name each time took most of their time.")
+(defvar *unsafe-slot-keys* (make-hash-table :test #'eq :weakness :key :synchronized t)
+  "Field -> CLOS slot symbol. Cached slot lookup must not retain its declaring class.")
 
 (defun %unsafe-slot-key (offset)
-  "Return the CLOS slot symbol for the field registered at Unsafe OFFSET,
-or NIL if no field is registered there."
-  (let ((field (gethash offset *field-offset-table*)))
-    (when field
-      (let ((cached (gethash offset *unsafe-slot-keys*)))
-        ;; An offset is a hash of its field, so check the entry is this one's.
-        (if (and cached (eq (car cached) field))
-            (cdr cached)
-            (let ((key (%field-object-slot field)))
-              (setf (gethash offset *unsafe-slot-keys*) (cons field key))
-              key))))))
+  "Return the slot of the live field registered at OFFSET, or NIL."
+  (when-let ((field (gethash offset *field-offset-table*)))
+    (or (gethash field *unsafe-slot-keys*)
+        (setf (gethash field *unsafe-slot-keys*) (%field-object-slot field)))))
 
 (defun %unsafe-static-storage (field &key (errorp t))
   "Return the static storage object (+static-CLASSNAME+) for FIELD's
@@ -311,10 +302,9 @@ the storage object does not (yet) exist."
          (pkg (%java-class-package clazz))
          (name (format nil "+static-~A+" bin-name)))
     (if errorp
-        (symbol-value (intern name pkg))
+        (%java-static-value (intern name pkg))
         (let ((sym (find-symbol name pkg)))
-          (when (and sym (boundp sym))
-            (symbol-value sym))))))
+          (when sym (ignore-errors (%java-static-value sym)))))))
 
 (defun %unsafe-field-owner-and-key (object offset)
   (let ((field (gethash offset *field-offset-table*)))
@@ -427,7 +417,11 @@ the storage object does not (yet) exist."
        (multiple-value-bind (owner key field-p)
            (%unsafe-field-owner-and-key object offset)
          (cond
-           (field-p (setf (slot-value owner key) normalized))
+           ;; Java fields hold numeric UTF-16 code units, even when the
+           ;; array/native-memory scalar path uses Lisp characters.
+           (field-p (setf (slot-value owner key)
+                          (if (and (eq kind :char) (characterp normalized))
+                              (char-code normalized) normalized)))
            ((null object)
             (%unsafe-write-native-bits
              offset byte-count (%unsafe-scalar-to-bits normalized kind)))
@@ -1143,10 +1137,10 @@ from a Class[] array.  Note: OpenLDK method symbols omit the return type."
           (slot-value module '|loader|) classloader)
     module))
 
-;; JDK 9+: JavaLangAccess.addEnableNativeAccess — identity stub
+;; ModuleBootstrap and ModuleLayer.Controller grant native access through JLA.
 (defmethod |addEnableNativeAccess(Ljava/lang/Module;)Ljava/lang/Module;| (this module)
   (declare (ignore this))
-  module)
+  (|implAddEnableNativeAccess()Ljava/lang/Module;| module))
 
 (defun |jdk/internal/loader/BootLoader.getSystemPackageLocation(Ljava/lang/String;)Ljava/lang/String;| (name)
   "Location of a boot-loader (system) package: everything OpenLDK loads
@@ -1427,7 +1421,8 @@ Method/Constructor so reflection reports them (e.g. Method.toString()'s
             :component-class (%get-java-class-by-fq-name "java.lang.reflect.Method")
             :initial-contents (coerce (append (when lclass
                                                 (loop for method across (or (methods lclass) #())
-                                                      when (and (not (starts-with? "<init>" (name method)))
+                                                      when (and (not (member (name method) '("<init>" "<clinit>")
+                                                                             :test #'string=))
                                                                 (or (zerop public-only)
                                                                     (not (zerop (logand #x1 (access-flags method))))))
                                                       #|

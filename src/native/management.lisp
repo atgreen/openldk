@@ -41,7 +41,7 @@
 ;;; ThreadImpl, enough for ManagementFactory's MXBeans (the Kotlin compiler
 ;;; measures its phases with the ThreadMXBean).  Of the optional monitoring,
 ;;; OpenLDK supports thread CPU time, for the current thread only, from
-;;; SBCL's run time (the process's); counters it doesn't keep read 0.
+;;; Linux per-thread resource usage; counters it doesn't keep read 0.
 
 (in-package :openldk)
 
@@ -52,26 +52,39 @@
 (defun |sun/management/VMManagementImpl.initOptionalSupportFields()V| ()
   "Publish support for current-thread CPU time to the management interface."
   (let ((statics (symbol-value (intern "+static-sun/management/VMManagementImpl+" :openldk))))
-    (setf (slot-value statics '|currentThreadCpuTimeSupport|) 1)))
+    (setf (slot-value statics '|currentThreadCpuTimeSupport|)
+          (if (minusp (%current-thread-cpu-time-nanos)) 0 1))))
 
-(defun %current-thread-cpu-time-nanos ()
-  "Convert SBCL runtime accounting to nanoseconds."
-  (* (get-internal-run-time) (/ 1000000000 internal-time-units-per-second)))
+(defun %current-thread-cpu-time-nanos (&optional user-only)
+  "Read Linux RUSAGE_THREAD, never the process-wide Lisp runtime counter."
+  #+(and linux 64-bit)
+  (sb-alien:with-alien ((usage (array sb-alien:long 18)))
+    ;; Linux x86-64 struct rusage is two timevals followed by 14 longs.
+    (if (zerop (sb-alien:alien-funcall
+                (sb-alien:extern-alien "getrusage" (function sb-alien:int sb-alien:int (* sb-alien:long)))
+                1 (sb-alien:cast (sb-alien:addr usage) (* sb-alien:long))))
+        (+ (* (sb-alien:deref usage 0) 1000000000)
+           (* (sb-alien:deref usage 1) 1000)
+           (if user-only 0
+               (+ (* (sb-alien:deref usage 2) 1000000000)
+                  (* (sb-alien:deref usage 3) 1000))))
+        -1))
+  #-(and linux 64-bit)
+  (locally (declare (ignore user-only)) -1))
 
-(defun %thread-cpu-time (id)
-  "CPU time in nanoseconds of the thread with ID (0 for the current one), or
--1 when it isn't known: only the current thread's is."
+(defun %thread-cpu-time (id &optional user-only)
+  "CPU time of the calling platform thread, or -1 when unavailable."
   (if (or (zerop id) (eql id (|threadId()| (|java/lang/Thread.currentThread()Ljava/lang/Thread;|))))
-      (%current-thread-cpu-time-nanos)
+      (%current-thread-cpu-time-nanos user-only)
       -1))
 
 (defun |sun/management/ThreadImpl.getThreadTotalCpuTime0(J)J| (id)
-  "Return known CPU time for thread ID, or -1 when unavailable."
+  "Return current-thread user plus system CPU time in nanoseconds."
   (%thread-cpu-time id))
 
 (defun |sun/management/ThreadImpl.getThreadUserCpuTime0(J)J| (id)
-  "Return the available CPU-time approximation for thread ID."
-  (%thread-cpu-time id))
+  "Return current-thread user CPU time in nanoseconds."
+  (%thread-cpu-time id t))
 
 (defun |sun/management/ThreadImpl.setThreadCpuTimeEnabled0(Z)V| (enable)
   "Accept the CPU-time monitoring flag; runtime accounting is always available."
@@ -193,8 +206,8 @@ the sampled thread could deadlock against the requesting thread's class locks."
  ("isThreadCpuTimeEnabled()" 1)
  ("isThreadAllocatedMemoryEnabled()" 0)
  ("endAOTRecording()" 0)
- ("getTotalClassCount()" (hash-table-count *java-classes-by-bin-name*))
- ("getUnloadedClassCount()" 0)
+ ("getTotalClassCount()" (+ (hash-table-count *java-classes-by-bin-name*) *unloaded-java-class-count*))
+ ("getUnloadedClassCount()" *unloaded-java-class-count*)
  ("getVerboseClass()" 0)
  ("getVerboseGC()" 0)
  ("getProcessId()" (sb-posix:getpid))

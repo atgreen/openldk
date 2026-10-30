@@ -1,10 +1,48 @@
+;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK-TESTS; Base: 10 -*-
+;;;
+;;; Copyright (C) 2026  Anthony Green <green@moxielogic.com>
+;;;
+;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+;;;
+;;; This file is part of OpenLDK.
+
+;;; OpenLDK is free software; you can redistribute it and/or modify it
+;;; under the terms of the GNU General Public License as published by
+;;; the Free Software Foundation; either version 3, or (at your
+;;; option) any later version.
+
+;;; OpenLDK is distributed in the hope that it will be useful, but
+;;; WITHOUT ANY WARRANTY; without even the implied warranty of
+;;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+;;; General Public License for more details.
+
+;;; You should have received a copy of the GNU General Public License
+;;; along with OpenLDK; see the file COPYING.  If not, please see
+;;; <http://www.gnu.org/licenses/>.
+
+;;; Linking this library statically or dynamically with other modules is
+;;; making a combined work based on this library.  Thus, the terms and
+;;; conditions of the GNU General Public License cover the whole
+;;; combination.
+
+;;; As a special exception, the copyright holders of this library give
+;;; you permission to link this library with independent modules to
+;;; produce an executable, regardless of the license terms of these
+;;; independent modules, and to copy and distribute the resulting
+;;; executable under terms of your choice, provided that you also
+;;; meet, for each linked independent module, the terms and conditions
+;;; of the license of that module.  An independent module is a module
+;;; which is not derived from or based on this library.  If you modify
+;;; this library, you may extend this exception to your version of the
+;;; library, but you are not obligated to do so.  If you do not wish
+;;; to do so, delete this exception statement from your version.
+
 ;;;; OpenLDK unit tests (FiveAM).
 ;;;;
 ;;;; These exercise the pure, deterministic transformation helpers (JVM
 ;;;; descriptor parsing, etc.) directly, without needing a running JVM or the
 ;;;; DejaGnu suite. Run with: (asdf:test-system :openldk)  or
 ;;;; (asdf:load-system :openldk/tests) then (fiveam:run! :openldk-tests).
-
 (defpackage :openldk-tests
   (:use :cl :fiveam))
 
@@ -349,7 +387,7 @@ nothing behind when it refuses."
                                        (method-name "test") super pool (version 69) (static t))
   "Construct raw metadata for verifier tests without loading Java or running the JIT."
   (let* ((class (make-instance 'openldk::<class> :name "verify/Fixture" :super super
-                               :interfaces nil :ldk-loader nil :major-version version
+                               :interfaces nil :ldk-loader nil :major-version version :access-flags #x21
                                :fields #() :constant-pool (or pool #(nil))))
          (attributes (make-hash-table :test 'equal))
          (code-attributes (make-hash-table :test 'equal))
@@ -490,3 +528,667 @@ nothing behind when it refuses."
 
 (test floating-remainder-exact-reference
   (is (= 201058 (openldk::%check-remainder-functions))))
+
+(defun %owned-entry-probe (function &optional keep-owner native-p)
+  "A loader-owned function graph with no Java runtime needed."
+  (let* ((loader (openldk::make-ldk-class-loader))
+         (class (make-instance 'openldk::<class> :name "OwnershipProbe" :ldk-loader loader))
+         (symbol (gensym "OWNED-ENTRY")))
+    (if native-p
+        (let* ((key "OwnershipProbe.entry()I")
+               (method (make-instance 'openldk::<method> :name "entry" :descriptor "()I" :access-flags #x109))
+               (openldk::*native-overrides* (make-hash-table :test #'equal))
+               (openldk::*methods-being-compiled* (make-hash-table :test #'equal)))
+          (setf symbol (intern key (openldk::loader-package loader))
+                (gethash key openldk::*native-overrides*) function)
+          (openldk::%install-native-override class method key))
+        (openldk::%install-owned-java-function class symbol function 0))
+    (sb-sys:with-pinned-objects (class)
+      (values (sb-ext:make-weak-pointer class) (fdefinition symbol)
+              (when keep-owner (vector class))))))
+
+(declaim (notinline %ownership-probe-live-p))
+(defun %ownership-probe-live-p (reference)
+  "Do not expose a class object to the assertion library's result storage."
+  (not (null (sb-ext:weak-pointer-value reference))))
+
+(test owned-method-entry-does-not-root-class
+  (dolist (native-p '(nil t))
+    (multiple-value-bind (reference function) (%owned-entry-probe (lambda () 42) nil native-p)
+      ;; Keeping the process entry point itself must not keep a class alive.
+      (dotimes (i 3) (sb-ext:gc :full t))
+      (is (not (%ownership-probe-live-p reference)))
+      (is (functionp function)))))
+
+(test executing-owned-method-retains-class
+  (dolist (native-p '(nil t))
+    (let ((lock (sb-thread:make-mutex))
+          (condition (sb-thread:make-waitqueue))
+          (entered nil) (release nil))
+      (multiple-value-bind (reference function keeper)
+          (%owned-entry-probe
+           (lambda ()
+             (sb-thread:with-mutex (lock)
+               (setf entered t)
+               (sb-thread:condition-notify condition)
+               (loop until release do (sb-thread:condition-wait condition lock)))
+             42) t native-p)
+        (let ((worker (sb-thread:make-thread function)))
+          (unwind-protect
+               (progn
+                 (sb-thread:with-mutex (lock)
+                   (loop until entered
+                         do (unless (sb-thread:condition-wait condition lock :timeout 15)
+                              (unless entered (error "Owned method did not enter")))))
+                 (setf (aref keeper 0) nil)
+                 (dotimes (i 3) (sb-ext:gc :full t))
+                 (is (%ownership-probe-live-p reference)))
+            (setf (aref keeper 0) nil)
+            (sb-thread:with-mutex (lock)
+              (setf release t)
+              (sb-thread:condition-notify condition)))
+          (is (= 42 (sb-thread:join-thread worker))))
+        (dotimes (i 3) (sb-ext:gc :full t))
+        (is (not (%ownership-probe-live-p reference)))))))
+
+(declaim (notinline %monitor-cache-retention-probe))
+(defun %monitor-cache-retention-probe ()
+  "Return only weak references and a lookup result, without retaining test objects."
+  (let* ((object (list :monitor-owner))
+         (monitor (openldk::%get-monitor object)))
+    (values (sb-ext:make-weak-pointer object) (sb-ext:make-weak-pointer monitor)
+            (eq monitor (openldk::%get-monitor object)))))
+
+(test monitor-shortcut-does-not-root-object
+  ;; Keep the cache global, but discard the allocating thread's stack before GC.
+  ;; A conservative stack slot must not be mistaken for a cache-owned root.
+  (let ((worker (sb-thread:make-thread #'%monitor-cache-retention-probe)))
+    (multiple-value-bind (object monitor same) (sb-thread:join-thread worker)
+      (is (eql t same))
+      (dotimes (i 3) (sb-ext:gc :full t))
+      (is (not (%ownership-probe-live-p object)))
+      (is (not (%ownership-probe-live-p monitor))))))
+
+(declaim (notinline %loader-cleanup-probe))
+(defun %loader-cleanup-probe ()
+  "Return observable cleanup results and a weak class reference, without its stack."
+  (let* ((package (make-package (symbol-name (gensym "UNLOADING-PROBE-")) :use '(:cl)))
+         (class-name (intern "Probe" package))
+         (function-name (intern "entry" package))
+         (generic-name (gensym "SHARED-DISPATCH-"))
+         (openldk::*unloaded-java-class-count* 0)
+         (openldk::*condition-table* (make-hash-table))
+         (resources (openldk::make-loader-resources :id -1 :package package
+                      :classes (list class-name) :functions (list function-name))))
+    (unwind-protect
+         (progn
+           (eval `(defclass ,class-name () ()))
+           (eval `(defmethod ,generic-name ((object ,class-name)) (declare (ignore object)) 42))
+           (setf (fdefinition function-name) (lambda () 42))
+           (let ((class (find-class class-name)))
+             (setf (gethash class openldk::*condition-table*) :condition)
+             (openldk::%cleanup-loader-resources resources)
+             (values (sb-ext:make-weak-pointer class)
+                     (list (cons :function-unbound (not (fboundp function-name)))
+                           (cons :class-unbound (null (find-class class-name nil)))
+                           (cons :class-unlinked
+                                 (notany (lambda (parent) (member class (sb-mop:class-direct-subclasses parent)))
+                                         (sb-mop:class-direct-superclasses class)))
+                           (cons :shared-dispatch-retained (not (null (fboundp generic-name))))
+                           (cons :methods-removed (null (sb-mop:generic-function-methods (fdefinition generic-name))))
+                           (cons :condition-removed (null (gethash class openldk::*condition-table*)))
+                           (cons :package-deleted (null (package-name package)))
+                           (cons :unloaded-count (= 1 openldk::*unloaded-java-class-count*))))))
+      (when (fboundp generic-name) (fmakunbound generic-name))
+      (when (fboundp function-name) (fmakunbound function-name))
+      (when (package-name package) (openldk::%cleanup-loader-resources resources)))))
+
+(test loader-cleanup-removes-runtime-definitions
+  (let ((worker (sb-thread:make-thread #'%loader-cleanup-probe)))
+    (multiple-value-bind (class checks) (sb-thread:join-thread worker)
+      (dolist (check checks) (is (eql t (cdr check)) "Cleanup failed: ~A" (car check)))
+      (dotimes (i 3) (sb-ext:gc :full t))
+      (is (not (%ownership-probe-live-p class))))))
+
+(defclass |TestAsInts$ByteBufferHandle| () ())
+(defclass |TestIndirectVarHandle| () ())
+
+(test varhandle-adaptation-lock-order
+  "MethodHandle adaptation can enter ReferenceQueue monitors; it must not hold
+  the memory lock that ReferenceQueue's volatile fields acquire in reverse order."
+  (let* ((bindings
+           (list
+            (cons 'openldk::|hasInvokeExactBehavior()Z| (lambda (handle) (declare (ignore handle)) 0))
+            (cons 'openldk::jstring #'identity)
+            (cons 'openldk::|java/lang/invoke/VarHandle$AccessMode.valueFromMethodName(Ljava/lang/String;)Ljava/lang/invoke/VarHandle$AccessMode;|
+                  #'identity)
+            (cons 'openldk::|toMethodHandle(Ljava/lang/invoke/VarHandle$AccessMode;)Ljava/lang/invoke/MethodHandle;|
+                  (lambda (handle mode)
+                    (declare (ignore handle mode))
+                    (is (not (sb-thread:holding-mutex-p openldk::*java-memory-lock*)))
+                    (throw 'adapted :adapted)))
+            (cons 'openldk::%vh-buffer-view
+                  (lambda (&rest arguments)
+                    (declare (ignore arguments))
+                    (is (not (sb-thread:holding-mutex-p openldk::*java-memory-lock*)))
+                    (openldk::%vh-run-op
+                     :getadd
+                     (lambda ()
+                       (is (sb-thread:holding-mutex-p openldk::*java-memory-lock*))
+                       98)
+                     (lambda (value)
+                       (is (sb-thread:holding-mutex-p openldk::*java-memory-lock*))
+                       (is (= 99 value)))
+                     '(1))))
+            (cons 'openldk::%varhandle-invoke
+                  (lambda (&rest arguments)
+                    (declare (ignore arguments))
+                    (is (not (sb-thread:holding-mutex-p openldk::*java-memory-lock*)))
+                    88))))
+         (saved (mapcar (lambda (entry)
+                          (cons (car entry) (and (fboundp (car entry)) (fdefinition (car entry)))))
+                        bindings))
+         (operation (symbol-function 'openldk::|%VARHANDLE-OP-getAndAdd|))
+         (buffer-handle (make-instance '|TestAsInts$ByteBufferHandle|)))
+    (unwind-protect
+         (progn
+           (dolist (entry bindings) (setf (fdefinition (car entry)) (cdr entry)))
+           (is (eq :adapted
+                   (catch 'adapted
+                     (funcall operation buffer-handle "(Ljava/nio/ByteBuffer;II)V" nil nil 0 1))))
+           (is (= 98 (funcall operation buffer-handle "(Ljava/nio/ByteBuffer;II)I" nil nil 0 1)))
+           (is (= 88 (funcall operation (make-instance '|TestIndirectVarHandle|) "()V" nil))))
+      (dolist (entry saved)
+        (if (cdr entry) (setf (fdefinition (car entry)) (cdr entry))
+            (fmakunbound (car entry)))))))
+
+(test array-allocation-storage-sizing
+  "Use actual SBCL vector sizes, including padding and alignment, for every backing type."
+  (dolist (type '(t (signed-byte 8) (unsigned-byte 16) (signed-byte 16)
+                  (signed-byte 32) (signed-byte 64) single-float double-float
+                  bit base-char character))
+    (dolist (size '(0 1 2 3 7 8 15 16 31 64 257))
+      (let ((vector (make-array size :element-type type)))
+        (is (= (sb-ext:primitive-object-size vector)
+               (openldk::%array-storage-bytes size type))))))
+  (is (> (openldk::%array-storage-bytes (ash 1 30) t) (ash 1 33))))
+
+(test array-allocation-error-unwinds-first
+  "Translate storage exhaustion after leaving the allocator, reusing the prepared condition."
+  (let* ((emergency (make-condition 'simple-error :format-control "emergency"))
+         (openldk::*array-allocation-error* emergency)
+         (cleaned nil)
+         (caught
+           (handler-case
+               (openldk::with-array-allocation-recovery
+                 (unwind-protect
+                      (error 'sb-kernel::heap-exhausted-error :available 0 :requested 1024)
+                   (setf cleaned t)))
+             (simple-error (condition)
+               (is (eql t cleaned))
+               condition))))
+    (is (eq emergency caught))))
+
+(test word-long-lowering
+  (let* ((x 'x) (n 'n)
+         (body '(let ((x initial) (i 0))
+                  (declare (type (signed-byte 64) x) (type (signed-byte 32) i))
+                  (tagbody again
+                     (when (>= i n) (go done))
+                     (setf x (sb-c::mask-signed-field 64
+                              (+ (sb-c::mask-signed-field 64 (* x 3)) 1)))
+                     (incf i) (go again) done)
+                  x))
+         (lowered (openldk::%lower-word-longs body (list x)))
+         (function (compile nil `(lambda (initial ,n)
+                                   (declare (optimize (speed 3) (safety 1))
+                                            (type (signed-byte 64) initial) (type (signed-byte 32) ,n))
+                                   ,lowered))))
+    (dolist (initial '(0 1 -1 9223372036854775807 -9223372036854775808 4611686018427387904))
+      (dolist (count '(0 1 2 63 1000))
+        (let ((expected initial))
+          (dotimes (i count) (setf expected (sb-c::mask-signed-field 64 (+ (* expected 3) 1))))
+          (is (= expected (funcall function initial count))))))
+    (funcall function 1 100)
+    (let ((before (sb-ext:get-bytes-consed)))
+      (funcall function 1 100000)
+      ;; Allow a return-value box/allocation-region accounting granularity;
+      ;; a boxed accumulator would allocate megabytes instead.
+      (is (< (- (sb-ext:get-bytes-consed) before) 65536)))
+    (dolist (expression '((< x 0) (ash x -1) (truncate x 3) (rem x 3)
+                          (coerce x 'double-float) (coerce x 'single-float)))
+      (let* ((original `(let ((x initial)) (declare (type (signed-byte 64) x)) ,expression))
+             (lowered (openldk::%lower-word-longs original '(x)))
+             (before (compile nil `(lambda (initial) ,original)))
+             (after (compile nil `(lambda (initial) ,lowered))))
+        (dolist (initial '(0 1 -1 9223372036854775807 -9223372036854775808))
+          (is (equalp (multiple-value-list (funcall before initial))
+                      (multiple-value-list (funcall after initial)))))))))
+
+(test primitive-entry-native-fallback
+  (let* ((openldk::*context* (make-instance 'openldk::<context>))
+         (openldk::*method-primitive-parameters* '((x . :int)))
+         (form (openldk::%method-let '((x argument)) '(x)))
+         (function (compile nil `(lambda (argument) ,form))))
+    (is (= 42 (funcall function 42)))
+    (is (eq t (funcall function t)))
+    (is (null (funcall function nil)))
+    (is (string= "opaque native value" (funcall function "opaque native value")))))
+
+(test word-long-native-normalization
+  (let* ((form '(let ((x 0))
+                 (declare (type (signed-byte 64) x))
+                 (setf x (openldk::%as-long argument))
+                 x))
+         (lowered (openldk::%lower-word-longs form '(x)))
+         (function (compile nil `(lambda (argument) ,lowered))))
+    (loop for argument in '(nil t #\A 18446744073709551615)
+          for expected in '(0 1 65 -1)
+          do (is (= expected (funcall function argument))))))
+
+(test word-long-operand-order
+  (let* ((form '(let ((x initial))
+                 (declare (type (signed-byte 64) x))
+                 (sb-c::mask-signed-field 64
+                   (let ((value2 (progn (push :second events) operand))
+                         (value1 (progn (push :first events) x)))
+                     (* value1 value2)))))
+         (lowered (openldk::%lower-word-longs form '(x)))
+         (function (compile nil `(lambda (initial operand)
+                                   (let ((events nil))
+                                     (handler-case ,lowered (type-error () nil))
+                                     events)))))
+    ;; Invalid foreign operands must not fail before the remaining operand
+    ;; has executed, even though canonical operands use modular words.
+    (is (equal '(:first :second) (funcall function 1 'invalid)))))
+
+(test safe-integer-leaf-handlers
+  (let* ((safe '(openldk::with-java-conditions (:arrays nil)
+                  (block done
+                    (tagbody
+                      (return-from done
+                        (let ((a x) (b 1))
+                          (sb-c::mask-signed-field 32 (+ a b))))))))
+         (types '((x . (signed-byte 32))))
+         (lowered (openldk::%omit-safe-leaf-handlers (list safe) types)))
+    (is (eq 'block (caar lowered)))
+    (is (= -2147483648
+           (funcall (compile nil `(lambda (x) ,@lowered)) 2147483647)))
+    ;; An unknown parameter must retain native error translation.
+    (is (equal (list safe) (openldk::%omit-safe-leaf-handlers (list safe) nil)))
+    (let ((openldk::*enable-safe-leaves* nil))
+      (is (equal (list safe) (openldk::%omit-safe-leaf-handlers (list safe) types)))))
+  (dolist (expression '((truncate x 0) (ash x y) (aref x 0)
+                        (slot-value x 'field) (funcall x)
+                        (openldk::%as-long unknown)))
+    (let ((body `((openldk::with-java-conditions (:arrays nil) ,expression))))
+      (is (equal body (openldk::%omit-safe-leaf-handlers body '((x . (signed-byte 64)))))))))
+
+(defclass test-lf-member ()
+  ((openldk::|flags| :initform (ash 6 24))
+   (openldk::|clazz| :initform nil)))
+(defclass test-lf-function ()
+  ((openldk::|member| :initarg :member)
+   (openldk::|resolvedHandle| :initform nil)))
+
+(test compiled-lambda-dispatch-observes-replacement
+  (let* ((member (make-instance 'test-lf-member))
+         (function (make-instance 'test-lf-function :member member))
+         (symbol (gensym "TARGET"))
+         (openldk::*member-name-invoke-cache* (make-hash-table :test 'eq))
+         (openldk::*last-member-plan* (cons nil nil))
+         (entry (symbol-function (openldk::%lf-fixed-invoker 1))))
+    (unwind-protect
+         (progn
+           (setf (symbol-function symbol) (lambda (x) (+ x 1))
+                 (gethash member openldk::*member-name-invoke-cache*)
+                 (list :static symbol nil #\I nil))
+           (is (= 43 (funcall entry function 42)))
+           ;; Fixed-arity dispatch must consult the symbol's current function.
+           (setf (symbol-function symbol) (lambda (x) (+ x 7)))
+           (is (= 49 (funcall entry function 42))))
+      (fmakunbound symbol))))
+
+(defclass test-lf-name ()
+  ((openldk::|index| :initform 0)
+   (openldk::|function$| :initarg :function)
+   (openldk::|arguments| :initarg :arguments)))
+(defclass test-lf-form ()
+  ((openldk::|names| :initform nil)
+   (openldk::|arity| :initform 0)
+   (openldk::|result| :initform 0)))
+
+(defun %weak-lambda-cache-fixture (table)
+  (let* ((key (make-instance 'test-lf-form))
+         (name (make-instance 'test-lf-name
+                             :function (make-instance 'test-lf-function :member (make-instance 'test-lf-member))
+                             :arguments (openldk::make-java-array-default :data (vector key)))))
+    ;; A constant points back to the form. Capturing it in compiled code
+    ;; would turn the weak-key cache into a permanent loader root.
+    (setf (slot-value key 'openldk::|names|) (openldk::make-java-array-default :data (vector name)))
+    (let ((function (openldk::%compile-lambda-form key (find-class 'test-lf-name))))
+      (setf (gethash key table) function)
+      (values (sb-ext:make-weak-pointer key) function))))
+
+(test compiled-lambda-cache-does-not-root-forms
+  (let ((table (make-hash-table :test 'eq :weakness :key :synchronized t)))
+    (multiple-value-bind (reference function) (%weak-lambda-cache-fixture table)
+      (dotimes (i 3) (sb-ext:gc :full t))
+      (is (functionp function))
+      (is (null (sb-ext:weak-pointer-value reference)))
+      (is (zerop (hash-table-count table))))))
+
+(test virtual-call-site-invalidation
+  (let* ((base-name (gensym "SITE-BASE-"))
+         (child-name (gensym "SITE-CHILD-"))
+         (name (gensym "SITE-GF-"))
+         (site (openldk::make-java-virtual-site :name name)))
+    (eval `(defclass ,base-name () ()))
+    (eval `(defclass ,child-name (,base-name) ()))
+    (let* ((base (find-class base-name)) (child (find-class child-name))
+           (object (make-instance child))
+           (gf (ensure-generic-function name :generic-function-class 'openldk::java-generic-function
+                                             :lambda-list '(object))))
+      (flet ((method (class value &optional qualifiers)
+               (make-instance 'standard-method :lambda-list '(object) :specializers (list class)
+                              :qualifiers qualifiers
+                              :function (lambda (args next) (declare (ignore args next)) value))))
+        (unwind-protect
+             (progn
+               (add-method gf (method base :base))
+               (is (eq :base (openldk::%invoke-virtual-at site object)))
+               (let ((snapshot (openldk::java-virtual-site-entry site)))
+                 (is (eq :base (openldk::%invoke-virtual-at site object)))
+                 (is (eq snapshot (openldk::java-virtual-site-entry site))))
+               (let ((specific (method child :child)))
+                 (add-method gf specific)
+                 (is (eq :child (openldk::%invoke-virtual-at site object)))
+                 (remove-method gf specific)
+                 (is (eq :base (openldk::%invoke-virtual-at site object))))
+               (let ((around (method base :around '(:around))))
+                 (add-method gf around)
+                 (is (eq :around (openldk::%invoke-virtual-at site object)))
+                 (remove-method gf around)
+                 (is (eq :base (openldk::%invoke-virtual-at site object))))
+               (add-method gf (method base :replacement))
+               (is (eq :replacement (openldk::%invoke-virtual-at site object)))
+               (setf (fdefinition name) (lambda (receiver) (declare (ignore receiver)) :plain))
+               (is (eq :plain (openldk::%invoke-virtual-at site object)))
+               (setf (fdefinition name) gf)
+               (is (eq :replacement (openldk::%invoke-virtual-at site object))))
+          (fmakunbound name)
+          (setf (find-class child-name) nil (find-class base-name) nil))))))
+
+(test concurrent-call-site-method-replacement
+  "A dispatch during lazy replacement must not observe the removed method's gap."
+  (let* ((base-name (gensym "DISPATCH-BASE-"))
+         (child-name (gensym "DISPATCH-CHILD-"))
+         (gf-name (gensym "DISPATCH-PROBE-"))
+         (removed (sb-thread:make-semaphore))
+         (attempting (sb-thread:make-semaphore))
+         (completed (sb-thread:make-semaphore))
+         (resume (sb-thread:make-semaphore))
+         (reader nil) (writer nil) (result nil) (writer-error nil))
+    (eval `(defclass ,base-name () ()))
+    (eval `(defclass ,child-name (,base-name) ()))
+    (let* ((gf (ensure-generic-function gf-name :generic-function-class 'openldk::java-generic-function
+                                               :lambda-list '(object)))
+           (base (find-class base-name))
+           (child (find-class child-name))
+           (object (make-instance child))
+           (site (openldk::make-java-virtual-site :name gf-name))
+           (old (make-instance 'standard-method :lambda-list '(object) :specializers (list child)
+                                                :function (lambda (args next) (declare (ignore args next)) :old)))
+           (hook (make-instance 'standard-method :qualifiers '(:after) :lambda-list '(gf method)
+                               :specializers (list (sb-mop:intern-eql-specializer gf) (find-class t))
+                               :function (lambda (args next)
+                                           (declare (ignore next))
+                                           (when (eq (second args) old)
+                                             (sb-thread:signal-semaphore removed)
+                                             (sb-thread:wait-on-semaphore resume :timeout 5))))))
+      (add-method gf (make-instance 'standard-method :lambda-list '(object) :specializers (list base)
+                                                    :function (lambda (args next) (declare (ignore args next)) :base)))
+      (add-method gf old)
+      (is (eq :old (openldk::%invoke-virtual-at site object)))
+      (add-method #'remove-method hook)
+      (unwind-protect
+           (progn
+             (setf writer (sb-thread:make-thread
+                           (lambda ()
+                             (handler-case
+                                 (add-method gf (make-instance 'standard-method :lambda-list '(object)
+                                                        :specializers (list child)
+                                                        :function (lambda (args next)
+                                                                    (declare (ignore args next)) :new)))
+                               (error (error) (setf writer-error error))))))
+             (is (sb-thread:wait-on-semaphore removed :timeout 5))
+             (setf reader (sb-thread:make-thread
+                           (lambda ()
+                             (sb-thread:signal-semaphore attempting)
+                             (setf result (handler-case (openldk::%invoke-virtual-at site object) (error () :error)))
+                             (sb-thread:signal-semaphore completed))))
+             (is (sb-thread:wait-on-semaphore attempting :timeout 5))
+             ;; The old dispatcher returns :BASE here. The atomic dispatcher
+             ;; waits until the replacement is complete instead.
+             (sb-thread:wait-on-semaphore completed :timeout 0.1)
+             (sb-thread:signal-semaphore resume)
+             (sb-thread:join-thread writer)
+             (sb-thread:join-thread reader)
+             (is (null writer-error))
+             (is (eq :new result))
+             (is (eq :new (openldk::%invoke-virtual-at site object))))
+        (sb-thread:signal-semaphore resume)
+        (when writer (sb-thread:join-thread writer))
+        (when reader (sb-thread:join-thread reader))
+        (remove-method #'remove-method hook)
+        (fmakunbound gf-name)
+        (setf (find-class child-name) nil (find-class base-name) nil)))))
+
+(test small-integer-method-recognition
+  (multiple-value-bind (expression success)
+      (openldk::%small-integer-method-expression #(26 27 96 172) '(a b))
+    (is (eq t success))
+    (let ((function (compile nil `(lambda (a b) ,expression))))
+      (is (= 42 (funcall function 19 23)))
+      (is (= -2147483648 (funcall function 2147483647 1)))))
+  (dolist (bytes '(#(26 27 108 172) #(26 153 0 4 172) #(184 0 1 172)
+                   #(178 0 1 172) #(26) #(96 172) #(29 172) #(26 172 0)))
+    (is (null (nth-value 1 (openldk::%small-integer-method-expression bytes '(a b))))))
+  (multiple-value-bind (expression success)
+      (openldk::%small-integer-method-expression #(26 145 172) '(a))
+    (is (eq t success))
+    (is (= -1 (funcall (compile nil `(lambda (a) ,expression)) 255)))))
+
+(test inline-static-target-observes-replacement
+  (let* ((name (gensym "INLINE-TARGET"))
+         (method (list :method))
+         (original (lambda (a) a))
+         (replacement (lambda (a) (+ a 1)))
+         (site (openldk::make-java-inline-site :name name :class method :method method))
+         (openldk::*java-inline-functions* (make-hash-table :test 'eq :weakness :key)))
+    (unwind-protect
+         (progn
+           (setf (fdefinition name) original
+                 (gethash original openldk::*java-inline-functions*) (sb-ext:make-weak-pointer method))
+           (is (eq t (openldk::%inline-static-target-p site)))
+           (is (eq t (openldk::%inline-static-target-p site)))
+           (setf (fdefinition name) replacement)
+           (is (null (openldk::%inline-static-target-p site)))
+           ;; A new Java compilation of the same method may refresh a site.
+           (setf (gethash replacement openldk::*java-inline-functions*) (sb-ext:make-weak-pointer method))
+           (is (eq t (openldk::%inline-static-target-p site))))
+      (fmakunbound name))))
+
+(defun %array-loop-fixture ()
+  '(tagbody
+      (setf sum (openldk::%as-int 0))
+      (setf i (openldk::%as-int 0))
+    again
+      (progn
+        (when (>= i (openldk::%as-int
+                     (let ((arrayref a))
+                       (if (openldk::java-array-p arrayref)
+                           (length (openldk::java-array-data arrayref))
+                           (openldk::%array-length-slow arrayref)))))
+          (go done)))
+      (setf sum (openldk::%as-int
+                 (sb-c::mask-signed-field 32
+                   (+ sum (let ((index i) (arrayref b))
+                            (aref (the (simple-array (signed-byte 32) (*))
+                                       (openldk::java-array-data arrayref)) index))))))
+      (setf i (openldk::%as-int (sb-c::mask-signed-field 32 (+ i 1))))
+      (go again)
+    done
+      (return-from result sum)))
+
+(defun %compile-array-loop-fixture (form)
+  (compile nil `(lambda (a b)
+                  (block result
+                    (let ((i 0) (sum 0))
+                      (declare (type (signed-byte 32) i sum))
+                      ,form)))))
+
+(defun %array-loop-outcome (function a b)
+  (handler-case (list :value (funcall function a b))
+    (error (condition) (list :error (type-of condition)))))
+
+(test guarded-array-loop-boundaries
+  (let ((original (%array-loop-fixture)))
+    (multiple-value-bind (lowered success) (openldk::%version-array-tagbody original)
+      (is (eq t success))
+      (let ((before (%compile-array-loop-fixture original))
+            (after (%compile-array-loop-fixture lowered)))
+        (dolist (a-length '(0 1 2 3 5))
+          (let ((a (openldk::make-java-array-default :data (make-array a-length))))
+            (dolist (b-length '(0 1 2 3 5))
+              (let ((b (openldk::make-java-array-default
+                        :data (make-array b-length :element-type '(signed-byte 32) :initial-element 7))))
+                (is (equal (%array-loop-outcome before a b) (%array-loop-outcome after a b)))))
+            ;; No iteration may touch a missing second array.
+            (when (zerop a-length) (is (= 0 (funcall after a nil)))))))))
+  (let* ((original (%array-loop-fixture))
+         (load '(let ((index i) (arrayref b))
+                  (aref (the (simple-array (signed-byte 32) (*)) (openldk::java-array-data arrayref)) index)))
+         (empty (openldk::make-java-array-default :data (make-array 0 :element-type '(signed-byte 32)))))
+    ;; Prefix and suffix array reads retain bounds checks, even when the
+    ;; loop itself has no iterations and the fast range guard succeeds.
+    (dolist (form (list (cons 'tagbody (cons `(setf sum ,load) (cddr original)))
+                       (append (butlast original) (list `(return-from result ,load)))))
+      (multiple-value-bind (lowered success) (openldk::%version-array-tagbody form)
+        (is (eq t success))
+        (let ((before (%array-loop-outcome (%compile-array-loop-fixture form) empty empty))
+              (after (%array-loop-outcome (%compile-array-loop-fixture lowered) empty empty)))
+          (is (eq :error (first before)))
+          (is (equal before after)))))))
+
+(test guarded-array-loop-rejections
+  (let* ((form (%array-loop-fixture))
+         (forms (cdr form)))
+    (dolist (bad (list '(tagbody a b)
+                      (append (butlast form) '((go again)))
+                      (cons 'tagbody (cons '(setf a b) forms))
+                      (cons 'tagbody (cons '(funcall native-hook) forms))))
+      (is (equal bad (openldk::%version-array-tagbody bad))))))
+
+(defun %primitive-arithmetic-outcome (function a b)
+  (handler-case
+      (let ((value (funcall function a b)))
+        (if (typep value 'double-float)
+            (list :double (float-features:double-float-bits value))
+            (list :value value)))
+    (error (condition) (list :error (type-of condition)))))
+
+(test guarded-primitive-result-arithmetic
+  (dolist (body '((sb-c::mask-signed-field 32 (+ value1 value2))
+                  (sb-c::mask-signed-field 64 (* value1 value2))
+                  (openldk::%long-word (- value1 value2))
+                  (openldk::%as-double (+ value1 value2))))
+    (let* ((form `(let ((value2 b) (value1 a)) ,body))
+           (lowered (openldk::%specialize-primitive-result-arithmetic form nil))
+           (before (compile nil `(lambda (a b) ,form)))
+           (after (compile nil `(lambda (a b) ,lowered))))
+      (is (not (equal form lowered)))
+      (dolist (a '(0 1 -1 2147483647 -2147483648 9223372036854775807 -9223372036854775808
+                   1208925819614629174706176 1.5d0 -0.0d0 2.5f0 1/3 :opaque))
+        (dolist (b '(1 -1 3 2.5d0 :opaque))
+          (is (equalp (%primitive-arithmetic-outcome before a b)
+                      (%primitive-arithmetic-outcome after a b))))))))
+
+(test primitive-result-operands-evaluated-once
+  (let* ((form '(let ((value2 (progn (push :second events) b))
+                     (value1 (progn (push :first events) a)))
+                 (sb-c::mask-signed-field 32 (+ value1 value2))))
+         (lowered (openldk::%specialize-primitive-result-arithmetic form nil))
+         (function (compile nil `(lambda (a b)
+                                   (let ((events nil))
+                                     (handler-case ,lowered (type-error () nil))
+                                     events)))))
+    (is (equal '(:first :second) (funcall function 1 2)))
+    (is (equal '(:first :second) (funcall function :opaque 2)))))
+
+(test primitive-result-proven-types-skip-guards
+  (let ((form '(let ((value2 b) (value1 a))
+                 (declare (type (signed-byte 32) value1 value2))
+                 (sb-c::mask-signed-field 32 (+ value1 value2)))))
+    (is (equal form (openldk::%specialize-primitive-result-arithmetic form nil)))
+    (let ((openldk::*enable-primitive-result-arithmetic* nil))
+      (is (eq form (openldk::%specialize-primitive-result-arithmetic form nil))))))
+
+(test primitive-result-mutations-and-shadowing
+  ;; Initializer facts and branch tests cease to prove a type after a write.
+  ;; Nested binding forms must not inherit facts about shadowed names.
+  (dolist (form '((let ((value1 0) (value2 b))
+                   (setf value1 a)
+                   (sb-c::mask-signed-field 32 (+ value1 value2)))
+                 (let ((value1 0) (value2 b))
+                   (setf value1 a)
+                   (sb-c::mask-signed-field 64 (* value1 value2)))
+                 (let ((value1 0) (value2 b))
+                   (setf value1 a)
+                   (openldk::%long-word (+ value1 value2)))
+                 (let ((value1 0.0d0) (value2 b))
+                   (setf value1 a)
+                   (openldk::%as-double (+ value1 value2)))
+                 (let ((value1 0) (value2 b))
+                   (if (typep value1 '(signed-byte 32))
+                       (progn (setf value1 a)
+                              (sb-c::mask-signed-field 32 (+ value1 value2)))
+                       0))
+                 (let ((value1 0) (value2 b))
+                   (labels ((leaf (value1)
+                              (sb-c::mask-signed-field 32 (+ value1 value2))))
+                     (leaf a)))
+                 (let ((value1 0) (value2 b))
+                   (flet ((change () (setf value1 a))) (change))
+                   (sb-c::mask-signed-field 32 (+ value1 value2)))
+                 (let ((value1 0) (value2 b))
+                   (handler-case (error "test")
+                     (error (value1)
+                       (sb-c::mask-signed-field 32 (+ value1 value2)))))))
+    (let* ((lowered (openldk::%specialize-primitive-result-arithmetic form nil))
+           (before (compile nil `(lambda (a b) (declare (ignorable a b)) ,form)))
+           (after (compile nil `(lambda (a b) (declare (ignorable a b)) ,lowered))))
+      (dolist (a '(1 1208925819614629174706176 3/4 :opaque))
+        (dolist (b '(1 1.25d0 :opaque))
+          (is (equalp (%primitive-arithmetic-outcome before a b)
+                      (%primitive-arithmetic-outcome after a b))))))))
+
+(test adjacent-linkage-check-elision
+  (let* ((owner (make-instance 'openldk::<class>))
+         (site `(load-time-value (openldk::%member-linkage-site ,owner 7)))
+         (other `(load-time-value (openldk::%member-linkage-site ,owner 8)))
+         (form `(tagbody
+                  (openldk::%with-member-constraints ,site (initialize-target))
+                  (setf result (openldk::%with-class-access caller target
+                                 (openldk::%with-member-constraints ,site (invoke-target))))))
+         (expected `(tagbody
+                      (openldk::%with-member-constraints ,site (initialize-target))
+                      (setf result (openldk::%with-class-access caller target (invoke-target))))))
+    (is (equal expected (openldk::%elide-adjacent-member-checks form)))
+    (dolist (barrier (list 'entry '(when condition (go elsewhere)) '(unrelated-call)))
+      (let ((guarded `(tagbody ,(second form) ,barrier ,(third form))))
+        (is (equal guarded (openldk::%elide-adjacent-member-checks guarded)))))
+    (let ((different `(tagbody ,(second form) (openldk::%with-member-constraints ,other (invoke-target)))))
+      (is (equal different (openldk::%elide-adjacent-member-checks different))))
+    (let ((openldk::*enable-redundant-linkage-elision* nil))
+      (is (eq form (openldk::%elide-adjacent-member-checks form))))))

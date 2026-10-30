@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2024, 2025  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2024, 2025, 2026  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 ;;;
@@ -357,7 +357,7 @@ not searched -- VarHandle/MethodHandle field access targets declared fields)."
 (defun |java/lang/invoke/MethodHandleNatives.resolve(Ljava/lang/invoke/MemberName;Ljava/lang/Class;IZ)Ljava/lang/invoke/MemberName;|
     (member-name klass speculative-resolve native-access)
   "JDK 17: resolve(MemberName self, Class<?> caller, int speculativeResolve, boolean nativeAccess)"
-  (declare (ignore klass speculative-resolve native-access))
+  (declare (ignore klass speculative-resolve))
   (let* ((member-class (slot-value member-name '|clazz|))
          (ldk-class (get-ldk-class-for-java-class member-class))
          (mn-flags (slot-value member-name '|flags|))
@@ -381,6 +381,11 @@ not searched -- VarHandle/MethodHandle field access targets declared fields)."
         (let ((method (when ldk-class
                         (find-method-in-class ldk-class (lstring (slot-value member-name '|name|))
                                               :static (if want-static :yes :no)))))
+          ;; A speculative lookup must not manufacture a successful
+          ;; MemberName for an absent method. VarForm uses this to discover
+          ;; which access modes an implementation actually provides.
+          (when (and ldk-class (null method) (not (zerop native-access)))
+            (return-from |java/lang/invoke/MethodHandleNatives.resolve(Ljava/lang/invoke/MemberName;Ljava/lang/Class;IZ)Ljava/lang/invoke/MemberName;| nil))
           (when method
             (setf (slot-value member-name '|flags|) (logior mn-flags (access-flags method)))))))
   member-name)
@@ -879,7 +884,7 @@ primitive type. ARGS must line up with the descriptor's declared parameters
 that linkTo*/%invoke-from-member-name resolves the target symbol once per call
 site instead of on every invocation.")
 
-(defvar *member-plans* (make-hash-table :test 'equal :synchronized t)
+(defvar *member-plans* (make-hash-table :test 'eq :weakness :key :synchronized t)
   "(class name type flags) -> invocation plan: the plans of MemberNames
 naming the same member, which code creates afresh again and again (Scala's
 compiler made 39,000 for 344 members in one compilation).")
@@ -898,7 +903,7 @@ compiler made 39,000 for 344 members in one compilation).")
             (%member-name-slot member-name '|flags|)))))
 
 (defvar *last-member-plan* (cons nil nil)
-  "(MemberName . plan) of the last %RESOLVE-MEMBER-NAME, replaced whole so
+  "Weak (MemberName . plan) of the last %RESOLVE-MEMBER-NAME, replaced whole so
 threads never see one's name with another's plan.  A loop calling one
 lambda finds its plan here, without the weak table's lock.")
 
@@ -911,18 +916,21 @@ UNBOX-FLAGS are %DESCRIPTOR-UNBOX-FLAGS of the descriptor, and RET-CHAR is
 %GET-RETURN-TYPE-CHAR of the MemberName.  The plan depends only on the
 (stable) MemberName, so it is memoized, by the MemberName and by the
 member it names."
-  (let ((last *last-member-plan*))
-    (if (eq (car last) member-name)
-        (cdr last)
+  (let* ((last *last-member-plan*)
+         (previous (and (car last) (sb-ext:weak-pointer-value (car last))))
+         (cached (and (eq previous member-name) (cdr last) (sb-ext:weak-pointer-value (cdr last)))))
+    (or cached
         (let ((plan (or (gethash member-name *member-name-invoke-cache*)
                         (setf (gethash member-name *member-name-invoke-cache*)
-                              (let ((key (%member-name-key member-name)))
-                                (or (and key (gethash key *member-plans*))
+                              (let* ((key (%member-name-key member-name))
+                                     (types (and key (%owner-cache-table *member-plans* (first key) 'eq :key)))
+                                     (table (and types (%owner-cache-table types (third key))))
+                                     (signature (and key (list (second key) (fourth key)))))
+                                (or (and table (gethash signature table))
                                     (let ((plan (%compute-member-name-plan member-name)))
-                                      (when key
-                                        (setf (gethash key *member-plans*) plan))
+                                      (when table (setf (gethash signature table) plan))
                                       plan)))))))
-          (setf *last-member-plan* (cons member-name plan))
+          (setf *last-member-plan* (cons (sb-ext:make-weak-pointer member-name) (sb-ext:make-weak-pointer plan)))
           plan))))
 
 (defun %compute-member-name-plan (member-name)

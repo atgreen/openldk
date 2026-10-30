@@ -1,6 +1,6 @@
 ;;; -*- Mode: LISP; Syntax: COMMON-LISP; Package: OPENLDK; Base: 10 -*-
 ;;;
-;;; Copyright (C) 2023, 2024, 2025  Anthony Green <green@moxielogic.com>
+;;; Copyright (C) 2023, 2024, 2025, 2026  Anthony Green <green@moxielogic.com>
 ;;;
 ;;; SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 ;;;
@@ -83,9 +83,14 @@
                (:file "src/basic-block")
                (:file "src/codegen")
                (:file "src/descriptors")
+               (:file "src/primitive-code")
+               (:file "src/inline-code")
+               (:file "src/array-loops")
+               (:file "src/primitive-results")
                (:file "src/classfile")
                (:file "src/verifier")
                (:file "src/interpreter")
+               (:file "src/loader-constraints")
                ;; JDK native-method implementations, split by domain;
                ;; loaded in this order (chunks of the former src/native.lisp).
                (:file "src/native/support")
@@ -100,6 +105,7 @@
                (:file "src/native/system")
                (:file "src/native/files")
                (:file "src/native/constantpool")
+               (:file "src/native/lambda-compiler")
                (:file "src/native/methodhandles")
                (:file "src/native/unsafe-tail")
                (:file "src/native/process")
@@ -120,6 +126,8 @@
                (:file "src/aot")
                (:file "src/openldk")
                (:file "src/jni")
+               (:file "src/native-access")
+               (:file "src/unloading")
                (:file "src/foreign")
                (:static-file "src/SourceCompiler.java")
                (:file "src/cli"))

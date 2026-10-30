@@ -48,15 +48,17 @@
 ;;;  - a direct method handle calls its MemberName: a method, a
 ;;;    constructor, or a field access;
 ;;;  - any other handle (bound, delegating, a combinator's) interprets its
-;;;    LambdaForm, as LambdaForm.interpretWithArguments would: each Name
+;;;    LambdaForm through a cached compiled graph: each Name
 ;;;    applies its NamedFunction to earlier Names' values, and a function
 ;;;    that is itself a method handle intrinsic (invokeBasic, linkTo*)
-;;;    recurses here.
+;;;    recurses here. The interpreter remains available for comparisons.
 ;;;
 ;;; LambdaForm.compileToBytecode does nothing, and prepare() gives a form
 ;;; without a vmentry the marker *LF-INTERPRET-ENTRY*.
 
 (in-package :openldk)
+
+(defvar *enable-compiled-lambda-forms* t)
 
 (defvar *lf-interpret-entry* nil
   "The vmentry of LambdaForms OpenLDK interprets: a MemberName naming nothing.")
@@ -94,7 +96,7 @@ MemberName: field access through a method handle asks on every call."
          (class-name (substitute #\/ #\. (lstring (slot-value clazz '|name|))))
          (ldk-class (get-ldk-class-for-java-class clazz)))
     (%clinit ldk-class)
-    (symbol-value (intern (format nil "+static-~A+" class-name) (ldk-class-package ldk-class)))))
+    (%class-static-instance ldk-class)))
 
 (defun %member-invoke (member args)
   "Apply what MEMBER (a MemberName) names to ARGS: call a method or
@@ -176,28 +178,39 @@ arguments), as LambdaForm.interpretWithArguments does."
     ((%java-class-p mh "java/lang/invoke/DirectMethodHandle")
      (%member-invoke (slot-value mh '|member|) args))
     (t
-     (%lf-interpret (slot-value mh '|form|) (cons mh args)))))
+     (if *enable-compiled-lambda-forms*
+         (let ((form (slot-value mh '|form|)))
+           (apply (%lf-compiled-function form) form mh args))
+         (%lf-interpret (slot-value mh '|form|) (cons mh args))))))
 
 ;;; MethodHandle.invoke: asType to the call site's type, then invokeExact.
 
-(defvar *call-site-method-types* (make-hash-table :test #'equal :synchronized t)
-  "Call-site descriptor -> its java.lang.invoke.MethodType.")
+(defvar *call-site-method-types* (make-hash-table :test #'eq :weakness :key :synchronized t)
+  "Calling Class -> descriptor -> MethodType, retaining resolved type identities.")
+(defvar *host-call-site-method-types* (make-hash-table :test #'equal :weakness :value :synchronized t)
+  "Host calls without a Java constant pool must not retain application classes.")
 
-(defun %descriptor-method-type (descriptor)
-  (or (gethash descriptor *call-site-method-types*)
-      (setf (gethash descriptor *call-site-method-types*)
-            (|java/lang/invoke/MethodType.fromMethodDescriptorString(Ljava/lang/String;Ljava/lang/ClassLoader;)Ljava/lang/invoke/MethodType;|
-             (jstring descriptor) *boot-class-loader*))))
+(defun %descriptor-method-type (descriptor &optional caller)
+  "Resolve a signature through its caller's loader and retain it with that caller."
+  (let ((table (if caller (%owner-cache-table *call-site-method-types* caller) *host-call-site-method-types*)))
+    (or (gethash descriptor table)
+        (setf (gethash descriptor table)
+              (|java/lang/invoke/MethodType.fromMethodDescriptorString(Ljava/lang/String;Ljava/lang/ClassLoader;)Ljava/lang/invoke/MethodType;|
+               (jstring descriptor) (if caller (%class-java-loader caller) *boot-class-loader*))))))
 
-(defun %invoke-generic (mh descriptor &rest args)
-  "MethodHandle.invoke at a call site of type DESCRIPTOR."
+(defun %invoke-generic-at (mh descriptor caller &rest args)
+  "MethodHandle.invoke at a call site whose defining class is CALLER."
   (when (null mh)
     (error (%lisp-condition (%make-throwable '|java/lang/NullPointerException|))))
-  (let ((type (%descriptor-method-type descriptor)))
+  (let ((type (%descriptor-method-type descriptor caller)))
     (%mh-invoke (if (eq type (slot-value mh '|type$|))
                     mh
                     (|asType(Ljava/lang/invoke/MethodType;)| mh type))
                 args)))
+
+(defun %invoke-generic (mh descriptor &rest args)
+  "Adapt a method handle for a host call without a Java constant-pool owner."
+  (apply #'%invoke-generic-at mh descriptor nil args))
 
 ;;; Call sites.
 
@@ -265,40 +278,45 @@ abstract, as (values method declaring-class)."
             when (and (logtest #x400 (access-flags m)) (not (static-p m)))
               return (values m lclass))
       (loop for iname across (interfaces lclass)
-            for super = (classload iname)
+            for super = (%resolve-class iname (ldk-loader lclass))
             do (multiple-value-bind (m c) (and super (%single-abstract-method super))
                  (when m (return (values m c)))))))
 
-(defun %mh-proxy-class (interface-name method)
-  (or (gethash interface-name *mh-proxy-classes*)
-      (setf (gethash interface-name *mh-proxy-classes*)
+(defun %mh-proxy-class (interface-name method &optional loader)
+  (let ((key (list (if loader (id loader) 0) interface-name)))
+    (or (gethash key *mh-proxy-classes*)
+        (setf (gethash key *mh-proxy-classes*)
             (let* ((class-sym (intern (format nil "openldk/MHProxy_~A" (substitute #\_ #\/ interface-name))
-                                      :openldk))
+                                      (if (%user-ldk-loader-p loader) (loader-package loader) :openldk)))
                    (descriptor (slot-value method 'descriptor))
                    (method-sym (intern (lispize-method-name (format nil "~A~A" (slot-value method 'name) descriptor))
                                        :openldk))
                    (params (loop for i from 1 upto (count-parameters descriptor)
                                  collect (intern (format nil "P~A" i) :openldk))))
-              (eval `(defclass/std ,class-sym (|java/lang/Object| ,(%interface-class-symbol interface-name))
+              (eval `(defclass/std ,class-sym (|java/lang/Object| ,(%interface-class-symbol interface-name loader))
                        ((target))))
               (unless (and (fboundp method-sym) (typep (fdefinition method-sym) 'generic-function))
                 (ensure-generic-function method-sym :generic-function-class 'java-generic-function
                                                     :lambda-list (cons '|this| params)))
               (eval `(defmethod ,method-sym ((|this| ,class-sym) ,@params)
                        (%mh-invoke (slot-value |this| 'target) (list ,@params))))
-              class-sym))))
+              (when (%user-ldk-loader-p loader)
+                (bt:with-recursive-lock-held (*loader-lifecycle-lock*)
+                  (pushnew class-sym (loader-resources-classes (slot-value loader 'unload-resources)))))
+              class-sym)))))
 
 (setf (gethash "java/lang/invoke/MethodHandleProxies.asInterfaceInstance(Ljava/lang/Class;Ljava/lang/invoke/MethodHandle;)Ljava/lang/Object;"
                *native-overrides*)
       (lambda (interface mh)
         (let* ((interface-name (substitute #\/ #\. (lstring (slot-value interface '|name|))))
-               (method (%single-abstract-method (classload interface-name))))
+               (class (get-ldk-class-for-java-class interface))
+               (method (%single-abstract-method class)))
           (unless method
             (error (%lisp-condition
                     (%make-throwable '|java/lang/IllegalArgumentException|
                                      (format nil "not a single-method interface: ~A" interface-name)))))
-          (let ((proxy (make-instance (%mh-proxy-class interface-name method))))
+          (let ((proxy (make-instance (%mh-proxy-class interface-name method (ldk-loader class)))))
             (setf (slot-value proxy 'target)
                   (|asType(Ljava/lang/invoke/MethodType;)|
-                   mh (%descriptor-method-type (slot-value method 'descriptor))))
+                   mh (%descriptor-method-type (slot-value method 'descriptor) interface)))
             proxy))))
