@@ -492,7 +492,7 @@ if the class has not been loaded."
 
 (defvar *file-streams-to-reopen* nil
   "Files open in Java objects when the image was saved, as
-(object path direction position original-stream), reopened when the image starts.")
+(object path direction position original-stream flags buffering), reopened at startup.")
 
 (defun %reopen-saved-file-streams ()
   "SB-EXT:*INIT-HOOKS* function: reopen the files Java objects held open
@@ -500,12 +500,10 @@ when the image was saved, at the position they had, and store the new
 streams where the old ones were."
   (let ((reopened (make-hash-table :test 'eq)))
     (dolist (entry *file-streams-to-reopen*)
-      (destructuring-bind (object path direction position original) entry
+      (destructuring-bind (object path direction position original flags buffering) entry
         (let ((stream (or (gethash original reopened)
                           (let ((new (ignore-errors
-                                       (open path :element-type '(unsigned-byte 8)
-                                                  :direction direction
-                                                  :if-exists (if (eq direction :input) nil :append)))))
+                                       (%open-descriptor-stream path direction flags buffering))))
                             (when new
                               (when position (ignore-errors (file-position new position)))
                               (setf (gethash original reopened) new))))))
@@ -530,11 +528,14 @@ SAVE-LISP-AND-DIE."
                       (open-stream-p stream))
              (let ((path (ignore-errors (namestring (pathname stream)))))
                (when path
+                 (when (output-stream-p stream) (finish-output stream))
                  (push (list obj path
                              (cond ((and (input-stream-p stream) (output-stream-p stream)) :io)
                                    ((output-stream-p stream) :output)
                                    (t :input))
-                             (ignore-errors (file-position stream)) stream)
+                             (ignore-errors (file-position stream)) stream
+                             (sb-posix:fcntl (sb-sys:fd-stream-fd stream) sb-posix:f-getfl)
+                             (sb-impl::fd-stream-buffering stream))
                        entries)))))))
      :all)
     (setf *file-streams-to-reopen* entries)

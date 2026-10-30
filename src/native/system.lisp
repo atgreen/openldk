@@ -271,9 +271,14 @@ user.variant
   -1)
 
 (defun |java/io/FileDescriptor.getAppend(I)Z| (fd)
-  "Check if fd is in append mode.  Return false for stdin/stdout/stderr."
-  (declare (ignore fd))
-  0)
+  "Read append mode from an OS descriptor, including redirected stdout/stderr."
+  (let ((handle (%resolve-fd fd)))
+    (handler-case
+        (if (logtest sb-posix:o-append
+                     (sb-posix:fcntl (if (typep handle 'sb-sys:fd-stream)
+                                         (sb-sys:fd-stream-fd handle) handle)
+                                     sb-posix:f-getfl)) 1 0)
+      (sb-posix:syscall-error () 0))))
 
 (defmethod |valid()Z| ((this |java/io/FileDescriptor|))
   "Return true (1) if the file descriptor is valid (has an open stream or known fd)."
@@ -922,9 +927,12 @@ directory: Lisp's OPEN opens one, and the first read fails."
 
 (defun %file-error-message (condition)
   "SBCL's OS message for a file error, when one is available."
-  (when (and (typep condition 'sb-int:simple-file-error)
-             (slot-boundp condition 'sb-kernel::message))
-    (slot-value condition 'sb-kernel::message)))
+  (cond
+    ((typep condition 'sb-posix:syscall-error)
+     (sb-int:strerror (sb-posix:syscall-errno condition)))
+    ((and (typep condition 'sb-int:simple-file-error)
+          (slot-boundp condition 'sb-kernel::message))
+     (slot-value condition 'sb-kernel::message))))
 
 (defun %file-descriptor-exhausted-p (condition)
   "Whether CONDITION reports process or system descriptor exhaustion."
@@ -940,7 +948,7 @@ directory: Lisp's OPEN opens one, and the first read fails."
              (handler-case (funcall thunk)
                (sb-ext:file-does-not-exist ()
                  (%throw-file-open-error filename "No such file or directory"))
-               (file-error (condition)
+               ((or file-error sb-posix:syscall-error) (condition)
                  (if (and recover-p (%file-descriptor-exhausted-p condition))
                      (progn
                        (sb-ext:gc :full t)
@@ -1160,34 +1168,74 @@ its FileDescriptor's fd (or its own fd slot), resolved by %RESOLVE-FD."
             (logand (row-major-aref signed-array i) #xFF)))
     unsigned-array))
 
+(defun %file-output-target (fos)
+  "Resolve FOS to an output stream or raw descriptor, rejecting closed handles."
+  (let* ((fd (%stream-fd fos))
+         (target (case fd (1 *standard-output*) (2 *error-output*) (otherwise fd))))
+    (unless (or (and (integerp target) (not (minusp target)))
+                (and (streamp target) (open-stream-p target) (output-stream-p target)))
+      (%throw '|java/io/IOException| "Stream Closed"))
+    target))
+
+(defun %write-file-output-bytes (fos bytes)
+  "Write BYTES completely to FOS without retaining a failed OS write in Lisp."
+  (let ((target (%file-output-target fos)))
+    (handler-case
+        (let ((fd (cond ((integerp target) target)
+                        ((typep target 'sb-sys:fd-stream) (sb-sys:fd-stream-fd target)))))
+          (when (streamp target)
+            (finish-output target)
+            ;; A FileOutputStream can share a RandomAccessFile's descriptor.
+            ;; Discard read-ahead at its logical position before native output.
+            (when (input-stream-p target)
+              (when-let ((position (file-position target)))
+                (file-position target position))))
+          (if fd
+              (unwind-protect
+                   (sb-sys:with-pinned-objects (bytes)
+                     (loop with offset = 0
+                           while (< offset (length bytes))
+                           do (multiple-value-bind (count errno)
+                                  ;; Close invalidates Java's descriptor before
+                                  ;; OS reuse. Re-read it after short/EINTR writes.
+                                  (sb-unix:unix-write
+                                   (let ((current (%file-output-target fos)))
+                                     (if (integerp current) current (sb-sys:fd-stream-fd current)))
+                                   (sb-sys:vector-sap bytes) offset (- (length bytes) offset))
+                                (cond
+                                  ((and count (plusp count)) (incf offset count))
+                                  ((and (null count) (= errno sb-posix:eintr)))
+                                  (t (%throw '|java/io/IOException|
+                                             (if count "Write made no progress" (sb-int:strerror errno))))))))
+                ;; Direct writes bypass SBCL's cached file-position tracking.
+                (when (typep target 'sb-sys:fd-stream)
+                  (setf (sb-impl::fd-stream-file-position target) -1)))
+              (progn (write-sequence bytes target) (finish-output target))))
+      (stream-error (condition)
+        (%throw '|java/io/IOException| (princ-to-string condition)))
+      (sb-posix:syscall-error (condition)
+        (%throw '|java/io/IOException| (sb-int:strerror (sb-posix:syscall-errno condition))))))
+  nil)
+
 (defmethod |writeBytes([BIIZ)V| ((fos |java/io/FileOutputStream|) byte-array offset length append?)
   (declare (ignore append?))
-  (let ((fd (%stream-fd fos)))
-    (cond
-      ((eq fd 1)
-       (write-sequence (%convert-to-unsigned-8-bit (java-array-data byte-array)) *standard-output* :start offset :end (+ offset length)))
-      ((eq fd 2)
-       (write-sequence (%convert-to-unsigned-8-bit (java-array-data byte-array)) *error-output* :start offset :end (+ offset length)))
-      ((streamp fd)
-       (write-sequence (%convert-to-unsigned-8-bit (java-array-data byte-array)) fd :start offset :end (+ offset length)))
-      (t
-       (unimplemented "fd ~A in FileOutputStream.writeBytes" fd)))))
+  (unless byte-array (%throw '|java/lang/NullPointerException|))
+  (unless (<= 0 offset (+ offset length) (length (java-array-data byte-array)))
+    (%throw '|java/lang/IndexOutOfBoundsException|))
+  ;; Like the JDK's native writeBytes, an empty valid region needs no fd.
+  (unless (zerop length)
+    (let ((bytes (make-array length :element-type '(unsigned-byte 8))))
+      (dotimes (index length)
+        (setf (aref bytes index) (logand (jaref byte-array (+ offset index)) #xff)))
+      (%write-file-output-bytes fos bytes))))
 
 (defmethod |write(IZ)V| ((fos |java/io/FileOutputStream|) byte append?)
   (declare (ignore append?))
-  (let ((fd (%stream-fd fos))
-        (b (logand byte #xFF)))
-    (cond
-      ((eql fd 1) (write-byte b *standard-output*))
-      ((eql fd 2) (write-byte b *error-output*))
-      ((streamp fd) (write-byte b fd))
-      (t (unimplemented "fd ~A in FileOutputStream.write" fd)))
-    nil))
+  (%write-file-output-bytes fos (make-array 1 :element-type '(unsigned-byte 8)
+                                            :initial-element (logand byte #xff))))
 
-;; Flush the underlying Lisp stream for stdout/stderr.
-;; In standard Java, FileOutputStream.write() calls the OS write() directly
-;; (no Lisp-level buffering). In OpenLDK, writes go through SBCL's stream
-;; buffering, so we need explicit force-output when Java code calls flush().
+;; Embedding code can supply Lisp streams with their own buffers.  Preserve
+;; Java's no-op flush after close while flushing any still-open host stream.
 (defmethod |flush()V| ((fos |java/io/FileOutputStream|))
   (let ((fd (%stream-fd fos)))
     (cond
@@ -1197,18 +1245,36 @@ its FileDescriptor's fd (or its own fd slot), resolved by %RESOLVE-FD."
       ;; close.  Only flush our extra Lisp buffer while it is still open.
       ((and (streamp fd) (open-stream-p fd)) (force-output fd)))))
 
+(defun %open-descriptor-stream (path direction flags &optional (buffering :full))
+  "Open PATH with OS FLAGS, retaining descriptor ownership only on success."
+  (let ((fd (sb-posix:open path flags #o666)))
+    (unwind-protect
+         (progn
+           ;; POSIX FD_CLOEXEC is bit zero; SB-POSIX does not export it.
+           (sb-posix:fcntl fd sb-posix:f-setfd 1)
+           (prog1 (sb-sys:make-fd-stream fd
+                                      :input (not (null (member direction '(:input :io))))
+                                      :output (not (null (member direction '(:output :io))))
+                                      :element-type '(unsigned-byte 8)
+                                      :buffering buffering :auto-close t
+                                      :pathname (merge-pathnames (sb-ext:parse-native-namestring path)))
+             (setf fd nil)))
+      (when fd (ignore-errors (sb-posix:close fd))))))
+
 (defmethod |open0(Ljava/lang/String;Z)V| ((fos |java/io/FileOutputStream|) filename append?)
   (%with-file-open-errors (filename)
-    (let* ((stream (open (sb-ext:parse-native-namestring (lstring filename))
-                         :element-type '(unsigned-byte 8)
-                         :direction :output
-                         :if-does-not-exist :create
-                         :if-exists (if (and append? (not (zerop append?))) :append :supersede)))
+    (let* ((flags (logior sb-posix:o-wronly sb-posix:o-creat
+                          (if (and append? (not (zerop append?)))
+                              sb-posix:o-append sb-posix:o-trunc)))
+           (stream (%open-descriptor-stream (lstring filename) :output flags :none))
            (fd (slot-value fos '|fd|)))
-      ;; FileOutputStream stores a FileDescriptor; stash the stream in its fd
-      ;; slot when available, otherwise keep it directly.
+      ;; O_TRUNC retains the inode and existing permissions.  Unbuffered
+      ;; streams expose errors and written data before the native call returns.
       (if (and fd (slot-exists-p fd '|fd|))
-          (setf (slot-value fd '|fd|) stream)
+          (progn
+            (setf (slot-value fd '|fd|) stream)
+            (when (slot-exists-p fd '|append|)
+              (setf (slot-value fd '|append|) (if (zerop append?) 0 1))))
           (setf (slot-value fos '|fd|) stream)))))
 
 (defmethod |close0()V| (this)
@@ -1824,13 +1890,12 @@ parent delegation is the Java caller's job)."
   "URL strings attached to resource URLs constructed by OpenLDK.")
 
 (defun %make-url-from-string (url-string)
-  "Create a java.net.URL object from URL-STRING."
-  (let ((url (%make-java-instance "java/net/URL")))
-    ;; Resource URLs are consumed by the native URL.openStream path.  Avoid
-    ;; relying on the overloaded URL constructors, whose invokespecial owner
-    ;; cannot be recovered from a direct Lisp call.
+  "Create a URL with the JDK's parser and protocol handler fully initialized."
+  (let ((*context* nil)
+        (url (%make-java-instance "java/net/URL")))
+    (invoke-special '|<init>(Ljava/lang/String;)V| '|java/net/URL|
+                    (list url (jstring url-string)))
     (setf (gethash url *native-url-strings*) url-string)
-    (%set-url-fields url url-string)
     url))
 
 (defun %current-directory-string ()
@@ -1839,42 +1904,6 @@ parent delegation is the Java caller's job)."
     (if (and (> (length dir) 1) (char= (char dir (1- (length dir))) #\/))
         (subseq dir 0 (1- (length dir)))
         dir)))
-
-(defun %set-url-fields (url url-string)
-  "Fill URL's fields from URL-STRING as URL's constructor would, so Java
-code can take it apart (getFile, toExternalForm, toURI: IntelliJ's
-PathManager finds the Kotlin compiler's jar this way)."
-  (let* ((colon (position #\: url-string))
-         (protocol (subseq url-string 0 colon))
-         (rest (subseq url-string (1+ colon)))
-         (authority nil))
-    (when (starts-with? "//" rest)
-      (let ((slash (or (position #\/ rest :start 2) (length rest))))
-        (setf authority (subseq rest 2 slash)
-              rest (subseq rest slash))))
-    (let* ((hash (position #\# rest))
-           (ref (and hash (subseq rest (1+ hash))))
-           (file (if hash (subseq rest 0 hash) rest))
-           (question (position #\? file))
-           (path (if question (subseq file 0 question) file))
-           (query (and question (subseq file (1+ question)))))
-      (flet ((put (slot value)
-               (when (slot-exists-p url slot)
-                 (setf (slot-value url slot) value))))
-        (put '|protocol| (jstring protocol))
-        (put '|host| (jstring (or authority "")))
-        (put '|port| -1)
-        (put '|authority| (and authority (jstring authority)))
-        (put '|file| (jstring file))
-        (put '|path| (jstring path))
-        (put '|query| (and query (jstring query)))
-        (put '|ref| (and ref (jstring ref)))
-        (put '|hashCode| -1)
-        (when (and (slot-exists-p url '|handler|)
-                   (fboundp '|java/net/URL.getURLStreamHandler(Ljava/lang/String;)Ljava/net/URLStreamHandler;|))
-          (put '|handler| (ignore-errors
-                           (funcall '|java/net/URL.getURLStreamHandler(Ljava/lang/String;)Ljava/net/URLStreamHandler;|
-                                    (jstring protocol)))))))))
 
 (defmethod |getBootstrapResource(Ljava/lang/String;)| ((loader |java/lang/ClassLoader|) name)
   "Find a resource by NAME on the bootstrap classpath."

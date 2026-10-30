@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Anthony Green <green@moxielogic.com>
 # SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 """Check Java lock identity, OS byte ranges, contention, sharing, and release."""
 import argparse
@@ -27,8 +28,10 @@ def main():
     parser.add_argument('--runtime', type=Path, default=ROOT / 'openldk')
     options = parser.parse_args()
     BUILD.mkdir(parents=True, exist_ok=True)
-    subprocess.run([str(JDK / 'bin/javac'), '-d', str(BUILD), str(ROOT / 'test/nio/FileLockProbe.java'),
-                    str(ROOT / 'test/nio/FileInputProbe.java'), str(ROOT / 'test/nio/BufferScalarProbe.java'), str(ROOT / 'test/nio/MemoryLayoutProbe.java')],
+    probes = ['FileLockProbe', 'FileInputProbe', 'BufferScalarProbe', 'MemoryLayoutProbe',
+              'ResourceLookupProbe', 'JrtFileSystemProbe', 'FileTransferProbe']
+    subprocess.run([str(JDK / 'bin/javac'), '-d', str(BUILD)]
+                   + [str(ROOT / 'test/nio' / (probe + '.java')) for probe in probes],
                    check=True, timeout=60)
     path = BUILD / 'locked.bin'
     path.write_bytes(bytes(64))

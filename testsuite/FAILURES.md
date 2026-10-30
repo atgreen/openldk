@@ -267,6 +267,30 @@ passes: image build, zero-issue lint, 840 unit checks, 165 interop checks,
 Clojure startup and arithmetic evaluation also succeeds after the package
 and class-name changes.
 
+FileOutputStream now completes native writes directly through the OS, retries
+interrupted/short writes, and exposes write errors before returning. It validates
+byte-array regions with Java exceptions, preserves inode/permissions on truncate,
+and records the descriptor's append flag for channel-position behavior. Saved
+images flush pending host output and retain OS flags, buffering mode, positions,
+and shared descriptor identity when reopening streams. File URLs now use the
+JDK's actual FileURLConnection for permission queries, metadata, headers, decoded
+paths, directory listings, and streaming; native resource URLs use the Java URL
+constructor to initialize their parser and handler.
+
+The historical `ObjectInputOutput/Compat1` and `URLConnection/getPermission`
+cases pass on both runtimes, removing two expectations and leaving **156 runtime
+expectations**. The serialization case was failing because its unclosed output
+stream's bytes remained in a Lisp buffer, rather than a BigInteger wire-format
+problem. `make check-file-io` covers 31 output checks, 21 file-URL checks, and
+saved-image write/append/RAF/shared-descriptor behavior. The NIO runner also
+compiles every probe it executes, verified from a fresh temporary build directory.
+Validation passes: image build, zero-issue lint, 840 unit checks, 165 interop
+checks, 80 standards comparisons, 20 compatibility comparisons, ZIP/NIO,
+preferences, FFM, saved-image checks, and a cold Clojure startup/evaluation.
+The final core gate retains **783 PASS, 1 XFAIL, and 7 UNSUPPORTED** with no
+regressions. The DF runner now launches its default-package class names and
+compares each fixture's output with JDK 25.
+
 ## Results
 
 | Suite audited | Passes | OpenLDK-only differences | Legacy version parser | Rejected by javac 25 | Reference failure | Reference timeout | Helpers without a main |

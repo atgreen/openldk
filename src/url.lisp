@@ -74,8 +74,8 @@
 ;;;      JIT-compiled, ensuring resource lookups always use our native
 ;;;      implementation.
 ;;;
-;;; 3. Implementing URL.openStream() to handle jar: and file: URLs, allowing
-;;;    resources found by our lookup to be read.
+;;; 3. Implementing URL.openStream() for native jar:/jrt: resources, while
+;;;    file: URLs use the JDK's Java protocol handler and streaming I/O.
 ;;;
 ;;; The flow is:
 ;;;   ClassLoader.getResource(name)
@@ -112,16 +112,9 @@
 ;; makes unrelated URLClassLoaders share classes. Resource streams and ZIP
 ;; metadata are supported by the native bridges below and in zip.lisp.
 
-(defun %special-file-p (path)
-  "True if PATH names something other than a regular file or directory."
-  (handler-case
-      (let ((mode (sb-posix:stat-mode (sb-posix:stat path))))
-        (not (or (sb-posix:s-isreg mode) (sb-posix:s-isdir mode))))
-    (sb-posix:syscall-error () nil)))
-
 (defun %open-url-stream-1 (url)
   "Open an InputStream for URL when its protocol is one we serve natively
-(jar:, file:, jrt:).  Returns the stream, NIL for a servable protocol whose
+(jar:, jrt:).  Returns the stream, NIL for a servable protocol whose
 target does not exist, or :FALLTHROUGH for other protocols."
   (let ((url-string (or (gethash url *native-url-strings*)
                         (lstring (|toString()Ljava/lang/String;| url)))))
@@ -129,32 +122,6 @@ target does not exist, or :FALLTHROUGH for other protocols."
       ;; Handle jar: URLs
       ((starts-with? "jar:" url-string)
        (%jar-connection-input-stream (%open-url-connection-1 url)))
-      ;; Handle file: URLs
-      ((starts-with? "file:" url-string)
-       (let ((path (subseq url-string 5)))  ; Skip "file:"
-         (cond
-           ((%special-file-p path)
-            ;; A device or FIFO -- file:/dev/random, which SecureRandom's
-            ;; seed generator reads -- never ends, so it can't be read into
-            ;; memory: stream it, as a JVM's FileURLConnection does.
-            (let ((stream (%make-java-instance "java/io/FileInputStream")))
-              (|<init>(Ljava/lang/String;)V| stream (jstring path))
-              stream))
-           ((uiop:file-exists-p path)
-            (make-instance '<resource-input-stream>
-                           :lisp-stream (flexi-streams:make-in-memory-input-stream
-                                         (read-file-into-byte-vector path))))
-           ;; A directory reads as its entries' names, sorted, one a line,
-           ;; as a JVM's FileURLConnection lists it.
-           ((uiop:directory-exists-p path)
-            (let ((names (sort (append (mapcar #'file-namestring (uiop:directory-files path))
-                                       (mapcar (lambda (d) (car (last (pathname-directory d))))
-                                               (uiop:subdirectories path)))
-                               #'string<)))
-              (make-instance '<resource-input-stream>
-                             :lisp-stream (flexi-streams:make-in-memory-input-stream
-                                           (flexi-streams:string-to-octets
-                                            (format nil "~{~A~%~}" names) :external-format :utf-8))))))))
       ;; Handle jrt: URLs (JDK jimage resources: jrt:/<module>/<resource>)
       ((starts-with? "jrt:" url-string)
        (let* ((rest (subseq url-string 4))            ; drop "jrt:"
@@ -167,8 +134,8 @@ target does not exist, or :FALLTHROUGH for other protocols."
 
 ;; The :around survives JIT compilation of java.net.URL — a compiled Java
 ;; openStream() installs a primary method on this same GF and would clobber
-;; a primary-only Lisp override (it then NPEs in openConnection() on our
-;; handler-less synthetic jar:/jrt: URLs).  The fallback PRIMARY below is
+;; a primary-only Lisp override for native JAR caching and JRT resources.
+;; File URLs use their actual Java protocol handler. The fallback PRIMARY is
 ;; still required: standard method combination signals NO-PRIMARY-METHOD if
 ;; only an :around is applicable, which is exactly the situation before
 ;; java.net.URL has been JIT-compiled.
@@ -293,7 +260,7 @@ scanning walks a jar from its directory's URL this way)."
          (%initialize-synthetic-connection conn url "jar")
          (%set-jar-connection-fields conn url url-string)
          conn))
-      ((or (starts-with? "file:" url-string) (starts-with? "jrt:" url-string))
+      ((starts-with? "jrt:" url-string)
        (let ((conn (%make-java-instance "java/net/JarURLConnection")))
          (%initialize-synthetic-connection conn url (subseq url-string 0 (position #\: url-string)))
          conn))

@@ -151,11 +151,9 @@ XFAIL: mauve/gnu/testlet/java/awt/image/PixelGrabber/SimpleGrabber.java executio
 XFAIL: mauve/gnu/testlet/java/awt/image/RescaleOp/filterImage.java execution test
 XFAIL: mauve/gnu/testlet/java/beans/SimpleBeanInfo/loadImage.java execution test
 XFAIL: mauve/gnu/testlet/java/beans/XMLDecoder/jdk14.java execution test
-XFAIL: mauve/gnu/testlet/java/io/ObjectInputOutput/Compat1.java execution test
 XFAIL: mauve/gnu/testlet/java/net/ServerSocket/AcceptGetLocalPort.java execution test
 XFAIL: mauve/gnu/testlet/java/net/ServerSocket/AcceptTimeout.java execution test
 XFAIL: mauve/gnu/testlet/java/net/Socket/jdk13.java execution test
 XFAIL: mauve/gnu/testlet/java/net/Socket/jdk14.java execution test
 XFAIL: mauve/gnu/testlet/java/net/URLConnection/getHeaderFields.java execution test
-XFAIL: mauve/gnu/testlet/java/net/URLConnection/getPermission.java execution test
 XFAIL: mauve/gnu/testlet/java/text/DateFormatSymbols/SanityCheck.java execution test
