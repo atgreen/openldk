@@ -152,6 +152,12 @@ The isolated pipe audit passes both checks on each runtime within the normal
 65-second limit, so its expectation is removed. The experimental X11 backend
 continues to be validated separately.
 
+The main-thread lifecycle repair also resolves the `Thread/daemon`,
+`Thread/interrupt`, `Thread/isAlive`, and `Thread/join` expectations. Fresh
+isolated comparisons pass all 35 assertions on both runtimes within the normal
+65-second limit. Removing those four expectations leaves **172 runtime
+expectations**.
+
 ## Results
 
 | Suite audited | Passes | OpenLDK-only differences | Legacy version parser | Rejected by javac 25 | Reference failure | Reference timeout | Helpers without a main |
