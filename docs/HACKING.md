@@ -64,6 +64,11 @@ come from canonical entry guards, checked conversions and specialized arrays;
 a native call's descriptor alone never becomes an unchecked Lisp declaration.
 Both operands are evaluated in their original order before a new guard runs.
 Known long operands use explicit unsigned-word modular operations.
+Initializer and branch-test facts apply only to locals with no writes in the
+generated form, including writes captured by nested functions. Reassigned
+locals require fresh operand guards unless an explicit storage declaration
+already constrains their representation. Unmodeled lexical binding forms
+remain unchanged so outer facts cannot leak into shadowed variables.
 
 Ordinary Lisp call boundaries can still box long and double return values.
 The pass removes avoidable arithmetic allocation while keeping those public

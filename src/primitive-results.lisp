@@ -3,6 +3,26 @@
 
 (defvar *enable-primitive-result-arithmetic* t)
 (defvar *method-primitive-return-type* nil)
+(defvar *primitive-result-mutable-variables* nil)
+
+(defun %primitive-written-variables (form)
+  "Conservatively find writes, including captured writes, before inferring types."
+  (let ((variables nil))
+    (labels ((remember (place)
+               (when (symbolp place) (pushnew place variables)))
+             (visit (x)
+               (when (and (consp x) (not (eql (first x) 'quote)))
+                 (case (first x)
+                   ((setf psetf setq psetq)
+                    (loop for (place value) on (rest x) by #'cddr
+                          do (remember place) (visit value)))
+                   ((incf decf pop) (remember (second x)))
+                   ((push pushnew) (remember (third x)))
+                   ((rotatef shiftf) (mapc #'remember (rest x)))
+                   (multiple-value-setq (mapc #'remember (second x))))
+                 (mapc #'visit x))))
+      (visit form))
+    variables))
 
 (defun %primitive-form-type (form environment)
   "Infer only representation facts, never a native call's nominal descriptor."
@@ -15,8 +35,9 @@
            (dolist (binding (second form))
              (let* ((name (if (symbolp binding) binding (first binding)))
                     (type (or (cdr (assoc name declared))
-                              (%primitive-form-type (and (consp binding) (second binding))
-                                                    (if (eql (first form) 'let*) local environment)))))
+                              (unless (member name *primitive-result-mutable-variables*)
+                                (%primitive-form-type (and (consp binding) (second binding))
+                                                      (if (eql (first form) 'let*) local environment))))))
                (push (cons name type) local)))
            (%primitive-form-type (car (last form)) local)))
         ((member (first form) '(+ - *))
@@ -42,6 +63,7 @@
         ((eql (first test) 'and)
          (reduce (lambda (env clause) (%primitive-test-types clause env)) (rest test) :initial-value environment))
         ((and (eql (first test) 'typep) (symbolp (second test))
+              (not (member (second test) *primitive-result-mutable-variables*))
               (consp (third test)) (eql (first (third test)) 'quote)
               (member (second (third test)) '((signed-byte 32) (signed-byte 64) single-float double-float) :test #'equal))
          (acons (second test) (second (third test)) environment))
@@ -92,11 +114,14 @@ Only actual canonical values take typed paths; all other Lisp values keep the
 old evaluation, coercion and error behavior. Existing proven types skip guards."
   (unless *enable-primitive-result-arithmetic*
     (return-from %specialize-primitive-result-arithmetic form))
-  (labels ((walk-sequence (forms env hint)
+  (let ((*primitive-result-mutable-variables* (%primitive-written-variables form)))
+   (labels ((walk-sequence (forms env hint)
              (loop for tail on forms collect (walk (first tail) env (and (null (rest tail)) hint))))
            (walk (x env hint)
              (cond ((atom x) x)
-                   ((member (first x) '(quote function declare)) x)
+                   ((member (first x) '(quote function declare lambda labels flet macrolet symbol-macrolet
+                                       progv prog prog* multiple-value-bind destructuring-bind
+                                       do do* dolist dotimes loop)) x)
                    ((member (first x) '(let let*))
                     (let ((local env) (bindings nil)
                           (declared (%primitive-declaration-types (cddr x))))
@@ -105,7 +130,8 @@ old evaluation, coercion and error behavior. Existing proven types skip guards."
                                (init (and (consp binding) (second binding)))
                                (value (walk init (if (eql (first x) 'let*) local env) (cdr (assoc name declared))))
                                (type (or (cdr (assoc name declared))
-                                         (%primitive-form-type value (if (eql (first x) 'let*) local env)))))
+                                         (unless (member name *primitive-result-mutable-variables*)
+                                           (%primitive-form-type value (if (eql (first x) 'let*) local env))))))
                           (push (list name value) bindings)
                           (push (cons name type) local)))
                       `(,(first x) ,(nreverse bindings) ,@(walk-sequence (cddr x) local hint))))
@@ -113,6 +139,13 @@ old evaluation, coercion and error behavior. Existing proven types skip guards."
                     `(if ,(walk (second x) env nil)
                          ,(walk (third x) (%primitive-test-types (second x) env) hint)
                          ,(walk (fourth x) env hint)))
+                   ((eql (first x) 'handler-case)
+                    `(handler-case ,(walk (second x) env hint)
+                       ,@(loop for (condition variables . body) in (cddr x)
+                               collect `(,condition ,variables
+                                         ,@(walk-sequence body
+                                                         (append (mapcar (lambda (var) (cons var nil)) variables) env)
+                                                         hint)))))
                    ((eql (first x) 'setf)
                     `(setf ,@(loop for (place value) on (rest x) by #'cddr
                                    append (list place (walk value env (and (symbolp place) (cdr (assoc place env))))))))
@@ -131,4 +164,4 @@ old evaluation, coercion and error behavior. Existing proven types skip guards."
                    (t (%guard-primitive-math
                        (cons (if (consp (first x)) (walk (first x) env nil) (first x))
                              (mapcar (lambda (arg) (walk arg env nil)) (rest x))) env hint)))))
-    (walk form types nil)))
+    (walk form types nil))))
