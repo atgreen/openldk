@@ -56,7 +56,9 @@ CL-USER> (mapcar #[#(* % %)] '(1 2 3 4))
 (1 4 9 16)
 ```
 
-See [Language interop](docs/INTEROP.md) for setup and more examples.
+Similar interop is available for Scheme (Kawa and JScheme), Scala, Kotlin,
+Groovy, and Common Lisp through ABCL. See
+[Language interop](docs/INTEROP.md) for setup and more examples.
 
 ## Status
 
