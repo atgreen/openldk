@@ -90,6 +90,38 @@
     (%throw '|java/lang/IllegalArgumentException| "Wrong receiver class"))
   receiver)
 
+(defun %reflection-instance-target (symbol declaring modifiers method-name descriptor receiver)
+  "Select private/default-access targets using Java overriding, not CLOS specificity.
+Retain every overriding declaration as an anchor for transitive overriding
+(JVMS 5.4.5), including a public bridge hidden by a later default-access method."
+  (if (not (zerop (logand modifiers #x5)))
+      symbol
+      (let* ((base (get-ldk-class-for-java-class declaring))
+             (selected base))
+        (unless (logbitp 1 modifiers)
+          (let ((lineage nil)
+                (anchors (list (cons base modifiers))))
+            (loop for class = (get-ldk-class-for-java-class (|getClass()Ljava/lang/Class;| receiver))
+                    then (and (super class) (%resolve-class (super class) (ldk-loader class)))
+                  while (and class (not (eq class base)))
+                  do (push class lineage))
+            (dolist (class lineage)
+              (let ((candidate
+                      (find-if (lambda (method)
+                                 (and (string= method-name (name method))
+                                      (string= descriptor (descriptor method))
+                                      (zerop (logand (access-flags method) #xa))))
+                               (methods class))))
+                (when (and candidate
+                           (some (lambda (anchor)
+                                   (or (not (zerop (logand (cdr anchor) #x5)))
+                                       (%same-runtime-package-p class (car anchor))))
+                                 anchors))
+                  (push (cons class (access-flags candidate)) anchors)
+                  (setf selected class))))))
+        (let ((owner (intern (name selected) (ldk-class-package selected))))
+          (lambda (&rest arguments) (invoke-special symbol owner arguments))))))
+
 (defun |jdk/internal/reflect/NativeMethodAccessorImpl.invoke0(Ljava/lang/reflect/Method;Ljava/lang/Object;[Ljava/lang/Object;)|
     (method obj args)
   "Native reflective method invocation for JDK 9+."
@@ -116,7 +148,10 @@
           (%clinit (get-ldk-class-for-java-class declaring-class))
           (%reflection-receiver declaring-class obj))
       (let* ((lisp-args (%reflection-arguments param-types args))
-             (result (%invoke-reflection-target sym (if is-static lisp-args (cons obj lisp-args))))
+             (target (if is-static sym
+                         (%reflection-instance-target sym declaring-class modifiers
+                                                      method-name descriptor obj)))
+             (result (%invoke-reflection-target target (if is-static lisp-args (cons obj lisp-args))))
              ;; Return descriptor char is the one just past the ')'.
              (ret-char (char descriptor (1+ (position #\) descriptor)))))
         ;; Method.invoke returns Object, so a primitive return must be boxed

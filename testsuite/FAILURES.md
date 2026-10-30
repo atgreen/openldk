@@ -47,11 +47,19 @@ exception wrapping. Validation passes: build, 818 unit checks, 165 interop
 checks, 50 standards comparisons, 20 compatibility comparisons, and 2,153
 Clojure checks. The full core gate retains 774 PASS, 1 XFAIL, 7 UNSUPPORTED.
 
-Mauve `Method/invoke` now passes its conversion checks but still fails
-package-private method dispatch: a same-signature subclass method in another
-package incorrectly replaces the reflected declaring-class method. Its
-expectation remains until Java overriding rules are enforced for that call.
-
+The reflection dispatch fix additionally resolves Mauve `Method/invoke`.
+Private methods invoke their declaring implementation; package-private
+methods select only genuine Java overrides, including
+[transitive overrides](https://docs.oracle.com/javase/specs/jvms/se25/html/jvms-5.html#jvms-5.4.5)
+and defining-loader package identity. A fresh isolated JDK 25 comparison
+passes, removing one expectation and leaving **326 runtime expectations**.
+`ReflectionDispatchProbe` adds 39 differential checks, including a generated
+class-file case where an intervening package-private method hides a public
+bridge without preventing later transitive overriding. Validation passes:
+full build, lint with zero issues, 818 unit checks, 165 interop checks,
+52 standards comparisons, 20 compatibility comparisons, and all 2,153
+Clojure checks in a rebuilt image. The core gate retains 783 PASS,
+1 XFAIL, and 7 UNSUPPORTED without regressions.
 
 The JAR resource-management port adds nine core assertions covering URL
 cache identity, uncached archive ownership, stored/deflated streaming,

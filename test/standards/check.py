@@ -16,6 +16,7 @@ PROBES = {
     'ArrayReflectionProbe': (25,),
     'ArrayExceptionProbe': (25,),
     'ReflectionConversionProbe': (25,),
+    'ReflectionDispatchProbe': (25,),
     'FieldTypeProbe': (25,),
     'PrimitiveOptimizationProbe': (25,),
     'PrimitiveResultProbe': (25,),
@@ -91,7 +92,9 @@ def main():
             if probe == 'VectorProbe':
                 flags += ['--add-modules', 'jdk.incubator.vector']
             subprocess.run([str(JDK / 'bin/javac'), '--release', str(release)] + flags
-                           + ['-g', '-d', str(directory), str(ROOT / 'test/standards' / (probe + '.java'))],
+                           + ['-g', '-d', str(directory), str(ROOT / 'test/standards' / (probe + '.java'))]
+                           + ([str(p) for p in sorted((ROOT / 'test/standards/dispatch').rglob('*.java'))]
+                              if probe == 'ReflectionDispatchProbe' else []),
                            check=True, timeout=60)
             reference_output = None
             for engine in engines:
