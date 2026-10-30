@@ -131,6 +131,14 @@ retains 783 PASS, 1 XFAIL, and 7 UNSUPPORTED without regressions. These runtime
 fixes do not remove any of the remaining 177 historical expectations; the
 X11 backend is still being implemented and validated separately.
 
+A further Java2D initialization defect caused `FontRenderContext` to reject a
+null antialiasing hint when default font metrics were requested before
+`RenderingHints` constants were accessed. The Lisp replacement for
+`GraphicsPrimitiveMgr.initIDs` now initializes the supplied classes, preserving
+the initialization performed by JNI field and method lookups. A fresh-process
+`FontContextProbe` checks default hints, metrics, and hint-cache updates on both
+the JDK and OpenLDK as part of `test/awt/check.py`.
+
 ## Results
 
 | Suite audited | Passes | OpenLDK-only differences | Legacy version parser | Rejected by javac 25 | Reference failure | Reference timeout | Helpers without a main |

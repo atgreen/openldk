@@ -49,6 +49,13 @@ def main():
                 raise RuntimeError(f'{engine} headless={headless}:\n{result.stdout}\n{result.stderr}')
             print(f'{engine.name} headless={headless}: {result.stdout.strip()}', flush=True)
         result = subprocess.run([str(engine), '-Djava.awt.headless=true', '-cp',
+                                 str(BUILD), 'FontContextProbe'], cwd=ROOT,
+                                capture_output=True, text=True, timeout=120)
+        (BUILD / (engine.name + '-font-context.log')).write_text(result.stdout + result.stderr)
+        if result.returncode or 'Default font contexts, metrics, and hint updates passed' not in result.stdout:
+            raise RuntimeError(f'{engine}:\n{result.stdout}\n{result.stderr}')
+        print(f'{engine.name}: {result.stdout.strip()}', flush=True)
+        result = subprocess.run([str(engine), '-Djava.awt.headless=true', '-cp',
                                  str(BUILD), 'BufferedImageProbe'], cwd=ROOT,
                                 capture_output=True, text=True, timeout=120)
         (BUILD / (engine.name + '.log')).write_text(result.stdout + result.stderr)

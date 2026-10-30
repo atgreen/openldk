@@ -87,8 +87,15 @@
  "sun/java2d/pipe/ShapeSpanIterator.initIDs()V"
  "sun/java2d/pipe/SpanClipRenderer.initIDs(Ljava/lang/Class;Ljava/lang/Class;)V"
  "sun/awt/image/BufImgSurfaceData.initIDs(Ljava/lang/Class;Ljava/lang/Class;)V"
- "sun/java2d/loops/GraphicsPrimitiveMgr.initIDs(Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Class;)V" ; lint:suppress max-line-length
  "sun/java2d/Disposer.initIDs()V")
+
+(defun |sun/java2d/loops/GraphicsPrimitiveMgr.initIDs(Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Class;)V| (&rest classes) ; lint:suppress max-line-length
+  "Preserve class initialization performed by JNI field and method ID lookups."
+  ;; In particular SunHints initializes the value table used by default font
+  ;; contexts. Resolving its Class literal alone does not initialize it.
+  (dolist (class classes)
+    (%clinit (get-ldk-class-for-java-class class)))
+  nil)
 
 (defmethod |initRaster(Ljava/lang/Object;IIIIIILjava/awt/image/IndexColorModel;)V|
     (this data offset bit-offset width height pixel-stride scanline-stride palette)
