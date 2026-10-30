@@ -50,8 +50,10 @@ python3 test/awt/check-x11.py --display :5 --runtime ./openldk --all-visuals
 ```
 
 The first command checks actual server pixels, window and Robot input events,
-disposal, image-save preflight, callback recovery, and screen capture. The
-second paints and captures each advertised visual, comparing color-model types
+disposal, primary-selection ownership and local Unicode string contents,
+image-save preflight, callback recovery, and screen capture. The selection
+probe exercises the real X11 selection initialization rather than a private
+Java clipboard. The second paints and captures each advertised visual, comparing color-model types
 and primary-color samples with JDK 25 by physical visual ID. A full StaticGray
 ramp additionally checks custom colors, copying, curves, alpha, and image
 uploads exactly. Other indexed palettes can allocate different legal colors;

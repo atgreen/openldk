@@ -516,6 +516,7 @@
     address))
 (%define-xlib "XSetErrorHandler" "(J)V" "XSetErrorHandler" :void (:pointer))
 (%define-xlib "ServerVendor" "(J)Ljava/lang/String;" "XServerVendor" :string (:pointer))
+(%define-xlib "XMaxRequestSize" "(J)J" "XMaxRequestSize" sb-alien:long (:pointer))
 (%define-xlib "XGetSelectionOwner" "(JJ)J" "XGetSelectionOwner" sb-alien:unsigned-long
   (:pointer sb-alien:unsigned-long))
 (%define-xlib "XSetSelectionOwner" "(JJJJ)V" "XSetSelectionOwner" :void

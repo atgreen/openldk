@@ -193,6 +193,20 @@ def check_robot(engine, display):
     print(f'{engine.name}: real Robot keyboard and mouse input passed', flush=True)
 
 
+def check_selection(engine, display):
+    result = subprocess.run([str(engine), '-cp', str(BUILD), 'X11SelectionProbe'], cwd=ROOT,
+                            capture_output=True, text=True, timeout=150,
+                            env=dict(os.environ, DISPLAY=display))
+    output = result.stdout + result.stderr
+    (BUILD / (engine.name + '-x11-selection.log')).write_text(output)
+    diagnostics = ('Exception in thread', 'UnsatisfiedLinkError',
+                   'CORRUPTION WARNING', 'terminated with error')
+    if (result.returncode or 'X11 primary selection round trip passed' not in result.stdout
+            or any(diagnostic in output for diagnostic in diagnostics)):
+        raise AssertionError('X11 primary selection failed:\n' + output)
+    print(f'{engine.name}: X11 primary selection ownership and contents passed', flush=True)
+
+
 def visual_command(engine, arguments):
     options = ['-Dsun.java2d.xrender=false', '-Dawt.robot.gtk=false']
     options.append('--add-exports=java.desktop/sun.awt=ALL-UNNAMED')
@@ -302,6 +316,7 @@ def main():
     subprocess.run([str(JDK / 'bin/javac'), '-d', str(BUILD),
                     str(ROOT / 'test/awt/X11WindowProbe.java'),
                     str(ROOT / 'test/awt/X11Probe.java'),
+                    str(ROOT / 'test/awt/X11SelectionProbe.java'),
                     str(ROOT / 'test/awt/X11RobotProbe.java'),
                     str(ROOT / 'test/awt/X11VisualProbe.java'),
                     str(ROOT / 'test/awt/X11ResizeProbe.java')], check=True, timeout=60)
@@ -323,11 +338,13 @@ def main():
     check(JDK / 'bin/java', options.display)
     check_robot(JDK / 'bin/java', options.display)
     check_resize(JDK / 'bin/java', options.display)
+    check_selection(JDK / 'bin/java', options.display)
     visual_counts = check_visuals(JDK / 'bin/java', options.display)
     if not options.reference_only:
         check(options.runtime.resolve(), options.display)
         check_robot(options.runtime.resolve(), options.display)
         check_resize(options.runtime.resolve(), options.display)
+        check_selection(options.runtime.resolve(), options.display)
         if check_visuals(options.runtime.resolve(), options.display) != visual_counts:
             raise AssertionError('Advertised visual configuration counts differ from the JDK')
         check_native(options.display)
