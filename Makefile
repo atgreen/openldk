@@ -284,7 +284,7 @@ check-jni: openldk jni | check-jdk
 check-jni-zstd: openldk jni | check-jdk
 	python3 test/jni/check.py --zstd
 
-.PHONY: check-zip check-nio check-modules check-reentrant check-launcher check-eclipse check-foreign check-concurrency check-source-launcher
+.PHONY: check-zip check-nio check-prefs check-modules check-reentrant check-launcher check-eclipse check-foreign check-concurrency check-source-launcher
 check-concurrency: openldk | check-jdk
 	python3 test/concurrency/check.py
 
@@ -323,6 +323,9 @@ check-zip: openldk | check-jdk
 
 check-nio: openldk | check-jdk
 	python3 test/nio/check.py
+
+check-prefs: openldk | check-jdk
+	python3 test/prefs/check.py
 
 check-modules: openldk | check-jdk
 	python3 test/modules/check.py

@@ -1176,3 +1176,69 @@ compiled Java readdir wrapper may overwrite the old readdir(J) symbol."
   (let* ((cp (constant-pool (ldk-class cp)))
          (i (slot-value (aref cp index) 'value)))
     i))
+
+;;; Unix preferences use nonblocking process-wide POSIX record locks.  Return
+;;; errno values to Java, whose retry and BackingStoreException policy lives
+;;; in FileSystemPreferences.
+
+(defun |java/util/prefs/FileSystemPreferences.chmod(Ljava/lang/String;I)I| (filename mode)
+  (handler-case
+      (progn (sb-posix:chmod (lstring (%non-null filename)) mode) 0)
+    (sb-posix:syscall-error (condition)
+      (sb-posix:syscall-errno condition))))
+
+(defun %open-preferences-lock (path mode shared)
+  "Open PATH without changing the process-wide umask."
+  (if shared
+      (sb-posix:open path sb-posix:o-rdonly)
+      (handler-case
+          (let ((fd (sb-posix:open path
+                                  (logior sb-posix:o-wronly sb-posix:o-creat sb-posix:o-excl)
+                                  mode)))
+            (handler-case
+                (progn (sb-posix:fchmod fd mode) fd)
+              (sb-posix:syscall-error (condition)
+                (ignore-errors (sb-posix:close fd))
+                (error condition))))
+        (sb-posix:syscall-error (condition)
+          (if (= (sb-posix:syscall-errno condition) sb-posix:eexist)
+              (sb-posix:open path sb-posix:o-wronly)
+              (error condition))))))
+
+(defun |java/util/prefs/FileSystemPreferences.lockFile0(Ljava/lang/String;IZ)[I| (filename mode shared)
+  (let ((fd nil) (cookie 0) (errno 0))
+    (unwind-protect
+         (handler-case
+             (progn
+               (setf fd (%open-preferences-lock (lstring (%non-null filename))
+                                                mode (not (zerop shared))))
+               (sb-posix:fcntl fd sb-posix:f-setlk
+                               (make-instance 'sb-posix:flock
+                                              :type (if (zerop shared)
+                                                        sb-posix:f-wrlck sb-posix:f-rdlck)
+                                              :whence sb-posix:seek-set :start 0 :len 0))
+               (setf cookie fd)
+               (prog1 (make-java-array
+                       :component-class (%get-java-class-by-bin-name "int")
+                       :initial-contents (list cookie errno))
+                 (setf fd nil)))
+           (sb-posix:syscall-error (condition)
+             (setf errno (sb-posix:syscall-errno condition))
+             (make-java-array :component-class (%get-java-class-by-bin-name "int")
+                              :initial-contents (list 0 errno))))
+      (when fd
+        (ignore-errors (sb-posix:close fd))))))
+
+(defun |java/util/prefs/FileSystemPreferences.unlockFile0(I)I| (fd)
+  (let ((errno 0))
+    (handler-case
+        (sb-posix:fcntl fd sb-posix:f-setlk
+                        (make-instance 'sb-posix:flock :type sb-posix:f-unlck
+                                       :whence sb-posix:seek-set :start 0 :len 0))
+      (sb-posix:syscall-error (condition)
+        (setf errno (sb-posix:syscall-errno condition))))
+    (handler-case (sb-posix:close fd)
+      (sb-posix:syscall-error (condition)
+        (when (zerop errno)
+          (setf errno (sb-posix:syscall-errno condition)))))
+    errno))

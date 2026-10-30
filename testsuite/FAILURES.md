@@ -236,6 +236,20 @@ closure, and segment lifetime checks. A syscall trace confirms successful
 mapped regions. Build, zero-issue lint, 840 unit checks, 165 interop checks,
 74 standards comparisons, and the FFM foreign-call suite pass.
 
+Unix preferences now implement permission changes and nonblocking shared and
+exclusive POSIX file locks directly through the OS. Lock acquisition returns
+errno values to the JDK's existing retry policy and closes failed acquisition
+descriptors. New lock files receive the requested mode without changing the
+process-wide umask; existing file permissions remain intact. The historical
+`PreferenceTest` passes on both runtimes, removing one expectation and leaving
+**160 runtime expectations**. `make check-prefs` checks cross-process persistence,
+Unicode and primitive values, XML import/export, preference/node listeners,
+node removal, shared/exclusive lock contention and release, permission modes,
+missing-file/invalid-descriptor errors, and 160 failed lock attempts under a
+128-descriptor limit. The tests use temporary preference roots and leave the
+user's preferences untouched. Build, zero-issue lint, 840 unit checks, and
+165 interop checks pass.
+
 ## Results
 
 | Suite audited | Passes | OpenLDK-only differences | Legacy version parser | Rejected by javac 25 | Reference failure | Reference timeout | Helpers without a main |
