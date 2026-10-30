@@ -1178,7 +1178,13 @@ when STATEMENTS can't be flat: some tag twice, or a handler not emitted."
 BLOCKS-AFTER-DCE: generate each block's code, then wrap it with debug
 tracing, the NPE/array-bounds handler-binds, and ACC_SYNCHRONIZED monitor
 entry/exit as required."
-  (let* ((*method-primitive-parameters* (%primitive-parameter-types method))
+  (let* ((*method-entry-initialized-class*
+           ;; Bootstrap natives also call JDK functions directly from Lisp,
+           ;; before Java entry has initialized their class (notably System).
+           ;; Application/library entries use Java invocation or JAVA-LOAD.
+           (when (and (ldk-loader class) (not (zerop (id (ldk-loader class))))
+                      (or (static-p method) (not (interface-p class)))) class))
+         (*method-primitive-parameters* (%primitive-parameter-types method))
          (*method-primitive-return-type*
            (when-let ((category (%jtype-category (get-return-type (descriptor method)))))
              (%primitive-lisp-type category)))
@@ -1196,7 +1202,7 @@ entry/exit as required."
             (unless (compact-p *context*)
               (%variable-categories (variable-sources *context*)))))
          (lisp-code
-           (%clean-method-body lisp-code
+           (%clean-method-body (%elide-adjacent-member-checks lisp-code)
                                (%go-targets lisp-code)
                                (and (not (static-p method))
                                     (not (%assigns-p lisp-code (intern "local-0" :openldk))))))

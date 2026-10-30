@@ -1134,3 +1134,23 @@ nothing behind when it refuses."
         (dolist (b '(1 1.25d0 :opaque))
           (is (equalp (%primitive-arithmetic-outcome before a b)
                       (%primitive-arithmetic-outcome after a b))))))))
+
+(test adjacent-linkage-check-elision
+  (let* ((owner (make-instance 'openldk::<class>))
+         (site `(load-time-value (openldk::%member-linkage-site ,owner 7)))
+         (other `(load-time-value (openldk::%member-linkage-site ,owner 8)))
+         (form `(tagbody
+                  (openldk::%with-member-constraints ,site (initialize-target))
+                  (setf result (openldk::%with-class-access caller target
+                                 (openldk::%with-member-constraints ,site (invoke-target))))))
+         (expected `(tagbody
+                      (openldk::%with-member-constraints ,site (initialize-target))
+                      (setf result (openldk::%with-class-access caller target (invoke-target))))))
+    (is (equal expected (openldk::%elide-adjacent-member-checks form)))
+    (dolist (barrier (list 'entry '(when condition (go elsewhere)) '(unrelated-call)))
+      (let ((guarded `(tagbody ,(second form) ,barrier ,(third form))))
+        (is (equal guarded (openldk::%elide-adjacent-member-checks guarded)))))
+    (let ((different `(tagbody ,(second form) (openldk::%with-member-constraints ,other (invoke-target)))))
+      (is (equal different (openldk::%elide-adjacent-member-checks different))))
+    (let ((openldk::*enable-redundant-linkage-elision* nil))
+      (is (eq form (openldk::%elide-adjacent-member-checks form))))))

@@ -17,6 +17,7 @@ PROBES = {
     'PrimitiveResultProbe': (25,),
     'MethodHandleGraphProbe': (25,),
     'InlineLeafProbe': (25,),
+    'CallCheckProbe': (25,),
     'InstanceInlineProbe': (25,),
     'ArrayLoopProbe': (25,),
     'LoaderLifetimeProbe': (25,),

@@ -629,6 +629,51 @@ take the method's arguments followed by the MemberName."
                 :openldk)
         method-sym)))
 
+(defvar *enable-redundant-linkage-elision* t)
+(defvar *method-entry-initialized-class* nil
+  "Class whose initialization is guaranteed by this method's Java entry.")
+
+(defun %self-declared-member-p (caller index)
+  "Self access has no class-access or cross-loader descriptor constraint.
+Inherited members still need their defining loader's constraints."
+  (multiple-value-bind (owner member descriptor)
+      (%v-member (constant-pool caller) index
+                 '(or constant-field-reference constant-method-reference constant-interface-method-reference))
+    (and (string= owner (name caller))
+         (if (typep (aref (constant-pool caller) index) 'constant-field-reference)
+             (find-if (lambda (field) (and (string= member (name field))
+                                           (string= descriptor (descriptor field)))) (fields caller))
+             (gethash (concatenate 'string member descriptor) (%class-method-name-table caller))))))
+
+(defun %elide-adjacent-member-checks (form)
+  "Reuse a successful, unconditional check immediately preceding an instruction.
+The first check stays before initialization; labels end the proof."
+  (labels ((constant-site-p (site)
+             (and (consp site) (eql (first site) 'load-time-value)
+                  (consp (second site)) (eql (first (second site)) '%member-linkage-site)
+                  (typep (second (second site)) '<class>) (integerp (third (second site)))))
+           (strip (x site)
+             (cond ((atom x) x)
+                   ((member (first x) '(quote function load-time-value)) x)
+                   ((and (eql (first x) '%with-member-constraints) (equal (second x) site))
+                    (strip (third x) site))
+                   (t (mapcar (lambda (part) (strip part site)) x))))
+           (walk (x)
+             (cond ((atom x) x)
+                   ((member (first x) '(quote function load-time-value)) x)
+                   ((eql (first x) 'tagbody)
+                    (let ((previous nil))
+                      `(tagbody ,@(loop for statement in (rest x)
+                                        for current = (walk statement)
+                                        for result = (if previous (strip current previous) current)
+                                        do (setf previous
+                                                 (and (consp current) (eql (first current) '%with-member-constraints)
+                                                      (constant-site-p (second current))
+                                                      (second current)))
+                                        collect result))))
+                   (t (mapcar #'walk x)))))
+    (if *enable-redundant-linkage-elision* (walk form) form)))
+
 (defmacro %with-class-access (caller target form)
   `(progn (%check-bytecode-class-access ,caller ,target) ,form))
 
@@ -648,7 +693,8 @@ take the method's arguments followed by the MemberName."
          (target (typecase reference
                    (ir-class (slot-value reference 'class))
                    (string (%resolve-class-in-context reference)))))
-    (when (and caller target (java-class caller) (java-class target))
+    (when (and caller target (java-class caller) (java-class target)
+               (not (and *enable-redundant-linkage-elision* (eq caller target))))
       (setf (code expression)
             `(%with-class-access ,(java-class caller) ,(java-class target) ,(code expression)))))
   expression)
@@ -670,10 +716,12 @@ take the method's arguments followed by the MemberName."
     (when (and bytes pc (<= 0 pc) (< (+ pc 2) (length bytes))
                (<= 178 (aref bytes pc) 185))
       (let ((index (+ (ash (aref bytes (1+ pc)) 8) (aref bytes (+ pc 2)))))
-        (setf (code expression)
+        (unless (and *enable-redundant-linkage-elision*
+                     (%self-declared-member-p (slot-value context 'class) index))
+         (setf (code expression)
               `(%with-member-constraints
                    (load-time-value (%member-linkage-site ,(slot-value context 'class) ,index))
-                 ,(code expression))))))
+                 ,(code expression)))))))
   expression)
 
 (defmethod codegen :around ((insn ir-clinit) context)
@@ -2103,7 +2151,9 @@ boolean prints true/false and char prints the character rather than an int."
     (make-instance '<expression>
                    :insn insn
                    :code (let* ((class (ir-class-class class)))
-                           (if class
+                           (if (and class
+                                    (not (and *enable-redundant-linkage-elision*
+                                              (eq class *method-entry-initialized-class*))))
                                (let* ((pkg (ldk-class-package class))
                                       (clinit (intern (format nil "%clinit-~A" (slot-value class 'name)) pkg)))
                                  ;; A class that isn't there (a stub, see EMIT of

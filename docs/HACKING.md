@@ -80,6 +80,32 @@ CL_SOURCE_REGISTRY="$PWD//:" LDK_CODE_CACHE=off \
   sbcl --dynamic-space-size 8192 --script bench/primitive-results/run.lisp
 ```
 
+### Redundant Member Checks
+
+Code generation omits class access to the caller itself. A member reference
+whose owner and actual declaration are both the caller also needs no loader
+constraint check: its descriptor is interpreted by the same defining loader.
+Inherited declarations retain their checks, even when the constant-pool owner
+names the caller. Adjacent repeated checks of the same constant member site
+reuse the first successful check; control-flow labels end that proof. The
+first check stays before class initialization so linkage failures keep their
+original timing.
+
+Own-class initialization checks can be omitted at ordinary Java application
+and library method entries, where invocation or construction already ensures
+initialization (or the current thread is running the initializer). Instance
+interface methods retain the checks. Bootstrap classes also retain them:
+bootstrap natives can call JDK Lisp functions before Java initialization.
+Do not infer permanence from INITIALIZED-P during compilation: saved-image
+warmup deliberately resets selected JDK classes.
+
+Compare identical generated call loops with only this optimization toggled:
+
+```sh
+CL_SOURCE_REGISTRY="$PWD//:" LDK_CODE_CACHE=off \
+  sbcl --dynamic-space-size 8192 --script bench/call-checks/run.lisp
+```
+
 ### Small Leaves and Guarded Array Loops
 
 `src/inline-code.lisp` recognizes short, straight-line integer expressions
