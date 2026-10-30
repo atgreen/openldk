@@ -497,6 +497,55 @@ serves the MappedByteBuffer as is."
   (sb-posix:munmap (sb-sys:int-sap address) length)
   0)
 
+;;; MappedMemoryUtils normally registers these entry points through JNI.
+;;; Use the system mapping operations directly; no JDK native library is needed.
+(sb-alien:define-alien-routine ("mincore" %mapped-mincore) sb-alien:int
+  (address sb-sys:system-area-pointer) (length sb-alien:unsigned-long)
+  (residency (* sb-alien:unsigned-char)))
+
+(sb-alien:define-alien-routine ("madvise" %mapped-madvise) sb-alien:int
+  (address sb-sys:system-area-pointer) (length sb-alien:unsigned-long) (advice sb-alien:int))
+
+(defun %mapped-io-result (result)
+  (when (minusp result)
+    (%throw '|java/io/IOException| (sb-int:strerror (sb-alien:get-errno))))
+  nil)
+
+(defun |java/nio/MappedMemoryUtils.registerNatives()V| ()
+  nil)
+
+(defun |java/nio/MappedMemoryUtils.isLoaded0(JJJ)Z| (address length pages)
+  ;; mincore writes one byte per page. Validate the JDK's supplied count before
+  ;; allocating, so even an inconsistent native call cannot overrun its bitmap.
+  (unless (and (not (minusp length)) (= pages (ceiling length (sb-posix:getpagesize))))
+    (%throw '|java/io/IOException| "Invalid mapped-memory page count"))
+  (let ((memory (handler-case (sb-alien:make-alien sb-alien:unsigned-char (1+ pages))
+                  (storage-condition () (%throw '|java/lang/OutOfMemoryError| "Mapped-memory residency bitmap")))))
+    (when (zerop (sb-sys:sap-int (sb-alien:alien-sap memory)))
+      (%throw '|java/lang/OutOfMemoryError| "Mapped-memory residency bitmap"))
+    (unwind-protect
+         (progn
+           (%mapped-io-result (%mapped-mincore (sb-sys:int-sap address) length memory))
+           (if (loop for i below pages always (logbitp 0 (sb-alien:deref memory i))) 1 0))
+      (sb-alien:free-alien memory))))
+
+(defun |java/nio/MappedMemoryUtils.load0(JJ)V| (address length)
+  ;; Linux MADV_WILLNEED. The Java caller also touches each page afterward.
+  (%mapped-io-result (%mapped-madvise (sb-sys:int-sap address) length 3)))
+
+(defun |java/nio/MappedMemoryUtils.unload0(JJ)V| (address length)
+  ;; Linux MADV_DONTNEED; the mapping remains valid for subsequent access.
+  (%mapped-io-result (%mapped-madvise (sb-sys:int-sap address) length 4)))
+
+(defun |java/nio/MappedMemoryUtils.force0(Ljava/io/FileDescriptor;JJ)V| (fd address length)
+  ;; POSIX mappings survive descriptor closure; msync needs only the mapping.
+  (declare (ignore fd))
+  (handler-case
+      (sb-posix:msync (sb-sys:int-sap address) length sb-posix:ms-sync)
+    (sb-posix:syscall-error (condition)
+      (%throw '|java/io/IOException| (sb-int:strerror (sb-posix:syscall-errno condition)))))
+  nil)
+
 (defun |sun/nio/ch/UnixFileDispatcherImpl.pread0(Ljava/io/FileDescriptor;JIJ)I| (fd ptr length offset)
   "pread(2) — positioned read into native buffer at PTR."
   (let ((real-fd (%raw-fd fd))

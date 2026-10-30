@@ -160,6 +160,5 @@ XFAIL: mauve/gnu/testlet/java/net/Socket/jdk13.java execution test
 XFAIL: mauve/gnu/testlet/java/net/Socket/jdk14.java execution test
 XFAIL: mauve/gnu/testlet/java/net/URLConnection/getHeaderFields.java execution test
 XFAIL: mauve/gnu/testlet/java/net/URLConnection/getPermission.java execution test
-XFAIL: mauve/gnu/testlet/java/nio/channels/FileChannel/map.java execution test
 XFAIL: mauve/gnu/testlet/java/text/DateFormatSymbols/SanityCheck.java execution test
 XFAIL: mauve/gnu/testlet/java/util/prefs/PreferenceTest.java execution test

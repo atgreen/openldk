@@ -41,6 +41,7 @@ PROBES = {
     'RandomAccessLengthProbe': (25,),
     'ZipFailureProbe': (25,),
     'FileDescriptorCloseProbe': (25,),
+    'MappedMemoryProbe': (25,),
     'CryptoProbe': (25,),
     'VectorProbe': (25,),
     'ReferenceProbe': (25,),

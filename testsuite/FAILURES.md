@@ -219,6 +219,19 @@ repeated closes after descriptor reuse. The pre-fix runtime grows from 23 to
 and under the 128-descriptor limit. Process pipes, NIO transfer/lock checks, and
 ZIP saved-image restart also pass with the repaired close implementation.
 
+The mapped-memory lifecycle natives now use Linux `mincore`, `madvise`, and
+synchronous `msync` through libc. The JDK's `MappedMemoryUtils` initializer
+continues to create its Java proxy, while the registration hook resolves to
+OpenLDK's native implementations. The historical `FileChannel/map` case
+passes all five assertions on both runtimes, removing one expectation and
+leaving **161 runtime expectations**. `MappedMemoryProbe` checks mapped buffers
+and FFM mapped segments, residency/loading/unloading, unaligned slices and
+partial flushes, private/read-only/empty mappings, flushing after channel
+closure, and segment lifetime checks. A syscall trace confirms successful
+`mincore`, `MADV_WILLNEED`, `MADV_DONTNEED`, and `MS_SYNC` operations on the
+mapped regions. Build, zero-issue lint, 840 unit checks, 165 interop checks,
+74 standards comparisons, and the FFM foreign-call suite pass.
+
 ## Results
 
 | Suite audited | Passes | OpenLDK-only differences | Legacy version parser | Rejected by javac 25 | Reference failure | Reference timeout | Helpers without a main |
