@@ -328,6 +328,7 @@ lambda over Jackson 2 classes behind a check that they are present."
     method-name-table  ; lazy hash set of lispized name+descriptor strings
     content-hash       ; MD5 of the classfile, hex, for the FASL cache
     ldk-loader)  ; <ldk-class-loader> that loaded this class
+   (definition-progress :std nil) ; non-NIL only during preparation or after failure
    (runtime-roots :std nil)
    (static-instance :std nil)
    (verified-p :std nil)

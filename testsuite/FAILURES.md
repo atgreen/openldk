@@ -40,6 +40,26 @@ python3 testsuite/audit-failures.py \
   --jobs 4 --displays :97,:98,:99,:100 --fresh
 ```
 
+## Class-definition publication follow-up
+
+Class lookups now wait for another thread to finish preparing a definition.
+The defining thread can still resolve its own provisional metadata. Both
+successful preparation and rollback wake all waiting readers; failed
+metadata is unavailable and a later definition can retry. The barrier covers
+metadata, initiating-loader, hierarchy, and Java class-mirror lookups.
+
+`make check-class-publication` deterministically pauses definitions before
+and after mirror publication, tests concurrent readers, and injects failures
+to exercise rollback and retry. Unit checks (840), interop checks (165), and
+the loader-constraint, package, loader-lifetime, memory-model, concurrency,
+and linkage comparisons pass.
+
+A fresh `ServerSocket/AcceptTimeout` comparison no longer reports the
+`SocketImpl` class-definition error. It reaches `accept()` but still exceeds
+the fixture's two-second accept deadline, so its expectation remains.
+This fixes a confirmed race without claiming that all socket failures are
+resolved.
+
 ## Fixes after the audit
 
 The cloning and array fixes resolve five audited failures:

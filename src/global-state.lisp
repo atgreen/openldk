@@ -445,6 +445,49 @@ loaders, whose classes are not in the global or app loader tables."
                   (bordeaux-threads:make-recursive-lock
                    (format nil "classload-~A" classname)))))))
 
+(defstruct (class-definition-progress (:constructor %make-class-definition-progress ()))
+  (owner sb-thread:*current-thread*)
+  (lock (sb-thread:make-mutex :name "class definition"))
+  (waiters (sb-thread:make-waitqueue :name "class definition"))
+  (status :pending))
+
+(defvar *java-class-definition-progress* (make-hash-table :test #'eq :weakness :key :synchronized t)
+  "Java mirrors published by definitions that are still preparing or failed.")
+
+(defun %await-definition-progress (progress)
+  "Wait for another thread's definition; its owner can resolve recursively."
+  ;; Pair with the release before a completed definition clears its token.
+  (sb-thread:barrier (:read))
+  (or (null progress)
+      (eq (class-definition-progress-owner progress) sb-thread:*current-thread*)
+      (sb-thread:with-mutex ((class-definition-progress-lock progress))
+        (loop while (eql :pending (class-definition-progress-status progress))
+              do (sb-thread:condition-wait (class-definition-progress-waiters progress)
+                                           (class-definition-progress-lock progress)))
+        (eql :ready (class-definition-progress-status progress)))))
+
+(defun %await-class-definition (class)
+  "Return prepared CLASS, or NIL after a failed definition has rolled back."
+  (and class (%await-definition-progress (slot-value class 'definition-progress)) class))
+
+(defun %await-java-class-definition (class)
+  "Return a Java mirror only when its definition is available to this thread."
+  (and class (%await-definition-progress (gethash class *java-class-definition-progress*)) class))
+
+(defun %finish-class-definition (class completed)
+  "Release all readers after preparation or rollback has finished."
+  (when-let ((progress (slot-value class 'definition-progress)))
+    (sb-thread:with-mutex ((class-definition-progress-lock progress))
+      (setf (class-definition-progress-status progress) (if completed :ready :failed)
+            (class-definition-progress-owner progress) nil)
+      ;; Completed classes need neither synchronization objects nor a thread root.
+      ;; Failed metadata retains its failed state for readers that captured it.
+      (when completed
+        (sb-thread:barrier (:write))
+        (remhash (slot-value class 'java-class) *java-class-definition-progress*)
+        (setf (slot-value class 'definition-progress) nil))
+      (sb-thread:condition-broadcast (class-definition-progress-waiters progress)))))
+
 ;;; The FASL cache's record of the classes a method's compilation looks at
 ;;; (see fasl-cache.lisp).
 
@@ -495,6 +538,7 @@ SYMBOL with NARGS arguments."
                       (%lookup-class-with-delegation loader bin-name 'java-classes-by-bin-name)
                       ;; Fall back to global tables for backward compatibility
                       (gethash bin-name *java-classes-by-bin-name*))))
+      (setf result (%await-java-class-definition result))
       (unless (or fail-ok result)
         (internal-error "Class ~A not found in %get-java-class-by-bin-name" bin-name))
       result)))
@@ -516,6 +560,7 @@ SYMBOL with NARGS arguments."
     (let ((result (if loader
                       (%lookup-class-with-delegation loader fq-name 'java-classes-by-fq-name)
                       (gethash fq-name *java-classes-by-fq-name*))))
+      (setf result (%await-java-class-definition result))
       (unless (or fail-ok result)
         (internal-error "Class ~A not found in %get-java-class-by-fq-name" fq-name))
       result)))
@@ -537,6 +582,7 @@ SYMBOL with NARGS arguments."
     (let ((result (if loader
                       (%lookup-class-with-delegation loader bin-name 'ldk-classes-by-bin-name)
                       (gethash bin-name *ldk-classes-by-bin-name*))))
+      (setf result (%await-class-definition result))
       (unless (or fail-ok result)
         (internal-error "Class ~A not found in %get-ldk-class-by-bin-name" bin-name))
       result)))
@@ -557,6 +603,7 @@ SYMBOL with NARGS arguments."
     (let ((result (if loader
                       (%lookup-class-with-delegation loader fq-name 'ldk-classes-by-fq-name)
                       (gethash fq-name *ldk-classes-by-fq-name*))))
+      (setf result (%await-class-definition result))
       (unless (or fail-ok result)
         (internal-error "Class ~A not found in %get-ldk-class-by-fq-name" fq-name))
       result)))

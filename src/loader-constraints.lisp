@@ -64,9 +64,12 @@
 (defun %initiated-class (name loader)
   "A definition initiated by LOADER, including delegated definitions."
   (sb-sys:with-pinned-objects (loader)
-    (bt:with-recursive-lock-held (*loader-constraint-lock*)
-      (when-let ((table (%constraint-initiations (%constraint-loader loader))))
-        (gethash name table)))))
+    ;; A defining thread needs this lock to finish or roll back. Never wait
+    ;; for its preparation while holding the loader-constraint lock.
+    (%await-class-definition
+     (bt:with-recursive-lock-held (*loader-constraint-lock*)
+       (when-let ((table (%constraint-initiations (%constraint-loader loader))))
+         (gethash name table))))))
 
 (defun %constraint-conflict-p (name loaders &optional candidate)
   "Whether LOADERS have initiated distinct definitions of NAME. Lock is held."

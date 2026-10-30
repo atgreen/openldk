@@ -2027,7 +2027,8 @@ without running the compiler, since most methods are never called."
 
 (defun find-class-in-loader-hierarchy (classname ldk-loader)
   "Search for class in this loader and all parent loaders sharing the same package."
-  (%lookup-class-with-delegation ldk-loader classname 'ldk-classes-by-bin-name))
+  (%await-class-definition
+   (%lookup-class-with-delegation ldk-loader classname 'ldk-classes-by-bin-name)))
 
 (defun %publish-class-globally-p (classname loader)
   "Keep boot/app definitions in compatibility tables when a child shadows them."
@@ -2143,7 +2144,8 @@ without running the compiler, since most methods are never called."
                             (format nil "~A (wrong name: ~A)" classname (name c))))
                   (setf (name c) classname)
                   (setf (slot-value c 'ldk-loader) ldk-loader)
-                  (setf definition c)
+                  (setf definition c
+                        (slot-value c 'definition-progress) (%make-class-definition-progress))
                   (%record-initiating-class c ldk-loader)
                   ;; Store in loader's hash tables
                   (setf (gethash classname (slot-value ldk-loader 'ldk-classes-by-bin-name)) c)
@@ -2220,6 +2222,9 @@ without running the compiler, since most methods are never called."
            (when (and *unnamed-module* (slot-exists-p klass '|module|))
              (setf (slot-value klass '|module|)
                    (%defining-class-module classname ldk-loader (slot-value klass '|classLoader|))))
+           ;; Attach the preparation barrier before publishing the Java mirror.
+           (setf (gethash klass *java-class-definition-progress*)
+                 (slot-value class 'definition-progress))
            ;; Store in loader's java-class hash tables
            (setf (gethash classname (slot-value ldk-loader 'java-classes-by-bin-name)) klass)
            (setf (gethash fq-classname (slot-value ldk-loader 'java-classes-by-fq-name)) klass)
@@ -2312,13 +2317,16 @@ without running the compiler, since most methods are never called."
          (loop for field across (fields class)
                do (classload (slot-value (slot-value field 'class) 'name)))
 
-         (setf completed t)
          (unless allow-renaming
            (%record-app-class-package class))
+         (setf completed t)
          class)
-      (close classfile-stream)
-      (when (and definition (not completed))
-        (%forget-failed-class-definition definition ldk-loader)))))
+      (unwind-protect
+           (close classfile-stream)
+        (unwind-protect
+             (when (and definition (not completed))
+               (%forget-failed-class-definition definition ldk-loader))
+          (when definition (%finish-class-definition definition completed)))))))
 
 (defun %classload-system (classname)
   "Load CLASSNAME as the boot or app class loader would, from the JDK and
@@ -2386,7 +2394,7 @@ application classpath must not be searched on that loader's behalf."
       (if askable
           ;; Only this loader's own definitions may bypass its delegation
           ;; policy. A null-parent loader must not see the app classpath.
-          (or (gethash classname (slot-value ldk-loader 'ldk-classes-by-bin-name))
+          (or (%await-class-definition (gethash classname (slot-value ldk-loader 'ldk-classes-by-bin-name)))
               (ask-java-loader))
           (or (and ldk-loader (%get-ldk-class-by-bin-name classname t ldk-loader))
               (%classload-system classname))))))
@@ -2403,6 +2411,10 @@ the class being compiled when there is one, as the JVM resolves references."
   (%resolve-class classname (and *context* (ldk-loader *context*))))
 
 (defun classload (classname &optional (class-loader nil))
+  "Load CLASSNAME, exposing provisional metadata only to its defining thread."
+  (%await-class-definition (%classload-1 classname class-loader)))
+
+(defun %classload-1 (classname &optional (class-loader nil))
   "Load a class from the classpath using proper JVM class loader delegation.
    JDK classes (java/*, javax/*, sun/*, etc.) are loaded by boot loader.
    User classes are loaded by app loader (which delegates to boot loader first).

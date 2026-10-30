@@ -285,6 +285,10 @@ check-jni-zstd: openldk jni | check-jdk
 	python3 test/jni/check.py --zstd
 
 .PHONY: check-zip check-nio check-file-io check-prefs check-modules check-reentrant check-launcher check-eclipse check-foreign check-concurrency check-source-launcher
+.PHONY: check-class-publication
+check-class-publication: | check-jdk
+	python3 test/concurrency/check-publication.py
+
 check-concurrency: openldk | check-jdk
 	python3 test/concurrency/check.py
 
