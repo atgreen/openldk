@@ -107,11 +107,19 @@
 
 (defun %run-java-reference-processor ()
   "Give the delivery service its own Java identity and Scoped Value state."
-  (let ((*scoped-value-cache* nil)
-        (thread (%make-java-instance "java/lang/Thread"))
-        (current (bordeaux-threads:current-thread)))
+  (let* ((*scoped-value-cache* nil)
+         ;; Thread's constructor may request currentThread() before this
+         ;; service has installed its permanent Java identity. Bootstrap a
+         ;; private temporary identity rather than borrowing the main thread.
+         (*current-thread* nil)
+         (thread (%make-java-instance "java/lang/Thread"))
+         (current (bordeaux-threads:current-thread)))
     (|<init>(Ljava/lang/String;)V| thread (jstring "Reference Handler"))
     (|setDaemon(Z)V| thread 1)
+    (when-let ((temporary (gethash current *lisp-to-java-threads*)))
+      (when (and (not (eq temporary thread))
+                 (eq (gethash temporary *java-threads*) current))
+        (%finish-java-main-thread temporary)))
     (setf (slot-value thread '|eetop|) 1)
     (%set-thread-status thread 4)
     (setf (gethash current *lisp-to-java-threads*) thread)

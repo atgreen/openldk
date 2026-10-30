@@ -33,6 +33,8 @@ PROBES = {
     'ConcurrencyStressProbe': (25,),
     'CpuTimeProbe': (25,),
     'ThreadFailureProbe': (25,),
+    'MainThreadProbe': (25,),
+    'MainJoinProbe': (25,),
     'CryptoProbe': (25,),
     'VectorProbe': (25,),
     'ReferenceProbe': (25,),

@@ -729,7 +729,7 @@ mauve/gnu/testlet/java/io/ObjectOutputStream/StreamDataTest.java	pass	0	0	0	7238
 mauve/gnu/testlet/java/io/ObjectOutputStream/security.java	reference-failure	0	1	1	52c938b77dbd388dbb07b087c753f1b9fae4d934af720b6223c5f876c246f67c	Fails on JDK 25; requires test/environment investigation: FAIL: gnu.testlet.java.io.ObjectOutputStream.security: Unexpected exception (number 0)
 mauve/gnu/testlet/java/io/ObjectStreamClass/ProxyTest.java	pass	0	0	0	c06ba73cf915000e7563899793a911ed3cb1cbcb8db97314a286dd1e34323e13	Passes its assertions or the current JDK 25 comparison.
 mauve/gnu/testlet/java/io/ObjectStreamClass/Test.java	pass	0	0	0	cf67104219d81ce00f7e5b541c5081c3d5bad44b8b18af4569e6242ed7a70e56	Passes its assertions or the current JDK 25 comparison.
-mauve/gnu/testlet/java/io/PipedReaderWriter/Test.java	runtime-failure	0	0	timeout	5ba7bbdda1d2fa5cebe2a302e977400afa3b3aaf77edf9978a8fec6dd339215c	OpenLDK exceeded the 65-second limit while the JDK 25 reference passed.
+mauve/gnu/testlet/java/io/PipedReaderWriter/Test.java	stale-pass	0	0	0	5ba7bbdda1d2fa5cebe2a302e977400afa3b3aaf77edf9978a8fec6dd339215c	Main-thread liveness and launcher termination fixed; both runtimes pass both checks within the normal 65-second limit.
 mauve/gnu/testlet/java/io/PipedStream/Test.java	pass	0	0	0	657134dc3e15ee88563bd84c7384f745ffce88d66423823ce6d0f685f0e58ad2	Passes its assertions or the current JDK 25 comparison.
 mauve/gnu/testlet/java/io/PrintWriter/checkError.java	pass	0	0	0	eb7f5468bc359aabc3d4808ca16fd329a4ae02d2e3db408e3b0c0f3c880f55bc	Passes its assertions or the current JDK 25 comparison.
 mauve/gnu/testlet/java/io/PrintWriter/jdk11.java	pass	0	0	0	6f6bd17d25c0dff8c25bea4fc91ef441f52fb77bebb27fedb22d9351fb42c7a8	Passes its assertions or the current JDK 25 comparison.

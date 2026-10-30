@@ -308,7 +308,7 @@
 (defun %launch-main (mainclass args classpath dump-dir aot)
   "Compile source input when requested, then execute application code in OpenLDK."
   (unless *source-launch-p*
-    (return-from %launch-main (main mainclass args :classpath classpath :dump-dir dump-dir :aot aot)))
+    (return-from %launch-main (main mainclass args :classpath classpath :dump-dir dump-dir :aot aot :exit-thread t)))
   (when aot (error "Source-file launching cannot be combined with --aot"))
   (ensure-java-home)
   (let* ((directory (uiop:ensure-directory-pathname
@@ -341,7 +341,7 @@
                (let ((name (uiop:read-file-string (merge-pathnames "main-class" classes))))
                  (main name args :classpath (format nil "~A~A~A" (namestring classes)
                                                     (uiop:inter-directory-separator) cp)
-                       :dump-dir dump-dir)))
+                       :dump-dir dump-dir :exit-thread t)))
            (error (condition) (setf failure condition)))
       (%cleanup-source-launch))
     (when failure (error failure))))
@@ -751,6 +751,9 @@ Java code (warmups)."
             (bt:make-lock "java-gf-cache")
             (slot-value gf 'method-lock)
             (bt:make-recursive-lock "java-gf-methods"))))
+  ;; Cache cleanup can execute Java code and request a current-thread identity.
+  ;; Retire thread identities only after that work has finished.
+  (%reset-java-thread-registry)
   ;; Snapshot only after all Java threads are stopped and cache cleanup
   ;; is complete. A Cleaner must not free a block while it is being saved.
   (%save-native-memory))
@@ -957,9 +960,6 @@ resetting its classpath.  Skipped, with a note, without a javac."
   ;; Clear all monitor state to prevent deadlocks in the saved image.
   (clrhash *monitors*)
   (setf *last-monitor* (cons nil nil))
-  ;; Clear stale thread mappings — after image restore the Lisp thread objects are different.
-  (clrhash *lisp-to-java-threads*)
-  (setf *current-thread* nil)
   (%reinitialize-static-properties)
   ;; Kill all Java threads before saving core (SBCL can't save with threads running)
   (loop for thread in (bt:all-threads)
@@ -991,15 +991,13 @@ resetting its classpath.  Skipped, with a note, without a javac."
   ;; Clear all monitor state to prevent deadlocks in the saved image.
   (clrhash *monitors*)
   (setf *last-monitor* (cons nil nil))
-  ;; Clear stale thread mappings — after image restore the Lisp thread objects are different.
-  (clrhash *lisp-to-java-threads*)
-  (setf *current-thread* nil)
   (%reinitialize-static-properties)
   ;; Kill all Java threads before saving core (SBCL can't save with threads running)
   (loop for thread in (bt:all-threads)
         when (and (not (eq thread (bt:current-thread)))
                   (search "Java-Thread" (bt:thread-name thread)))
         do (bt:destroy-thread thread))
+  (%reset-java-thread-registry)
   (sb-ext:save-lisp-and-die output-path
                             :executable t
                             :save-runtime-options t

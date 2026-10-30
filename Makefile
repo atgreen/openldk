@@ -336,6 +336,17 @@ check-launcher: openldk | check-jdk
 check-eclipse: openldk jni | check-jdk
 	python3 test/eclipse/check.py
 
+.PHONY: check-thread-image
+check-thread-image: | check-jdk
+	@image_test_dir=$$(mktemp -d); \
+	trap 'rm -rf "$$image_test_dir"' EXIT; \
+	$(JAVAC) --release 25 -g -d "$$image_test_dir" test/ThreadImage.java test/standards/MainThreadProbe.java && \
+	LDK_THREAD_IMAGE_DIR="$$image_test_dir" \
+	  sbcl --dynamic-space-size $(DYNAMIC_SPACE_SIZE) --disable-debugger \
+	  --eval '(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))' \
+	  --load test/thread-image.lisp && \
+	"$$image_test_dir/thread-image"
+
 .PHONY: check-reference-image
 check-reference-image: | check-jdk
 	@image_test_dir=$$(mktemp -d); \

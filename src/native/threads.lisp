@@ -94,7 +94,29 @@
             (condition ()
               ;; If the old constructor doesn't work, set name directly
               (setf (slot-value thread '|name|) (jstring "main"))))
+          ;; This Java object represents an already-running Lisp thread, not
+          ;; an unstarted Java Thread. JDK 25's compiled isAlive() reads eetop.
+          (when (slot-exists-p thread '|eetop|)
+            (setf (slot-value thread '|eetop|) 1))
+          (%set-thread-status thread 4)
+          (setf (gethash thread *java-threads*) current-lisp-thread)
           thread))))
+
+(defun %reset-java-thread-registry ()
+  "Retire process-local Java thread identities after other Lisp threads stop."
+  ;; Retained Java references must describe terminated build-time threads.
+  ;; The restarted main receives a new identity through currentThread().
+  (maphash (lambda (thread lisp-thread)
+             (declare (ignore lisp-thread))
+             (when (slot-exists-p thread '|eetop|)
+               (setf (slot-value thread '|eetop|) 0))
+             (%set-thread-status thread 2))
+           *java-threads*)
+  (clrhash *java-threads*)
+  (clrhash *lisp-to-java-threads*)
+  (clrhash *thread-interrupted*)
+  (setf *current-thread* nil
+        *java-thread-registry-lock* (bt:make-recursive-lock "Java thread lifecycle")))
 
 ;; A thread's contextClassLoader defaults to the system class loader (never null
 ;; for the main thread in a real JVM). OpenLDK never initializes the field, so
@@ -445,6 +467,16 @@ name is recorded in the Java thread already, so there is nothing to do."
     (let ((current (bt:current-thread)))
       (when (eq thread (gethash current *lisp-to-java-threads*))
         (remhash current *lisp-to-java-threads*)))))
+
+(defun %finish-java-main-thread (thread)
+  "Publish launcher-thread termination before waiting for non-daemon children."
+  (%run-java-thread-exit thread)
+  (when (slot-exists-p thread '|eetop|) (setf (slot-value thread '|eetop|) 0))
+  (%set-thread-status thread 2)
+  (when (eq *current-thread* thread) (setf *current-thread* nil))
+  (ignore-errors
+    (monitor-enter thread)
+    (unwind-protect (|notifyAll()V| thread) (monitor-exit thread))))
 
 #+sb-fiber
 (defmethod |start0()V| :around ((thread |java/lang/BaseVirtualThread|))

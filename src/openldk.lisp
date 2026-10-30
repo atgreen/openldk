@@ -2812,25 +2812,29 @@ seconds instead."
             (t
              (sleep 0.1))))))))
 
-(defun main (mainclass &optional (args (list)) &key dump-dir classpath aot)
+(defun main (mainclass &optional (args (list)) &key dump-dir classpath aot exit-thread)
   "Run a Java class with the given arguments.
    MAINCLASS: The class or interface whose Java main method is executed.
    ARGS: Java program command line arguments (list of strings).
    CLASSPATH: The classpath from which classes are loaded.
    DUMP-DIR: The directory into which internal debug info is dumped.
-   AOT: Ahead-of-time compilation directory (generate Lisp source files)."
+   AOT: Ahead-of-time compilation directory (generate Lisp source files).
+   EXIT-THREAD: Retire the CLI launcher's Java thread before waiting for children.
+   Lisp callers retain their attached Java thread by default."
   (%main-runtime-setup classpath dump-dir aot)
   (when (plusp (hash-table-count *java-references*))
     (%ensure-java-reference-processor))
   (if *aot-dir*
       (%run-aot-main mainclass aot)
-      (let* ((class (classload (substitute #\/ #\. mainclass)))
+      (let* ((thread (when exit-thread (|java/lang/Thread.currentThread()Ljava/lang/Thread;|)))
+             (class (classload (substitute #\/ #\. mainclass)))
              (argv (make-java-array
                     :component-class (%get-java-class-by-bin-name "java/lang/String")
                     :initial-contents (mapcar #'jstring args))))
         (assert (or class (error "Can't load ~A" mainclass)))
-        (%clinit class)
-        (%invoke-java-main class argv)
+        (unwind-protect
+             (progn (%clinit class) (%invoke-java-main class argv))
+          (when thread (%finish-java-main-thread thread)))
         (%await-nondaemon-java-threads))))
 
 

@@ -139,6 +139,19 @@ the initialization performed by JNI field and method lookups. A fresh-process
 `FontContextProbe` checks default hints, metrics, and hint-cache updates on both
 the JDK and OpenLDK as part of `test/awt/check.py`.
 
+The `PipedReaderWriter` failure exposed the main Java thread being left in
+`NEW` state with zero `eetop`, so a writer believed its reader had died.
+`currentThread()` now records an already-running thread in both directions
+and initializes the Java liveness/state fields. CLI launches retire the main
+thread and notify joiners before waiting for non-daemon children; Lisp calls
+retain their attached context. The reference processor uses a private
+bootstrap identity, and saved images retire build-time thread identities.
+`MainThreadProbe`, `MainJoinProbe`, and `make check-thread-image` check character
+and byte pipes, joining main after return, and saved-thread state after restart.
+The isolated pipe audit passes both checks on each runtime within the normal
+65-second limit, so its expectation is removed. The experimental X11 backend
+continues to be validated separately.
+
 ## Results
 
 | Suite audited | Passes | OpenLDK-only differences | Legacy version parser | Rejected by javac 25 | Reference failure | Reference timeout | Helpers without a main |

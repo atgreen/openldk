@@ -88,6 +88,12 @@ Before saving, `%reset-runtime-for-save` kills leftover threads, drops
 process-local handles (open jars, mmapped JDK images, off-heap memory), and
 gives every lock a fresh mutex.  `make-javac-image` uses the same function.
 
+Retained Java `Thread` objects describe terminated build-time threads after
+restart. `Thread.currentThread()` creates a new live execution-thread identity;
+the saved thread registry and interruption state are cleared. Run
+`make check-thread-image` to check retained identities, main-thread liveness,
+and pipe communication across a warm-image restart.
+
 ### Example: `make abcl`
 
 `make abcl` downloads ABCL 1.9.2, compiles its entry point, and runs
