@@ -519,6 +519,9 @@
 (%define-xlib "XMaxRequestSize" "(J)J" "XMaxRequestSize" sb-alien:long (:pointer))
 (%define-xlib "XGetSelectionOwner" "(JJ)J" "XGetSelectionOwner" sb-alien:unsigned-long
   (:pointer sb-alien:unsigned-long))
+(%define-xlib "XConvertSelection" "(JJJJJJ)V" "XConvertSelection" :void
+  (:pointer sb-alien:unsigned-long sb-alien:unsigned-long sb-alien:unsigned-long
+   sb-alien:unsigned-long sb-alien:unsigned-long))
 (%define-xlib "XSetSelectionOwner" "(JJJJ)V" "XSetSelectionOwner" :void
   (:pointer sb-alien:unsigned-long sb-alien:unsigned-long sb-alien:unsigned-long))
 (%define-xlib "XCreateWindow" "(JJIIIIIIJJJJ)J" "XCreateWindow" sb-alien:unsigned-long

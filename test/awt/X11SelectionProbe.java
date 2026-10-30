@@ -9,6 +9,8 @@ public class X11SelectionProbe {
     public static void main(String[] args) throws Exception {
         Clipboard primary = Toolkit.getDefaultToolkit().getSystemSelection();
         if (primary == null) throw new AssertionError("Missing X11 primary selection");
+        if (primary.getAvailableDataFlavors().length != 0)
+            throw new AssertionError("PRIMARY is already owned; use an isolated X server");
         String text = "OpenLDK primary selection: \u03bb \u2603";
         primary.setContents(new StringSelection(text), null);
         Object actual = primary.getContents(null).getTransferData(DataFlavor.stringFlavor);
