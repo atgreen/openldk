@@ -27,6 +27,8 @@ jobs:
     timeout-minutes: 30
 
     env:
+      # Bound large-array tests by the runtime heap, not hosted-runner RAM.
+      DYNAMIC_SPACE_SIZE: "4096"
       OCICL_HTTP_RETRIES: "6"
       OCICL_DOWNLOAD_CONCURRENCY: "2"
 
@@ -86,3 +88,14 @@ jobs:
         run: |
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           make check-regression
+
+      - name: Upload Linux regression diagnostics
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-regression-diagnostics
+          path: |
+            testsuite/openldk.log
+            testsuite/openldk.sum
+          if-no-files-found: ignore
+          retention-days: 7
