@@ -1660,6 +1660,12 @@ naming what the <clinit> threw."
     (assert
      (or class (internal-error "Can't find ~A" class)))
     (labels ((clinit (class)
+               ;; Fast path: an initialized class (and so its supers) needs
+               ;; nothing done.  Check the flag before scanning the method table
+               ;; for <clinit>, which otherwise costs an O(methods) string
+               ;; compare on every call for an already-initialized class.
+               (when (initialized-p class)
+                 (return-from clinit))
                (let ((super-class (and (super class)
                                        (%resolve-class (super class) (ldk-loader class)))))
                  (when (and super-class (not (initialized-p super-class)))
