@@ -204,23 +204,51 @@ keep it in OpenLDK's cache; and where to download it from."
     (apply (symbol-function (intern init :openldk)) object args)
     object))
 
+(defun %java-call-function (method object)
+  "The OpenLDK generic function implementing METHOD on OBJECT, resolved from
+OBJECT's class.  The result depends only on the class and METHOD, so a caller
+may cache it per receiver class; it is the generic function itself (not an
+effective method), so it keeps dispatching correctly as methods are added."
+  (symbol-function
+   (intern (if (typep object 'standard-object)
+               ;; A DEFINE-JAVA-SUBCLASS instance resolves through its Java superclass.
+               (or (loop for class in (closer-mop:class-precedence-list (class-of object))
+                         for name = (class-name class)
+                         for full = (and (symbolp name)
+                                         (or (eq class (class-of object)) (find #\/ (symbol-name name)))
+                                         (openldk::%resolve-method-name (symbol-name name) method))
+                         when (and full (string/= full method))
+                           return full)
+                   method)
+               method)
+           :openldk)))
+
 (defun java-call (method object &rest args)
   "Call the instance method METHOD, e.g. \"toString()\" (the return type
 may be given too), on OBJECT."
-  (apply (symbol-function
-          (intern (if (typep object 'standard-object)
-                      ;; A DEFINE-JAVA-SUBCLASS instance resolves through its Java superclass.
-                      (or (loop for class in (closer-mop:class-precedence-list (class-of object))
-                                for name = (class-name class)
-                                for full = (and (symbolp name)
-                                                (or (eq class (class-of object)) (find #\/ (symbol-name name)))
-                                                (openldk::%resolve-method-name (symbol-name name) method))
-                                when (and full (string/= full method))
-                                  return full)
-                          method)
-                      method)
-                  :openldk))
-         object args))
+  (apply (%java-call-function method object) object args))
+
+(define-compiler-macro java-call (&whole form method object &rest args)
+  "When METHOD is a constant string -- the usual case -- resolve the target
+once per call site and cache it against the receiver class, so a hot call does
+an EQ check and a FUNCALL instead of re-walking the class and interning a symbol
+every time.  The cache holds the generic function, which stays valid as methods
+are added, so no version check is needed (unlike an effective-method cache)."
+  (if (stringp method)
+      (let ((obj (gensym "OBJ")) (class (gensym "CLASS"))
+            (cache (gensym "JCALL-CACHE")) (fn (gensym "FN")))
+        `(let* ((,obj ,object)
+                (,class (class-of ,obj))
+                (,cache (load-time-value (cons nil nil))))
+           (funcall (the function
+                         (if (eq (car ,cache) ,class)
+                             (cdr ,cache)
+                             (let ((,fn (%java-call-function ,method ,obj)))
+                               (setf (car ,cache) ,class
+                                     (cdr ,cache) ,fn)
+                               ,fn)))
+                    ,obj ,@args)))
+      form))
 
 (defun java-static (class-name method &rest args)
   "Call the static method METHOD of CLASS-NAME, e.g. (java-static
