@@ -371,6 +371,7 @@ Returns the class symbol."
          (return-type (char descriptor (1+ (position #\) descriptor))))
          (box-return (and (find return-type "L[") t))
          (primitive-return (and (find return-type "ZBSIJFDC") return-type))
+         (box-params (%descriptor-param-prim-chars descriptor))
          ;; Use interface name as cache key when available for proper CHECKCAST
          (class-name-str (format nil "~A~{+~A~}_L~D"
                                  (if interface-type-name
@@ -388,7 +389,7 @@ Returns the class symbol."
         (let ((method-sym (intern lispized-name :openldk)))
           (unless (and (fboundp method-sym)
                        (typep (fdefinition method-sym) 'generic-function))
-            (%define-lambda-method method-sym cached param-count box-return primitive-return))
+            (%define-lambda-method method-sym cached param-count box-return primitive-return box-params))
           cached)
         ;; Create new dynamic lambda class, extending the interface if known
         (let* ((class-sym (intern class-name-str (if (%user-ldk-loader-p loader) (loader-package loader) :openldk)))
@@ -403,16 +404,28 @@ Returns the class symbol."
             (bt:with-recursive-lock-held (*loader-lifecycle-lock*)
               (pushnew class-sym (loader-resources-classes (slot-value loader 'unload-resources)))))
           ;; Define the dispatch method
-          (%define-lambda-method method-sym class-sym param-count box-return primitive-return)
+          (%define-lambda-method method-sym class-sym param-count box-return primitive-return box-params)
           (setf (gethash cache-key *dynamic-lambda-classes*) class-sym)
           class-sym))))
 
-(defun %define-lambda-method (method-sym class-sym param-count &optional box-return primitive-return)
+(defun %define-lambda-method (method-sym class-sym param-count &optional box-return primitive-return box-params)
   "Define a lambda dispatch method METHOD-SYM on CLASS-SYM with PARAM-COUNT
 parameters.  BOX-RETURN boxes a primitive the implementation returns, for an
-interface method returning a reference (Kotlin's Function1.invoke)."
-  (let ((params (loop for i below param-count
-                      collect (intern (format nil "P~A" i) :openldk))))
+interface method returning a reference (Kotlin's Function1.invoke).  BOX-PARAMS,
+aligned with the parameters, carries each primitive SAM parameter's type
+character (or NIL): such an argument is boxed to its wrapper before the
+implementation runs, so a method reference whose SAM takes a primitive but
+whose target takes a reference (e.g. an int/long passed to Collection.add,
+PriorityQueue.insertWithOverflow or Long::longValue through a stream) receives
+the boxed object the target expects.  %INVOKE-FROM-MEMBER-NAME unboxes again at
+the target when that target parameter is itself primitive."
+  (let* ((params (loop for i below param-count
+                       collect (intern (format nil "P~A" i) :openldk)))
+         (arg-forms (if box-params
+                        (loop for p in params
+                              for c = (pop box-params)
+                              collect (if c `(%box-primitive-return ,p ,c) p))
+                        params)))
     ;; Only create/change GF if not already a GF (avoid change-class violation)
     (unless (and (fboundp method-sym)
                  (typep (fdefinition method-sym) 'generic-function))
@@ -422,7 +435,7 @@ interface method returning a reference (Kotlin's Function1.invoke)."
     (eval `(defmethod ,method-sym ((|this| ,class-sym) ,@params)
              (%lambda-invoke (slot-value |this| 'target)
                              (slot-value |this| 'captures)
-                             (list ,@params)
+                             (list ,@arg-forms)
                              :box-return ,box-return
                              :primitive-return ,primitive-return)))))
 

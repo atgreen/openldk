@@ -843,6 +843,30 @@ parameter has a primitive type (Z B S C I J F D)."
                  (t (incf index)))))
     (nreverse flags)))
 
+(defun %descriptor-param-prim-chars (descriptor)
+  "Return a list, one entry per parameter of DESCRIPTOR: the primitive type
+character (Z B S C I J F D) when that parameter is a primitive, or NIL when
+it is a reference type.  Like %DESCRIPTOR-PARAM-PRIM-FLAGS, but keeps the
+type so a primitive argument can be boxed to the matching wrapper."
+  (let ((chars nil)
+        (index (1+ (position #\( descriptor)))
+        (end (position #\) descriptor)))
+    (loop while (< index end)
+          do (let ((ch (char descriptor index)))
+               (cond
+                 ((find ch "ZBSCIJFD") (push ch chars) (incf index))
+                 ((char= ch #\L)
+                  (push nil chars)
+                  (setf index (1+ (position #\; descriptor :start index))))
+                 ((char= ch #\[)
+                  (loop while (char= (char descriptor index) #\[) do (incf index))
+                  (if (char= (char descriptor index) #\L)
+                      (setf index (1+ (position #\; descriptor :start index)))
+                      (incf index))
+                  (push nil chars))
+                 (t (incf index)))))
+    (nreverse chars)))
+
 (defun %maybe-unbox (arg)
   "If ARG is a boxed primitive wrapper object, return its primitive value;
 otherwise return ARG unchanged."
