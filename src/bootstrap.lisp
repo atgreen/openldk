@@ -176,6 +176,11 @@
   ()
   (:documentation "Stub for jdk.internal.reflect.ConstantPool"))
 
+(defclass |jdk/internal/misc/ScopedMemoryAccess| (|java/lang/Object|)
+  ()
+  (:documentation "Stub for jdk.internal.misc.ScopedMemoryAccess, so its
+   instance natives (e.g. closeScope0) have a build-time specializer."))
+
 (ensure-generic-function '%lisp-condition
                          :generic-function-class 'java-generic-function
                          :lambda-list '(|this|))

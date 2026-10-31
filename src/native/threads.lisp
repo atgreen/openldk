@@ -515,6 +515,18 @@ name is recorded in the Java thread already, so there is nothing to do."
 (defun |jdk/internal/misc/ScopedMemoryAccess.registerNatives()V| ()
   nil)
 
+;; closeScope0 is an INSTANCE native: dispatched on the bare method descriptor
+;; with the ScopedMemoryAccess singleton as receiver (its CLOS specializer is
+;; declared in bootstrap.lisp).  HotSpot runs a thread handshake here to reject
+;; the close if another thread is mid scoped-access; OpenLDK has no such
+;; deferred accesses to detect, so the close always succeeds.  Returning
+;; normally makes the Java-side closeScope wrapper return true and mark the
+;; session CLOSED.
+(defmethod |closeScope0(Ljdk/internal/foreign/MemorySessionImpl;Ljdk/internal/misc/ScopedMemoryAccess$ScopedAccessError;)V|
+    ((this |jdk/internal/misc/ScopedMemoryAccess|) session error)
+  (declare (ignore session error))
+  nil)
+
 ;; Runtime native methods
 (defun %available-processor-count ()
   "Number of online CPUs, via sysconf(_SC_NPROCESSORS_ONLN) with a
