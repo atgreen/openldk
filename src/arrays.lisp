@@ -133,6 +133,17 @@ element width as Java's narrowing stores do."
 (defvar *array-allocation-headroom* (* 16 1024 1024)
   "Leave space for exception handling, JIT compilation and Lisp runtime bookkeeping.")
 
+(defvar *array-allocation-budget* 0
+  "Bytes that may be allocated before the next availability measurement is due.
+%ARRAY-ALLOCATION-AVAILABLE can walk the whole page table, which is too costly to
+run on every allocation once the heap is more than about half full.  Instead we
+measure once, then spend that measured headroom from this budget -- a cheap
+subtract-and-compare -- and only re-measure when it is exhausted.  It is an
+approximation (other allocations and GC also move the heap), kept safe by the
+reactive exhaustion handler in WITH-ARRAY-ALLOCATION-RECOVERY and by the headroom
+reserved below LIMIT; so a loose estimate costs at most a slightly late GC, never
+unsafety.")
+
 (defparameter *array-element-layouts*
   (let ((layouts (make-hash-table :test #'equal)))
     (loop for layout across sb-vm:*specialized-array-element-type-properties*
@@ -208,7 +219,10 @@ element width as Java's narrowing stores do."
       (sb-ext:gc :gen sb-vm:+highest-normal-generation+))))
 
 (defun %check-array-allocation (size element-type)
-  "Reject impossible requests and collect before rejecting a crowded heap."
+  "Reject impossible requests and collect before rejecting a crowded heap.
+Common allocations are served from *ARRAY-ALLOCATION-BUDGET* with a cheap
+subtract-and-compare; the page-table walk in %ARRAY-ALLOCATION-AVAILABLE runs
+only to replenish the budget once it is spent."
   (when *array-allocation-error*
     (let* ((bytes (* (+ (ceiling (%array-storage-bytes size element-type) sb-vm:gencgc-page-bytes)
                         (ceiling *array-wrapper-bytes* sb-vm:gencgc-page-bytes))
@@ -216,10 +230,20 @@ element width as Java's narrowing stores do."
            (limit (- (sb-ext:dynamic-space-size)
                      (min *array-allocation-headroom* (ash (sb-ext:dynamic-space-size) -3)))))
       (when (> bytes limit) (error *array-allocation-error*))
-      (when (> bytes (%array-allocation-available limit bytes))
-        (%collect-java-heap)
-        (when (> bytes (%array-allocation-available limit bytes))
-          (error *array-allocation-error*))))))
+      (unless (<= bytes *array-allocation-budget*)
+        ;; Budget spent: measure again (collecting, or erroring, as before) and
+        ;; replenish.  Rare, so the page-table walk and lock are amortized away.
+        (bt:with-recursive-lock-held (*array-allocation-lock*)
+          (when (> bytes *array-allocation-budget*)   ; another thread may have refilled
+            (let ((available (%array-allocation-available limit bytes)))
+              (when (> bytes available)
+                (%collect-java-heap)
+                (setf available (%array-allocation-available limit bytes))
+                (when (> bytes available)
+                  (error *array-allocation-error*)))
+              (setf *array-allocation-budget* available)))))
+      ;; Account for this allocation against the measured headroom.
+      (decf *array-allocation-budget* bytes))))
 
 (defmacro with-array-allocation-recovery (&body body)
   "Translate recoverable SBCL exhaustion using the preconstructed Java condition."
