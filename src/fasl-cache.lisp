@@ -350,12 +350,18 @@ LOAD-TIME-VALUE form that makes it.  Signals UNCACHEABLE when one can't be."
   "The fraction of immobile (text) space past which cached code loads
 into dynamic space instead.")
 
+(defparameter *fasl-cache-text-space-size*
+  (let ((symbol (find-symbol "TEXT-SPACE-SIZE" :sb-vm)))
+    (when (and symbol (boundp symbol)) (symbol-value symbol)))
+  "Immobile text-space capacity, or NIL on SBCL builds without that space.")
+
 (defun %fasl-cache-load-file (path &optional stream)
   "Load the cached FASL at PATH, from STREAM when given (open on it), its
 code where EVAL would put it."
   (let ((sb-c:*compile-file-to-memory-space*
-          (if (< (- (sb-sys:sap-int sb-vm:*text-space-free-pointer*) sb-vm:text-space-start)
-                 (* *fasl-cache-text-space-limit* sb-vm:text-space-size))
+          (if (and *fasl-cache-text-space-size*
+                   (< (- (sb-sys:sap-int sb-vm:*text-space-free-pointer*) sb-vm:text-space-start)
+                      (* *fasl-cache-text-space-limit* *fasl-cache-text-space-size*)))
               :immobile
               :dynamic)))
     (handler-bind ((warning #'muffle-warning))

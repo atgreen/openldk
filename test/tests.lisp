@@ -346,6 +346,24 @@ nothing behind when it refuses."
            (is (equal '(#xFF #xFF 0 0) (bytes))))
       (sb-alien:free-alien mem))))
 
+(defvar *cached-load-space* nil)
+
+(test fasl-cache-without-immobile-space
+  ;; Cached code must still load on SBCL targets without TEXT-SPACE-SIZE.
+  (uiop:with-temporary-file (:stream out :pathname source :type "lisp")
+    (write-line "(setf openldk-tests::*cached-load-space* sb-c:*compile-file-to-memory-space*)" out)
+    (finish-output out)
+    (let ((fasl (compile-file source :verbose nil :print nil)))
+      (unwind-protect
+           (let ((openldk::*fasl-cache-text-space-size* nil)
+                 ;; Capacity must take precedence even if the usual threshold
+                 ;; would otherwise select immobile code on this host.
+                 (openldk::*fasl-cache-text-space-limit* 10.0)
+                 (*cached-load-space* nil))
+             (is (openldk::%fasl-cache-load-file fasl))
+             (is (eql :dynamic *cached-load-space*)))
+        (delete-file fasl)))))
+
 (test fasl-cache-externalize
   ;; Code the FASL cache can write as it is comes back unchanged; a NaN,
   ;; which can't be printed readably, is made at load time from its bits;
