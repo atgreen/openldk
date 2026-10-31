@@ -197,6 +197,18 @@
     (make-java-array :component-class (%get-java-class-by-bin-name "java/lang/management/MemoryPoolMXBean")
                      :initial-contents (list mp-mxbean))))
 
+(defmethod |getMemoryUsage0(Z)Ljava/lang/management/MemoryUsage;| ((this t) heap)
+  ;; MemoryMXBean.getHeapMemoryUsage()/getNonHeapMemoryUsage() land here.  SBCL
+  ;; has one managed heap and no separate non-heap pool, so HEAP is ignored and
+  ;; we report the dynamic space either way: a MemoryUsage(init, used, committed,
+  ;; max).  USED is clamped to COMMITTED so the constructor's invariants hold.
+  (declare (ignore this heap))
+  (let* ((committed (sb-ext:dynamic-space-size))
+         (used (min (sb-kernel:dynamic-usage) committed))
+         (usage (%make-java-instance "java/lang/management/MemoryUsage")))
+    (|<init>(JJJJ)V| usage 0 used committed committed)
+    usage))
+
 (defun |jdk/internal/platform/CgroupMetrics.isUseContainerSupport()Z| ()
   0)
 
