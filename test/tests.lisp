@@ -842,6 +842,24 @@ nothing behind when it refuses."
     (is (null (funcall function nil)))
     (is (string= "opaque native value" (funcall function "opaque native value")))))
 
+(test primitive-entry-fallback-type-exclusions
+  (let* ((openldk::*context* (make-instance 'openldk::<context>))
+         (openldk::*method-primitive-parameters* '((x . :int)))
+         (form (openldk::%method-let
+                '((x argument))
+                '((if (< 0 x 2147483647) (ash x 1) 0))))
+         (warnings nil)
+         (function
+           (handler-bind ((warning (lambda (condition)
+                                     (unless (typep condition 'style-warning)
+                                       (push condition warnings)))))
+             (compile nil `(lambda (argument) ,form)))))
+    (is (null warnings))
+    (is (= 8 (funcall function 4)))
+    (is (= 0 (funcall function 2147483648)))
+    (is (= 0 (funcall function -1/2)))
+    (signals type-error (funcall function 1/2))))
+
 (test word-long-native-normalization
   (let* ((form '(let ((x 0))
                  (declare (type (signed-byte 64) x))

@@ -888,6 +888,12 @@ the alist TYPES so VALUE passes through that type's normalizer."
                       (not (gethash (first binding) used))))
                bindings)))
 
+(declaim (notinline %native-entry-value))
+
+(defun %native-entry-value (value)
+  "Retain VALUE's native ABI representation without fast-path type exclusions."
+  value)
+
 (defun %method-let (bindings body)
   "Use a guarded typed entry for canonical Java parameters, with the old ABI as fallback."
   (let* ((bindings (%prune-unused-bindings bindings body))
@@ -898,7 +904,15 @@ the alist TYPES so VALUE passes through that type's normalizer."
         `(if (and ,@(loop for (local . category) in parameters
                           collect `(typep ,(second (assoc local bindings)) ',(%primitive-lisp-type category))))
              ,(%typed-let bindings body parameters)
-             ,(%typed-let bindings body))
+             ;; A failed canonical-type test must not narrow the native ABI
+             ;; copy: SBCL otherwise carries negative integer types through
+             ;; comparisons and diagnoses later integer operations as invalid.
+             ,(%typed-let
+               (loop for (local . init) in bindings
+                     collect (if (assoc local parameters)
+                                 (list local `(%native-entry-value ,(first init)))
+                                 (cons local init)))
+               body))
         (%typed-let bindings body))))
 
 ;;; Folding single-use stack variables.  Bytecode passes nearly every
