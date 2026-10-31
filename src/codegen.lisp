@@ -680,7 +680,21 @@ The first check stays before initialization; labels end the proof."
     (if *enable-redundant-linkage-elision* (walk form) form)))
 
 (defmacro %with-class-access (caller target form)
-  `(progn (%check-bytecode-class-access ,caller ,target) ,form))
+  ;; The (CALLER, TARGET) pair is constant at each emitted site, and a class
+  ;; access decision, once made, is stable: an allowed access stays allowed, and
+  ;; a denied one keeps throwing.  So verify at most once per site.  A persistent
+  ;; LOAD-TIME-VALUE cell records the first success, after which the hot path is
+  ;; a single slot read -- no per-execution weak-hash lookup and no lock, the
+  ;; same fast-path shape %CHECK-MEMBER-CONSTRAINT-SITE already uses for its
+  ;; sibling check.  A denied access throws before the cell is set, so it is
+  ;; re-checked (and re-throws) every time, unchanged.
+  (let ((ok (gensym "ACCESS-OK")))
+    `(progn
+       (let ((,ok (load-time-value (cons nil nil))))
+         (unless (car ,ok)
+           (%check-bytecode-class-access ,caller ,target)
+           (setf (car ,ok) t)))
+       ,form)))
 
 (define-setf-expander %with-class-access (caller target place &environment environment)
   ;; Field IR is used both as a value and a SETF place. Preserve the underlying
