@@ -325,6 +325,10 @@ check-language: openldk | check-jdk
 check-foreign: openldk jni | check-jdk
 	python3 test/foreign/check.py
 
+.PHONY: check-lucene
+check-lucene: openldk | check-jdk
+	python3 test/lucene/check.py
+
 check-zip: openldk | check-jdk
 	python3 test/zip/check.py
 

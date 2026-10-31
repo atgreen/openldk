@@ -48,3 +48,18 @@ Acquire/release and opaque accesses may legally provide stronger ordering."
      (sb-thread:barrier (:memory))
      (unwind-protect (progn ,@body)
        (sb-thread:barrier (:memory)))))
+
+(defun %shared-memory-session-p (session)
+  "True for a shared FFM session whose close can race a memory access."
+  (and session
+       (find '|jdk/internal/foreign/SharedSession|
+             (closer-mop:class-precedence-list (class-of session))
+             :key #'class-name)))
+
+(defmacro with-scoped-memory-access ((&rest sessions) &body body)
+  "Exclude shared-session teardown until the checked memory access finishes."
+  (let ((access (gensym "ACCESS")))
+    `(flet ((,access () ,@body))
+       (if ,(cons 'or (loop for session in sessions collect `(%shared-memory-session-p ,session)))
+           (with-java-memory-ordering (,access))
+           (,access)))))

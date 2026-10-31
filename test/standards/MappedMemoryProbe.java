@@ -15,6 +15,23 @@ public class MappedMemoryProbe {
         try { operation.run(); throw new AssertionError("missing " + expected.getName()); }
         catch (Throwable error) { if (!expected.isInstance(error)) throw new AssertionError("wrong exception", error); }
     }
+    static void bulkFloatCopies(MemorySegment segment) {
+        float[] values = {-9f, 1f, -0f, Float.intBitsToFloat(0x7fc12345), -8f};
+        for (ByteOrder order : new ByteOrder[]{ByteOrder.LITTLE_ENDIAN, ByteOrder.BIG_ENDIAN}) {
+            ValueLayout.OfFloat layout = ValueLayout.JAVA_FLOAT_UNALIGNED.withOrder(order);
+            segment.fill((byte)0x55);
+            MemorySegment.copy(values, 1, segment, layout, 3, 3);
+            float[] restored = {42f, 42f, 42f, 42f, 42f};
+            MemorySegment.copy(segment, layout, 3, restored, 1, 3);
+            check(restored[0] == 42f && restored[4] == 42f, "bulk copy preserves sentinels");
+            for (int i = 1; i <= 3; i++) {
+                int bits = Float.floatToRawIntBits(values[i]);
+                check(Float.floatToRawIntBits(restored[i]) == bits, "bulk float copy bits");
+                check(Float.floatToRawIntBits(segment.get(layout, 3 + (i-1)*4)) == bits,
+                      "bulk copy agrees with scalar read");
+            }
+        }
+    }
     public static void main(String[] args) throws Exception {
         Path path = Files.createTempFile("openldk-mapped", ".dat");
         try {
@@ -66,6 +83,20 @@ public class MappedMemoryProbe {
             fails(IllegalStateException.class, () -> segment.load());
             restored = Files.readAllBytes(path);
             check(restored[1] == 51 && restored[2] == 52, "FFM mapped writes persisted");
+            bulkFloatCopies(MemorySegment.ofArray(new byte[64]));
+            try (Arena arena = Arena.ofConfined()) {
+                bulkFloatCopies(arena.allocate(64));
+            }
+            MemorySegment sharedSegment;
+            try (Arena arena = Arena.ofShared();
+                 FileChannel channel = FileChannel.open(path, StandardOpenOption.READ, StandardOpenOption.WRITE)) {
+                sharedSegment = channel.map(FileChannel.MapMode.READ_WRITE, 1, 64, arena);
+                bulkFloatCopies(sharedSegment);
+            }
+            MemorySegment closed = sharedSegment;
+            fails(IllegalStateException.class, () -> closed.get(ValueLayout.JAVA_BYTE, 0));
+            fails(IllegalStateException.class, () -> MemorySegment.copy(
+                closed, ValueLayout.JAVA_FLOAT_UNALIGNED, 0, new float[1], 0, 1));
             System.out.println("Mapped buffers and FFM segments: load, residency, unload, flush, slices, modes, and lifetimes passed");
         } finally { Files.deleteIfExists(path); }
     }

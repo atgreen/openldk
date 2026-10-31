@@ -1236,6 +1236,19 @@ entry/exit as required."
            `((openldk::with-java-conditions
                  (:arrays ,(and (needs-array-bounds-check *context*) t))
                ,(car traced-lisp-code))))
+         ;; HotSpot protects @Scoped operations against concurrent arena
+         ;; closure. Keep the validity check and access inside one region;
+         ;; closeScope0 takes the same lock before resources are released.
+         (null-checked-lisp-code
+           (if (and (string= (name class) "jdk/internal/misc/ScopedMemoryAccess")
+                    (ends-with? "Internal" (name method)))
+               `((with-scoped-memory-access
+                     ,(loop for type in (parse-parameter-types (descriptor method))
+                            for index from (if (static-p method) 0 1)
+                            when (string= type "jdk/internal/foreign/MemorySessionImpl")
+                              collect (intern (format nil "arg~D" index) :openldk))
+                   ,@null-checked-lisp-code))
+               null-checked-lisp-code))
          ;; For ACC_SYNCHRONIZED methods, wrap body with monitor-enter/exit.
          ;; Instance methods synchronize on 'this'; static methods on the Class object.
          (synchronized-lisp-code

@@ -832,6 +832,43 @@ nothing behind when it refuses."
           (is (equalp (multiple-value-list (funcall before initial))
                       (multiple-value-list (funcall after initial)))))))))
 
+(test scoped-memory-access-drains-before-close
+  (let* ((lock (bt:make-recursive-lock "scoped access test"))
+         (entered (sb-thread:make-semaphore))
+         (resume (sb-thread:make-semaphore))
+         (attempted (sb-thread:make-semaphore))
+         (completed (sb-thread:make-semaphore))
+         (close (lambda ()
+                  (openldk::|closeScope0(Ljdk/internal/foreign/MemorySessionImpl;Ljdk/internal/misc/ScopedMemoryAccess$ScopedAccessError;)V|
+                   (make-instance 'openldk::|jdk/internal/misc/ScopedMemoryAccess|) nil nil)))
+         (reader nil)
+         (closer nil))
+    (unwind-protect
+         (progn
+           (setf reader
+                 (sb-thread:make-thread
+                  (lambda ()
+                    (let ((openldk::*java-memory-lock* lock))
+                      (flet ((openldk::%shared-memory-session-p (session) (eq session :shared)))
+                        (openldk::with-scoped-memory-access (:shared)
+                          (sb-thread:signal-semaphore entered)
+                          (sb-thread:wait-on-semaphore resume :timeout 10)))))))
+           (is (sb-thread:wait-on-semaphore entered :timeout 5))
+           (setf closer
+                 (sb-thread:make-thread
+                  (lambda ()
+                    (let ((openldk::*java-memory-lock* lock))
+                      (sb-thread:signal-semaphore attempted)
+                      (funcall close)
+                      (sb-thread:signal-semaphore completed)))))
+           (is (sb-thread:wait-on-semaphore attempted :timeout 5))
+           (is (null (sb-thread:wait-on-semaphore completed :timeout 0.1)))
+           (sb-thread:signal-semaphore resume)
+           (is (sb-thread:wait-on-semaphore completed :timeout 5)))
+      (sb-thread:signal-semaphore resume)
+      (when reader (sb-thread:join-thread reader))
+      (when closer (sb-thread:join-thread closer)))))
+
 (test primitive-entry-native-fallback
   (let* ((openldk::*context* (make-instance 'openldk::<context>))
          (openldk::*method-primitive-parameters* '((x . :int)))

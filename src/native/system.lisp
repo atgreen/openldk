@@ -1141,6 +1141,7 @@ its FileDescriptor's fd (or its own fd slot), resolved by %RESOLVE-FD."
          (class-symbol (intern normalized-name pkg)))
     ;; Handle native Lisp types (integers, floats, doubles, characters)
     (cond
+      ((null objref) 0)
       ((%native-type-castable-p objref normalized-name)
        1)
       ;; Java arrays (java-array structs) are instances of Object, Cloneable, Serializable,
@@ -1150,8 +1151,11 @@ its FileDescriptor's fd (or its own fd slot), resolved by %RESOLVE-FD."
          ((member class-name '("java.lang.Object" "java.lang.Cloneable" "java.io.Serializable")
                   :test #'string=) 1)
          ;; Check if the target is an array class matching the component type
-         ((and (plusp (length class-name)) (char= (char class-name 0) #\[)) 1)
+         ((and (plusp (length class-name)) (char= (char class-name 0) #\[))
+          (|isAssignableFrom(Ljava/lang/Class;)Z| this (|getClass()Ljava/lang/Class;| objref)))
          (t 0)))
+      ;; Array and primitive mirrors do not name CLOS instance types.
+      ((or (starts-with? "[" normalized-name) (= 1 (|isPrimitive()Z| this))) 0)
       ;; Standard typep check for CLOS objects
       ((typep objref class-symbol) 1)
       (t 0))))
