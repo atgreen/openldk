@@ -252,8 +252,37 @@
                ;; -XX options are consumed and ignored
                ((str:starts-with? "-XX" arg)
                 (incf i))
+               ;; -Xbootclasspath/a:<path> appends to (and /p: prepends to) the
+               ;; class search path; jtreg delivers its WhiteBox stubs this way.
+               ;; These must precede the generic -X clause, which drops the rest.
+               ((str:starts-with? "-Xbootclasspath/a:" arg)
+                (push (subseq arg (length "-Xbootclasspath/a:")) *cli-boot-classpath-append*)
+                (incf i))
+               ((str:starts-with? "-Xbootclasspath/p:" arg)
+                (push (subseq arg (length "-Xbootclasspath/p:")) *cli-boot-classpath-prepend*)
+                (incf i))
                ;; -X options are consumed and ignored
                ((str:starts-with? "-X" arg)
+                (incf i))
+               ;; Assertion flags.  jtreg runs every test with -ea -esa, and
+               ;; -ea/-da may carry a :packagename.../:classname qualifier.
+               ;; Accepted here so the launcher does not reject them.
+               ;; NOTE: currently a no-op -- assertions are not actually
+               ;; enabled yet (tracked separately); a test that relies on -ea
+               ;; to detect failure will pass vacuously until that lands.
+               ((or (member arg '("-ea" "-da" "-esa" "-dsa"
+                                  "-enableassertions" "-disableassertions"
+                                  "-enablesystemassertions" "-disablesystemassertions")
+                            :test #'string=)
+                    (str:starts-with? "-ea:" arg) (str:starts-with? "-da:" arg)
+                    (str:starts-with? "-enableassertions:" arg)
+                    (str:starts-with? "-disableassertions:" arg))
+                (incf i))
+               ;; Legacy VM-selection / splash options other launchers accept
+               ;; and ignore; consume them so jtreg-injected flags don't abort.
+               ((or (member arg '("-client" "-server" "-d32" "-d64" "-showversion")
+                            :test #'string=)
+                    (str:starts-with? "-splash:" arg))
                 (incf i))
                ;; -verbose options
                ((str:starts-with? "-verbose" arg)

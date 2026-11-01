@@ -663,3 +663,12 @@ java.lang.Class), was defined by a user-defined class loader."
 
 (defvar *cli-add-exports* nil
   "Additional package exports supplied by the launcher.")
+
+(defvar *cli-boot-classpath-prepend* nil
+  "Classpath strings from -Xbootclasspath/p:, searched before the application
+classpath.  Each element is one launcher occurrence, most recent first.")
+
+(defvar *cli-boot-classpath-append* nil
+  "Classpath strings from -Xbootclasspath/a:, searched after the boot (jmod)
+classpath.  Each element is one launcher occurrence, most recent first.
+jtreg supplies its WhiteBox API stubs this way.")

@@ -2750,13 +2750,18 @@ properties, and *CLASSPATH* construction."
     ;; openldk.interop:start-runtime) too: Scala's compiler reads it.
     (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;|
      (ijstring "java.class.path") (ijstring classpath))
-    (setf *classpath*
-          (append
-           (loop for cpe in (split-sequence:split-sequence (uiop:inter-directory-separator) classpath)
-                 collect (if (ends-with? ".jar" cpe)
-                             (make-instance 'jar-classpath-entry :jarfile cpe)
-                             (make-instance 'dir-classpath-entry :dir cpe)))
-           (discover-jmod-classpath-entries))))
+    (flet ((cp->entries (cp)
+             (loop for cpe in (split-sequence:split-sequence (uiop:inter-directory-separator) cp)
+                   when (plusp (length cpe))
+                   collect (if (ends-with? ".jar" cpe)
+                               (make-instance 'jar-classpath-entry :jarfile cpe)
+                               (make-instance 'dir-classpath-entry :dir cpe)))))
+      (setf *classpath*
+            (append
+             (loop for cp in (reverse *cli-boot-classpath-prepend*) append (cp->entries cp))
+             (cp->entries classpath)
+             (discover-jmod-classpath-entries)
+             (loop for cp in (reverse *cli-boot-classpath-append*) append (cp->entries cp))))))
   (when (or *cli-add-modules* *cli-add-exports*) (%reset-boot-module-layer))
   (loop for modules in (reverse *cli-add-modules*)
         for index from 0
@@ -2964,15 +2969,18 @@ seconds instead."
   "Build *CLASSPATH* from the LDK_CLASSPATH environment variable plus
 the discovered jmod entries."
   (let ((classpath (or (uiop:getenv "LDK_CLASSPATH") "")))
-
-    (setf *classpath*
-          (append
-           (loop for cpe in (split-sequence:split-sequence (uiop:inter-directory-separator) classpath)
-                 when (plusp (length cpe))
-                 collect (if (ends-with? ".jar" cpe)
-                             (make-instance 'jar-classpath-entry :jarfile cpe)
-                             (make-instance 'dir-classpath-entry :dir cpe)))
-           (discover-jmod-classpath-entries)))))
+    (flet ((cp->entries (cp)
+             (loop for cpe in (split-sequence:split-sequence (uiop:inter-directory-separator) cp)
+                   when (plusp (length cpe))
+                   collect (if (ends-with? ".jar" cpe)
+                               (make-instance 'jar-classpath-entry :jarfile cpe)
+                               (make-instance 'dir-classpath-entry :dir cpe)))))
+      (setf *classpath*
+            (append
+             (loop for cp in (reverse *cli-boot-classpath-prepend*) append (cp->entries cp))
+             (cp->entries classpath)
+             (discover-jmod-classpath-entries)
+             (loop for cp in (reverse *cli-boot-classpath-append*) append (cp->entries cp)))))))
 
 (defun %initialize-bootstrap-classes ()
   "Hand-load the classes Class.forName0 itself depends on, then patch

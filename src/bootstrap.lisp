@@ -181,6 +181,12 @@
   (:documentation "Stub for jdk.internal.misc.ScopedMemoryAccess, so its
    instance natives (e.g. closeScope0) have a build-time specializer."))
 
+(defclass |jdk/test/whitebox/WhiteBox| (|java/lang/Object|)
+  ()
+  (:documentation "Stub for jdk.test.whitebox.WhiteBox, so its instance
+   natives (see src/native/whitebox.lisp) have a build-time specializer.
+   jtreg loads the real class from its boot classpath to evaluate @requires."))
+
 (ensure-generic-function '%lisp-condition
                          :generic-function-class 'java-generic-function
                          :lambda-list '(|this|))
