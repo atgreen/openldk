@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-10-31
+
+### Fixed
+
+- A static field that shadows an inherited instance field of the same name no
+  longer collapses into a single class-allocated CLOS slot. Previously the
+  static declaration's class allocation flipped the inherited instance slot, so
+  every instance read the static's value instead of its own — this broke EC key
+  generation and so every TLS handshake. Such a field now gets its own slot.
+
 ## [1.0.1] - 2026-10-31
 
 ### Added

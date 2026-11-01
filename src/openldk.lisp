@@ -1862,20 +1862,32 @@ orders), while one order shared by all classes never can."
                          (and (= da db) (string< (symbol-name a) (symbol-name b)))))))))
 
 (defun %field-shadows-super-p (class field ldk-loader)
-  "True when instance FIELD of CLASS shadows an instance field of the same
-name declared somewhere in CLASS's superclass chain (distinct fields in
-the JVM -- javac's synthetic this$0 outer references do this routinely)."
-  (and (zerop (logand 8 (slot-value field 'access-flags)))   ; instance field
-       (let ((field-name (slot-value field 'name)))
-         (loop for super-class = (and (super class) (%resolve-class (super class) ldk-loader))
-                 then (and (super super-class)
-                           (%resolve-class (super super-class) (ldk-loader super-class)))
-               while super-class
-               when (find-if (lambda (sf)
-                               (and (string= (slot-value sf 'name) field-name)
-                                    (zerop (logand 8 (slot-value sf 'access-flags)))))
-                             (fields super-class))
-                 return t))))
+  "True when FIELD of CLASS needs its own CLOS slot because a field of the same
+name is declared in CLASS's superclass chain and the two would otherwise
+collapse into one slot.  Two cases qualify: both are instance fields (classic
+JVM field hiding -- javac's synthetic this$0 outer references do this
+routinely), or one is static and the other an instance field.  The latter is
+the dangerous one: a subclass static field and an inherited instance field of
+the same name map to the same slot name, and the static declaration's
+:allocation :class flips the inherited slot to class allocation, so every
+instance reads the static's value instead of its own
+(MontgomeryIntegerPolynomialP256's static long[] `modulus' over
+IntegerPolynomial's instance BigInteger `modulus', which broke EC key
+generation and so every TLS handshake).  Two static fields of the same name
+are left alone."
+  (let ((field-static (not (zerop (logand 8 (slot-value field 'access-flags)))))
+        (field-name (slot-value field 'name)))
+    (loop for super-class = (and (super class) (%resolve-class (super class) ldk-loader))
+            then (and (super super-class)
+                      (%resolve-class (super super-class) (ldk-loader super-class)))
+          while super-class
+          when (find-if (lambda (sf)
+                          (and (string= (slot-value sf 'name) field-name)
+                               ;; needs its own storage unless both are static
+                               (not (and field-static
+                                         (not (zerop (logand 8 (slot-value sf 'access-flags))))))))
+                        (fields super-class))
+            return t)))
 
 (defun %field-slot-symbol (class field ldk-loader)
   "CLOS slot symbol for FIELD of CLASS: the plain mangled name, or a

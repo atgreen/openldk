@@ -50,7 +50,7 @@
   :description "Preloaded javac executable built on OpenLDK"
   :author "Anthony Green <green@moxielogic.com>"
   :license "GPL3+Classpath Exception"
-  :version "1.0.1"
+  :version "1.0.2"
   :depends-on ("openldk")
   :components ((:file "src/javac"))
   :build-operation "program-op"
