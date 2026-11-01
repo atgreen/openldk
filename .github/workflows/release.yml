@@ -1,0 +1,91 @@
+# SPDX-FileCopyrightText:  Copyright 2026 Anthony Green
+# SPDX-License-Identifier: MIT
+#
+# Project:  openldk
+# File:     release.yml
+# Date:     2026-10-31
+#
+# Cut a GitHub release when a vMAJOR.MINOR.PATCH tag is pushed: use the
+# matching CHANGELOG.md section as the release notes, generate CycloneDX and
+# SPDX SBOMs of the ocicl dependency set, and attach them to the release.
+# ==============================================================================
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    # Least privilege: creating a release needs contents:write and nothing else.
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version number
+        id: get_version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # The version is interpolated into file paths below, so a tag
+          # containing ../ would read or write an arbitrary repo file. Require a
+          # plain semantic version.
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Refusing tag '${GITHUB_REF_NAME}': version must be vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Extract release notes from CHANGELOG.md
+        id: notes
+        run: |
+          VERSION="${{ steps.get_version.outputs.version }}"
+          # Print this version's section: from its heading to the next level-2
+          # heading, dropping the heading line itself (Keep a Changelog format).
+          awk -v v="## [$VERSION]" '
+            index($0, v) == 1 { inside = 1; next }
+            inside && /^## / { exit }
+            inside { print }
+          ' CHANGELOG.md > release-body.md
+          # Fail loudly rather than publishing a release with an empty body.
+          if [ ! -s release-body.md ]; then
+            echo "::error::No CHANGELOG.md section found for version $VERSION" >&2
+            echo "Add a '## [$VERSION] - YYYY-MM-DD' section before tagging." >&2
+            exit 1
+          fi
+          echo "Extracted $(wc -l < release-body.md) lines for $VERSION"
+
+      - name: Install SBCL and ocicl
+        run: |
+          /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          echo "eval \"\$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)\"" >> ~/.bashrc
+          brew install sbcl ocicl
+
+      - name: Generate SBOMs
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          ocicl setup > ~/.sbclrc
+          # ocicl.csv (the lockfile) is committed; the ocicl/ systems tree is
+          # not, so restore it before describing the dependency set.
+          ocicl install
+          ocicl create-sbom cyclonedx openldk-sbom.cdx.json
+          ocicl create-sbom spdx openldk-sbom.spdx.json
+
+      - name: Create GitHub release
+        # Pinned to a commit SHA, not the mutable v1 tag: a compromised or moved
+        # tag would otherwise execute with this job's token.
+        uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd  # v1.21.0
+        with:
+          tag: ${{ github.ref_name }}
+          name: OpenLDK ${{ github.ref_name }}
+          bodyFile: release-body.md
+          artifacts: "openldk-sbom.cdx.json,openldk-sbom.spdx.json"
+          allowUpdates: true

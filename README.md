@@ -11,7 +11,8 @@ Common Lisp, which SBCL compiles to native machine code, and maps Java
 classes to CLOS classes. Java and Lisp code share a process.
 
 It's for when you want to write Common Lisp but need a Java library.
-See [cl-log4j](https://github.com/atgreen/cl-log4j) for an example.
+See [cl-jdbc](https://github.com/atgreen/cl-jdbc) and
+[cl-lucene](https://github.com/atgreen/cl-lucene) for examples.
 Clojure, Scheme, Scala, Kotlin, Groovy, and ABCL can also be embedded through
 OpenLDK's [language interop systems](docs/INTEROP.md).
 
