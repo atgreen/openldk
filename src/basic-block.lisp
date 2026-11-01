@@ -317,10 +317,15 @@ Combined with global substitutions during codegen for this block only.")
           ;; split: its guard and with-exception-handler compile to an outer
           ;; range covering an inner catch block, whose exception the outer
           ;; catch must see.  The handler's code is every block it reaches
-          ;; without leaving the range, less those the range's own body
-          ;; reaches (emitted inside its HANDLER-CASE already): for
-          ;; try-with-resources under a catch, the inner catch-all closes the
-          ;; resource in several blocks and rethrows from the last.
+          ;; without leaving the range -- including a block the range's own
+          ;; body also reaches.  Such a block is emitted a SECOND time on the
+          ;; handler's path (a CL GO cannot jump from the handler, emitted
+          ;; outside the HANDLER-CASE, into the body's TAGBODY inside it), and
+          ;; that copy needs the entry too; otherwise an exception thrown from
+          ;; it after the handler has run escapes the enclosing catch
+          ;; (cl-lucene-3xk: e.g. a divide reached after an inner catch that
+          ;; sits inside an if-branch -- try-with-resources under a catch is
+          ;; the same shape, its inner catch-all closing the resource).
           (labels ((block-pc (block)
                      (address (first (code block))))
                    (reachable (from start end)
@@ -338,19 +343,14 @@ Combined with global substitutions during codegen for this block only.")
             (loop for i from 0 below (length exception-table)
                   for ete = (aref exception-table i)
                   for handler = (gethash (handler-pc ete) block-by-address)
-                  for body = nil
                   do (loop for other across exception-table
                            for inner-handler-pc = (handler-pc other)
                            for inner-handler = (gethash inner-handler-pc block-by-address)
                            when (and inner-handler
                                      (< (start-pc ete) inner-handler-pc (end-pc ete))
                                      (/= inner-handler-pc (handler-pc ete)))
-                             do (unless body
-                                  (setf body (reachable (gethash (start-pc ete) block-by-address)
-                                                        (start-pc ete) (end-pc ete))))
-                                (dolist (block (reachable inner-handler (start-pc ete) (end-pc ete)))
-                                  (unless (or (and (not (eq block inner-handler)) (member block body))
-                                              (eq block handler)
+                             do (dolist (block (reachable inner-handler (start-pc ete) (end-pc ete)))
+                                  (unless (or (eq block handler)
                                               (find i (gethash block tuples-by-block) :key #'fifth))
                                     ;; After the block's own entries, which belong to
                                     ;; trys nested inside this range, and innermost
