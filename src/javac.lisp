@@ -310,7 +310,7 @@
 (defun make-javac-image (&optional (output-path "javacl"))
   "Build an executable image that jumps straight into javac."
   (let ((cp (default-javac-classpath)))
-    (openldk::initialize)
+    (openldk::%bootstrap-core)
     (openldk::%fasl-cache-start-build)
     ;; Set classpath inside the image so warmup uses it.
     (when cp

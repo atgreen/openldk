@@ -23,6 +23,7 @@ cl-annot, ghcr.io/ocicl/cl-annot@sha256:611a41daa8943d3a6c29c21b1ebf8459d70fc69c
 cl-annot-test, ghcr.io/ocicl/cl-annot@sha256:611a41daa8943d3a6c29c21b1ebf8459d70fc69ccc73203b6fa58bf333901bed, cl-annot-20230809-c99e69c/cl-annot-test.asd
 cl-change-case, ghcr.io/ocicl/cl-change-case@sha256:4c14d77c6b55bb76d50fe37625114b0c1b2590c4c7f8a96bf495e64b746e900d, cl-change-case-1.0/cl-change-case.asd
 cl-change-case-test, ghcr.io/ocicl/cl-change-case@sha256:72df96e856cd493df958231e6cd5183764833c89bfc8e5bcb585bc52313b488e, cl-change-case-cl-change-case-0.1.0/cl-change-case-test.asd
+cl-dbi, ghcr.io/ocicl/dbi@sha256:200c09f88ec8e7ff3ce1942a82624af83fc81e6ead3512a1a9daa02e876df23f, cl-dbi-20250928-be4df4f/cl-dbi.asd
 cl-fad, ghcr.io/ocicl/cl-fad@sha256:c0aaffc859e419e0a94cedb08f48c2484da404363fb0fe4ffd6e09a80aadafe1, cl-fad-0.7.6/cl-fad.asd
 cl-murmurhash, ghcr.io/ocicl/cl-murmurhash@sha256:cf21eb7af128c36416f40e842e622bb2f04c09803587333a1cfa489a0c0d1525, cl-murmurhash-20240503-5433f5e/cl-murmurhash.asd
 cl-package-locks, ghcr.io/ocicl/cl-package-locks@sha256:3cc3430aa866786164cd64110795ba329d72cd98f6606a72a83b04c1dc295a0d, cl-package-locks-20240503-96a358e/cl-package-locks.asd
@@ -32,6 +33,12 @@ cl-ppcre-unicode, ghcr.io/ocicl/cl-ppcre@sha256:bf073924cf4fd5957a4fd961a95d446e
 cl-store, ghcr.io/ocicl/cl-store@sha256:9c58bb54e0b871e06b47e049314f890a7e0cf8133aa47cdd7fc06590d564681b, cl-store-20240503-adb52a1/cl-store.asd
 cl-unicode, ghcr.io/ocicl/cl-unicode@sha256:d98f12c1271fb3c1812a27d64dfbe95b0bc5bcfd545b71b8101874e61270b120, cl-unicode-20240503-07e7ff5/cl-unicode.asd
 closer-mop, ghcr.io/ocicl/closer-mop@sha256:0cee307fbc9538461f4ecfa329c545ad220ba43cf13faf8993e156a0bb27b699, closer-mop-20260203-211c5ec/closer-mop.asd
+dbd-mysql, ghcr.io/ocicl/dbi@sha256:200c09f88ec8e7ff3ce1942a82624af83fc81e6ead3512a1a9daa02e876df23f, cl-dbi-20250928-be4df4f/dbd-mysql.asd
+dbd-null, ghcr.io/ocicl/dbi@sha256:200c09f88ec8e7ff3ce1942a82624af83fc81e6ead3512a1a9daa02e876df23f, cl-dbi-20250928-be4df4f/dbd-null.asd
+dbd-postgres, ghcr.io/ocicl/dbi@sha256:200c09f88ec8e7ff3ce1942a82624af83fc81e6ead3512a1a9daa02e876df23f, cl-dbi-20250928-be4df4f/dbd-postgres.asd
+dbd-sqlite3, ghcr.io/ocicl/dbi@sha256:200c09f88ec8e7ff3ce1942a82624af83fc81e6ead3512a1a9daa02e876df23f, cl-dbi-20250928-be4df4f/dbd-sqlite3.asd
+dbi, ghcr.io/ocicl/dbi@sha256:200c09f88ec8e7ff3ce1942a82624af83fc81e6ead3512a1a9daa02e876df23f, cl-dbi-20250928-be4df4f/dbi.asd
+dbi-test, ghcr.io/ocicl/dbi@sha256:200c09f88ec8e7ff3ce1942a82624af83fc81e6ead3512a1a9daa02e876df23f, cl-dbi-20250928-be4df4f/dbi-test.asd
 defclass-std, ghcr.io/ocicl/defclass-std@sha256:47ed2c44381191d4382a0a5800f4b2394854cabca71254bfc78d6b33190e199b, defclass-std-20241228-6d003a5/defclass-std.asd
 defclass-std-test, ghcr.io/ocicl/defclass-std@sha256:47ed2c44381191d4382a0a5800f4b2394854cabca71254bfc78d6b33190e199b, defclass-std-20241228-6d003a5/defclass-std-test.asd
 documentation-utils, ghcr.io/ocicl/documentation-utils@sha256:b2a1b3f3bcd1a738af85ae2b0168d408c177661eab6d6bbebb254e394d983f54, documentation-utils-20230511-98630dd/documentation-utils.asd

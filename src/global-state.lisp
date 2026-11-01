@@ -277,7 +277,18 @@ loaders, whose classes are not in the global or app loader tables."
    CLASS-NAME is the binary name (e.g. \"java/lang/String\").
    First checks :openldk for bootstrap/shared classes, then falls back to
    the class's defining loader's package, looked up through LDK-LOADER when
-   given (another loader may have a class of the same name)."
+   given (another loader may have a class of the same name).
+
+   Per JVMS 5.5, creating an instance triggers initialization of its class:
+   this is OpenLDK's `new` for Lisp callers, so it runs <clinit> the way the
+   NEW bytecode's IR-CLINIT does.  Without it a Java object built from Lisp has
+   unset statics (e.g. MMapDirectory.PROVIDER null -> NPE in its constructor).
+   Skipped during bootstrap, before the runtime class loaders exist: there,
+   initialization order is managed explicitly and some classes are instantiated
+   before their <clinit> can run."
+  (when *app-ldk-class-loader*
+    (let ((ldk-class (ignore-errors (classload class-name))))
+      (when ldk-class (%clinit ldk-class))))
   ;; First try :openldk - this handles bootstrap classes and ensures
   ;; method dispatch works for methods defined on bootstrap classes
   (let ((openldk-sym (find-symbol class-name :openldk)))

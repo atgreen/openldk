@@ -876,7 +876,7 @@ reset the application's own classes, and save.
                       NIL, the image keeps the state the warmups left, and
                       main must be written to reuse it.
 JDK classes always keep their state."
-  (initialize)
+  (%bootstrap-core)
   (%fasl-cache-start-build)
   (let ((cp (or classpath (uiop:getenv "CLASSPATH") ".")))
     (setf *default-mainclass* default-mainclass
@@ -969,7 +969,7 @@ resetting its classpath.  Skipped, with a note, without a javac."
         (uiop:delete-directory-tree directory :validate t :if-does-not-exist :ignore)))))
 
 (defun make-image (&optional (output-path "openldk"))
-  (initialize)
+  (%bootstrap-core)
   (%fasl-cache-start-build)
   (%warm-up-jdk)
   (%reset-runtime-for-save)
@@ -994,7 +994,7 @@ resetting its classpath.  Skipped, with a note, without a javac."
    CLASSPATH:         Classpath string to bake in. If nil, reads CLASSPATH env var."
   (%jni-check-save)
   (%x11-check-save)
-  (initialize)
+  (%bootstrap-core)
   (let ((cp (or classpath (uiop:getenv "CLASSPATH") ".")))
     (setf *default-mainclass* default-mainclass)
     (setf *default-classpath* cp)

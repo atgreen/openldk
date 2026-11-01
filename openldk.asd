@@ -59,7 +59,7 @@
   :around-compile call-with-openldk-policy
   :author "Anthony Green <green@moxielogic.com>"
   :license "GPL3+Classpath Exception"
-  :version "1.0.0"
+  :version "1.0.1"
   :serial t
   :components ((:file "src/package")
                (:file "src/conditions")

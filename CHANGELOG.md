@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-31
+
+### Added
+
+- A single `initialize` entry point for embedding OpenLDK as a Common Lisp
+  library. It runs the core bootstrap and the per-launch runtime setup (boot
+  and application class loaders, the live classpath, system properties, and
+  Java floating-point semantics) that the `openldk` launcher performs, so an
+  embedder with no saved image gets working class loaders and native bridge in
+  one call. Image builds call the core bootstrap directly, re-establishing
+  per-launch state fresh at each launch.
+
+### Fixed
+
+- Creating a Java instance from Lisp now triggers initialization of its class
+  per JVMS §5.5, running `<clinit>` the way the `new` bytecode does. Without it
+  a Java object built from Lisp could see unset statics (e.g.
+  `MMapDirectory.PROVIDER` null, causing an NPE in its constructor).
+
 ## [1.0.0] - 2026-10-31
 
 First release. OpenLDK is a JIT compiler and Java runtime written in Common

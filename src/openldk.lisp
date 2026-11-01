@@ -3179,10 +3179,16 @@ lazy initialization via ClassSpecializer needs runtime ordering."
                "sun/nio/cs/Surrogate$Parser"))
     (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;| (jstring c) nil boot-class-loader nil)))
 
-(defun initialize (&optional (property-alist (list)))
-  "Bootstrap the Java runtime: classpath, core classes, system
+(defun %bootstrap-core (&optional (property-alist (list)))
+  "The bake-able half of runtime startup: classpath, core classes, system
 properties, System.initPhase1, and class preloading.  PROPERTY-ALIST
-supplies additional system properties as (name . value) pairs."
+supplies additional system properties as (name . value) pairs.
+
+This is the part SAVE-LISP-AND-DIE bakes into the ./openldk and javacl
+images at build time; it deliberately omits the per-launch state (class
+loaders, the live classpath, the VM start-time stamp, signal handlers) that
+MAIN re-establishes fresh at each launch via %MAIN-RUNTIME-SETUP.  Library
+embedders call INITIALIZE, which runs this plus that per-launch setup."
   (assert (typep property-alist 'list))
   ;; The policy JIT-compiled code is built with, which the images save.
   ;; openldk.asd proclaims it around compiling OpenLDK itself, but an image
@@ -3224,3 +3230,24 @@ supplies additional system properties as (name . value) pairs."
   (%initialize-array-allocation-error)
   (setf *debug-load* nil)
   (setf *debug-compile* nil))
+
+(defun initialize (&optional (property-alist (list)) &key classpath)
+  "Start the OpenLDK Java runtime in this process.  Call this once, before
+loading or invoking any Java classes from Lisp; it is the single entry point
+for embedding OpenLDK as a Common Lisp library.
+
+It runs the core bootstrap (%BOOTSTRAP-CORE) and then the per-launch setup
+MAIN performs for the ./openldk launcher (%MAIN-RUNTIME-SETUP): the boot and
+application class loaders, the live classpath, system properties and Java
+floating-point semantics.  Both halves are needed in one process because a
+library embedder has no saved image and no MAIN -- without the second half the
+class loaders stay NIL, which breaks anything reaching the FFM/native bridge.
+
+PROPERTY-ALIST supplies extra system properties as (name . value) pairs;
+CLASSPATH defaults to $CLASSPATH, then $LDK_CLASSPATH, then the current
+directory.
+
+(The ./openldk and javacl image builds call %BOOTSTRAP-CORE directly, so the
+per-launch state is established fresh at each launch rather than baked in.)"
+  (%bootstrap-core property-alist)
+  (%main-runtime-setup classpath nil nil))
