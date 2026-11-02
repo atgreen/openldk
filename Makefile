@@ -388,3 +388,59 @@ check-font-image: | check-jdk
 	  --eval '(progn (push (uiop:getcwd) asdf:*central-registry*) (asdf:load-system :openldk))' \
 	  --load test/font-image.lisp && \
 	"$$font_image_dir/font-image"
+
+# --- OpenJDK jtreg suite -----------------------------------------------------
+# Run the upstream OpenJDK regression tests (jtreg) against OpenLDK as the
+# "tested JDK" (see testsuite/jtreg/README.md).  On first use the jtreg harness
+# and the JDK test sources are fetched into $(JTREG_CACHE).  Override on the
+# command line, e.g.:
+#   make check-jtreg JTREG_TESTS="java/lang/Math"            # narrow the run
+#   make check-jtreg JTREG_TESTS="java/lang java/util"       # the full lang+util tree
+#   make check-jtreg JTREG_CONC=4                            # more parallelism
+#   make check-jtreg JTREG_TIMEOUT_FACTOR=0.25               # tighter timeouts
+#
+# MEMORY: the openldk launcher is saved with :save-runtime-options t, so every
+# test JVM reserves the build-time --dynamic-space-size ($(DYNAMIC_SPACE_SIZE) MiB)
+# heap and the size cannot be overridden at runtime.  JTREG_CONC bounds how many
+# of those run at once; a runaway/looping test holds its heap until jtreg kills
+# it at the (timeoutFactor-scaled) timeout.  Keep JTREG_CONC modest, and size it
+# against RAM (roughly JTREG_CONC * peak-test-heap), not core count.  The default
+# scope is a small, pre-triaged smoke set; widen it deliberately, not by habit.
+# If a run is interrupted, orphaned launchers can linger: `pkill -f openldk`.
+JTREG_VERSION        ?= 7.5.1+1
+JDK_TAG              ?= jdk-25+36
+JTREG_CACHE          ?= $(XDG_CACHE_HOME)/jtreg
+JTREG                ?= $(JTREG_CACHE)/jtreg/bin/jtreg
+JDK_TESTS            ?= $(JTREG_CACHE)/jdk
+JTREG_SHIM           ?= $(JTREG_CACHE)/openldk-jdk
+JTREG_TESTS          ?= java/lang/Math java/lang/Integer java/lang/Long \
+                        java/util/Optional java/util/ArrayList
+JTREG_CONC           ?= 2
+JTREG_TIMEOUT_FACTOR ?= 1
+
+# Prebuilt jtreg harness ('+' is URL-encoded in the download name).
+$(JTREG):
+	mkdir -p $(JTREG_CACHE)
+	curl -fL -o $(JTREG_CACHE)/jtreg.zip "https://builds.shipilev.net/jtreg/jtreg-$(subst +,%2B,$(JTREG_VERSION)).zip"
+	cd $(JTREG_CACHE) && unzip -q -o jtreg.zip && rm -f jtreg.zip
+	test -x $(JTREG)
+
+# OpenJDK test sources at the matching tag; sparse: test/ plus the unicode data
+# files the java.lang.Character tests read.
+$(JDK_TESTS)/test/jdk/TEST.ROOT:
+	git clone --depth 1 --branch '$(JDK_TAG)' --filter=blob:none --sparse \
+	  https://github.com/openjdk/jdk.git $(JDK_TESTS)
+	cd $(JDK_TESTS) && git sparse-checkout set test src/java.base/share/data
+
+.PHONY: check-jtreg
+check-jtreg: openldk $(JTREG) $(JDK_TESTS)/test/jdk/TEST.ROOT | check-jdk
+	SHIM=$(JTREG_SHIM) TEMURIN=$(JAVA_HOME) OPENLDK_BIN=$(CURDIR)/openldk \
+	  testsuite/jtreg/make-openldk-jdk.sh
+	cd $(JDK_TESTS) && $(JTREG) \
+	  -jdk:$(JTREG_SHIM) -compilejdk:$(JAVA_HOME) \
+	  -othervm -conc:$(JTREG_CONC) -ignore:quiet \
+	  -timeoutFactor:$(JTREG_TIMEOUT_FACTOR) \
+	  -w:$(JTREG_CACHE)/work -r:$(JTREG_CACHE)/report \
+	  $(addprefix test/jdk/,$(JTREG_TESTS)) \
+	  || test -f $(JTREG_CACHE)/report/text/summary.txt   # test failures are expected; fail only if jtreg produced no report
+	@echo "jtreg report: $(JTREG_CACHE)/report/ (text/summary.txt, html/report.html)"
