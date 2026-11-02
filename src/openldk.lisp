@@ -2467,6 +2467,12 @@ the class being compiled when there is one, as the JVM resolves references."
   (let ((classname (coerce classname 'string)))
     (assert (not (find #\. classname)))
     (assert (> (length classname) 0))
+    ;; Runtime-image ownership, rather than a package-prefix heuristic,
+    ;; determines whether --limit-modules makes this class observable.
+    ;; JDK modules also contain packages such as netscape/javascript and
+    ;; org/jcp/xml/dsig that JDK-CLASS-P intentionally does not classify.
+    (when (not (%observable-runtime-class-p classname))
+      (return-from %classload-1 nil))
     (%note-class-dependency classname)
     (cond
       ;; During warm-up (before main initializes loaders), use global tables
@@ -2733,9 +2739,16 @@ properties, and *CLASSPATH* construction."
   (|java/lang/System.initProperties(Ljava/util/Properties;)|
    (slot-value |+static-java/lang/System+| '|props|))
   ;; Apply -D system properties from command line
-  (dolist (prop *cli-jvm-properties*)
-    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;|
-     (ijstring (car prop)) (ijstring (cdr prop))))
+  (let* ((vm (%static-storage "jdk/internal/misc/VM"))
+         (saved-properties (and vm (slot-value vm '|savedProps|))))
+    (dolist (prop *cli-jvm-properties*)
+      (let ((key (ijstring (car prop)))
+            (value (ijstring (cdr prop))))
+        (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;|
+         key value)
+        (when saved-properties
+          (|put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;|
+           saved-properties key value)))))
   (%configure-runtime-encoding)
   (when *debug-slynk*
     (slynk:create-server :port 2025)
@@ -2762,12 +2775,15 @@ properties, and *CLASSPATH* construction."
              (cp->entries classpath)
              (discover-jmod-classpath-entries)
              (loop for cp in (reverse *cli-boot-classpath-append*) append (cp->entries cp))))))
-  (when (or *cli-add-modules* *cli-add-exports* *cli-add-opens*)
+  (when (or *cli-add-modules* *cli-limit-modules* *cli-add-exports* *cli-add-opens*)
     (%reset-boot-module-layer))
   (loop for modules in (reverse *cli-add-modules*)
         for index from 0
         do (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;|
             (jstring (format nil "jdk.module.addmods.~D" index)) (jstring modules)))
+  (when *cli-limit-modules*
+    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;|
+     (jstring "jdk.module.limitmods") (jstring *cli-limit-modules*)))
   (loop for exports in (reverse *cli-add-exports*)
         for index from 0
         do (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;|

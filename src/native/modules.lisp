@@ -118,6 +118,87 @@
                     (setf (slot-value system '|bootLayer|)
                           (|jdk/internal/module/ModuleBootstrap.boot()Ljava/lang/ModuleLayer;|))))))))))
 
+(defvar *attach-providers* nil
+  "Stable platform attach providers for this OpenLDK launch.")
+
+(defun %attach-providers ()
+  "Return the JDK platform provider despite OpenLDK's loader identity."
+  (or *attach-providers*
+      (let ((provider (%make-java-instance "sun/tools/attach/AttachProviderImpl"))
+            (providers (%make-java-instance "java/util/ArrayList")))
+        (|<init>()V| provider)
+        (|<init>()V| providers)
+        (|add(Ljava/lang/Object;)Z| providers provider)
+        (setf *attach-providers*
+              (|java/util/Collections.unmodifiableList(Ljava/util/List;)Ljava/util/List;|
+               providers)))))
+
+(setf (gethash "com/sun/tools/attach/spi/AttachProvider.providers()Ljava/util/List;"
+               *native-overrides*)
+      #'%attach-providers)
+
+(defun %attach-to-openldk (provider vmid)
+  "Return an attach handle for OpenLDK's current process."
+  (unless (member (lstring vmid) (list "0" (princ-to-string (sb-posix:getpid)))
+                  :test #'string=)
+    (%throw '|com/sun/tools/attach/AttachNotSupportedException|
+            "OpenLDK supports self-attach only"))
+  (let ((allow (|jdk/internal/misc/VM.getSavedProperty(Ljava/lang/String;)Ljava/lang/String;|
+                (jstring "jdk.attach.allowAttachSelf"))))
+    (unless (and allow
+                 (or (string= "" (lstring allow))
+                     (string-equal "true" (lstring allow))))
+      (%throw '|java/io/IOException| "Can not attach to current VM")))
+  (classload "sun/tools/attach/VirtualMachineImpl")
+  (let ((virtual-machine (%make-java-instance "sun/tools/attach/VirtualMachineImpl")))
+    (setf (slot-value virtual-machine '|provider|) provider
+          (slot-value virtual-machine '|id|) vmid
+          (slot-value virtual-machine '|hash|) 0)
+    virtual-machine))
+
+(setf (gethash "sun/tools/attach/AttachProviderImpl.attachVirtualMachine(Ljava/lang/String;)Lcom/sun/tools/attach/VirtualMachine;"
+               *native-overrides*)
+      #'%attach-to-openldk)
+
+(defun %start-local-management-agent (virtual-machine)
+  "Start the management agent in-process without a HotSpot attach listener."
+  (declare (ignore virtual-machine))
+  (|jdk/internal/module/Modules.loadModule(Ljava/lang/String;)Ljava/lang/Module;|
+   (jstring "jdk.management.agent"))
+  (classload "jdk/internal/agent/Agent")
+  (|jdk/internal/agent/Agent.startLocalManagementAgent()V|)
+  (let ((properties (|jdk/internal/vm/VMSupport.getAgentProperties()Ljava/util/Properties;|)))
+    (|getProperty(Ljava/lang/String;)Ljava/lang/String;|
+     properties (jstring "com.sun.management.jmxremote.localConnectorAddress"))))
+
+(setf (gethash "sun/tools/attach/HotSpotVirtualMachine.startLocalManagementAgent()Ljava/lang/String;"
+               *native-overrides*)
+      #'%start-local-management-agent)
+
+(setf (gethash "jdk/internal/vm/VMSupport.initAgentProperties(Ljava/util/Properties;)Ljava/util/Properties;"
+               *native-overrides*)
+      #'identity)
+
+(setf (gethash "jdk/internal/agent/ConnectorAddressLink.export(Ljava/lang/String;)V"
+               *native-overrides*)
+      (lambda (address) (declare (ignore address)) nil))
+
+(setf (gethash "sun/tools/attach/VirtualMachineImpl.execute(Ljava/lang/String;[Ljava/lang/Object;)Ljava/io/InputStream;"
+               *native-overrides*)
+      (lambda (virtual-machine command arguments)
+        (declare (ignore virtual-machine command arguments))
+        (%throw '|java/io/IOException| "OpenLDK attach operation is not supported")))
+
+(defun %observable-runtime-class-p (classname)
+  "Whether CLASSNAME belongs to a module visible in the current runtime graph."
+  (or (not *module-access-ready*)
+      (let* ((image-module (%runtime-image-class-module-name classname))
+             (slash (and image-module (position #\/ classname :from-end t)))
+             (package (and slash (take slash classname))))
+        (or (null image-module)
+            (gethash package *runtime-package-modules*)
+            (gethash package (%owner-cache-table *defined-package-modules* nil))))))
+
 (defvar *class-access-cache* (make-hash-table :test #'eq :weakness :key :synchronized t)
   "Weak caller Class -> weak referenced Class -> access resolution outcome.")
 (defvar *checking-class-access* nil
