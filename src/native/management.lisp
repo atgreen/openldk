@@ -189,6 +189,18 @@ the sampled thread could deadlock against the requesting thread's class locks."
   (declare (ignore locked-monitors locked-synchronizers))
   (%managed-thread-infos ids max-depth))
 
+;;; Deadlock detection.  OpenLDK does not track the monitor/ownable-synchronizer
+;;; wait-for graph, so report no deadlock (null) rather than failing with an
+;;; UnsatisfiedLinkError; ThreadMXBean.find*DeadlockedThreads() returns null for
+;;; "no deadlock found", which is the common, correct answer.
+(defun |sun/management/ThreadImpl.findMonitorDeadlockedThreads0()[Ljava/lang/Thread;| ()
+  "No monitor-deadlock graph is tracked; report none (null)."
+  nil)
+
+(defun |sun/management/ThreadImpl.findDeadlockedThreads0()[Ljava/lang/Thread;| ()
+  "No deadlock graph (monitors or ownable synchronizers) is tracked; report none."
+  nil)
+
 (defmacro %define-vm-management-natives (&rest specs)
   "Define VMManagementImpl's instance natives: each spec is (NAME VALUE-FORM)."
   `(progn
