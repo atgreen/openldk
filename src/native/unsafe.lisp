@@ -347,9 +347,11 @@ the storage object does not (yet) exist."
     (:boolean (if (or (null value) (eql value 0)) 0 1))
     (:byte (%unsigned-to-signed-byte (logand value #xff)))
     (:short (unsigned-to-signed-short (logand value #xffff)))
-    (:char (if (characterp value)
-               value
-               (code-char (logand value #xffff))))
+    ;; char is an integer code unit everywhere in OpenLDK (char[] is
+    ;; (unsigned-byte 16), i2c yields an integer); return one, not a Lisp
+    ;; character, so arithmetic consumers (e.g. Bits.swap ->
+    ;; Character.reverseBytes on a byte-swapped direct buffer) work.
+    (:char (logand (if (characterp value) (char-code value) value) #xffff))
     (:int (unsigned-to-signed-integer (logand value #xffffffff)))
     (:long (unsigned-to-signed-long (logand value #xffffffffffffffff)))
     (:float (coerce value 'single-float))
@@ -360,7 +362,8 @@ the storage object does not (yet) exist."
     (:boolean (if (zerop (logand bits #xff)) 0 1))
     (:byte (%unsigned-to-signed-byte (logand bits #xff)))
     (:short (unsigned-to-signed-short (logand bits #xffff)))
-    (:char (code-char (logand bits #xffff)))
+    ;; Integer code unit, not a Lisp character (see %unsafe-normalize-scalar).
+    (:char (logand bits #xffff))
     (:int (unsigned-to-signed-integer (logand bits #xffffffff)))
     (:long (unsigned-to-signed-long (logand bits #xffffffffffffffff)))
     (:float (float-features:bits-single-float (logand bits #xffffffff)))
