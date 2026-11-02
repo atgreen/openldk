@@ -2235,11 +2235,14 @@ without running the compiler, since most methods are never called."
                     (%throw '|java/lang/NoClassDefFoundError|
                             (format nil "~A (wrong name: ~A)" classname (name c))))
                   (when metadata
-                    (setf metadata-class metadata
-                          metadata-mirror (java-class metadata)
-                          (java-class c) metadata-mirror
-                          (gethash metadata-mirror *metadata-only-classes-by-mirror*) c)
-                    (%replace-initiating-class metadata c))
+                    (bt:with-recursive-lock-held (*loader-constraint-lock*)
+                      (bt:with-recursive-lock-held (*loader-lifecycle-lock*)
+                        (setf metadata-class metadata
+                              metadata-mirror (java-class metadata)
+                              (java-class c) metadata-mirror
+                              (runtime-roots c) (copy-list (runtime-roots metadata))
+                              (gethash metadata-mirror *metadata-only-classes-by-mirror*) c)
+                        (%replace-initiating-class metadata c))))
                   (setf (name c) classname)
                   (setf (slot-value c 'ldk-loader) ldk-loader)
                   (setf definition c
@@ -2427,10 +2430,14 @@ without running the compiler, since most methods are never called."
         (unwind-protect
              (when (and definition (not completed))
                (when metadata-class
-                 (%replace-initiating-class definition metadata-class)
-                 (setf (gethash metadata-mirror *metadata-only-classes-by-mirror*)
-                       metadata-class)
-                 (remhash metadata-mirror *java-class-definition-progress*))
+                 (bt:with-recursive-lock-held (*loader-constraint-lock*)
+                   (bt:with-recursive-lock-held (*loader-lifecycle-lock*)
+                     (dolist (root (runtime-roots definition))
+                       (pushnew root (runtime-roots metadata-class) :test #'eq))
+                     (%replace-initiating-class definition metadata-class)
+                     (setf (gethash metadata-mirror *metadata-only-classes-by-mirror*)
+                           metadata-class)
+                     (remhash metadata-mirror *java-class-definition-progress*))))
                (%forget-failed-class-definition definition ldk-loader))
           (when definition (%finish-class-definition definition completed)))))))
 
