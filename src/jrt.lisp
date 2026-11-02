@@ -107,6 +107,27 @@ cached filesystem holds process-local state (mmapped buffers, channels).")
                                 "~&; Warning: jar FileSystemProvider unavailable: ~A~%" c)))
                     list)))))
 
+;;; javax.tools.ToolProvider.getSystemJavaCompiler()/getSystemDocumentationTool()
+;;; find their implementation with ServiceLoader over module-declared services
+;;; (see FileSystemProvider above), which OpenLDK does not support, so the
+;;; private getSystemTool they delegate to returns null and every "system java
+;;; compiler" lookup fails.  Both callers hand getSystemTool the exact impl
+;;; class name (com.sun.tools.javac.api.JavacTool,
+;;; jdk.javadoc.internal.api.JavadocTool); load and instantiate it directly --
+;;; what a working ServiceLoader would have produced.  The stock javac runs
+;;; fine under OpenLDK once it is handed back.
+(setf (gethash "javax/tools/ToolProvider.getSystemTool(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;"
+               *native-overrides*)
+      (lambda (service-class module-name class-name)
+        (declare (ignore service-class module-name))
+        (handler-case
+            (let ((bin (substitute #\/ #\. (lstring class-name)))) ; lint:suppress substitute-use
+              (classload bin)
+              (let ((tool (%make-java-instance bin)))
+                (|<init>()V| tool)
+                tool))
+          (condition () nil))))
+
 (defvar *jimage-native-maps* (make-hash-table :test #'equal)
   "Path -> (sap . size) for mmapped jimage files.  Entries live for the
 process; cleared (without munmap -- the process is about to dump or exit)
