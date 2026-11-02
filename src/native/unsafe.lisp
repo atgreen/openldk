@@ -1231,9 +1231,13 @@ Without either on the classpath, every name is reported, as before."
           (when (and path (starts-with? "jrt:/" path))
             (gethash (subseq path 5) *boot-modules*)))))
 
-;; Return our boot-class-loader for getSystemClassLoader() so it's never nil
+;; The public system loader may be replaced by java.system.class.loader.  Its
+;; constructor must not recursively observe a half-constructed loader.
 (defun |java/lang/ClassLoader.getSystemClassLoader()Ljava/lang/ClassLoader;| ()
-  *boot-class-loader*)
+  (when *system-class-loader-initializing*
+    (%throw '|java/lang/IllegalStateException|
+            "getSystemClassLoader cannot be called during the system class loader instantiation"))
+  (or *system-class-loader* *boot-class-loader*))
 (setf (gethash "java/lang/ClassLoader.getSystemClassLoader()Ljava/lang/ClassLoader;" *native-overrides*)
       #'|java/lang/ClassLoader.getSystemClassLoader()Ljava/lang/ClassLoader;|)
 

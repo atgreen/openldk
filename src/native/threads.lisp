@@ -128,7 +128,7 @@
   (or (and (slot-exists-p thread '|contextClassLoader|)
            (slot-boundp thread '|contextClassLoader|)
            (slot-value thread '|contextClassLoader|))
-      *boot-class-loader*))
+      (or *system-class-loader* *boot-class-loader*)))
 
 (defmethod |setPriority0(I)V| ((thread |java/lang/Thread|) priority)
   "Thread priorities are advisory; SBCL threads have none."
