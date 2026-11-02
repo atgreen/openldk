@@ -95,6 +95,32 @@
   ()
   (:documentation "Stub for java.net.URLClassLoader; populated at runtime."))
 
+(defmethod |getResource(Ljava/lang/String;)Ljava/net/URL;| :around
+    ((loader |java/lang/ClassLoader|) name)
+  "Let OpenLDK's synthetic system loader see resources in resolved modules."
+  (or (when (eq loader *boot-class-loader*)
+        (|findResource(Ljava/lang/String;)Ljava/net/URL;|
+         (|jdk/internal/loader/ClassLoaders.appClassLoader()Ljava/lang/ClassLoader;|)
+         name))
+      (call-next-method)))
+
+(defmethod |getResources(Ljava/lang/String;)Ljava/util/Enumeration;| :around
+    ((loader |java/lang/ClassLoader|) name)
+  "Combine resolved-module and OpenLDK classpath resources for the system loader."
+  (if (not (eq loader *boot-class-loader*))
+      (call-next-method)
+      (let ((urls (%make-java-instance "java/util/ArrayList")))
+        (|<init>()V| urls)
+        (dolist (resources
+                 (list (|findResources(Ljava/lang/String;)Ljava/util/Enumeration;|
+                        (|jdk/internal/loader/ClassLoaders.appClassLoader()Ljava/lang/ClassLoader;|)
+                        name)
+                       (call-next-method)))
+          (loop while (and resources (not (zerop (|hasMoreElements()Z| resources))))
+                do (|add(Ljava/lang/Object;)Z| urls
+                    (|nextElement()Ljava/lang/Object;| resources))))
+        (|java/util/Collections.enumeration(Ljava/util/Collection;)Ljava/util/Enumeration;| urls))))
+
 ;; Override URLClassLoader.findResource to use our native classpath
 ;; This is needed because the AppClassLoader's URLClassPath is initialized
 ;; at build time with URLs that don't match the runtime classpath.

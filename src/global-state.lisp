@@ -664,6 +664,9 @@ java.lang.Class), was defined by a user-defined class loader."
 (defvar *cli-limit-modules* nil
   "Observable module universe supplied by the launcher.")
 
+(defvar *cli-module-path* nil
+  "Application module path supplied by the launcher.")
+
 (defvar *cli-add-exports* nil
   "Additional package exports supplied by the launcher.")
 

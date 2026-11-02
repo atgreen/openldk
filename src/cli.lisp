@@ -67,6 +67,8 @@
   (format *error-output* "    -classpath <class search path>~%")
   (format *error-output* "                  A : separated list of directories, JAR archives,~%")
   (format *error-output* "                  and ZIP archives to search for class files.~%")
+  (format *error-output* "    -p <module path>~%")
+  (format *error-output* "    --module-path <module path>~%                  A : separated list of module directories and archives.~%")
   (format *error-output* "    -D<name>=<value>~%")
   (format *error-output* "                  set a system property~%")
   (format *error-output* "    --add-modules <modules>~%                  resolve additional root modules (comma separated)~%")
@@ -178,6 +180,7 @@
         (properties nil)
         (i 0))
     (setf *enable-preview* nil *cli-add-modules* nil *cli-limit-modules* nil
+          *cli-module-path* nil
           *cli-add-exports* nil *cli-add-opens* nil
           *cli-enable-native-access* nil *cli-illegal-native-access* "warn")
     (setf *source-launch-p* nil *source-launch-version* nil)
@@ -244,6 +247,17 @@
                     (format *error-output* "--limit-modules requires module names~%")
                     (uiop:quit 1))
                   (setf *cli-limit-modules* modules))
+                (incf i))
+               ((or (string= arg "-p") (string= arg "--module-path")
+                    (starts-with? "--module-path=" arg))
+                (let ((path (if (starts-with? "--module-path=" arg)
+                                (subseq arg 14)
+                                (nth (incf i) raw-args))))
+                  (unless (and path (plusp (length path))
+                               (not (char= (char path 0) #\-)))
+                    (format *error-output* "~A requires a module path~%" arg)
+                    (uiop:quit 1))
+                  (setf *cli-module-path* path))
                 (incf i))
                ((or (string= arg "--source") (str:starts-with? "--source=" arg))
                 (if (string= arg "--source")
@@ -407,6 +421,8 @@
                                               append (list "--add-modules" modules))
                                         (when *cli-limit-modules*
                                           (list "--limit-modules" *cli-limit-modules*))
+                                        (when *cli-module-path*
+                                          (list "--module-path" *cli-module-path*))
                                         (loop for exports in (reverse *cli-add-exports*)
                                               append (list "--add-exports" exports)))
                                 :environment (remove-if (lambda (entry) (starts-with? "JDK_JAVA_OPTIONS=" entry))
