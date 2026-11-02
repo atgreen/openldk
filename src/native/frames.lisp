@@ -241,6 +241,23 @@ arrays. Resolving an array never initializes its component class."
                   (gethash fq-name *java-classes-by-fq-name*) java-class)
             class)))))
 
+(defun %valid-array-class-name-p (name &optional allow-slashes)
+  "Whether NAME is a legal array descriptor accepted by Class.forName.
+ALLOW-SLASHES preserves OpenLDK's internal binary-descriptor convention."
+  (let ((dimensions (position-if-not (lambda (ch) (char= ch #\[)) name)))
+    (and dimensions
+         (<= 1 dimensions 255)
+         (let* ((component (subseq name dimensions))
+                (length (length component)))
+           (or (and (= length 1)
+                    (find (char component 0) "BCDFIJSZ"))
+               (and (> length 2)
+                    (char= (char component 0) #\L)
+                    (char= (char component (1- length)) #\;)
+                    (not (find #\[ component))
+                    (or allow-slashes (not (find #\/ component)))
+                    (not (position #\; component :end (1- length)))))))))
+
 (defun %get-array-ldk-class (element-type)
   (let* ((cname (format nil "[~A" (%type-to-descriptor element-type))))
     (%get-array-ldk-class-from-name cname)))
@@ -380,7 +397,12 @@ its superclasses, made and registered on first use; or NIL for any other."
                 ;; "java/lang/Object"), never a mix.  "java/lang.Object" and the
                 ;; like are malformed binary names; the JVM rejects them with
                 ;; ClassNotFoundException rather than normalising the slash away.
-                (malformed (and (find #\/ raw) (find #\. raw)))
+                (array-name-p (and (plusp (length raw)) (char= (char raw 0) #\[)))
+                (malformed (or (and (find #\/ raw) (find #\. raw))
+                               (and array-name-p
+                                    (not (%valid-array-class-name-p raw (null caller))))
+                               (and (not array-name-p)
+                                    (or (find #\[ raw) (find #\; raw)))))
                 (lname (substitute #\/ #\. raw))
                 (user-loader (and loader (not (eq loader *boot-class-loader*))))
                 (result
@@ -391,7 +413,7 @@ its superclasses, made and registered on first use; or NIL for any other."
                   ;; OpenLDK's own callers (descriptor resolution) pass
                   ;; binary names, but Java loaders take dotted ones.
                   (unless malformed
-                   (or (and (eq (char lname 0) #\[)
+                   (or (and array-name-p
                            (let ((*descriptor-loader* loader))
                              (java-class (%get-array-ldk-class-from-name lname))))
                       (and user-loader
