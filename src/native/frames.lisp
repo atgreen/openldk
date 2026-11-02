@@ -267,10 +267,15 @@ ALLOW-SLASHES preserves OpenLDK's internal binary-descriptor convention."
 no class file (openldk/LambdaSupplier, a dynamic lambda class): a public
 final synthetic subclass of Object implementing the Java interfaces among
 its superclasses, made and registered on first use; or NIL for any other."
-  (let* ((cname (and (symbolp class-symbol) (symbol-name class-symbol)))
+  (let* ((generated-name (and (symbolp class-symbol)
+                              (gethash class-symbol *lisp-only-class-java-names*)))
+         (cname (and (symbolp class-symbol)
+                     (or generated-name (symbol-name class-symbol))))
          (loader (and cname (or (%ldk-loader-for-symbol class-symbol) *boot-ldk-class-loader*))))
-    (when (and cname (or (eq (symbol-package class-symbol) (find-package :openldk)) (%user-ldk-loader-p loader))
-               (starts-with? "openldk/" cname)
+    (when (and cname (or generated-name
+                         (and (or (eq (symbol-package class-symbol) (find-package :openldk))
+                                  (%user-ldk-loader-p loader))
+                              (starts-with? "openldk/" cname)))
                (find-class class-symbol nil))
       (or (gethash cname (slot-value loader 'java-classes-by-bin-name))
           (let* ((fq-name (substitute #\. #\/ cname))
@@ -284,14 +289,18 @@ its superclasses, made and registered on first use; or NIL for any other."
                            collect super-name)))
             (setf (slot-value jclass '|name|) (ijstring fq-name))
             (when (%user-ldk-loader-p loader)
-              (setf (slot-value jclass *java-loader-owner-slot*) loader
-                    (slot-value jclass '|classLoader|) (java-loader loader)))
+              (setf (slot-value jclass *java-loader-owner-slot*) loader))
+            (setf (slot-value jclass '|classLoader|)
+                  (or (and (%user-ldk-loader-p loader) (java-loader loader))
+                      (and (eq loader *app-ldk-class-loader*) *boot-class-loader*)))
             (when (slot-exists-p jclass '|modifiers|)
               (setf (slot-value jclass '|modifiers|) #x1011))
             (when (and *unnamed-module* (slot-exists-p jclass '|module|))
               (setf (slot-value jclass '|module|)
-                    (if (%user-ldk-loader-p loader)
-                        (%defining-class-module cname loader (java-loader loader)) *unnamed-module*)))
+                    (if (or (%user-ldk-loader-p loader)
+                            (eq loader *app-ldk-class-loader*))
+                        (%defining-class-module cname loader (slot-value jclass '|classLoader|))
+                        *unnamed-module*)))
             (setf (name lclass) cname
                   (ldk-loader lclass) loader
                   (super lclass) "java/lang/Object"
