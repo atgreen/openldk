@@ -2686,6 +2686,39 @@ build and restart, so a dumped image whose loader lost the map recovers it."
       (|<init>()V| map)
       (setf (slot-value *boot-class-loader* '|packages|) map))))
 
+(defun %initialize-system-class-loader ()
+  "Install the loader named by java.system.class.loader for this launch."
+  (setf *system-class-loader* *boot-class-loader*)
+  (when-let ((property
+               (|java/lang/System.getProperty(Ljava/lang/String;)Ljava/lang/String;|
+                (jstring "java.system.class.loader"))))
+    (let* ((class-name (substitute #\/ #\. (lstring property)))
+           (class (or (classload class-name)
+                      (%throw '|java/lang/Error|
+                              (format nil "System class loader class not found: ~A"
+                                      class-name))))
+           (loader (%make-java-instance class-name (ldk-loader class))))
+      (setf *system-class-loader-initializing* t)
+      (unwind-protect
+           (invoke-special '|<init>(Ljava/lang/ClassLoader;)V|
+                           (intern class-name (ldk-class-package class))
+                           (list loader *boot-class-loader*))
+        (setf *system-class-loader-initializing* nil))
+      ;; Preserve the custom loader's identity.  Its Java parent maps to the
+      ;; application LDK loader, so the new metadata loader delegates there.
+      (get-ldk-loader-for-java-loader loader)
+      (setf *system-class-loader* loader))))
+
+(defun %load-main-class (mainclass)
+  "Load MAINCLASS through the configured system loader."
+  (let ((class-name (substitute #\/ #\. mainclass)))
+    (if (and *system-class-loader*
+             (not (eq *system-class-loader* *boot-class-loader*)))
+        (get-ldk-class-for-java-class
+         (|loadClass(Ljava/lang/String;)Ljava/lang/Class;|
+          *system-class-loader* (jstring (substitute #\. #\/ class-name))))
+        (classload class-name))))
+
 (defun %main-runtime-setup (classpath dump-dir aot)
   "Per-run setup shared by every MAIN invocation: Java FP semantics, the
 VM start-time stamp, SIGQUIT handler, class loaders, debug flags, system
@@ -2800,7 +2833,8 @@ properties, and *CLASSPATH* construction."
   ;; reenter module initialization through an access check.
   (%boot-module-layer)
   (%configure-native-access)
-  (setf *module-access-ready* t))
+  (setf *module-access-ready* t)
+  (%initialize-system-class-loader))
 
 (defun %main-method-declared-by (class descriptor public-only &optional inherited-interface)
   "Find a candidate main declared by CLASS for DESCRIPTOR."
@@ -2940,7 +2974,7 @@ seconds instead."
   (if *aot-dir*
       (%run-aot-main mainclass aot)
       (let* ((thread (when exit-thread (|java/lang/Thread.currentThread()Ljava/lang/Thread;|)))
-             (class (classload (substitute #\/ #\. mainclass)))
+             (class (%load-main-class mainclass))
              (argv (make-java-array
                     :component-class (%get-java-class-by-bin-name "java/lang/String")
                     :initial-contents (mapcar #'jstring args))))

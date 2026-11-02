@@ -378,6 +378,12 @@ loaders, whose classes are not in the global or app loader tables."
 
 (defvar *boot-class-loader* nil)
 
+(defvar *system-class-loader* nil
+  "The java.lang.ClassLoader returned by ClassLoader.getSystemClassLoader.")
+
+(defvar *system-class-loader-initializing* nil
+  "True while the custom system class loader constructor is running.")
+
 (defvar *unnamed-module* nil
   "An unnamed java.lang.Module for bootstrap classes (JDK 9+).")
 
