@@ -1186,6 +1186,15 @@ Without either on the classpath, every name is reported, as before."
   (declare (ignore module))
   nil)
 
+;; JDK 9+: slash-separated names of the boot loader's packages, as the VM
+;; native returns them (no trailing slash); BootLoader.packages() maps each to
+;; a Package.  Drawn from the runtime-image package table, keyed in that form.
+(defun |jdk/internal/loader/BootLoader.getSystemPackageNames()[Ljava/lang/String;| ()
+  (make-java-array
+   :component-class (%get-java-class-by-bin-name "java/lang/String")
+   :initial-contents (loop for pkg being the hash-keys of *runtime-package-modules*
+                           collect (jstring pkg))))
+
 ;; The Java module implementation owns descriptors, reads, and exports;
 ;; native registration associates its boot modules with our Class objects.
 (defun |java/lang/Module.defineModule0(Ljava/lang/Module;ZLjava/lang/String;Ljava/lang/String;[Ljava/lang/Object;)V|
