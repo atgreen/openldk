@@ -664,6 +664,9 @@ java.lang.Class), was defined by a user-defined class loader."
 (defvar *cli-add-exports* nil
   "Additional package exports supplied by the launcher.")
 
+(defvar *cli-add-opens* nil
+  "Additional package opens supplied by the launcher.")
+
 (defvar *cli-boot-classpath-prepend* nil
   "Classpath strings from -Xbootclasspath/p:, searched before the application
 classpath.  Each element is one launcher occurrence, most recent first.")
