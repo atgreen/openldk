@@ -2547,6 +2547,9 @@ the class being compiled when there is one, as the JVM resolves references."
     (when (not (%observable-runtime-class-p classname))
       (return-from %classload-1 nil))
     (%note-class-dependency classname)
+    (when-let ((module (%patched-module-for-class classname)))
+      (when-let ((class (%classload-from-module-path classname module)))
+        (return-from %classload-1 class)))
     (cond
       ;; During warm-up (before main initializes loaders), use global tables
       ((not *boot-ldk-class-loader*)
@@ -2829,6 +2832,35 @@ build and restart, so a dumped image whose loader lost the map recovers it."
     (loop for path in (split-sequence:split-sequence (uiop:inter-directory-separator) module-path)
           when (plusp (length path)) append (path-entries path))))
 
+(defun %patch-path-classpath-entries (patch-path)
+  "Classpath backends named directly by a --patch-module PATCH-PATH."
+  (loop for path in (split-sequence:split-sequence (uiop:inter-directory-separator) patch-path)
+        when (plusp (length path))
+          collect (if (or (ends-with? ".jar" path) (ends-with? ".zip" path))
+                      (make-instance 'jar-classpath-entry :jarfile path)
+                      (make-instance 'dir-classpath-entry :dir path))))
+
+(defun %patched-module-for-class (classname)
+  "Return the patched boot module which owns CLASSNAME's package."
+  (when-let ((package-end (position #\/ classname :from-end t)))
+    (let ((package (subseq classname 0 package-end)))
+      (loop for specification in *cli-patch-modules*
+            for module-name = (car specification)
+            for module = (gethash module-name *boot-modules*)
+            for entries = (gethash module-name *module-patch-classpaths*)
+            when (and module
+                      (loop for entry in entries
+                            for stream = (open-java-classfile entry classname)
+                            when stream
+                              do (close stream)
+                                 (return t)))
+              do (setf (gethash package
+                                (%owner-cache-table
+                                 *defined-package-modules*
+                                 (slot-value module '|loader|)))
+                       module)
+                 (return module)))))
+
 (defun %classload-from-module-path (classname module)
   "Load CLASSNAME from the resolved named MODULE, never from the classpath."
   (let* ((java-loader (slot-value module '|loader|))
@@ -2846,7 +2878,10 @@ build and restart, so a dumped image whose loader lost the map recovers it."
          (or (let ((loaded (%get-ldk-class-by-bin-name classname t ldk-loader)))
                (and loaded (eq (slot-value (java-class loaded) '|module|) module) loaded))
              (when-let ((stream
-                          (loop for entry in *module-classpath*
+                          (loop for entry in (append
+                                              (gethash (lstring (slot-value module '|name|))
+                                                       *module-patch-classpaths*)
+                                              *module-classpath*)
                                 for candidate = (open-java-classfile entry classname)
                                 when candidate return candidate)))
                (let ((*module-definition-module* module))
@@ -2943,7 +2978,12 @@ properties, and *CLASSPATH* construction."
              (cp->entries classpath)
              (discover-jmod-classpath-entries)
              (loop for cp in (reverse *cli-boot-classpath-append*) append (cp->entries cp))))))
-  (when (or *cli-add-modules* *cli-limit-modules* *cli-module-path*
+  (clrhash *module-patch-classpaths*)
+  (loop for (module . path) in (reverse *cli-patch-modules*)
+        do (setf (gethash module *module-patch-classpaths*)
+                 (append (gethash module *module-patch-classpaths*)
+                         (%patch-path-classpath-entries path))))
+  (when (or *cli-add-modules* *cli-limit-modules* *cli-module-path* *cli-patch-modules*
             *cli-add-exports* *cli-add-opens*)
     (%reset-boot-module-layer))
   (loop for modules in (reverse *cli-add-modules*)
@@ -2956,7 +2996,12 @@ properties, and *CLASSPATH* construction."
   (when *cli-module-path*
     (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;|
      (jstring "jdk.module.path") (jstring *cli-module-path*)))
-  (loop for exports in (reverse *cli-add-exports*)
+  (loop for exports in (remove-if
+                         (lambda (specification)
+                           (when-let ((slash (position #\/ specification)))
+                             (assoc (subseq specification 0 slash)
+                                    *cli-patch-modules* :test #'string=)))
+                         (reverse *cli-add-exports*))
         for index from 0
         do (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;|
             (jstring (format nil "jdk.module.addexports.~D" index)) (jstring exports)))

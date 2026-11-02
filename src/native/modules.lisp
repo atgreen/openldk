@@ -225,6 +225,32 @@
     (clrhash *runtime-package-modules*)
     (setf (slot-value |+static-java/lang/System+| '|bootLayer|) nil)))
 
+(defun %cli-export-allows-access-p (caller target)
+  "Whether --add-exports explicitly grants CALLER access to TARGET."
+  (let* ((target-module (slot-value target '|module|))
+         (caller-module (slot-value caller '|module|))
+         (target-module-name (and target-module (slot-value target-module '|name|)))
+         (caller-module-name (and caller-module (slot-value caller-module '|name|)))
+         (target-name (lstring (slot-value target '|name|)))
+         (package-end (position #\. target-name :from-end t))
+         (package (and package-end (take package-end target-name))))
+    (and target-module-name package
+         (loop for specification in *cli-add-exports*
+               for equals = (position #\= specification)
+               for slash = (and equals (position #\/ specification :end equals))
+               when (and slash
+                         (string= (lstring target-module-name)
+                                  (take slash specification))
+                         (string= package (subseq specification (1+ slash) equals)))
+                 do (when (some (lambda (recipient)
+                                  (or (and (string= recipient "ALL-UNNAMED")
+                                           (null caller-module-name))
+                                      (and caller-module-name
+                                           (string= recipient (lstring caller-module-name)))))
+                                (split-sequence:split-sequence
+                                 #\, (drop (1+ equals) specification)))
+                      (return t))))))
+
 (defun %check-bytecode-class-access (caller target)
   "Check runtime package/module class access, retaining failed resolutions.
 Graph updates affect fresh references, not a reference which already failed."
@@ -234,8 +260,9 @@ Graph updates affect fresh references, not a reference which already failed."
            (outcome (or (gethash target table)
                         (let ((*checking-class-access* t))
                           (setf (gethash target table)
-                                (if (eql 1 (|sun/invoke/util/VerifyAccess.isClassAccessible(Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Class;I)Z|
-                                            target caller nil #x1f))
+                                (if (or (%cli-export-allows-access-p caller target)
+                                        (eql 1 (|sun/invoke/util/VerifyAccess.isClassAccessible(Ljava/lang/Class;Ljava/lang/Class;Ljava/lang/Class;I)Z|
+                                                target caller nil #x1f)))
                                     :allowed :denied))))))
       (when (eql outcome :denied)
         (%throw '|java/lang/IllegalAccessError|
