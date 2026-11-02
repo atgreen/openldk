@@ -96,6 +96,34 @@
         (%throw '|java/lang/LinkageError| (format nil "Loader constraint violated for ~A" name)))))
   class)
 
+(defun %replace-initiating-class (old new)
+  "Replace metadata-only OLD with its prepared definition NEW in every loader."
+  (let ((name (name old)))
+    (bt:with-recursive-lock-held (*loader-constraint-lock*)
+      (flet ((replace-in (table)
+               (when (eq (gethash name table) old)
+                 (setf (gethash name table) new))))
+        (replace-in *initiated-classes*)
+        (maphash (lambda (id loader)
+                   (declare (ignore id))
+                   (replace-in (slot-value loader 'initiated-classes)))
+                 *ldk-loaders-by-id*))))
+  new)
+
+(defun %forget-initiating-class (class)
+  "Remove metadata-only CLASS from every loader's initiation table."
+  (let ((name (name class)))
+    (bt:with-recursive-lock-held (*loader-constraint-lock*)
+      (flet ((forget-in (table)
+               (when (eq (gethash name table) class)
+                 (remhash name table))))
+        (forget-in *initiated-classes*)
+        (maphash (lambda (id loader)
+                   (declare (ignore id))
+                   (forget-in (slot-value loader 'initiated-classes)))
+                 *ldk-loaders-by-id*))))
+  class)
+
 (defun %impose-loader-constraint (name left right)
   "Join equivalence sets only after checking their complete transitive closure."
   (let ((left (%constraint-loader left)) (right (%constraint-loader right)))

@@ -492,8 +492,13 @@ with ACC_SUPER (0x20) masked out (it is not a source-level modifier)."
      ;; A nested class's come from its InnerClasses entry, which has
      ;; static, private and protected.
      (let* ((lclass (get-ldk-class-for-java-class class))
-            (entry (and lclass (%inner-class-entry lclass))))
-       (cond (entry (logandc2 (slot-value entry 'inner-class-access-flags) #x20))
+            (metadata-flags (and lclass (%metadata-only-class-p lclass)
+                                 (gethash "MetadataInnerClassAccessFlags"
+                                          (attributes lclass))))
+            (entry (and lclass (not (%metadata-only-class-p lclass))
+                        (%inner-class-entry lclass))))
+       (cond (metadata-flags (logandc2 metadata-flags #x20))
+             (entry (logandc2 (slot-value entry 'inner-class-access-flags) #x20))
              (lclass (logandc2 (access-flags lclass) #x20))
              (t 0))))))
 
@@ -585,7 +590,7 @@ name after its package, $ and all."
      :initial-contents
      (if lclass
          (coerce (remove nil (mapcar (lambda (iname)
-                                        (let ((lc (gethash iname *ldk-classes-by-bin-name*)))
+                                        (let ((lc (%resolve-class iname (ldk-loader lclass))))
                                           (when lc (java-class lc))))
                                       (coerce (interfaces lclass) 'list)))
                  'vector)
@@ -1302,7 +1307,7 @@ its FileDescriptor's fd (or its own fd slot), resolved by %RESOLVE-FD."
   "Return Object[3] {enclosing Class, method name, method descriptor} from
 the EnclosingMethod attribute, or nil for classes that aren't local or
 anonymous.  Name/descriptor are null when enclosed by an initializer."
-  (let ((lclass (get-ldk-class-for-java-class this)))
+  (let ((lclass (%prepared-ldk-class-for-java-class this)))
     (when lclass
       (when-let ((em (gethash "EnclosingMethod" (attributes lclass))))
         (let* ((cp (constant-pool lclass))
@@ -1325,7 +1330,7 @@ anonymous.  Name/descriptor are null when enclosed by an initializer."
 (defmethod |getDeclaringClass0()Ljava/lang/Class;| ((this |java/lang/Class|))
   "Return the class that declares THIS as a member, from the InnerClasses
 attribute; nil for top-level, local, and anonymous classes."
-  (let ((lclass (get-ldk-class-for-java-class this)))
+  (let ((lclass (%prepared-ldk-class-for-java-class this)))
     (when lclass
       (loop for ic in (gethash "InnerClasses" (attributes lclass))
             when (and (not (zerop (outer-class-info-index ic)))
@@ -1363,7 +1368,7 @@ the class declaring it."
 or anonymous class (Class.isAnonymousClass, getSimpleName)."
   (let* ((lclass (and (eq 0 (|isArray()Z| this))
                       (eq 0 (|isPrimitive()Z| this))
-                      (get-ldk-class-for-java-class this)))
+                      (%prepared-ldk-class-for-java-class this)))
          (entry (and lclass (%inner-class-entry lclass))))
     (when entry
       (let ((index (slot-value entry 'inner-name-index)))
@@ -1372,7 +1377,7 @@ or anonymous class (Class.isAnonymousClass, getSimpleName)."
 
 (defmethod |getPermittedSubclasses0()[Ljava/lang/Class;| ((this |java/lang/Class|))
   "Resolve permitted direct subtypes without initializing them; omit missing types."
-  (let ((class (get-ldk-class-for-java-class this)))
+  (let ((class (%prepared-ldk-class-for-java-class this)))
     (when (and class (hash-table-p (attributes class)))
       (multiple-value-bind (names sealed-p) (gethash "PermittedSubclasses" (attributes class))
         (when sealed-p

@@ -1668,6 +1668,8 @@ naming what the <clinit> threw."
     (error (%lisp-condition ncdfe))))
 
 (defun %clinit (class)
+  (when (and class (%metadata-only-class-p class))
+    (setf class (%resolve-class (name class) (ldk-loader class))))
   (%verify-class-for-java class)
   (let ()
     (assert
@@ -2157,6 +2159,49 @@ without running the compiler, since most methods are never called."
                           '|java/lang/ClassLoader|
                           (list loader (jstring package-name) (slot-value klass '|module|))))))))
 
+(defun %metadata-only-class-p (class)
+  "Whether CLASS has been parsed but not prepared for execution."
+  (eq class (gethash (name class) *metadata-only-classes*)))
+
+(defun %runtime-class-metadata (classname)
+  "Return a Class mirror for runtime CLASSNAME without preparing the class."
+  (when (%observable-runtime-class-p classname)
+    (or (%get-java-class-by-bin-name classname t *boot-ldk-class-loader*)
+        (when-let ((class (gethash classname *metadata-only-classes*)))
+          (java-class class))
+        (bordeaux-threads:with-recursive-lock-held ((%get-class-lock classname))
+          (or (%get-java-class-by-bin-name classname t *boot-ldk-class-loader*)
+              (when-let ((class (gethash classname *metadata-only-classes*)))
+                (java-class class))
+              (when-let ((stream (open-java-classfile-on-classpath classname)))
+                (unwind-protect
+                     (let* ((class (handler-case (read-classfile-metadata stream)
+                                     (bytecode-verification-error (condition)
+                                       (%throw-verification-error condition))))
+                            (fq-name (substitute #\. #\/ classname))
+                            (mirror (%make-java-instance "java/lang/Class")))
+                       (unless (string= (name class) classname)
+                         (%throw '|java/lang/NoClassDefFoundError|
+                                 (format nil "~A (wrong name: ~A)" classname (name class))))
+                       (setf (slot-value class 'ldk-loader) *boot-ldk-class-loader*
+                             (java-class class) mirror
+                             (slot-value mirror '|name|) (jstring fq-name)
+                             (slot-value mirror '|classLoader|) nil)
+                       (when (slot-exists-p mirror '|modifiers|)
+                         (setf (slot-value mirror '|modifiers|)
+                               (logandc2
+                                (or (gethash "MetadataInnerClassAccessFlags"
+                                             (attributes class))
+                                    (access-flags class))
+                                #x20)))
+                       (when (and *unnamed-module* (slot-exists-p mirror '|module|))
+                         (setf (slot-value mirror '|module|)
+                               (%defining-class-module classname *boot-ldk-class-loader* nil)))
+                       (setf (gethash classname *metadata-only-classes*) class
+                             (gethash mirror *metadata-only-classes-by-mirror*) class)
+                       mirror)
+                  (close stream))))))))
+
 (defun %classload-from-stream (classname classfile-stream class-loader ldk-loader &optional allow-renaming)
   "Load a class from a stream. CLASS-LOADER is the java.lang.ClassLoader object.
    LDK-LOADER is the <ldk-class-loader> to use for this class.
@@ -2172,7 +2217,7 @@ without running the compiler, since most methods are never called."
         (let ((existing-ldk-class (find-class-in-loader-hierarchy classname ldk-loader)))
           (when existing-ldk-class
             (return-from %classload-from-stream existing-ldk-class))))))
-  (let ((definition nil) (completed nil))
+  (let ((definition nil) (completed nil) (metadata-class nil) (metadata-mirror nil))
     (unwind-protect
        (let* ((publish-globally (%publish-class-globally-p classname ldk-loader))
               (pkg (loader-package ldk-loader))
@@ -2181,12 +2226,20 @@ without running the compiler, since most methods are never called."
                                                         (substitute #\. #\/ classname)
                                                         "/anonymous-class"))
               (class
-                (let ((c (handler-case (read-classfile classfile-stream)
-                           (bytecode-verification-error (condition)
-                             (%throw-verification-error condition)))))
+                (let* ((metadata (and (eq ldk-loader *boot-ldk-class-loader*)
+                                      (gethash classname *metadata-only-classes*)))
+                       (c (handler-case (read-classfile classfile-stream)
+                            (bytecode-verification-error (condition)
+                              (%throw-verification-error condition)))))
                   (unless (or allow-renaming (string= (name c) classname))
                     (%throw '|java/lang/NoClassDefFoundError|
                             (format nil "~A (wrong name: ~A)" classname (name c))))
+                  (when metadata
+                    (setf metadata-class metadata
+                          metadata-mirror (java-class metadata)
+                          (java-class c) metadata-mirror
+                          (gethash metadata-mirror *metadata-only-classes-by-mirror*) c)
+                    (%replace-initiating-class metadata c))
                   (setf (name c) classname)
                   (setf (slot-value c 'ldk-loader) ldk-loader)
                   (setf definition c
@@ -2232,6 +2285,7 @@ without running the compiler, since most methods are never called."
                (remhash fq-classname *ldk-classes-by-fq-name*))
              (error condition)))
          (let ((klass (or (gethash classname (slot-value ldk-loader 'java-classes-by-bin-name))
+                          (java-class class)
                           (let ((klass (%make-java-instance "java/lang/Class"))
                                 (cname (jstring fq-classname)))
                             (with-slots (|name| |classLoader|) klass
@@ -2364,12 +2418,19 @@ without running the compiler, since most methods are never called."
 
          (unless allow-renaming
            (%record-app-class-package class))
+         (when metadata-class
+           (remhash classname *metadata-only-classes*))
          (setf completed t)
          class)
       (unwind-protect
            (close classfile-stream)
         (unwind-protect
              (when (and definition (not completed))
+               (when metadata-class
+                 (%replace-initiating-class definition metadata-class)
+                 (setf (gethash metadata-mirror *metadata-only-classes-by-mirror*)
+                       metadata-class)
+                 (remhash metadata-mirror *java-class-definition-progress*))
                (%forget-failed-class-definition definition ldk-loader))
           (when definition (%finish-class-definition definition completed)))))))
 
@@ -2446,7 +2507,8 @@ application classpath must not be searched on that loader's behalf."
 
 (defun %resolve-class (classname ldk-loader)
   "Resolve through a stable initiating-loader identity, recording delegated results."
-  (or (%initiated-class classname ldk-loader)
+  (or (when-let ((class (%initiated-class classname ldk-loader)))
+        (if (%metadata-only-class-p class) (classload classname) class))
       (when-let ((class (%resolve-class-without-initiation classname ldk-loader)))
         (%record-initiating-class class (or ldk-loader (ldk-loader class))))))
 
