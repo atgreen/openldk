@@ -64,11 +64,14 @@ there is nothing to bind, so it is a no-op."
   nil)
 
 ;;; VM flag queries: report every flag as absent (null), which VMProps and
-;;; its callers treat as "not set / use the default".
+;;; its callers treat as "not set / use the default".  The one exception is
+;;; VMContinuations: VMProps.vmContinuations() unboxes the result without a
+;;; null-check, so null there is a NullPointerException.  Answer it with a
+;;; boxed Boolean instead -- FALSE, since continuations are not modelled.
 (defmethod |getBooleanVMFlag(Ljava/lang/String;)Ljava/lang/Boolean;|
     ((this |jdk/test/whitebox/WhiteBox|) name)
-  (declare (ignore name))
-  nil)
+  (when (and name (string= (lstring name) "VMContinuations"))
+    (%boolean-object nil)))
 
 (defmethod |getIntVMFlag(Ljava/lang/String;)Ljava/lang/Long;|
     ((this |jdk/test/whitebox/WhiteBox|) name)

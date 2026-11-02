@@ -56,6 +56,10 @@
     ("java.vm.version" . "1.0")
     ("java.vm.vendor" . "OpenLDK")
     ("java.vm.info" . "interpreted mode")
+    ;; A non-debug ("release") build.  Tooling such as jtreg's
+    ;; requires.VMProps.vmDebug() reads jdk.debug and errors if it is absent;
+    ;; "release" does not contain "debug", so vm.debug evaluates to false.
+    ("jdk.debug" . "release")
     ("java.version" . "25")
     ("java.version.date" . "2025-09-16")
     ("java.runtime.version" . "25+36")
