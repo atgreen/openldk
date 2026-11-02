@@ -638,11 +638,15 @@ SYMBOL with NARGS arguments."
 
 (defun %user-ldk-loader-p (ldk-loader)
   "True when LDK-LOADER belongs to a user-defined Java class loader, not the
-boot or app loader."
+boot, platform, or app loader."
   (and ldk-loader
        (not (eq ldk-loader *boot-ldk-class-loader*))
        (not (eq ldk-loader *app-ldk-class-loader*))
-       (not (eq (slot-value ldk-loader 'pkg) (find-package "OPENLDK.SYSTEM")))))
+       (not (eq (slot-value ldk-loader 'pkg) (find-package "OPENLDK.SYSTEM")))
+       (let ((java-loader (slot-value ldk-loader 'java-loader)))
+         (not (and java-loader
+                   (when-let ((builtin (find-class '|jdk/internal/loader/BuiltinClassLoader| nil)))
+                     (typep java-loader builtin)))))))
 
 (defun %defined-by-user-loader-p (class slot-name)
   "True when CLASS, found in a table named SLOT-NAME (an LDK class or a
@@ -689,6 +693,12 @@ java.lang.Class), was defined by a user-defined class loader."
 
 (defvar *module-classpath* nil
   "Classpath backends searched only for classes in resolved named modules.")
+
+(defvar *cli-patch-modules* nil
+  "MODULE=PATH specifications supplied by --patch-module.")
+
+(defvar *module-patch-classpaths* (make-hash-table :test #'equal)
+  "Named module -> classpath backends supplied by --patch-module.")
 
 (defvar *module-definition-module* nil
   "Named module whose transitive class definition is currently in progress.")

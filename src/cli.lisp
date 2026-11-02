@@ -71,6 +71,7 @@
   (format *error-output* "    --module-path <module path>~%                  A : separated list of module directories and archives.~%")
   (format *error-output* "    -m <module>[/<mainclass>]~%")
   (format *error-output* "    --module <module>[/<mainclass>]~%                  execute the main class in a module~%")
+  (format *error-output* "    --patch-module <module>=<path>~%                  override or augment a module with classes~%")
   (format *error-output* "    -D<name>=<value>~%")
   (format *error-output* "                  set a system property~%")
   (format *error-output* "    --add-modules <modules>~%                  resolve additional root modules (comma separated)~%")
@@ -182,7 +183,7 @@
         (properties nil)
         (i 0))
     (setf *enable-preview* nil *cli-add-modules* nil *cli-limit-modules* nil
-          *cli-module-path* nil *cli-main-module* nil
+          *cli-module-path* nil *cli-main-module* nil *cli-patch-modules* nil
           *cli-add-exports* nil *cli-add-opens* nil
           *cli-enable-native-access* nil *cli-illegal-native-access* "warn")
     (setf *source-launch-p* nil *source-launch-version* nil)
@@ -260,6 +261,20 @@
                     (format *error-output* "~A requires a module path~%" arg)
                     (uiop:quit 1))
                   (setf *cli-module-path* path))
+                (incf i))
+               ((or (string= arg "--patch-module")
+                    (starts-with? "--patch-module=" arg))
+                (let* ((specification (if (starts-with? "--patch-module=" arg)
+                                          (subseq arg 15)
+                                          (nth (incf i) raw-args)))
+                       (equals (and specification (position #\= specification))))
+                  (unless (and equals (plusp equals)
+                               (< equals (1- (length specification))))
+                    (format *error-output* "--patch-module requires <module>=<path>~%")
+                    (uiop:quit 1))
+                  (push (cons (subseq specification 0 equals)
+                              (subseq specification (1+ equals)))
+                        *cli-patch-modules*))
                 (incf i))
                ((or (string= arg "--source") (str:starts-with? "--source=" arg))
                 (if (string= arg "--source")
