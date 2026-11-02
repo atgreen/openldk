@@ -424,6 +424,11 @@ its superclasses, made and registered on first use; or NIL for any other."
                                            name))
                              (|condition-java/lang/ClassNotFoundException| () nil)))
                       (and (not user-loader)
+                           *module-access-ready*
+                           (or (null initialize) (eql initialize 0))
+                           (jdk-class-p lname)
+                           (%runtime-class-metadata lname))
+                      (and (not user-loader)
                            (or (and (%get-ldk-class-by-bin-name lname t)
                                     (java-class (%get-ldk-class-by-bin-name lname)))
                                (let ((klass (classload lname)))

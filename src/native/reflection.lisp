@@ -45,7 +45,7 @@
 
 (defun |java/io/ObjectStreamClass.hasStaticInitializer(Ljava/lang/Class;)Z| (java-class)
   "Inspect the declared initializer without running it or searching superclasses."
-  (let ((class (get-ldk-class-for-java-class java-class)))
+  (let ((class (%prepared-ldk-class-for-java-class java-class)))
     (if (and class (find "<clinit>" (methods class) :key #'name :test #'string=)) 1 0)))
 
 (defvar *serialization-constructor-classes*
@@ -134,6 +134,7 @@ Retain every overriding declaration as an anchor for transitive overriding
          (descriptor (%build-method-descriptor return-type param-types))
          (lispized (lispize-method-name (format nil "~A~A" method-name descriptor))))
     (let* ((class-name (substitute #\/ #\. (lstring (slot-value declaring-class '|name|))))
+           (ldk-class (%prepared-ldk-class-for-java-class declaring-class))
            (fn-name (if is-static
                         (format nil "~A.~A" class-name lispized)
                         lispized))
@@ -145,7 +146,7 @@ Retain every overriding declaration as an anchor for transitive overriding
         (internal-error "Reflective invoke0: method ~A not found (class=~A, static=~A)"
                fn-name class-name is-static))
       (if is-static
-          (%clinit (get-ldk-class-for-java-class declaring-class))
+          (%clinit ldk-class)
           (%reflection-receiver declaring-class obj))
       (let* ((lisp-args (%reflection-arguments param-types args))
              (target (if is-static sym
@@ -256,7 +257,7 @@ Retain every overriding declaration as an anchor for transitive overriding
 (defmethod |getGenericSignature0()Ljava/lang/String;| ((this |java/lang/Class|))
   (let* ((lclass (and (eq 0 (|isArray()Z| this))
                       (eq 0 (|isPrimitive()Z| this))
-                      (get-ldk-class-for-java-class this)))
+                      (%prepared-ldk-class-for-java-class this)))
          (attributes (and lclass (slot-boundp lclass 'attributes) (attributes lclass)))
          (signature (and (hash-table-p attributes) (gethash "Signature" attributes))))
     (and signature (ijstring signature))))
@@ -281,26 +282,25 @@ Retain every overriding declaration as an anchor for transitive overriding
                                       ;; When public-only is 1 (true), skip non-public fields
                                       when (or (zerop public-only)
                                                (not (zerop (logand #x1 (access-flags field)))))
-                                      collect (let ((f (%make-java-instance "java/lang/reflect/Field")))
-                                                ;; JDK 17: Field(Class, String, Class, int, boolean, int, String, byte[])
-                                                (|<init>(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/Class;IZILjava/lang/String;[B)V|
-                                                 f this (ijstring (name field))
-                                                 ;; Resolve the canonical Class without initializing it.
-                                                 ;; A name-only placeholder has no defining loader or
-                                                 ;; metadata, poisoning clients' reflection caches.
-                                                 (%bin-type-name-to-class (descriptor field))
-                                                 (access-flags field)
-                                                 nil  ; trustedFinal
-                                                 0    ; slot
-                                                 ;; signature (getGenericType) and
-                                                 ;; annotations: picocli's @Option List<String>
-                                                 (let* ((attributes (slot-value field 'attributes))
-                                                        (signature (and (hash-table-p attributes)
-                                                                        (gethash "Signature" attributes))))
-                                                   (and signature (ijstring signature)))
-                                                 (let ((attributes (slot-value field 'attributes)))
-                                                   (and (hash-table-p attributes)
-                                                        (gethash "RuntimeVisibleAnnotations" attributes))))
+                                      collect (let* ((f (%make-java-instance "java/lang/reflect/Field"))
+                                                     (attributes (slot-value field 'attributes))
+                                                     (signature (and (hash-table-p attributes)
+                                                                     (gethash "Signature" attributes))))
+                                                ;; Populate Field's private constructor slots directly.
+                                                ;; Calling its Java bytecode constructor for every field
+                                                ;; dominates all-classes reflection sweeps.
+                                                (setf (slot-value f '|clazz|) this
+                                                      (slot-value f '|name|) (ijstring (name field))
+                                                      (slot-value f '|type$|)
+                                                      (%bin-type-name-to-class (descriptor field))
+                                                      (slot-value f '|modifiers|) (access-flags field)
+                                                      (slot-value f '|trustedFinal|) nil
+                                                      (slot-value f '|slot|) 0
+                                                      (slot-value f '|signature|)
+                                                      (and signature (ijstring signature))
+                                                      (slot-value f '|annotations|)
+                                                      (and (hash-table-p attributes)
+                                                           (gethash "RuntimeVisibleAnnotations" attributes)))
                                                 f))))))
 
              (make-java-array
@@ -374,6 +374,21 @@ The override flag only bypasses checks after setAccessible has authorized it."
       (setf (slot-value storage slot-key) v))
     nil))
 
+(defun %reflective-field-set-accessible (field flag)
+  "Authorize Field.setAccessible without building the JDK's diagnostic string."
+  (if (or (null flag) (eql flag 0))
+      (setf (slot-value field '|override|) 0)
+      (let* ((caller (%java-caller-class '%reflective-field-set-accessible))
+             (declaring (slot-value field '|clazz|))
+             (allowed
+               (|checkCanSetAccessible(Ljava/lang/Class;Ljava/lang/Class;Z)Z|
+                field caller declaring 0)))
+        (unless (eql 1 allowed)
+          (%throw '|java/lang/reflect/InaccessibleObjectException|
+                  "Unable to make field accessible"))
+        (setf (slot-value field '|override|) 1)))
+  nil)
+
 ;; Constructor.newInstance on JDK 25 builds a MethodHandle-based constructor
 ;; accessor (MethodHandleAccessorFactory.makeConstructorHandle), which NPEs in
 ;; MethodHandle.asType under OpenLDK's crack-and-bypass MethodHandle model --
@@ -401,6 +416,9 @@ The override flag only bypasses checks after setAccessible has authorized it."
 
 (setf (gethash "java/lang/reflect/Field.set(Ljava/lang/Object;Ljava/lang/Object;)V" *native-overrides*)
       #'%reflective-field-set)
+
+(setf (gethash "java/lang/reflect/Field.setAccessible(Z)V" *native-overrides*)
+      #'%reflective-field-set-accessible)
 
 (setf (gethash "java/lang/reflect/Constructor.newInstance([Ljava/lang/Object;)Ljava/lang/Object;" *native-overrides*)
       #'%reflective-constructor-new-instance)
@@ -720,7 +738,7 @@ The override flag only bypasses checks after setAccessible has authorized it."
 (defun %executable-method (executable)
   "The class-file method a java.lang.reflect.Method or Constructor
 reflects."
-  (let* ((lclass (get-ldk-class-for-java-class (slot-value executable '|clazz|)))
+  (let* ((lclass (%prepared-ldk-class-for-java-class (slot-value executable '|clazz|)))
          (name (if (slot-exists-p executable '|name|)
                    (lstring (slot-value executable '|name|))
                    "<init>"))
@@ -754,14 +772,14 @@ reflects."
 (defun %record-components (java-class)
   (let ((lclass (and (eq 0 (|isArray()Z| java-class))
                      (eq 0 (|isPrimitive()Z| java-class))
-                     (get-ldk-class-for-java-class java-class))))
+                     (%prepared-ldk-class-for-java-class java-class))))
     (and lclass
          (hash-table-p (attributes lclass))
          (gethash "Record" (attributes lclass)))))
 
 (defun %record-class-p (java-class)
   "A final Record subclass with a Record attribute, even with zero components."
-  (let ((class (get-ldk-class-for-java-class java-class)))
+  (let ((class (%prepared-ldk-class-for-java-class java-class)))
     (and class (equal (super class) "java/lang/Record")
          (logbitp 4 (access-flags class))
          (nth-value 1 (gethash "Record" (attributes class))))))

@@ -330,6 +330,13 @@ loaders, whose classes are not in the global or app loader tables."
 (defvar *java-classes-by-bin-name* (make-hash-table :test #'equal :synchronized t))
 (defvar *java-classes-by-fq-name* (make-hash-table :test #'equal :synchronized t))
 
+(defvar *metadata-only-classes* (make-hash-table :test #'equal :synchronized t)
+  "Runtime classes parsed for non-initializing reflection but not yet prepared.")
+
+(defvar *metadata-only-classes-by-mirror*
+  (make-hash-table :test #'eq :weakness :key :synchronized t)
+  "Metadata-only classes keyed by their java.lang.Class mirrors.")
+
 (defvar *packages* (make-hash-table :test #'equal :synchronized t))
 
 (defvar *context* nil)

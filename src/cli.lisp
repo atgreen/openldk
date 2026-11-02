@@ -731,6 +731,15 @@ Java code (warmups)."
   (%jni-check-save)
   (%x11-check-save)
   (%fasl-cache-stop-build)
+  ;; Non-initializing reflection during warmup may leave compact classfile
+  ;; metadata behind.  It is launch-local scratch state, not part of the
+  ;; prepared boot image, and retaining it can conflict with later definitions.
+  (maphash (lambda (name class)
+             (declare (ignore name))
+             (%forget-initiating-class class))
+           *metadata-only-classes*)
+  (clrhash *metadata-only-classes*)
+  (clrhash *metadata-only-classes-by-mirror*)
   ;; Force ProcessEnvironment to re-initialize at runtime so it reads
   ;; the actual runtime environment, not stale warmup state.
   (let ((pe (%get-ldk-class-by-bin-name "java/lang/ProcessEnvironment" t)))

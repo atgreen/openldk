@@ -59,7 +59,7 @@
     (uiop:quit status t)))
 
 (defmethod |getRawAnnotations()[B| ((class |java/lang/Class|))
-  (let ((lclass (get-ldk-class-for-java-class class)))
+  (let ((lclass (%prepared-ldk-class-for-java-class class)))
     (when (and lclass (attributes lclass))
       (gethash "RuntimeVisibleAnnotations" (attributes lclass)))))
 
@@ -67,14 +67,14 @@
 ;;; class, method or field, NIL (none) when it has none.
 
 (defmethod |getRawTypeAnnotations()[B| ((class |java/lang/Class|))
-  (let ((lclass (get-ldk-class-for-java-class class)))
+  (let ((lclass (%prepared-ldk-class-for-java-class class)))
     (when (and lclass (attributes lclass))
       (gethash "RuntimeVisibleTypeAnnotations" (attributes lclass)))))
 
 (defun %member-type-annotations (java-class name descriptor-prefix)
   "The RuntimeVisibleTypeAnnotations of the member of JAVA-CLASS named NAME
 whose descriptor starts with DESCRIPTOR-PREFIX, or NIL."
-  (let* ((lclass (get-ldk-class-for-java-class java-class))
+  (let* ((lclass (%prepared-ldk-class-for-java-class java-class))
          (member (and lclass
                       (find-if (lambda (m)
                                  (and (string= (name m) name)

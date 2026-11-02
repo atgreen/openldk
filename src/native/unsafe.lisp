@@ -1305,10 +1305,18 @@ Without either on the classpath, every name is reported, as before."
 
 (defun get-ldk-class-for-java-class (java-class)
   "Get the <class> object for a java.lang.Class, using the correct loader."
-  (let* ((fq-name (lstring (slot-value java-class '|name|)))
-         (java-loader (slot-value java-class '|classLoader|))
-         (ldk-loader (get-ldk-loader-for-java-loader java-loader)))
-    (%get-ldk-class-by-fq-name fq-name t ldk-loader)))
+  (or (gethash java-class *metadata-only-classes-by-mirror*)
+      (let* ((fq-name (lstring (slot-value java-class '|name|)))
+             (java-loader (slot-value java-class '|classLoader|))
+             (ldk-loader (get-ldk-loader-for-java-loader java-loader)))
+        (%get-ldk-class-by-fq-name fq-name t ldk-loader))))
+
+(defun %prepared-ldk-class-for-java-class (java-class)
+  "Return JAVA-CLASS's executable definition, promoting compact metadata."
+  (when-let ((class (get-ldk-class-for-java-class java-class)))
+    (if (%metadata-only-class-p class)
+        (%resolve-class (name class) (ldk-loader class))
+        class)))
 
 (defun %java-class-package (java-class)
   "The Lisp package of the class JAVA-CLASS (a java.lang.Class) stands for,
@@ -1346,7 +1354,7 @@ a same-named class from another loader."
         (cp-class-fq "jdk.internal.reflect.ConstantPool"))
     (unless (%get-ldk-class-by-fq-name cp-class-fq t)
       (%clinit (classload cp-class-bin)))
-    (let ((ldk-class (get-ldk-class-for-java-class this)))
+    (let ((ldk-class (%prepared-ldk-class-for-java-class this)))
       (when ldk-class
         (let ((cp (%make-java-instance cp-class-bin)))
           (setf (slot-value cp '|constantPoolOop|)
@@ -1362,7 +1370,7 @@ a same-named class from another loader."
            (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;| (jstring "java/lang/reflect/Constructor") nil nil nil))
 
          ;; Get the lclass for THIS (use correct loader)
-         (let ((lclass (get-ldk-class-for-java-class this))
+         (let ((lclass (%prepared-ldk-class-for-java-class this))
                (*descriptor-loader* (%class-java-loader this)))
            (make-java-array
             :component-class (%get-java-class-by-fq-name "java.lang.reflect.Constructor")
@@ -1406,7 +1414,7 @@ a same-named class from another loader."
 class is THIS, loaded if need be."
   (let* ((lclass (and (eq 0 (|isArray()Z| this))
                       (eq 0 (|isPrimitive()Z| this))
-                      (get-ldk-class-for-java-class this)))
+                      (%prepared-ldk-class-for-java-class this)))
          (cp (and lclass (constant-pool lclass)))
          (java-classes
            (when lclass
@@ -1450,7 +1458,7 @@ Method/Constructor so reflection reports them (e.g. Method.toString()'s
            (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;| (jstring "java/lang/reflect/Method") nil nil nil))
 
          ;; Get the lclass for THIS (use correct loader)
-         (let ((lclass (get-ldk-class-for-java-class this))
+         (let ((lclass (%prepared-ldk-class-for-java-class this))
                (*descriptor-loader* (%class-java-loader this)))
            (make-java-array
             :component-class (%get-java-class-by-fq-name "java.lang.reflect.Method")
