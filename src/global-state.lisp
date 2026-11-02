@@ -684,6 +684,15 @@ java.lang.Class), was defined by a user-defined class loader."
 (defvar *cli-module-path* nil
   "Application module path supplied by the launcher.")
 
+(defvar *cli-main-module* nil
+  "Named module selected by -m or --module.")
+
+(defvar *module-classpath* nil
+  "Classpath backends searched only for classes in resolved named modules.")
+
+(defvar *module-definition-module* nil
+  "Named module whose transitive class definition is currently in progress.")
+
 (defvar *cli-add-exports* nil
   "Additional package exports supplied by the launcher.")
 

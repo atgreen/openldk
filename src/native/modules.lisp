@@ -88,6 +88,11 @@
   "Associate a boot MODULE with PACKAGES and already loaded runtime classes."
   (when *boot-module-layer-initializing*
     (setf (gethash (lstring (slot-value module '|name|)) *boot-modules*) module)
+    (when-let ((loader (slot-value module '|loader|)))
+      (%register-defined-module module packages)
+      (when (typep loader '|jdk/internal/loader/ClassLoaders$AppClassLoader|)
+        (setf (gethash loader *java-to-ldk-loaders*) *app-ldk-class-loader*
+              (slot-value *app-ldk-class-loader* 'java-loader) loader)))
     (loop for package across (java-array-data packages)
           do (setf (gethash (substitute #\/ #\. (lstring package)) *runtime-package-modules*) module)) ; lint:suppress substitute-use
     (maphash (lambda (name klass)
@@ -210,6 +215,7 @@
     (dolist (loader (list (|jdk/internal/loader/ClassLoaders.bootLoader()Ljdk/internal/loader/BuiltinClassLoader;|)
                           (|jdk/internal/loader/ClassLoaders.platformClassLoader()Ljava/lang/ClassLoader;|)
                           (|jdk/internal/loader/ClassLoaders.appClassLoader()Ljava/lang/ClassLoader;|)))
+      (remhash loader *defined-package-modules*)
       (|clear()V| (slot-value loader '|nameToModule|))
       (|clear()V| (slot-value loader '|moduleToReader|))
       (setf (slot-value loader '|resourceCache|) nil))

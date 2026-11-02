@@ -69,6 +69,8 @@
   (format *error-output* "                  and ZIP archives to search for class files.~%")
   (format *error-output* "    -p <module path>~%")
   (format *error-output* "    --module-path <module path>~%                  A : separated list of module directories and archives.~%")
+  (format *error-output* "    -m <module>[/<mainclass>]~%")
+  (format *error-output* "    --module <module>[/<mainclass>]~%                  execute the main class in a module~%")
   (format *error-output* "    -D<name>=<value>~%")
   (format *error-output* "                  set a system property~%")
   (format *error-output* "    --add-modules <modules>~%                  resolve additional root modules (comma separated)~%")
@@ -180,7 +182,7 @@
         (properties nil)
         (i 0))
     (setf *enable-preview* nil *cli-add-modules* nil *cli-limit-modules* nil
-          *cli-module-path* nil
+          *cli-module-path* nil *cli-main-module* nil
           *cli-add-exports* nil *cli-add-opens* nil
           *cli-enable-native-access* nil *cli-illegal-native-access* "warn")
     (setf *source-launch-p* nil *source-launch-version* nil)
@@ -372,6 +374,24 @@
                     (%jar-launch (nth i raw-args))))
                 (incf i)
                 ;; Everything after -jar <jarfile> is program args
+                (setf program-args (subseq raw-args i))
+                (return))
+               ;; -m module/mainclass or --module module/mainclass
+               ((or (string= arg "-m") (string= arg "--module")
+                    (starts-with? "--module=" arg))
+                (let* ((target (if (starts-with? "--module=" arg)
+                                   (subseq arg 9)
+                                   (nth (incf i) raw-args)))
+                       (slash (and target (position #\/ target))))
+                  (unless (and target (plusp (length target))
+                               (or (null slash)
+                                   (and (plusp slash) (< slash (1- (length target))))))
+                    (format *error-output* "~A requires a module name~%" arg)
+                    (uiop:quit 1))
+                  (setf *cli-main-module* (if slash (subseq target 0 slash) target)
+                        mainclass (if slash (subseq target (1+ slash)) ""))
+                  (push *cli-main-module* *cli-add-modules*))
+                (incf i)
                 (setf program-args (subseq raw-args i))
                 (return))
                ;; Unknown option starting with -

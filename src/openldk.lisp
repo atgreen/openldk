@@ -2417,7 +2417,8 @@ without running the compiler, since most methods are never called."
 
          ;; Load all of the field classes
          (loop for field across (fields class)
-               do (classload (slot-value (slot-value field 'class) 'name)))
+               do (%resolve-class (slot-value (slot-value field 'class) 'name)
+                                  (ldk-loader class)))
 
          (unless allow-renaming
            (%record-app-class-package class))
@@ -2504,13 +2505,16 @@ application classpath must not be searched on that loader's behalf."
                          (when java-class
                            (get-ldk-class-for-java-class java-class)))
                      (|condition-java/lang/ClassNotFoundException| () nil)))))))
-      (if askable
-          ;; Only this loader's own definitions may bypass its delegation
-          ;; policy. A null-parent loader must not see the app classpath.
-          (or (%await-class-definition (gethash classname (slot-value ldk-loader 'ldk-classes-by-bin-name)))
-              (ask-java-loader))
-          (or (and ldk-loader (%get-ldk-class-by-bin-name classname t ldk-loader))
-              (%classload-system classname))))))
+      (or (and *module-definition-module*
+               (%classload-from-module-path classname *module-definition-module*))
+          (if askable
+              ;; Only this loader's own definitions may bypass its delegation
+              ;; policy. A null-parent loader must not see the app classpath.
+              (or (%await-class-definition
+                   (gethash classname (slot-value ldk-loader 'ldk-classes-by-bin-name)))
+                  (ask-java-loader))
+              (or (and ldk-loader (%get-ldk-class-by-bin-name classname t ldk-loader))
+                  (%classload-system classname)))))))
 
 (defun %resolve-class (classname ldk-loader)
   "Resolve through a stable initiating-loader identity, recording delegated results."
@@ -2781,12 +2785,72 @@ build and restart, so a dumped image whose loader lost the map recovers it."
 (defun %load-main-class (mainclass)
   "Load MAINCLASS through the configured system loader."
   (let ((class-name (substitute #\/ #\. mainclass)))
-    (if (and *system-class-loader*
-             (not (eq *system-class-loader* *boot-class-loader*)))
-        (get-ldk-class-for-java-class
-         (|loadClass(Ljava/lang/String;)Ljava/lang/Class;|
-          *system-class-loader* (jstring (substitute #\. #\/ class-name))))
-        (classload class-name))))
+    (cond
+      (*cli-main-module*
+       (when-let ((module (gethash *cli-main-module* *boot-modules*)))
+         (let ((selected-name
+                 (if (plusp (length class-name))
+                     class-name
+                     (when-let ((main
+                                  (|orElse(Ljava/lang/Object;)Ljava/lang/Object;|
+                                   (|mainClass()Ljava/util/Optional;|
+                                    (|getDescriptor()Ljava/lang/module/ModuleDescriptor;| module))
+                                   nil)))
+                       (substitute #\/ #\. (lstring main))))))
+           (when selected-name
+             (when-let ((java-class
+                          (|java/lang/Class.forName(Ljava/lang/Module;Ljava/lang/String;)Ljava/lang/Class;|
+                           module (jstring (substitute #\. #\/ selected-name)))))
+               (get-ldk-class-for-java-class java-class))))))
+      ((and *system-class-loader*
+            (not (eq *system-class-loader* *boot-class-loader*)))
+       (get-ldk-class-for-java-class
+        (|loadClass(Ljava/lang/String;)Ljava/lang/Class;|
+         *system-class-loader* (jstring (substitute #\. #\/ class-name)))))
+      (t (classload class-name)))))
+
+(defun %module-path-classpath-entries (module-path)
+  "Classpath backends for exploded and archived modules on MODULE-PATH."
+  (labels ((entry (path)
+             (let ((name (namestring path)))
+               (if (or (ends-with? ".jar" name) (ends-with? ".zip" name))
+                   (make-instance 'jar-classpath-entry :jarfile name)
+                   (make-instance 'dir-classpath-entry :dir name))))
+           (path-entries (text)
+             (let ((directory (uiop:directory-exists-p text)))
+               (cond
+                 ((not directory) (when (probe-file text) (list (entry (pathname text)))))
+                 ((probe-file (merge-pathnames "module-info.class" directory))
+                  (list (entry directory)))
+                 (t
+                  (append (mapcar #'entry (uiop:subdirectories directory))
+                          (mapcar #'entry (directory (merge-pathnames "*.jar" directory)))
+                          (mapcar #'entry (directory (merge-pathnames "*.zip" directory)))))))))
+    (loop for path in (split-sequence:split-sequence (uiop:inter-directory-separator) module-path)
+          when (plusp (length path)) append (path-entries path))))
+
+(defun %classload-from-module-path (classname module)
+  "Load CLASSNAME from the resolved named MODULE, never from the classpath."
+  (let* ((java-loader (slot-value module '|loader|))
+         (ldk-loader (get-ldk-loader-for-java-loader java-loader))
+         (package-end (position #\/ classname :from-end t))
+         (package (and package-end (subseq classname 0 package-end)))
+         (owner (and package
+                     (gethash package (%owner-cache-table *defined-package-modules* java-loader))))
+         (existing (%get-ldk-class-by-bin-name classname t ldk-loader)))
+    (cond
+      ((not (eq owner module)) nil)
+      (existing (and (eq (slot-value (java-class existing) '|module|) module) existing))
+      (t
+       (bt:with-recursive-lock-held ((%get-class-lock classname))
+         (or (let ((loaded (%get-ldk-class-by-bin-name classname t ldk-loader)))
+               (and loaded (eq (slot-value (java-class loaded) '|module|) module) loaded))
+             (when-let ((stream
+                          (loop for entry in *module-classpath*
+                                for candidate = (open-java-classfile entry classname)
+                                when candidate return candidate)))
+               (let ((*module-definition-module* module))
+                 (%classload-from-stream classname stream java-loader ldk-loader)))))))))
 
 (defun %main-runtime-setup (classpath dump-dir aot)
   "Per-run setup shared by every MAIN invocation: Java FP semantics, the
@@ -2871,7 +2935,9 @@ properties, and *CLASSPATH* construction."
                    collect (if (ends-with? ".jar" cpe)
                                (make-instance 'jar-classpath-entry :jarfile cpe)
                                (make-instance 'dir-classpath-entry :dir cpe)))))
-      (setf *classpath*
+      (setf *module-classpath*
+            (when *cli-module-path* (%module-path-classpath-entries *cli-module-path*))
+            *classpath*
             (append
              (loop for cp in (reverse *cli-boot-classpath-prepend*) append (cp->entries cp))
              (cp->entries classpath)
