@@ -1237,11 +1237,10 @@ Without either on the classpath, every name is reported, as before."
 (setf (gethash "java/lang/ClassLoader.getSystemClassLoader()Ljava/lang/ClassLoader;" *native-overrides*)
       #'|java/lang/ClassLoader.getSystemClassLoader()Ljava/lang/ClassLoader;|)
 
-;; JDK 17: registerAsParallelCapable always succeeds (avoids InternalError in <clinit>)
-(defun |java/lang/ClassLoader.registerAsParallelCapable()Z| ()
-  1)
-(setf (gethash "java/lang/ClassLoader.registerAsParallelCapable()Z" *native-overrides*)
-      #'|java/lang/ClassLoader.registerAsParallelCapable()Z|)
+;; ClassLoader.registerAsParallelCapable() is ordinary Java (getCallerClass ->
+;; ClassLoader$ParallelLoaders.register): no native is needed, and stubbing it
+;; to "always succeed" left ParallelLoaders empty, so isRegisteredAsParallelCapable
+;; always answered false.  Let the stock method run.
 
 ;; JDK 9+: Reflection.getClassAccessFlags — return class modifiers
 (defun |jdk/internal/reflect/Reflection.getClassAccessFlags(Ljava/lang/Class;)I| (java-class)
