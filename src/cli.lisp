@@ -241,13 +241,21 @@
                ;; -Dkey=value sets a system property
                ((str:starts-with? "-D" arg)
                 (let* ((prop-str (subseq arg 2))
-                       (eq-pos (position #\= prop-str)))
-                  (if eq-pos
-                      (push (cons (subseq prop-str 0 eq-pos)
-                                  (subseq prop-str (1+ eq-pos)))
-                            properties)
-                      ;; -Dkey with no value sets empty string
-                      (push (cons prop-str "") properties)))
+                       (eq-pos (position #\= prop-str))
+                       (key (if eq-pos (subseq prop-str 0 eq-pos) prop-str))
+                       (value (if eq-pos (subseq prop-str (1+ eq-pos)) "")))
+                  ;; java.endorsed.dirs and java.ext.dirs were removed in JDK 9;
+                  ;; the launcher refuses to start when either is set to a
+                  ;; non-empty value (surrounding double quotes count as empty,
+                  ;; matching the reference launcher).
+                  (when (and (member key '("java.endorsed.dirs" "java.ext.dirs")
+                                     :test #'string=)
+                             (plusp (length (string-trim "\"" value))))
+                    (format *error-output* "Error occurred during initialization of VM~%")
+                    (format *error-output* "Setting -D~A=~A is not supported.~%" key value)
+                    (format *error-output* "Could not create the Java Virtual Machine.~%")
+                    (uiop:quit 1))
+                  (push (cons key value) properties))
                 (incf i))
                ;; -XX options are consumed and ignored
                ((str:starts-with? "-XX" arg)
