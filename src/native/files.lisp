@@ -1167,6 +1167,36 @@ compiled Java readdir wrapper may overwrite the old readdir(J) symbol."
       (sb-posix:syscall-error (e)
         (%throw-unix-exception (sb-posix:syscall-errno e))))))
 
+;;; LinuxNativeDispatcher: the Linux-specific fast paths UnixNativeDispatcher
+;;; lacks.  Only the Files.copy direct-copy path is covered: init() has no
+;;; library to bind, posix_fadvise(2) is an advisory hint we can safely ignore,
+;;; and directCopy0 copies one regular file to another with sendfile(2).
+
+(defun |sun/nio/fs/LinuxNativeDispatcher.init()V| ()
+  "The real init() only caches a JNI method id; there is nothing to bind here."
+  nil)
+
+(defun |sun/nio/fs/LinuxNativeDispatcher.posix_fadvise(IJJI)I| (fd offset len advice) ; lint:suppress naming-underscore
+  "posix_fadvise(2) access-pattern hint; advisory only, so accept and ignore it."
+  (declare (ignore fd offset len advice))
+  0)
+
+(defun |sun/nio/fs/LinuxNativeDispatcher.directCopy0(IIJ)I| (dst src cancel-address)
+  "Copy every byte of regular-file fd SRC to fd DST with sendfile(2) -- the
+fast path LinuxFileSystem.directCopy takes.  CANCEL-ADDRESS, a word the real
+native polls for cancellation, is unused.  Returns 0 on success and throws
+UnixException on error, as the native directCopy0 does."
+  (declare (ignore cancel-address))
+  (sb-alien:with-alien ((offset sb-alien:long 0))
+    (loop
+      (let ((copied (%file-sendfile dst src (sb-alien:addr offset) #x7ffff000)))
+        (cond
+          ((zerop copied) (return 0))           ; source exhausted
+          ((not (minusp copied)))               ; partial progress; keep going
+          (t (let ((errno (sb-alien:get-errno)))
+               (unless (= errno sb-posix:eintr)
+                 (%throw-unix-exception errno)))))))))
+
 (defmethod |getUTF8At0(Ljava/lang/Object;I)Ljava/lang/String;| ((this |sun/reflect/ConstantPool|) cp index)
   (let* ((cp (constant-pool (ldk-class cp)))
          (s (format nil "~A" (emit (aref cp index) cp))))
