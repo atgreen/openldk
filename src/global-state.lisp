@@ -337,6 +337,10 @@ loaders, whose classes are not in the global or app loader tables."
   (make-hash-table :test #'eq :weakness :key :synchronized t)
   "Metadata-only classes keyed by their java.lang.Class mirrors.")
 
+(defvar *lisp-only-class-java-names*
+  (make-hash-table :test #'eq :weakness :key :synchronized t)
+  "Generated Lisp class symbols mapped to their Java binary names.")
+
 (defvar *packages* (make-hash-table :test #'equal :synchronized t))
 
 (defvar *context* nil)

@@ -1641,6 +1641,19 @@ JVMS 5.4.6 selects that method independently of the receiver's class."
 
 (defparameter *invokedynamic-cache* (make-hash-table :test #'eq :weakness :key))
 
+(defun %lambda-site-component (string)
+  "Encode STRING collision-free for a generated lambda class name."
+  (with-output-to-string (stream)
+    (loop for character across string
+          do (format stream "~X_" (char-code character)))))
+
+(defun %lambda-site-key (caller method address)
+  "A stable identity for an invokedynamic lambda site."
+  (format nil "C~A_M~A_B~D"
+          (%lambda-site-component caller)
+          (%lambda-site-component method)
+          address))
+
 (defun %call-bootstrap-method (bootstrap-method-name caller name args)
   "Call the bootstrap method BOOTSTRAP-METHOD-NAME (the full
 \"class/name.method(descriptor)\" string) with a lookup on the class CALLER
@@ -2116,7 +2129,9 @@ boolean prints true/false and char prints the character rather than an int."
                                 ,(when (search "altMetafactory" bootstrap-method-name)
                                    `(list ,@(mapcar (lambda (a) (code (codegen a context)))
                                                      (nthcdr 4 args))))
-                                ,(java-class (slot-value context 'class)))))
+                                ,(java-class (slot-value context 'class))
+                                ,(%lambda-site-key (name (slot-value context 'class))
+                                                   (fn-name context) address))))
         ;; Fallback: generic invokedynamic handling
         (t
          (make-instance '<expression>

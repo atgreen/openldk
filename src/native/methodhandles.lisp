@@ -349,7 +349,8 @@ NIL."
         (and sym (find-class sym nil) sym))
     (condition () nil)))
 
-(defun %ensure-dynamic-lambda-class (method-str sam-method-type &optional interface-type-name markers loader)
+(defun %ensure-dynamic-lambda-class (method-str sam-method-type
+                                     &optional interface-type-name markers loader caller-name site-key)
   "Get or create a dynamic lambda class for the given SAM method name and type.
 INTERFACE-TYPE-NAME is the binary name of the functional interface (e.g.
 \"com/sun/tools/javac/util/JavacMessages$ResourceBundleHelper\") so that
@@ -372,17 +373,23 @@ Returns the class symbol."
          (box-return (and (find return-type "L[") t))
          (primitive-return (and (find return-type "ZBSIJFDC") return-type))
          (box-params (%descriptor-param-prim-chars descriptor))
+         (site-name site-key)
          ;; Use interface name as cache key when available for proper CHECKCAST
-         (class-name-str (format nil "~A~{+~A~}_L~D"
+         (class-name-str (format nil "~A~{+~A~}_L~D~@[_S~A~]"
                                  (if interface-type-name
                                      (format nil "openldk/DynamicLambda_~A" (substitute #\_ #\/ interface-type-name))
                                      (format nil "openldk/DynamicLambda_~A_~A" method-str param-count))
                                  (mapcar (lambda (marker) (substitute #\_ #\/ marker)) markers)
-                                 (if loader (slot-value loader 'id) 0)))
+                                 (if loader (slot-value loader 'id) 0)
+                                 site-name))
+         (java-class-name (if caller-name
+                              (format nil "~A$$Lambda$OpenLDK$~A"
+                                      caller-name (or site-name class-name-str))
+                              class-name-str))
          (interface-sym (when interface-type-name
                           (%interface-class-symbol interface-type-name loader)))
          (marker-syms (remove nil (mapcar (lambda (name) (%interface-class-symbol name loader)) markers)))
-         (cache-key (list class-name-str interface-sym marker-syms))
+         (cache-key (list site-key caller-name class-name-str interface-sym marker-syms))
          (cached (gethash cache-key *dynamic-lambda-classes*)))
     (if cached
         ;; Ensure the method is defined for this specific lispized name
@@ -392,7 +399,7 @@ Returns the class symbol."
             (%define-lambda-method method-sym cached param-count box-return primitive-return box-params))
           cached)
         ;; Create new dynamic lambda class, extending the interface if known
-        (let* ((class-sym (intern class-name-str (if (%user-ldk-loader-p loader) (loader-package loader) :openldk)))
+        (let* ((class-sym (intern class-name-str (if loader (loader-package loader) :openldk)))
                (method-sym (intern lispized-name :openldk))
                (superclasses (append (list '|java/lang/Object|)
                                      (when interface-sym (list interface-sym))
@@ -400,6 +407,7 @@ Returns the class symbol."
           ;; Define the class with target and captures slots
           (eval `(defclass/std ,class-sym ,superclasses
                    ((target) (captures))))
+          (setf (gethash class-sym *lisp-only-class-java-names*) java-class-name)
           (when (%user-ldk-loader-p loader)
             (bt:with-recursive-lock-held (*loader-lifecycle-lock*)
               (pushnew class-sym (loader-resources-classes (slot-value loader 'unload-resources)))))
@@ -487,7 +495,7 @@ classes and bridges) ask a lambda to implement."
     (nreverse markers)))
 
 (defun %lambda-metafactory (impl-handle captures &optional (method-name "get") sam-method-type
-                                                           interface-type-name alt-args caller)
+                                                           interface-type-name alt-args caller site-key)
   "Construct a functional interface implementation for Java lambdas.
 METHOD-NAME is the interface method name (get, test, apply, accept, etc.).
 CAPTURES is a list of pre-bound values for captured variables.
@@ -497,6 +505,8 @@ INTERFACE-TYPE-NAME is the binary name of the target functional interface.
 ALT-ARGS are altMetafactory's static arguments after the first three: the
 lambda also implements the marker interfaces they name (Serializable)."
   (let* ((loader (and caller (ldk-loader (get-ldk-class-for-java-class caller))))
+         (caller-name (and caller
+                           (substitute #\/ #\. (lstring (slot-value caller '|name|)))))
          (markers (and alt-args (%alt-metafactory-markers alt-args)))
          (method-str (if (stringp method-name) method-name (lstring method-name)))
          (sam-param-count (if (and sam-method-type
@@ -521,10 +531,11 @@ lambda also implements the marker interfaces they name (Serializable)."
                         ;; custom SAM like java.util.stream.Sink (accept, but
                         ;; NOT a Consumer as far as checkcast is concerned)
                         ;; must get a generated class implementing it.
-                        (unless (or (%user-ldk-loader-p loader) markers (and interface-type-name sam-has-primitive-param))
+                        (unless (or caller (%user-ldk-loader-p loader) markers
+                                    (and interface-type-name sam-has-primitive-param))
                           (%prebuilt-lambda-class method-str sam-param-count interface-type-name))
                         (%ensure-dynamic-lambda-class method-str sam-method-type interface-type-name
-                                                      markers loader)))
+                                                      markers loader caller-name site-key)))
          (instance (make-instance lambda-class)))
     (when (%user-ldk-loader-p loader)
       (setf (slot-value instance *java-loader-owner-slot*) loader))
