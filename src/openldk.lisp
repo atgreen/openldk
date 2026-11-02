@@ -2775,7 +2775,8 @@ properties, and *CLASSPATH* construction."
              (cp->entries classpath)
              (discover-jmod-classpath-entries)
              (loop for cp in (reverse *cli-boot-classpath-append*) append (cp->entries cp))))))
-  (when (or *cli-add-modules* *cli-limit-modules* *cli-add-exports* *cli-add-opens*)
+  (when (or *cli-add-modules* *cli-limit-modules* *cli-module-path*
+            *cli-add-exports* *cli-add-opens*)
     (%reset-boot-module-layer))
   (loop for modules in (reverse *cli-add-modules*)
         for index from 0
@@ -2784,6 +2785,9 @@ properties, and *CLASSPATH* construction."
   (when *cli-limit-modules*
     (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;|
      (jstring "jdk.module.limitmods") (jstring *cli-limit-modules*)))
+  (when *cli-module-path*
+    (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;|
+     (jstring "jdk.module.path") (jstring *cli-module-path*)))
   (loop for exports in (reverse *cli-add-exports*)
         for index from 0
         do (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;|
