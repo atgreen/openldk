@@ -2762,7 +2762,8 @@ properties, and *CLASSPATH* construction."
              (cp->entries classpath)
              (discover-jmod-classpath-entries)
              (loop for cp in (reverse *cli-boot-classpath-append*) append (cp->entries cp))))))
-  (when (or *cli-add-modules* *cli-add-exports*) (%reset-boot-module-layer))
+  (when (or *cli-add-modules* *cli-add-exports* *cli-add-opens*)
+    (%reset-boot-module-layer))
   (loop for modules in (reverse *cli-add-modules*)
         for index from 0
         do (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;|
@@ -2771,6 +2772,10 @@ properties, and *CLASSPATH* construction."
         for index from 0
         do (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;|
             (jstring (format nil "jdk.module.addexports.~D" index)) (jstring exports)))
+  (loop for opens in (reverse *cli-add-opens*)
+        for index from 0
+        do (|java/lang/System.setProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;|
+            (jstring (format nil "jdk.module.addopens.~D" index)) (jstring opens)))
   ;; Resolve the boot graph before application loading/JIT compilation can
   ;; reenter module initialization through an access check.
   (%boot-module-layer)

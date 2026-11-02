@@ -71,6 +71,7 @@
   (format *error-output* "                  set a system property~%")
   (format *error-output* "    --add-modules <modules>~%                  resolve additional root modules (comma separated)~%")
   (format *error-output* "    --add-exports <module/package=targets>~%                  export a package to additional modules~%")
+  (format *error-output* "    --add-opens <module/package=targets>~%                  open a package to additional modules~%")
   (format *error-output* "    --enable-native-access <modules>~%                  permit JNI/FFM access (or ALL-UNNAMED)~%")
   (format *error-output* "    --illegal-native-access=<allow|warn|deny>~%                  control unpermitted JNI/FFM access (default: warn)~%")
   (format *error-output* "    --enable-preview~%                  enable Java 25 preview features~%")
@@ -175,7 +176,7 @@
         (program-args nil)
         (properties nil)
         (i 0))
-    (setf *enable-preview* nil *cli-add-modules* nil *cli-add-exports* nil
+    (setf *enable-preview* nil *cli-add-modules* nil *cli-add-exports* nil *cli-add-opens* nil
           *cli-enable-native-access* nil *cli-illegal-native-access* "warn")
     (setf *source-launch-p* nil *source-launch-version* nil)
     ;; Parse options until we hit mainclass
@@ -211,6 +212,16 @@
                     (format *error-output* "--add-exports requires module/package=targets~%")
                     (uiop:quit 1))
                   (push exports *cli-add-exports*))
+                (incf i))
+               ((or (string= arg "--add-opens") (starts-with? "--add-opens=" arg))
+                (let ((opens (if (string= arg "--add-opens")
+                                 (nth (incf i) raw-args)
+                                 (subseq arg 12))))
+                  (unless (and opens (plusp (length opens))
+                               (not (char= (char opens 0) #\-)))
+                    (format *error-output* "--add-opens requires module/package=targets~%")
+                    (uiop:quit 1))
+                  (push opens *cli-add-opens*))
                 (incf i))
                ((or (string= arg "--add-modules") (starts-with? "--add-modules=" arg))
                 (let ((modules (if (string= arg "--add-modules")
