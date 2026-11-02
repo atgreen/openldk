@@ -661,6 +661,9 @@ java.lang.Class), was defined by a user-defined class loader."
 (defvar *cli-add-modules* nil
   "Additional boot module roots supplied by the launcher.")
 
+(defvar *cli-limit-modules* nil
+  "Observable module universe supplied by the launcher.")
+
 (defvar *cli-add-exports* nil
   "Additional package exports supplied by the launcher.")
 

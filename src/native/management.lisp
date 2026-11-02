@@ -45,6 +45,10 @@
 
 (in-package :openldk)
 
+(defun |com/sun/management/internal/OperatingSystemImpl.initialize0()V| ()
+  "Initialize HotSpot-backed operating-system counters; OpenLDK has none."
+  nil)
+
 (defun |sun/management/VMManagementImpl.getVersion0()Ljava/lang/String;| ()
   "Return the management interface version implemented by OpenLDK."
   (jstring "4.0"))

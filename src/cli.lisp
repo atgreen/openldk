@@ -70,6 +70,7 @@
   (format *error-output* "    -D<name>=<value>~%")
   (format *error-output* "                  set a system property~%")
   (format *error-output* "    --add-modules <modules>~%                  resolve additional root modules (comma separated)~%")
+  (format *error-output* "    --limit-modules <modules>~%                  limit the observable module universe~%")
   (format *error-output* "    --add-exports <module/package=targets>~%                  export a package to additional modules~%")
   (format *error-output* "    --add-opens <module/package=targets>~%                  open a package to additional modules~%")
   (format *error-output* "    --enable-native-access <modules>~%                  permit JNI/FFM access (or ALL-UNNAMED)~%")
@@ -176,7 +177,8 @@
         (program-args nil)
         (properties nil)
         (i 0))
-    (setf *enable-preview* nil *cli-add-modules* nil *cli-add-exports* nil *cli-add-opens* nil
+    (setf *enable-preview* nil *cli-add-modules* nil *cli-limit-modules* nil
+          *cli-add-exports* nil *cli-add-opens* nil
           *cli-enable-native-access* nil *cli-illegal-native-access* "warn")
     (setf *source-launch-p* nil *source-launch-version* nil)
     ;; Parse options until we hit mainclass
@@ -232,6 +234,16 @@
                     (format *error-output* "--add-modules requires module names~%")
                     (uiop:quit 1))
                   (push modules *cli-add-modules*))
+                (incf i))
+               ((or (string= arg "--limit-modules") (starts-with? "--limit-modules=" arg))
+                (let ((modules (if (string= arg "--limit-modules")
+                                   (nth (incf i) raw-args)
+                                   (subseq arg 16))))
+                  (unless (and modules (plusp (length modules))
+                               (not (char= (char modules 0) #\-)))
+                    (format *error-output* "--limit-modules requires module names~%")
+                    (uiop:quit 1))
+                  (setf *cli-limit-modules* modules))
                 (incf i))
                ((or (string= arg "--source") (str:starts-with? "--source=" arg))
                 (if (string= arg "--source")
@@ -393,6 +405,8 @@
                                               (if *enable-preview* "true" "false") (or *source-launch-version* ""))
                                         (loop for modules in (reverse *cli-add-modules*)
                                               append (list "--add-modules" modules))
+                                        (when *cli-limit-modules*
+                                          (list "--limit-modules" *cli-limit-modules*))
                                         (loop for exports in (reverse *cli-add-exports*)
                                               append (list "--add-exports" exports)))
                                 :environment (remove-if (lambda (entry) (starts-with? "JDK_JAVA_OPTIONS=" entry))
