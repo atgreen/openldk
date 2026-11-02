@@ -384,13 +384,28 @@ its superclasses, made and registered on first use; or NIL for any other."
       (lambda (module name)
         (handler-case
             (let* ((module-name (slot-value module '|name|))
-                   (runtime-module (and module-name
-                                        (eq module (gethash (lstring module-name) *boot-modules*))))
-                   (class (if runtime-module
-                              (let ((metadata (%classload-system (substitute #\/ #\. (lstring name)))))
-                                (and metadata (java-class metadata)))
-                              (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;|
-                               name nil (slot-value module '|loader|) nil))))
+                   (module-loader (slot-value module '|loader|))
+                   (system-module
+                     (or (and module-name
+                              (eq module (gethash (lstring module-name) *boot-modules*)))
+                         (and (null module-name)
+                              (eq (gethash module-loader *java-to-ldk-loaders*)
+                                  *app-ldk-class-loader*))))
+                   (binary-name (substitute #\/ #\. (lstring name)))
+                   (class
+                     (cond
+                       ((and module-name system-module)
+                        (let ((metadata
+                                (or (%classload-from-module-path binary-name module)
+                                    (and (eq module (%runtime-class-module binary-name *boot-ldk-class-loader*))
+                                         (%classload-system binary-name)))))
+                          (and metadata (java-class metadata))))
+                       (system-module
+                        (let ((metadata (classload binary-name module-loader)))
+                          (and metadata (java-class metadata))))
+                       (t
+                        (|java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;|
+                         name nil module-loader nil)))))
               (when (and class (eq (slot-value class '|module|) module)) class))
           (|condition-java/lang/ClassNotFoundException| () nil))))
 
