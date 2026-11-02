@@ -248,6 +248,26 @@ by %ensure-java-gf, else any fbound symbol in PACKAGE whose name extends NAME
   ;; Return 0 (false) to disable assertions
   0)
 
+(defun |java/lang/ClassLoader.retrieveDirectives()Ljava/lang/AssertionStatusDirectives;| ()
+  "The command-line assertion directives (-ea/-esa and friends), consulted by
+ClassLoader.initializeJavaAssertionMaps.  OpenLDK accepts those flags but does
+not wire them, so report no per-class or per-package directives and a false
+default -- an AssertionStatusDirectives whose four tables are empty arrays
+rather than null (the Java code iterates them)."
+  (let ((directives (%make-java-instance "java/lang/AssertionStatusDirectives"))
+        (string-class (%get-java-class-by-bin-name "java/lang/String"))
+        (boolean-class (%get-java-class-by-bin-name "boolean")))
+    (setf (slot-value directives '|classes|)
+          (make-java-array :component-class string-class)
+          (slot-value directives '|classEnabled|)
+          (make-java-array :component-class boolean-class)
+          (slot-value directives '|packages|)
+          (make-java-array :component-class string-class)
+          (slot-value directives '|packageEnabled|)
+          (make-java-array :component-class boolean-class)
+          (slot-value directives '|deflt|) 0)
+    directives))
+
 (defun |java/lang/Class.getSecurityManager()| ()
   (classload "java/lang/SecurityManager")
   (eval (list 'make-instance (list 'quote '|java/lang/SecurityManager|))))
