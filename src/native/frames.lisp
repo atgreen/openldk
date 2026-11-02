@@ -374,7 +374,14 @@ its superclasses, made and registered on first use; or NIL for any other."
          (when *debug-trace*
            (format t "~&~V@A trace: entering java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;) ~A~%"
                    (incf *call-nesting-level* 1) "*" (list name initialize loader caller)))
-         (let* ((lname (substitute #\/ #\. (lstring name)))
+         (let* ((raw (lstring name))
+                ;; A valid name is either dotted (Java callers: "java.lang.Object")
+                ;; or slash-separated binary (OpenLDK's own descriptor callers:
+                ;; "java/lang/Object"), never a mix.  "java/lang.Object" and the
+                ;; like are malformed binary names; the JVM rejects them with
+                ;; ClassNotFoundException rather than normalising the slash away.
+                (malformed (and (find #\/ raw) (find #\. raw)))
+                (lname (substitute #\/ #\. raw))
                 (user-loader (and loader (not (eq loader *boot-class-loader*))))
                 (result
                   ;; Ask a user class loader first (if provided and not the boot
@@ -383,7 +390,8 @@ its superclasses, made and registered on first use; or NIL for any other."
                   ;; calls findClass.  Then fall back to our classpath search.
                   ;; OpenLDK's own callers (descriptor resolution) pass
                   ;; binary names, but Java loaders take dotted ones.
-                  (or (and (eq (char lname 0) #\[)
+                  (unless malformed
+                   (or (and (eq (char lname 0) #\[)
                            (let ((*descriptor-loader* loader))
                              (java-class (%get-array-ldk-class-from-name lname))))
                       (and user-loader
@@ -397,7 +405,7 @@ its superclasses, made and registered on first use; or NIL for any other."
                            (or (and (%get-ldk-class-by-bin-name lname t)
                                     (java-class (%get-ldk-class-by-bin-name lname)))
                                (let ((klass (classload lname)))
-                                 (when klass (java-class klass))))))))
+                                 (when klass (java-class klass)))))))))
            (when result
              (let ((class (get-ldk-class-for-java-class result)))
                ;; Lisp descriptor lookups also pass NIL and may use the
