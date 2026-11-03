@@ -366,6 +366,10 @@ ArrayStoreException during bootstrap."
   (let ((component-name (lstring (slot-value component '|name|))))
     (cond
       ((string= component-name "java.lang.Object") t)
+      ((and (typep value 'java-array)
+            (member component-name '("java.lang.Cloneable" "java.io.Serializable")
+                    :test #'string=))
+       t)
       ;; Array-of-arrays component: the value must be an array whose
       ;; type is assignable to the component array type.
       ((char= (char component-name 0) #\[)
